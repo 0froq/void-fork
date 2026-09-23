@@ -115,6 +115,7 @@ function createMockDoNamespace(): DurableObjectNamespace {
   return {
     idFromName: (name: string) => ({ toString: () => name }),
     get: (_id: unknown) => ({
+      revokeDeployment: async () => {},
       fetch: async (req: Request) => {
         const url = new URL(req.url);
         if (url.pathname === '/rollover') {
@@ -664,7 +665,11 @@ export async function createTestDeployment(
     | 'canceled' = 'live',
   source?: string,
   errorMessage?: string,
-  options?: { cliVersion?: string | null; commit?: string | null },
+  options?: {
+    cliVersion?: string | null;
+    commit?: string | null;
+    admissionProtocol?: number;
+  },
 ): Promise<{ id: string }> {
   const n = ++deploymentCounter;
   const id = `dpl_test${n}`;
@@ -684,6 +689,7 @@ export async function createTestDeployment(
     // rollback gate). Left null otherwise (container deploys record no commit).
     commit: options?.commit ?? null,
     error_message: errorMessage ?? null,
+    admission_protocol: options?.admissionProtocol,
     // Production deploys always have a manifest set after `updateDeploymentManifest`
     // (post-parse). Test fixtures seeding rows directly need a non-null
     // manifest so they're counted by `countUserDeploymentsToday` (which
@@ -949,7 +955,7 @@ function extractMigrationTag(metadata: Record<string, unknown>): string | undefi
 
 function parseScriptNameFromUrl(url: string): string | null {
   // .../workers/dispatch/namespaces/{ns}/scripts/{name}[/...]
-  const m = /\/workers\/dispatch\/namespaces\/[^/]+\/scripts\/([^/?#]+)/.exec(url);
+  const m = /\/workers\/(?:dispatch\/namespaces\/[^/]+\/)?scripts\/([^/?#]+)/.exec(url);
   return m ? decodeURIComponent(m[1]!) : null;
 }
 
@@ -1600,6 +1606,27 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): MockCfApiHandle 
 
     if (method === 'GET' && url.includes('/workers/dispatch/') && url.includes('/secrets')) {
       return mocks.listWorkerSecrets(url, init);
+    }
+    if (url.includes('/workers/scripts/')) {
+      if (method === 'GET' && url.endsWith('/settings')) {
+        const name = parseScriptNameFromUrl(url);
+        const script = name ? state.hostScripts.get(name) : undefined;
+        return script
+          ? cfSuccess({ bindings: script.bindings })
+          : Response.json(
+              { success: false, errors: [{ code: 10007, message: 'script not found' }] },
+              { status: 404 },
+            );
+      }
+      if (method === 'POST' && url.endsWith('/subdomain')) {
+        return cfSuccess({ enabled: false });
+      }
+      if (method === 'PUT') {
+        return mocks.uploadWorker(url, init);
+      }
+      if (method === 'DELETE') {
+        return mocks.deleteWorker(url, init);
+      }
     }
     if (method === 'PUT' && url.includes('/workers/dispatch/') && url.includes('/secrets')) {
       return mocks.setWorkerSecret(url, init);

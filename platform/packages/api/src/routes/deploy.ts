@@ -113,9 +113,15 @@ import {
   deleteContainerApplicationIdempotent,
   findContainerApplication,
   perDeployContainerApplicationName,
-  provisionPerDeployContainer,
 } from '../provisioning/containers.ts';
 import { provisionBindings } from '../provisioning/provision.ts';
+import {
+  assertManagedSandboxEntitlement,
+  deleteSandboxController,
+  isManagedSandbox,
+  provisionSandboxController,
+  sandboxControllerWorkerName,
+} from '../provisioning/sandbox-controller.ts';
 import { presignAssetPut } from '../r2-presign.ts';
 import { RESERVED_BINDING_NAMES } from '../reserved-bindings.ts';
 import {
@@ -612,15 +618,23 @@ export async function settleDeploymentForSandboxDrain(
 
     if (deployment.status !== 'cutover' && deployment.status !== 'compensating') {
       if (deployment.status !== 'canceling') {
-        const requested = await cancelDeployment(txDb, deployment.id, 'managed Sandbox disabled');
+        const requested = await cancelDeployment(
+          txDb,
+          deployment.id,
+          'legacy managed Sandbox drain',
+        );
         return { state: requested ? 'cancel_requested' : 'waiting' } as const;
       }
       if (ageMs < DEPLOYMENT_CANCEL_STALE_MS) {
         return { state: 'waiting' } as const;
       }
-      await updateDeploymentStatus(txDb, deployment.id, 'canceled', 'managed Sandbox disabled', {
-        force: true,
-      });
+      await updateDeploymentStatus(
+        txDb,
+        deployment.id,
+        'canceled',
+        'legacy managed Sandbox drain',
+        { force: true },
+      );
       return { state: 'terminal' } as const;
     }
 
@@ -1486,25 +1500,28 @@ export function buildWebSocketUploadBindings(
 }
 
 /**
- * Per-deploy user worker owns its own Sandbox class. CF rejects cross-script
- * DO bindings into dispatch namespaces (the resolver only sees account-level
- * scripts), so each deploy declares its own DO namespace + container app.
+ * Tenant code receives only the controller service. It cannot access the raw
+ * container namespace, accounting control, or lifecycle callbacks.
  */
 export function buildSandboxUploadBindings(
   sandbox: DeployManifest['sandbox'] | undefined,
+  controllerWorkerName?: string,
 ): ReadonlyArray<{
-  type: 'durable_object_namespace';
+  type: 'service';
   name: string;
-  class_name: string;
+  service: string;
 }> {
   if (!sandbox) {
     return [];
   }
+  if (!controllerWorkerName) {
+    throw new Error('Sandbox controller Worker name is required.');
+  }
   return [
     {
-      type: 'durable_object_namespace',
-      name: sandbox.bindingName,
-      class_name: sandbox.className,
+      type: 'service',
+      name: '__VOID_SANDBOX',
+      service: controllerWorkerName,
     },
   ];
 }
@@ -1527,9 +1544,9 @@ export function buildLiveUploadBindings(live: DeployManifest['live'] | undefined
 }
 
 export function buildSandboxUploadContainers(
-  sandbox: DeployManifest['sandbox'] | undefined,
+  _sandbox: DeployManifest['sandbox'] | undefined,
 ): ReadonlyArray<{ class_name: string }> | undefined {
-  return sandbox ? [{ class_name: sandbox.className }] : undefined;
+  return undefined;
 }
 
 export function enrichWebSocketManifest(
@@ -2197,6 +2214,22 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     return context.json({ event: 'error', message: shapeError }, 400);
   }
   const incomingManifest = body.manifest as DeployManifest;
+  if (incomingManifest.sandbox && incomingManifest.sandbox.controllerProtocol !== 1) {
+    return context.json(
+      {
+        event: 'error',
+        message:
+          'Managed Sandboxes require an updated Void runtime. Upgrade void, rebuild the app, and deploy again.',
+      },
+      400,
+    );
+  }
+  if (incomingManifest.sandbox && 'runtime' in incomingManifest.sandbox) {
+    return context.json(
+      { event: 'error', message: 'sandbox.runtime is reserved for the platform.' },
+      400,
+    );
+  }
   if (incomingManifest.sandbox && !getPlatformCapabilities(context.env).sandbox) {
     return context.json(
       {
@@ -2205,6 +2238,22 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
       },
       501,
     );
+  }
+  if (incomingManifest.sandbox) {
+    try {
+      await assertManagedSandboxEntitlement(context.env.CF_ACCOUNT_ID, context.env.CF_API_TOKEN);
+    } catch (error) {
+      return context.json(
+        {
+          event: 'error',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Cloudflare Containers access could not be verified.',
+        },
+        403,
+      );
+    }
   }
   if (
     incomingManifest.version == null ||
@@ -3109,6 +3158,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     let workerUploadUrl: string | undefined;
     let sandboxContainerAppId: string | undefined;
     let sandboxContainerAppName: string | undefined;
+    let sandboxControllerAttempted = false;
     let manifest: DeployManifest | undefined;
     let workerName: string | undefined;
     let dispatchNamespace: string | undefined;
@@ -3237,6 +3287,9 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         enrichedManifestResult.changed ||
         liveManifestResult.changed;
       manifest = liveManifestResult.manifest;
+      if (manifest.sandbox) {
+        manifest = { ...manifest, sandbox: { ...manifest.sandbox, runtime: { protocol: 1 } } };
+      }
       if (hasWorkerFiles && manifest.type === undefined) {
         // Rollback identifies retained Workers from their manifest, including
         // older clients that omit type and workerMain but configure asset fallbacks.
@@ -4125,7 +4178,30 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           text,
         }));
         const websocketBindings = buildWebSocketUploadBindings(manifest.websocket);
-        const sandboxBindings = buildSandboxUploadBindings(manifest.sandbox);
+        if (manifest.sandbox) {
+          currentStep = 'sandbox_container';
+          markPhase('sandbox_container');
+          sandboxControllerAttempted = true;
+          const controller = await provisionSandboxController({
+            accountId: context.env.CF_ACCOUNT_ID,
+            apiToken: context.env.CF_API_TOKEN,
+            apiService: context.env.SANDBOX_CONTROL_SERVICE ?? 'void-api',
+            identity: {
+              projectId,
+              deploymentId: deployment.id,
+              userId: owner.id,
+              slug: project.slug,
+            },
+            sandbox: manifest.sandbox,
+          });
+          sandboxContainerAppId = controller.containerApplicationId;
+          await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+          await assertProjectNotDeleting(context.get('db'), projectId);
+        }
+        const sandboxBindings = buildSandboxUploadBindings(
+          manifest.sandbox,
+          sandboxControllerWorkerName(projectId, deployment.id),
+        );
         const liveBindings = buildLiveUploadBindings(manifest.live);
         // No per-project `send_email` binding is uploaded. The framework's
         // `sendEmail()` POSTs MIME + recipients to `__VOID_PROXY/email/send`;
@@ -4148,7 +4224,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         const assetConfig = manifest.assetConfig ?? { not_found_handling: 'none' };
         const durableObjectMigrations = buildDurableObjectUploadMigrations(
           manifest.websocket?.migrations,
-          manifest.sandbox?.migrations,
+          undefined,
           manifest.live?.migrations,
         );
         const containers = buildSandboxUploadContainers(manifest.sandbox);
@@ -4219,34 +4295,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
 
         await assertDeploymentNotCanceled(context.get('db'), deployment.id);
         await assertProjectNotDeleting(context.get('db'), projectId);
-
-        if (manifest.sandbox && hasWorkerFiles) {
-          currentStep = 'sandbox_container';
-          markPhase('sandbox_container');
-          sandboxContainerAppName = perDeployContainerApplicationName(
-            projectId,
-            deployment.id,
-            manifest.sandbox.containerName ?? 'void-sandbox',
-          );
-          const { containerApplicationId } = await provisionPerDeployContainer(
-            context.env.CF_ACCOUNT_ID,
-            context.env.CF_API_TOKEN,
-            dispatchNamespace,
-            workerName,
-            sandboxContainerAppName,
-            manifest.sandbox.bindingName,
-            manifest.sandbox.className,
-            {
-              image: manifest.sandbox.image,
-              instanceType: manifest.sandbox.instanceType,
-              maxInstances: manifest.sandbox.maxInstances,
-            },
-            context.env.ROUTING,
-          );
-          sandboxContainerAppId = containerApplicationId;
-          await assertDeploymentNotCanceled(context.get('db'), deployment.id);
-          await assertProjectNotDeleting(context.get('db'), projectId);
-        }
 
         emit({ event: 'worker_upload_done' });
 
@@ -5016,22 +5064,34 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                 try {
                   const oldManifest = JSON.parse(old.manifest) as DeployManifest;
                   if (oldManifest.sandbox) {
-                    const oldContainerAppName = perDeployContainerApplicationName(
-                      projectId,
-                      old.id,
-                      oldManifest.sandbox.containerName ?? 'void-sandbox',
-                    );
-                    const existing = await findContainerApplication(
-                      context.env.CF_ACCOUNT_ID,
-                      context.env.CF_API_TOKEN,
-                      oldContainerAppName,
-                    );
-                    if (existing) {
-                      await deleteContainerApplicationIdempotent(
+                    if (isManagedSandbox(oldManifest)) {
+                      await deleteSandboxController(
                         context.env.CF_ACCOUNT_ID,
                         context.env.CF_API_TOKEN,
-                        existing.id,
+                        projectId,
+                        old.id,
+                        oldManifest.sandbox,
+                        context.env.SANDBOX_CONCURRENCY_COUNTER,
+                        context.get('db'),
                       );
+                    } else {
+                      const oldContainerAppName = perDeployContainerApplicationName(
+                        projectId,
+                        old.id,
+                        oldManifest.sandbox.containerName ?? 'void-sandbox',
+                      );
+                      const existing = await findContainerApplication(
+                        context.env.CF_ACCOUNT_ID,
+                        context.env.CF_API_TOKEN,
+                        oldContainerAppName,
+                      );
+                      if (existing) {
+                        await deleteContainerApplicationIdempotent(
+                          context.env.CF_ACCOUNT_ID,
+                          context.env.CF_API_TOKEN,
+                          existing.id,
+                        );
+                      }
                     }
                   }
                 } catch (e) {
@@ -5338,7 +5398,21 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               }),
             );
           }
-          if (sandboxContainerAppId) {
+          if (sandboxControllerAttempted && deployment && manifest?.sandbox) {
+            await deleteSandboxController(
+              context.env.CF_ACCOUNT_ID,
+              context.env.CF_API_TOKEN,
+              projectId,
+              deployment.id,
+              manifest.sandbox,
+              context.env.SANDBOX_CONCURRENCY_COUNTER,
+              context.get('db'),
+            ).catch((error) =>
+              logger.error('catch', 'sandbox_controller_cleanup_failed', error, {
+                deploymentId: deployment?.id,
+              }),
+            );
+          } else if (sandboxContainerAppId) {
             await deleteContainerApplicationWithRetry(
               context.env.CF_ACCOUNT_ID,
               context.env.CF_API_TOKEN,
@@ -5486,7 +5560,21 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               workerName: failedWorkerName,
             }),
           );
-          if (sandboxContainerAppId) {
+          if (sandboxControllerAttempted && deployment && manifest?.sandbox) {
+            await deleteSandboxController(
+              context.env.CF_ACCOUNT_ID,
+              context.env.CF_API_TOKEN,
+              projectId,
+              deployment.id,
+              manifest.sandbox,
+              context.env.SANDBOX_CONCURRENCY_COUNTER,
+              context.get('db'),
+            ).catch((error) =>
+              logger.error('catch', 'sandbox_controller_cleanup_failed', error, {
+                deploymentId: deployment?.id,
+              }),
+            );
+          } else if (sandboxContainerAppId) {
             await deleteContainerApplicationWithRetry(
               context.env.CF_ACCOUNT_ID,
               context.env.CF_API_TOKEN,

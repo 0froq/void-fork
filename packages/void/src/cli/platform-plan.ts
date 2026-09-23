@@ -89,6 +89,7 @@ export async function createPlatformInstallPlan(
     repairMissing?: boolean;
     allowUnverifiedAiGateway?: boolean;
     includeEmailGateway?: boolean;
+    enableSandbox?: boolean;
   },
 ): Promise<PlatformInstallPlan> {
   const accounts = await client.listAccounts();
@@ -157,6 +158,7 @@ export async function createPlatformInstallPlan(
     options?.includeEmailGateway !== false && !!emailSharedZoneId && !!normalizedEmailSenderDomain;
   const capabilities = {
     ...existing?.deployment.capabilities,
+    ...(options?.enableSandbox ? { sandbox: true } : {}),
     ...(input.authentication
       ? {
           githubOAuth: input.authentication.providers.includes('github'),
@@ -203,13 +205,20 @@ export async function createPlatformInstallPlan(
     emailSenderDomain: recordedSenderDomain,
     ...existingWithoutEmailZone
   } = existing?.deployment ?? deployment;
+  const existingWithSandbox =
+    existing && options?.enableSandbox
+      ? {
+          ...existingWithoutEmailZone,
+          capabilities: { ...existingWithoutEmailZone.capabilities, sandbox: true },
+        }
+      : existingWithoutEmailZone;
   const comparableExistingWithoutEmailZone =
     existing && deployment.capabilities.email && !existing.deployment.capabilities.email
       ? {
-          ...existingWithoutEmailZone,
-          capabilities: { ...existingWithoutEmailZone.capabilities, email: true },
+          ...existingWithSandbox,
+          capabilities: { ...existingWithSandbox.capabilities, email: true },
         }
-      : existingWithoutEmailZone;
+      : existingWithSandbox;
   if (
     existing &&
     (JSON.stringify(comparableExistingWithoutEmailZone) !==
@@ -634,6 +643,7 @@ export async function revalidatePlatformInstallAction(
     {
       ...options,
       includeEmailGateway: original.actions.some((entry) => entry.key === 'email-gateway-worker'),
+      enableSandbox: original.deployment.capabilities.sandbox,
     },
   );
   const current = refreshed.actions.find((entry) => entry.key === action.key);

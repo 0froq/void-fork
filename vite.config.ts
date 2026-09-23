@@ -24,6 +24,9 @@ const testTimeout = 120_000 * ciTimeoutScale;
 const hookTimeout = 120_000 * ciTimeoutScale;
 
 const platformAlias = {
+  'void:sandbox-controller-source': fileURLToPath(
+    new URL('platform/packages/api/test/__mocks__/sandbox-controller-source.ts', import.meta.url),
+  ),
   // cloudflare:workers is only available in the Workers runtime.
   'cloudflare:workers': fileURLToPath(
     new URL('platform/packages/api/test/__mocks__/cloudflare-workers.ts', import.meta.url),

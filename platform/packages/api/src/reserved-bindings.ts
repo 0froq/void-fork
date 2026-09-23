@@ -29,6 +29,7 @@
  */
 export const RESERVED_BINDING_NAMES: ReadonlySet<string> = new Set([
   '__VOID_PROXY',
+  '__VOID_SANDBOX',
   '__PROJECT_ID',
   '__VOID_PROXY_TOKEN',
   '__VOID_USER_ID',

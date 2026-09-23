@@ -576,15 +576,15 @@ describe('buildSandboxUploadMetadata', () => {
     image: 'docker.io/cloudflare/sandbox:0.8.11',
   };
 
-  it('serializes sandbox Durable Object bindings and container metadata', () => {
-    expect(buildSandboxUploadBindings(sandbox)).toEqual([
+  it('gives the tenant only the trusted Sandbox service', () => {
+    expect(buildSandboxUploadBindings(sandbox, 'void-sb-project-deployment')).toEqual([
       {
-        type: 'durable_object_namespace',
-        name: 'SANDBOX',
-        class_name: 'Sandbox',
+        type: 'service',
+        name: '__VOID_SANDBOX',
+        service: 'void-sb-project-deployment',
       },
     ]);
-    expect(buildSandboxUploadContainers(sandbox)).toEqual([{ class_name: 'Sandbox' }]);
+    expect(buildSandboxUploadContainers(sandbox)).toBeUndefined();
   });
 
   it('combines websocket and sandbox migrations for Worker upload metadata', () => {

@@ -40,7 +40,7 @@ describe('platform runtime manifest', () => {
     const manifest = readPlatformRuntimeManifest();
 
     expect(manifest.schemaVersion).toBe(2);
-    expect(manifest.safetyProtocols).toEqual({ sandboxDrain: 2 });
+    expect(manifest.safetyProtocols).toEqual({ sandboxDrain: 3 });
     expect(manifest.usageProtocolVersion).toBe(2);
     expect(manifest.database.schemaDigest).toBe(
       platformDatabaseSchemaDigest(manifest.database.lineage, manifest.database.migrations),
@@ -103,9 +103,9 @@ describe('platform runtime manifest', () => {
     expect(() =>
       parsePlatformRuntimeManifest({
         ...manifest,
-        safetyProtocols: { sandboxDrain: 3 },
+        safetyProtocols: { sandboxDrain: 4 },
       }),
-    ).toThrow('safetyProtocols.sandboxDrain must be 0, 1, or 2');
+    ).toThrow('safetyProtocols.sandboxDrain must be 0, 1, 2, or 3');
     const { usageProtocolVersion: _usageProtocolVersion, ...legacy } = manifest;
     expect(parsePlatformRuntimeManifest(legacy).usageProtocolVersion).toBe(0);
     const { safetyProtocols: _safetyProtocols, ...legacySafety } = manifest;

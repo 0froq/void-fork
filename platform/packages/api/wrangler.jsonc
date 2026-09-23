@@ -1,6 +1,8 @@
 {
   "name": "void-api",
   "main": "src/worker/index.ts",
+  "build": { "command": "node scripts/build-sandbox-controller.mjs" },
+  "alias": { "void:sandbox-controller-source": "./dist/sandbox-controller-source.ts" },
   "compatibility_date": "2026-02-12",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
@@ -170,6 +172,7 @@
   "vars": {
     "CRON_FIRES_QUEUE_NAME": "void-cron-fires",
     "PLATFORM_ENV": "production",
+    "SANDBOX_CONTROL_SERVICE": "void-api",
     "PROXY_URL": "https://proxy.void.cloud",
     "REQUESTS_DATASET": "void_requests",
     "TAIL_SERVICE_NAME": "void-tail",
@@ -316,6 +319,7 @@
       "vars": {
         "CRON_FIRES_QUEUE_NAME": "void-cron-fires",
         "PLATFORM_ENV": "production",
+        "SANDBOX_CONTROL_SERVICE": "void-api",
         "PROXY_URL": "https://proxy.void.cloud",
         "REQUESTS_DATASET": "void_requests",
         "TAIL_SERVICE_NAME": "void-tail",
@@ -465,6 +469,7 @@
         "EMAIL_SHARED_ZONE_ID": "57fc5c5286e74843013704368205de38",
         "EMAIL_SHARED_INGRESS_NAME": "void-email-gateway-staging",
         "PLATFORM_ENV": "staging",
+        "SANDBOX_CONTROL_SERVICE": "void-api-staging",
         "PROXY_URL": "https://proxy.staging.void.cloud",
         "TAIL_SERVICE_NAME": "void-tail-staging",
         "R2_STATIC_ASSETS_BUCKET": "void-static-assets-overflow-staging",

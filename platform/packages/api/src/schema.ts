@@ -506,7 +506,7 @@ export const deployments = pgTable(
     admission_protocol: integer('admission_protocol')
       .notNull()
       .default(0)
-      .$default(() => 2),
+      .$default(() => 3),
     error_message: text('error_message'),
     asset_hashes: text('asset_hashes'),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),

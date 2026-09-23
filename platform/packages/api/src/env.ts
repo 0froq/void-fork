@@ -96,6 +96,7 @@ export type ApiEnv = Env & {
      */
     TAIL_SERVICE_NAME?: string;
     VOID_PROXY_SERVICE?: string;
+    SANDBOX_CONTROL_SERVICE?: string;
     VOID_PROXY_TOKEN?: string;
     /** Trusted producer used by the API-owned sandbox lease counter. */
     USAGE_EVENTS_QUEUE?: Queue<unknown>;

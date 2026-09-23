@@ -40,7 +40,7 @@ export type PlatformRuntimeManifest = Readonly<{
   emailProtocolVersion?: 1;
   database: PlatformRuntimeDatabaseManifest;
   platformVersion: string;
-  safetyProtocols: Readonly<{ sandboxDrain: 0 | 1 | 2 }>;
+  safetyProtocols: Readonly<{ sandboxDrain: 0 | 1 | 2 | 3 }>;
   schemaVersion: 2;
   sourceRevision: string | null;
   /** Queue payload contract shared by the API consumer and trusted producers. */
@@ -212,9 +212,10 @@ function parseSafetyProtocols(value: unknown): PlatformRuntimeManifest['safetyPr
   if (
     protocols.sandboxDrain !== 0 &&
     protocols.sandboxDrain !== 1 &&
-    protocols.sandboxDrain !== 2
+    protocols.sandboxDrain !== 2 &&
+    protocols.sandboxDrain !== 3
   ) {
-    throw new Error('runtime manifest safetyProtocols.sandboxDrain must be 0, 1, or 2');
+    throw new Error('runtime manifest safetyProtocols.sandboxDrain must be 0, 1, 2, or 3');
   }
   return { sandboxDrain: protocols.sandboxDrain };
 }

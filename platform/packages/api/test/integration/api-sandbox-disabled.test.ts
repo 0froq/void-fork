@@ -26,7 +26,7 @@ beforeEach(async () => {
   await clearTables(env.db);
 });
 
-const staleCapabilities = JSON.stringify({
+const disabledCapabilities = JSON.stringify({
   ai: true,
   customDomains: true,
   email: true,
@@ -34,14 +34,11 @@ const staleCapabilities = JSON.stringify({
   githubOAuth: true,
   googleOAuth: true,
   managedBuilds: true,
-  sandbox: true,
+  sandbox: false,
 });
 
-describe('managed Sandbox beta disablement', () => {
-  it.each([
-    ['hosted configuration is absent', undefined],
-    ['stored configuration still says enabled', staleCapabilities],
-  ])('rejects a new Sandbox deployment when %s', async (_label, capabilities) => {
+describe('managed Sandbox capability disablement', () => {
+  it('rejects a new Sandbox deployment when the installation disables it', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'sandbox-disabled');
     const response = await app.fetch(
@@ -57,6 +54,7 @@ describe('managed Sandbox beta disablement', () => {
             assetManifestVersion: 2,
             bindings: {},
             sandbox: {
+              controllerProtocol: 1,
               bindingName: 'SANDBOX',
               className: 'Sandbox',
               containerName: 'void-sandbox',
@@ -68,7 +66,7 @@ describe('managed Sandbox beta disablement', () => {
           workerFiles: {},
         }),
       }),
-      { ...env, PLATFORM_CAPABILITIES: capabilities },
+      { ...env, PLATFORM_CAPABILITIES: disabledCapabilities },
     );
 
     expect(response.status).toBe(501);
@@ -108,7 +106,7 @@ describe('managed Sandbox beta disablement', () => {
         },
         body: JSON.stringify({ deploymentId: deployment.id }),
       }),
-      env,
+      { ...env, PLATFORM_CAPABILITIES: disabledCapabilities },
     );
 
     expect(response.status).toBe(501);

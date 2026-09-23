@@ -3,20 +3,7 @@ import type { ApiEnv } from './env.ts';
 import { ensureUsageSigningKey, signUsageEvent } from './usage-auth.ts';
 import type { UsageEvent } from './usage-counter.ts';
 
-// --- Exported constants (used by tests + the proxy caller) ---
-
-/**
- * Entries older than this are considered stale and swept by the alarm.
- * Set deliberately longer than any reasonable sandbox session — if a sandbox
- * has been "held" for more than an hour without an explicit `release`, the
- * caller most likely crashed mid-session and the slot would otherwise leak.
- */
-export const STALE_MS = 60 * 60_000;
-
-/** How often the alarm sweeps stale entries. */
-export const RECONCILE_INTERVAL_MS = 60 * 60_000;
-
-// --- Storage shape ---
+export const RECONCILE_INTERVAL_MS = 60_000;
 
 export type SandboxUsageAttribution = Readonly<{
   projectId: string;
@@ -24,42 +11,37 @@ export type SandboxUsageAttribution = Readonly<{
   slug: string;
 }>;
 
+export type SandboxControlResult =
+  | { ok: true }
+  | { ok: false; reason: 'concurrency' | 'runtime_budget' | 'unavailable' };
+
 type Entry = {
-  acquiredAt: number;
-  /** Stable generation start; acquiredAt is only the last heartbeat. */
-  meteringStart?: number;
+  generation: string;
+  attribution: SandboxUsageAttribution;
+  /** Only a confirmed container start begins billing. Reservations are unbilled. */
+  startedAt?: number;
   meteredThrough?: number;
-  attribution?: SandboxUsageAttribution;
+  /** Persist before publishing, so a queue outage cannot bill time after stop. */
+  stoppedAt?: number;
 };
 
 type EntriesMap = Record<string, Entry>;
+// The previous tenant-controlled lease namespace is deliberately never adopted.
+// The upgrade drain removes its containers before this protocol is admitted.
+const STORAGE_KEY = 'controlled-entries-v1';
+const COMPLETIONS_KEY = 'controlled-completions-v1';
+const COMPLETION_RETENTION_MS = 24 * 60 * 60 * 1000;
+const MAX_COMPLETIONS = 4_096;
+const unavailable: SandboxControlResult = { ok: false, reason: 'unavailable' };
 
-const STORAGE_KEY = 'entries';
-
-// --- RPC result types ---
-
-export type AcquireResult = { ok: true } | { ok: false; reason: 'concurrency' };
-
-export type RefreshResult = { ok: true } | { ok: false; reason: 'not_held' };
-
-/**
- * Per-account counter for live sandbox containers.
- *
- * The caller (the proxy worker) owns plan lookups and KV
- * `sandbox-block:{userId}` checks before invoking `acquire`. This DO owns the
- * lease clock and publishes signed usage intervals to the platform queue.
- *
- * Addressing convention: callers derive the DO id with
- * `idFromName('account:${userId}')`. The trusted proxy supplies attribution
- * and the plan limit; the DO compares capacity against that integer.
- */
+/** Account-wide capacity and usage, callable only through the private SandboxControl entrypoint. */
 export class SandboxConcurrencyCounter extends DurableObject<ApiEnv['Bindings']> {
   private entries: EntriesMap | null = null;
   private operationTail: Promise<void> = Promise.resolve();
 
   private serialize<T>(operation: () => Promise<T>): Promise<T> {
-    // KV and Queue I/O open the DO input gate. Queue every distinct operation
-    // through persistence so a heartbeat cannot resurrect a released lease.
+    // Queue/network I/O releases the DO input gate. Hold application ordering
+    // through persistence so delayed heartbeats cannot resurrect released runs.
     const result = this.operationTail.then(operation);
     this.operationTail = result.then(
       () => {},
@@ -70,62 +52,75 @@ export class SandboxConcurrencyCounter extends DurableObject<ApiEnv['Bindings']>
 
   private async getEntries(): Promise<EntriesMap> {
     if (!this.entries) {
-      const stored = await this.ctx.storage.get<EntriesMap>(STORAGE_KEY);
-      this.entries = stored ?? {};
+      this.entries = (await this.ctx.storage.get<EntriesMap>(STORAGE_KEY)) ?? {};
     }
-    // Entries themselves are replaced, never mutated. A private map keeps a
-    // failed publish or storage put from committing changes to the cache.
     return { ...this.entries };
   }
 
   private async saveEntries(entries: EntriesMap): Promise<void> {
     await this.ctx.storage.put(STORAGE_KEY, entries);
-    this.entries = entries;
+    this.entries = { ...entries };
   }
 
   private async ensureAlarm(): Promise<void> {
-    const current = await this.ctx.storage.getAlarm();
-    if (!current) {
+    if (!(await this.ctx.storage.getAlarm())) {
       await this.ctx.storage.setAlarm(Date.now() + RECONCILE_INTERVAL_MS);
     }
   }
 
-  private attributeEntry(entry: Entry, attribution: SandboxUsageAttribution | undefined): Entry {
-    if (!attribution) {
-      return entry;
-    }
-    // Old leases have no trustworthy attribution or metering generation.
-    // Adopt them from this server timestamp instead of guessing prior usage.
-    return { ...entry, attribution, meteringStart: entry.meteringStart ?? Date.now() };
+  private completionKey(id: string, generation: string): string {
+    return JSON.stringify([id, generation]);
   }
 
-  /** Publish cumulative whole-second usage using only the DO's clock. */
-  private async meterThrough(
-    projectScopedSandboxInstanceId: string,
-    entry: Entry,
-    through: number,
-  ): Promise<Entry> {
-    const attribution = entry.attribution;
-    if (!attribution || entry.meteringStart === undefined) {
-      // An entry persisted by the previous class version has no trustworthy
-      // attribution. A proxy refresh/release backfills it; the stale sweep
-      // must not guess identity for an orphan that never called either path.
+  private async completions(): Promise<Record<string, number>> {
+    const stored = (await this.ctx.storage.get<Record<string, number>>(COMPLETIONS_KEY)) ?? {};
+    const cutoff = Date.now() - COMPLETION_RETENTION_MS;
+    return Object.fromEntries(
+      Object.entries(stored)
+        .filter(([, completedAt]) => completedAt >= cutoff)
+        .sort((left, right) => left[1] - right[1])
+        .slice(-MAX_COMPLETIONS),
+    );
+  }
+
+  private async hasCompletion(id: string, generation: string): Promise<boolean> {
+    return this.completionKey(id, generation) in (await this.completions());
+  }
+
+  private async recordCompletion(id: string, generation: string): Promise<void> {
+    const completions = await this.completions();
+    completions[this.completionKey(id, generation)] = Date.now();
+    const bounded = Object.fromEntries(
+      Object.entries(completions)
+        .sort((left, right) => left[1] - right[1])
+        .slice(-MAX_COMPLETIONS),
+    );
+    await this.ctx.storage.put(COMPLETIONS_KEY, bounded);
+  }
+
+  private withinLimit(entries: EntriesMap, id: string, limit: number): boolean {
+    // A plan downgrade deterministically preserves at most the new capacity.
+    // Stopping reservations still consume capacity until their receipt commits.
+    return limit === 0 || Object.keys(entries).sort().indexOf(id) < limit;
+  }
+
+  private async meterThrough(id: string, entry: Entry, through: number): Promise<Entry> {
+    if (entry.startedAt === undefined) {
       return entry;
     }
-    const from = entry.meteringStart;
+    const from = entry.startedAt;
     const seconds = Math.floor(Math.max(0, through - from) / 1000);
     const meteredThrough = from + seconds * 1000;
     if (meteredThrough <= (entry.meteredThrough ?? from)) {
       return entry;
     }
-    // Queue delivery can be out of order. Keeping the start fixed lets the
-    // consumer bill only the unseen suffix of this lease generation.
-    const eventId = `sandbox:${projectScopedSandboxInstanceId}:${from}:${meteredThrough}`;
+    // Include the random run generation, not just its millisecond start time.
+    const instance = JSON.stringify([id, entry.generation]);
     const event: UsageEvent = {
-      ...attribution,
+      ...entry.attribution,
       requests: 0,
       responseBytes: 0,
-      sandboxInstanceId: projectScopedSandboxInstanceId,
+      sandboxInstanceId: instance,
       sandboxMeteredFrom: from,
       sandboxMeteredThrough: meteredThrough,
     };
@@ -134,180 +129,152 @@ export class SandboxConcurrencyCounter extends DurableObject<ApiEnv['Bindings']>
     }
     const key = await ensureUsageSigningKey(this.env.ROUTING, this.env.JWT_SECRET);
     await this.env.USAGE_EVENTS_QUEUE.send(
-      await signUsageEvent(key, 'sandbox-counter', eventId, event),
+      await signUsageEvent(
+        key,
+        'sandbox-counter',
+        `sandbox:${instance}:${from}:${meteredThrough}`,
+        event,
+      ),
     );
     return { ...entry, meteredThrough };
   }
 
-  /**
-   * Try to claim a sandbox slot for `projectScopedSandboxInstanceId`.
-   *
-   * `planLimit` is the per-account cap (`PlanLimits.sandboxMaxConcurrentInstances`).
-   * A value of `0` follows the project's standard "0 means unlimited"
-   * convention used elsewhere in `tiers.ts` / `isWithinLimit`.
-   *
-   * Idempotent: if `projectScopedSandboxInstanceId` is already held, the call refreshes
-   * its `acquiredAt` timestamp (which keeps the alarm sweep from reaping a
-   * still-live session) and returns `{ ok: true }` without double-counting.
-   */
-  async acquire(
-    projectScopedSandboxInstanceId: string,
-    planLimit: number,
-    attribution?: SandboxUsageAttribution,
-  ): Promise<AcquireResult> {
-    return this.serialize(() =>
-      this.handleAcquire(projectScopedSandboxInstanceId, planLimit, attribution),
-    );
+  async reserve(
+    id: string,
+    generation: string,
+    limit: number,
+    attribution: SandboxUsageAttribution,
+  ): Promise<SandboxControlResult> {
+    return this.serialize(async () => {
+      const entries = await this.getEntries();
+      const current = entries[id];
+      if (current) {
+        if (current.generation !== generation || current.stoppedAt !== undefined) {
+          return unavailable;
+        }
+        return this.withinLimit(entries, id, limit)
+          ? { ok: true }
+          : { ok: false, reason: 'concurrency' };
+      }
+      // A timed-out reserve can finish after stop. Never admit that run again.
+      if (await this.hasCompletion(id, generation)) {
+        return unavailable;
+      }
+      if (limit !== 0 && Object.keys(entries).length >= limit) {
+        return { ok: false, reason: 'concurrency' };
+      }
+      entries[id] = { generation, attribution };
+      await this.saveEntries(entries);
+      return { ok: true };
+    });
   }
 
-  private async handleAcquire(
-    projectScopedSandboxInstanceId: string,
-    planLimit: number,
-    attribution?: SandboxUsageAttribution,
-  ): Promise<AcquireResult> {
-    const entries = await this.getEntries();
-    const now = Date.now();
+  async started(id: string, generation: string, limit: number): Promise<SandboxControlResult> {
+    return this.serialize(async () => {
+      const entries = await this.getEntries();
+      const current = entries[id];
+      if (!current || current.generation !== generation || current.stoppedAt !== undefined) {
+        return unavailable;
+      }
+      if (!this.withinLimit(entries, id, limit)) {
+        return { ok: false, reason: 'concurrency' };
+      }
+      if (current.startedAt === undefined) {
+        entries[id] = { ...current, startedAt: Date.now() };
+        await this.saveEntries(entries);
+      }
+      return { ok: true };
+    });
+  }
 
-    // Idempotent refresh — don't double-count an already-held slot. Avoids
-    // a leak when the proxy retries `acquire` for the same sandbox after a
-    // transient network error.
-    if (entries[projectScopedSandboxInstanceId]) {
-      const current = entries[projectScopedSandboxInstanceId]!;
-      const withAttribution = this.attributeEntry(current, attribution);
-      const metered = await this.meterThrough(projectScopedSandboxInstanceId, withAttribution, now);
-      entries[projectScopedSandboxInstanceId] = {
-        ...metered,
-        acquiredAt: now,
-        ...(attribution ? { attribution } : {}),
-      };
+  async heartbeat(id: string, generation: string, limit: number): Promise<SandboxControlResult> {
+    return this.serialize(async () => {
+      const entries = await this.getEntries();
+      const current = entries[id];
+      if (!current || current.generation !== generation || current.stoppedAt !== undefined) {
+        return unavailable;
+      }
+      if (!this.withinLimit(entries, id, limit)) {
+        return { ok: false, reason: 'concurrency' };
+      }
+      entries[id] = await this.meterThrough(id, current, Date.now());
+      await this.saveEntries(entries);
+      return { ok: true };
+    });
+  }
+
+  /** The trusted controller calls this only after confirming the container stopped. */
+  async stopped(id: string, generation: string): Promise<void> {
+    const stoppedAt = Date.now();
+    return this.serialize(async () => {
+      const entries = await this.getEntries();
+      const current = entries[id];
+      if (!current || current.generation !== generation) {
+        // Stop may overtake a reserve request whose transport timed out.
+        await this.recordCompletion(id, generation);
+        return;
+      }
+      if (current.stoppedAt === undefined) {
+        entries[id] = { ...current, stoppedAt };
+        await this.saveEntries(entries);
+      }
+      // Retry final usage even if the controller is subsequently deleted.
+      await this.ensureAlarm();
+      await this.finishStopped(entries, id);
+    });
+  }
+
+  /** Called only after the API confirms every container for a deployment is gone. */
+  async revokeDeployment(projectId: string, deploymentId: string): Promise<void> {
+    const stoppedAt = Date.now();
+    return this.serialize(async () => {
+      const entries = await this.getEntries();
+      const matching = Object.keys(entries).filter((id) => {
+        try {
+          const identity = JSON.parse(id) as unknown;
+          return (
+            Array.isArray(identity) && identity[0] === projectId && identity[1] === deploymentId
+          );
+        } catch {
+          return false;
+        }
+      });
+      if (matching.length === 0) {
+        return;
+      }
+      for (const id of matching) {
+        const entry = entries[id]!;
+        if (entry.stoppedAt === undefined) {
+          entries[id] = { ...entry, stoppedAt };
+        }
+      }
       await this.saveEntries(entries);
       await this.ensureAlarm();
-      return { ok: true };
-    }
-
-    const count = Object.keys(entries).length;
-    // 0 means unlimited (matches tiers.isWithinLimit semantics).
-    if (planLimit !== 0 && count >= planLimit) {
-      return { ok: false, reason: 'concurrency' };
-    }
-
-    entries[projectScopedSandboxInstanceId] = {
-      acquiredAt: now,
-      meteringStart: now,
-      meteredThrough: now,
-      ...(attribution ? { attribution } : {}),
-    };
-    await this.saveEntries(entries);
-    await this.ensureAlarm();
-    return { ok: true };
-  }
-
-  /**
-   * Heartbeat refresh for a slot the caller still believes it holds. Touches
-   * `acquiredAt` to the current time so the `STALE_MS` alarm sweep doesn't
-   * reap a long-running but still-live session.
-   *
-   * Deliberately does NOT re-check `planLimit` — the user's plan may have
-   * changed since acquire, but in-flight sandboxes are not retroactively
-   * suspended; only new acquires see the updated cap.
-   *
-   * Returns `{ ok: false, reason: 'not_held' }` if the slot is unknown
-   * (already swept or never acquired). Refresh does NOT auto-acquire: the
-   * caller treats this as a heartbeat ping that won't recover the session,
-   * which keeps the DO's accounting simple (no surprise re-claim that
-   * bypasses the planLimit check on the acquire path).
-   */
-  async refresh(
-    projectScopedSandboxInstanceId: string,
-    attribution?: SandboxUsageAttribution,
-  ): Promise<RefreshResult> {
-    return this.serialize(() => this.handleRefresh(projectScopedSandboxInstanceId, attribution));
-  }
-
-  private async handleRefresh(
-    projectScopedSandboxInstanceId: string,
-    attribution?: SandboxUsageAttribution,
-  ): Promise<RefreshResult> {
-    const entries = await this.getEntries();
-    const current = entries[projectScopedSandboxInstanceId];
-    if (!current) {
-      return { ok: false, reason: 'not_held' };
-    }
-    const now = Date.now();
-    const withAttribution = this.attributeEntry(current, attribution);
-    const metered = await this.meterThrough(projectScopedSandboxInstanceId, withAttribution, now);
-    entries[projectScopedSandboxInstanceId] = {
-      ...metered,
-      acquiredAt: now,
-      ...(attribution ? { attribution } : {}),
-    };
-    await this.saveEntries(entries);
-    await this.ensureAlarm();
-    return { ok: true };
-  }
-
-  /**
-   * Release the slot held by `projectScopedSandboxInstanceId`. Idempotent: missing ids
-   * are a no-op so the proxy can call `release` from both happy-path and
-   * cleanup code paths without coordination.
-   */
-  async release(
-    projectScopedSandboxInstanceId: string,
-    attribution?: SandboxUsageAttribution,
-  ): Promise<void> {
-    return this.serialize(() => this.handleRelease(projectScopedSandboxInstanceId, attribution));
-  }
-
-  private async handleRelease(
-    projectScopedSandboxInstanceId: string,
-    attribution?: SandboxUsageAttribution,
-  ): Promise<void> {
-    const entries = await this.getEntries();
-    const current = entries[projectScopedSandboxInstanceId];
-    if (!current) {
-      return;
-    }
-    await this.meterThrough(
-      projectScopedSandboxInstanceId,
-      this.attributeEntry(current, attribution),
-      Date.now(),
-    );
-    delete entries[projectScopedSandboxInstanceId];
-    await this.saveEntries(entries);
-  }
-
-  /**
-   * Sweep stale entries — anything older than `STALE_MS` is assumed to be a
-   * leaked slot (caller crashed without `release`). Re-arms itself so the
-   * DO continues reconciling as long as it has live entries; once empty,
-   * we let the alarm lapse to keep the DO cold.
-   */
-  async alarm(): Promise<void> {
-    return this.serialize(() => this.handleAlarm());
-  }
-
-  private async handleAlarm(): Promise<void> {
-    const entries = await this.getEntries();
-    const now = Date.now();
-    let changed = false;
-    for (const [id, entry] of Object.entries(entries)) {
-      if (entry.acquiredAt < now - STALE_MS) {
-        // Bill through the exact stale boundary, not the later alarm fire
-        // time. If publishing fails, retain the entry so the next alarm can
-        // retry the same deterministic interval id.
-        await this.meterThrough(id, entry, entry.acquiredAt + STALE_MS);
-        delete entries[id];
-        changed = true;
+      for (const id of matching) {
+        await this.finishStopped(entries, id);
       }
-    }
-    if (changed) {
-      await this.saveEntries(entries);
-    }
+    });
+  }
 
-    // Re-arm only while we still have entries to watch. An empty DO doesn't
-    // need to wake itself — the next `acquire` will set the alarm again.
-    if (Object.keys(entries).length > 0) {
-      await this.ctx.storage.setAlarm(now + RECONCILE_INTERVAL_MS);
-    }
+  private async finishStopped(entries: EntriesMap, id: string): Promise<void> {
+    const entry = entries[id]!;
+    await this.meterThrough(id, entry, entry.stoppedAt!);
+    // Receipt precedes capacity release; any partial failure is safe to retry.
+    await this.recordCompletion(id, entry.generation);
+    delete entries[id];
+    await this.saveEntries(entries);
+  }
+
+  async alarm(): Promise<void> {
+    return this.serialize(async () => {
+      const entries = await this.getEntries();
+      for (const [id, entry] of Object.entries(entries)) {
+        if (entry.stoppedAt !== undefined) {
+          await this.finishStopped(entries, id);
+        }
+      }
+      // Never infer stop from age or meter unverified time. The controller's
+      // own alarm verifies liveness and destroys denied containers.
+    });
   }
 }

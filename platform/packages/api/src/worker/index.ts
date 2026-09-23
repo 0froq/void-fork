@@ -7,6 +7,7 @@ export {
   CronScheduler,
   ErrorAlertMonitor,
   SandboxConcurrencyCounter,
+  SandboxControl,
   UsageCounter,
   default,
 } from '../index.ts';

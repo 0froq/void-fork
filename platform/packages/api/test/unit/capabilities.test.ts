@@ -3,7 +3,7 @@ import adminPlatform from '../../src/admin/routes/platform.tsx';
 import { getPlatformCapabilities } from '../../src/capabilities.ts';
 
 describe('platform capabilities', () => {
-  it('keeps managed Sandbox disabled when hosted configuration is absent', () => {
+  it('enables managed Sandbox when hosted configuration is absent', () => {
     expect(getPlatformCapabilities({})).toEqual({
       ai: true,
       customDomains: true,
@@ -12,11 +12,11 @@ describe('platform capabilities', () => {
       githubOAuth: true,
       googleOAuth: true,
       managedBuilds: true,
-      sandbox: false,
+      sandbox: true,
     });
   });
 
-  it('overrides a stale configured sandbox capability to disabled', () => {
+  it('honors the installed platform Sandbox capability', () => {
     expect(
       getPlatformCapabilities({
         PLATFORM_CAPABILITIES: JSON.stringify({
@@ -30,7 +30,7 @@ describe('platform capabilities', () => {
           sandbox: true,
         }),
       }).sandbox,
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('rejects incomplete capability configuration', () => {

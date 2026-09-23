@@ -1,29 +1,19 @@
 import { eq, and } from 'drizzle-orm';
 import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  beforeEach,
   afterAll,
   afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
   vi,
 } from 'vite-plus/test';
-
-vi.mock('../../src/capabilities.ts', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../src/capabilities.ts')>();
-  return {
-    ...original,
-    getPlatformCapabilities(env: { PLATFORM_CAPABILITIES?: string }) {
-      // Keep exercising the dormant provisioning, rollback, and cleanup
-      // implementation. Production hard-disable behavior has a separate
-      // integration test that imports the unmocked capability resolver.
-      return { ...original.getPlatformCapabilities(env), sandbox: true };
-    },
-  };
-});
-
 import app from '../../src/index.ts';
+import {
+  retrySandboxControllerCleanup,
+  sandboxControllerWorkerName,
+} from '../../src/provisioning/sandbox-controller.ts';
 import { deployments, projects, resources } from '../../src/schema.ts';
 import {
   setupEnv,
@@ -37,24 +27,9 @@ import {
 } from './helpers.ts';
 
 // ---------------------------------------------------------------------------
-// Integration tests for the per-deploy sandbox architecture (post-#46/#47).
-//
-// Each sandbox deploy creates its own user worker `user-{slug}-{deployId}`
-// that owns its own `Sandbox` Durable Object class via the Worker upload
-// metadata (`bindings + containers + migrations`). The deploy then POSTs a
-// fresh container application named
-// `${projectId}-${deploymentId}-${containerName}` (lowercased, `_`→`-`)
-// bound to the freshly-minted DO namespace.
-//
-// There is NO host script (`do-host-{slug}` is gone), NO cross-script DO
-// binding, and NO `provisionSandboxHost` step. Cross-script bindings into a
-// dispatch namespace are rejected by CF (the mock guards this); the
-// regression test asserts the rejection still fires.
-//
-// Retention deletes the per-deploy container app and any historical R2 bundle
-// objects when evicting. Project teardown deletes all retained deployments'
-// container apps via the orphan-recovery enumeration in cleanup.ts.
-// ---------------------------------------------------------------------------
+// Managed Sandbox deploys isolate the trusted controller in an account Worker.
+// Tenant Workers receive only its service binding. Containers remain per deployment
+// so image upgrades, rollback, retention, and deletion have independent lifetimes.
 
 let env: TestEnv;
 
@@ -85,6 +60,7 @@ function buildSandboxManifest(overrides?: {
     version: 3,
     bindings: {},
     sandbox: {
+      controllerProtocol: 1,
       bindingName: 'SANDBOX',
       className: 'Sandbox',
       containerName: overrides?.containerName ?? 'void-sandbox',
@@ -158,7 +134,7 @@ describe('per-deploy sandbox integration', () => {
   // ----------------------------------------------------------------------
   // 1. First sandbox deploy
   // ----------------------------------------------------------------------
-  it('first sandbox deploy: PUT user worker with same-script DO binding + containers + migrations; POST per-deploy container app; NO resources row', async () => {
+  it('provisions a trusted controller and gives the tenant only its restricted service', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'sb-first');
     const cf = mockCfApi();
@@ -178,32 +154,37 @@ describe('per-deploy sandbox integration', () => {
     const userWorker = cf.state.hostScripts.get(userWorkerName);
     expect(userWorker).toBeDefined();
 
-    // User worker owns the Sandbox DO class (mock minted a namespace_id for
-    // it because metadata.migrations declared `new_sqlite_classes: ['Sandbox']`).
-    expect(userWorker!.classes.get('Sandbox')).toBeTruthy();
-    const namespaceId = userWorker!.classes.get('Sandbox')!;
-
-    // Same-script DO binding: no `script_name`, with the resolved `namespace_id`.
-    const sandboxBinding = userWorker!.bindings.find(
-      (b) => b.type === 'durable_object_namespace' && b.name === 'SANDBOX',
+    const controllerName = sandboxControllerWorkerName(project.id, deployId);
+    const controller = cf.state.hostScripts.get(controllerName)!;
+    const namespaceId = controller.classes.get('SandboxController');
+    expect(namespaceId).toBeTruthy();
+    expect(userWorker!.classes.size).toBe(0);
+    expect(userWorker!.metadata.containers).toBeUndefined();
+    expect(userWorker!.bindings).toContainEqual({
+      type: 'service',
+      name: '__VOID_SANDBOX',
+      service: controllerName,
+    });
+    expect(
+      userWorker!.bindings.some((binding) => binding.type === 'durable_object_namespace'),
+    ).toBe(false);
+    expect(userWorker!.bindings.some((binding) => binding.name === '__VOID_SANDBOX_CONTROL')).toBe(
+      false,
     );
-    expect(sandboxBinding).toBeDefined();
-    expect(sandboxBinding!.script_name).toBeUndefined();
-    expect(sandboxBinding!.class_name).toBe('Sandbox');
-    expect(sandboxBinding!.namespace_id).toBe(namespaceId);
-
-    // Metadata declares Sandbox as a container-enabled class on the user worker.
-    const containers = (userWorker!.metadata as { containers?: Array<unknown> }).containers;
-    expect(containers).toEqual([{ class_name: 'Sandbox' }]);
-
-    // Migrations include `new_sqlite_classes: ['Sandbox']` so CF mints + sticks
-    // a fresh DO namespace to this user worker.
-    const migrations = userWorker!.metadata.migrations as {
-      new_tag?: string;
-      steps?: Array<{ new_sqlite_classes?: Array<string> }>;
-    };
-    expect(migrations).toBeDefined();
-    expect(migrations.steps?.some((s) => s.new_sqlite_classes?.includes('Sandbox'))).toBe(true);
+    expect(controller.bindings).toContainEqual({
+      type: 'service',
+      name: '__VOID_SANDBOX_CONTROL',
+      service: 'void-api',
+      entrypoint: 'SandboxControl',
+      props: { projectId: project.id, deploymentId: deployId, userId: user.id, slug: project.slug },
+    });
+    const [stored] = await env.db.select().from(deployments).where(eq(deployments.id, deployId));
+    expect(JSON.parse(stored!.manifest!).sandbox.runtime).toEqual({ protocol: 1 });
+    cf.expectCallOrder(
+      { method: 'PUT', url: '/workers/scripts/' + controllerName },
+      { method: 'POST', url: '/containers/applications' },
+      { method: 'PUT', url: '/scripts/' + userWorkerName },
+    );
 
     // Per-deploy container app exists: `${projectId}-${deployId}-void-sandbox`
     // (lowercased, `_`→`-`), bound to the user worker's namespace_id.
@@ -242,7 +223,9 @@ describe('per-deploy sandbox integration', () => {
     const v1Id = done1!.deployment;
 
     const v1WorkerName = `user-${project.slug}-${v1Id}`;
-    const v1Namespace = cf.state.hostScripts.get(v1WorkerName)!.classes.get('Sandbox')!;
+    const v1Namespace = cf.state.hostScripts
+      .get(sandboxControllerWorkerName(project.id, v1Id))!
+      .classes.get('SandboxController')!;
     const v1ContainerName = `${project.id}-${v1Id}-void-sandbox`.toLowerCase().replaceAll('_', '-');
 
     // Deploy v2 with the same manifest.
@@ -261,7 +244,9 @@ describe('per-deploy sandbox integration', () => {
     expect(v2Worker).toBeDefined();
 
     // Brand-new namespace_id (per-deploy, NOT preserved across deploys).
-    const v2Namespace = v2Worker!.classes.get('Sandbox')!;
+    const v2Namespace = cf.state.hostScripts
+      .get(sandboxControllerWorkerName(project.id, v2Id))!
+      .classes.get('SandboxController')!;
     expect(v2Namespace).toBeTruthy();
     expect(v2Namespace).not.toBe(v1Namespace);
 
@@ -380,6 +365,7 @@ describe('per-deploy sandbox integration', () => {
 
     // v1's user worker is gone.
     expect(cf.state.hostScripts.has(v1WorkerName)).toBe(false);
+    expect(cf.state.hostScripts.has(sandboxControllerWorkerName(project.id, v1Id))).toBe(false);
 
     // v1's container app is gone.
     expect(
@@ -392,6 +378,38 @@ describe('per-deploy sandbox integration', () => {
     // v1's retained flag flipped false in DB.
     const [v1Row] = await env.db.select().from(deployments).where(eq(deployments.id, v1Id));
     expect(v1Row!.retained).toBe(false);
+  });
+
+  it('retries controller and container cleanup after an interrupted deployment cleanup', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'sb-cleanup-retry');
+    const cf = mockCfApi();
+    const response = await deploy(project.id, user.jwt);
+    const deploymentId = getDoneEvent(await readAllEvents(response))!.deployment;
+    const controllerName = sandboxControllerWorkerName(project.id, deploymentId);
+    expect(cf.state.hostScripts.has(controllerName)).toBe(true);
+
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: null })
+      .where(eq(projects.id, project.id));
+    await env.db
+      .update(deployments)
+      .set({ retained: false, status: 'failed' })
+      .where(eq(deployments.id, deploymentId));
+
+    await retrySandboxControllerCleanup(env.db, env);
+    expect(cf.state.hostScripts.has(controllerName)).toBe(false);
+    expect(
+      Array.from(cf.state.containerApps.values()).some((application) =>
+        application.name.includes(deploymentId),
+      ),
+    ).toBe(false);
+    const [cleaned] = await env.db
+      .select({ manifest: deployments.manifest })
+      .from(deployments)
+      .where(eq(deployments.id, deploymentId));
+    expect(JSON.parse(cleaned!.manifest!).sandbox.runtime.cleanupComplete).toBe(true);
   });
 
   // ----------------------------------------------------------------------

@@ -4,6 +4,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { basename, dirname, join } from 'pathslash';
+import { buildSandboxController } from '../../../platform/packages/api/scripts/build-sandbox-controller.mjs';
 import { resolvePlatformSourceRevision } from './source-revision.mjs';
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -40,6 +41,7 @@ try {
   rmSync(runtimeRoot, { force: true, recursive: true });
   mkdirSync(runtimeRoot, { recursive: true });
   const artifacts = {};
+  const controller = buildSandboxController(temporaryRoot);
 
   for (const [name, entrypoint] of workers) {
     const configPath = join(temporaryRoot, `${name}.json`);
@@ -49,7 +51,10 @@ try {
       JSON.stringify({
         name: `void-runtime-build-${name === 'emailGateway' ? 'email-gateway' : name}`,
         main: entrypoint,
-        alias: sourceAliases,
+        alias: {
+          ...sourceAliases,
+          ...(name === 'api' ? { 'void:sandbox-controller-source': controller.modulePath } : {}),
+        },
         compatibility_date: '2026-02-24',
         compatibility_flags:
           name === 'api' || name === 'proxy' || name === 'emailGateway' ? ['nodejs_compat'] : [],
@@ -89,7 +94,7 @@ try {
     emailProtocolVersion: 1,
     database,
     platformVersion: packageJson.version,
-    safetyProtocols: { sandboxDrain: 2 },
+    safetyProtocols: { sandboxDrain: 3 },
     schemaVersion: 2,
     sourceRevision,
     usageProtocolVersion: PLATFORM_USAGE_PROTOCOL_VERSION,

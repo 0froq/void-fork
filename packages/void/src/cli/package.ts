@@ -446,6 +446,7 @@ function toWebSocketManifest(
 
 function toSandboxManifest(sandbox: ResolvedSandboxConfig): SandboxManifestMeta {
   return {
+    controllerProtocol: 1,
     bindingName: sandbox.binding,
     className: sandbox.className,
     containerName: sandbox.containerName,

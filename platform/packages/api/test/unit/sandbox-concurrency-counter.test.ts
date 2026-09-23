@@ -1,591 +1,308 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vite-plus/test';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
-// Mock cloudflare:workers since DurableObject base class isn't available in unit tests
-vi.mock('cloudflare:workers', () => ({
-  DurableObject: class {},
-}));
+vi.mock('cloudflare:workers', () => ({ DurableObject: class {} }));
 
 import {
   SandboxConcurrencyCounter,
-  STALE_MS,
-  RECONCILE_INTERVAL_MS,
   type SandboxUsageAttribution,
 } from '../../src/sandbox-concurrency-counter.ts';
 import { verifyUsageEnvelope } from '../../src/usage-auth.ts';
 import type { UsageEvent } from '../../src/usage-counter.ts';
 
 const SIGNING_KEY = 'sandbox-counter-test-key';
-const ATTRIBUTION: SandboxUsageAttribution = {
-  projectId: 'project-1',
-  userId: 'user-1',
-  slug: 'project-one',
-};
+const ATTRIBUTION: SandboxUsageAttribution = { projectId: 'p', userId: 'u', slug: 'project' };
+const START = 1_800_000_000_000;
 
-type StoredEntry = {
-  acquiredAt: number;
-  meteredThrough?: number;
-  attribution?: SandboxUsageAttribution;
-};
-
-function makeFakeStorage() {
+function makeCounter(options?: { send?: () => Promise<void> }) {
   const data = new Map<string, unknown>();
   let alarm: number | null = null;
-  const setAlarmCalls: Array<number> = [];
-  return {
-    data,
-    setAlarmCalls,
-    getAlarmRef: () => alarm,
-    // Mirror CF behavior: after `alarm()` fires, the alarm is cleared
-    // unless re-set inside the handler.
-    fireAlarm: () => {
-      alarm = null;
-    },
-    get: async <T>(key: string): Promise<T | undefined> => {
-      const v = data.get(key);
-      // Mirror Durable Object storage cloning semantics so callers can't
-      // mutate the in-memory store through the returned reference.
-      return v === undefined ? undefined : (structuredClone(v) as T);
-    },
-    put: async (key: string, value: unknown) => {
+  const storage = {
+    get: vi.fn(
+      async <T>(key: string): Promise<T | undefined> =>
+        structuredClone(data.get(key)) as T | undefined,
+    ),
+    put: vi.fn(async (key: string, value: unknown) => {
       data.set(key, structuredClone(value));
-    },
+    }),
     getAlarm: async () => alarm,
-    setAlarm: async (ts: number) => {
-      alarm = ts;
-      setAlarmCalls.push(ts);
-    },
-    deleteAlarm: async () => {
-      alarm = null;
+    setAlarm: async (time: number) => {
+      alarm = time;
     },
   };
-}
-
-function makeCounter(options?: { send?: (message: unknown) => Promise<void> }) {
-  const storage = makeFakeStorage();
   const sent: Array<unknown> = [];
   const env = {
     JWT_SECRET: 'jwt-secret',
-    ROUTING: {
-      get: async () => SIGNING_KEY,
-      put: async () => {},
-    },
+    ROUTING: { get: async () => SIGNING_KEY, put: async () => {} },
     USAGE_EVENTS_QUEUE: {
       send: async (message: unknown) => {
-        if (options?.send) {
-          await options.send(message);
-        }
+        await options?.send?.();
         sent.push(message);
       },
     },
-  } as never;
-  const ctx = { storage } as never;
-  const counter = new SandboxConcurrencyCounter(ctx, env);
-  // Mocked DurableObject base doesn't run super(); assign manually so
-  // `this.ctx` / `this.env` resolve.
-  (counter as unknown as { ctx: unknown; env: unknown }).ctx = ctx;
-  (counter as unknown as { ctx: unknown; env: unknown }).env = env;
-  return { counter, storage, sent };
+  };
+  const ctx = { storage };
+  const counter = new SandboxConcurrencyCounter(ctx as never, env as never);
+  Object.assign(counter, { ctx, env });
+  const reserve = (id = 'instance', generation = 'run', limit = 1) =>
+    counter.reserve(id, generation, limit, ATTRIBUTION);
+  const frames = async () =>
+    Promise.all(
+      sent.map(
+        async (message) => (await verifyUsageEnvelope<UsageEvent>(message, SIGNING_KEY))?.event,
+      ),
+    );
+  return { counter, reserve, storage, data, sent, frames };
 }
 
-function entries(storage: ReturnType<typeof makeFakeStorage>): Record<string, StoredEntry> {
-  return (storage.data.get('entries') as Record<string, StoredEntry>) ?? {};
-}
-
-function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
-}
-
-describe('SandboxConcurrencyCounter.acquire', () => {
-  it('grants slot when under the plan limit', async () => {
-    const { counter, storage } = makeCounter();
-    const result = await counter.acquire('sb-1', 2);
-    expect(result).toEqual({ ok: true });
-    const stored = entries(storage);
-    expect(Object.keys(stored)).toEqual(['sb-1']);
-    expect(stored['sb-1']?.acquiredAt).toBeTypeOf('number');
-  });
-
-  it('is idempotent for the same sandboxInstanceId — no double count, refreshes acquiredAt', async () => {
-    vi.useFakeTimers();
-    const t0 = 1_000_000_000_000;
-    vi.setSystemTime(t0);
-    try {
-      const { counter, storage } = makeCounter();
-      const r1 = await counter.acquire('sb-1', 1);
-      expect(r1).toEqual({ ok: true });
-      const firstAcquiredAt = entries(storage)['sb-1']?.acquiredAt;
-      expect(firstAcquiredAt).toBe(t0);
-
-      // Advance time and re-acquire the same id; should refresh, not reject,
-      // and count must remain 1 so a separate acquire is still blocked.
-      vi.setSystemTime(t0 + 1_000);
-      const r2 = await counter.acquire('sb-1', 1);
-      expect(r2).toEqual({ ok: true });
-      const stored = entries(storage);
-      expect(Object.keys(stored)).toEqual(['sb-1']);
-      expect(stored['sb-1']?.acquiredAt).toBe(t0 + 1_000);
-
-      // A different id should now be rejected because limit is still 1.
-      const r3 = await counter.acquire('sb-2', 1);
-      expect(r3).toEqual({ ok: false, reason: 'concurrency' });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('publishes server-clock elapsed usage when an existing lease is acquired again', async () => {
-    vi.useFakeTimers();
-    const t0 = 1_100_000_000_000;
-    vi.setSystemTime(t0);
-    try {
-      const { counter, sent } = makeCounter();
-      await counter.acquire('lease-1', 2, ATTRIBUTION);
-      vi.setSystemTime(t0 + 30_500);
-      await counter.acquire('lease-1', 2, ATTRIBUTION);
-
-      expect(sent).toHaveLength(1);
-      const envelope = await verifyUsageEnvelope<UsageEvent>(sent[0], SIGNING_KEY);
-      expect(envelope?.source).toBe('sandbox-counter');
-      expect(envelope?.event).toMatchObject({
-        ...ATTRIBUTION,
-        requests: 0,
-        responseBytes: 0,
-        sandboxInstanceId: 'lease-1',
-        sandboxMeteredFrom: t0,
-        sandboxMeteredThrough: t0 + 30_000,
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('rejects at the limit and leaves storage unchanged', async () => {
-    const { counter, storage } = makeCounter();
-    expect(await counter.acquire('sb-1', 2)).toEqual({ ok: true });
-    expect(await counter.acquire('sb-2', 2)).toEqual({ ok: true });
-    const beforeReject = JSON.stringify(entries(storage));
-
-    const r = await counter.acquire('sb-3', 2);
-    expect(r).toEqual({ ok: false, reason: 'concurrency' });
-    expect(JSON.stringify(entries(storage))).toBe(beforeReject);
-  });
-
-  it('treats planLimit=0 as unlimited (always grants)', async () => {
-    const { counter, storage } = makeCounter();
-    for (let i = 0; i < 25; i++) {
-      const r = await counter.acquire(`sb-${i}`, 0);
-      expect(r).toEqual({ ok: true });
-    }
-    expect(Object.keys(entries(storage)).length).toBe(25);
-  });
-
-  it('schedules an alarm on first acquire', async () => {
-    vi.useFakeTimers();
-    const t0 = 1_700_000_000_000;
-    vi.setSystemTime(t0);
-    try {
-      const { counter, storage } = makeCounter();
-      expect(storage.getAlarmRef()).toBe(null);
-      await counter.acquire('sb-1', 5);
-      expect(storage.getAlarmRef()).toBe(t0 + RECONCILE_INTERVAL_MS);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(START);
 });
+afterEach(() => vi.useRealTimers());
 
-describe('SandboxConcurrencyCounter.release', () => {
-  it('removes an existing entry', async () => {
-    const { counter, storage } = makeCounter();
-    await counter.acquire('sb-1', 2);
-    await counter.acquire('sb-2', 2);
-    expect(Object.keys(entries(storage)).sort()).toEqual(['sb-1', 'sb-2']);
-
-    await counter.release('sb-1');
-    expect(Object.keys(entries(storage))).toEqual(['sb-2']);
+describe('trusted Sandbox capacity and metering', () => {
+  it('reserves capacity before start without billing idle reservations', async () => {
+    const { counter, reserve, sent } = makeCounter();
+    expect(await reserve()).toEqual({ ok: true });
+    expect(await reserve('other')).toEqual({ ok: false, reason: 'concurrency' });
+    vi.setSystemTime(START + 60_000);
+    expect(await reserve()).toEqual({ ok: true });
+    await counter.heartbeat('instance', 'run', 1);
+    await counter.stopped('instance', 'run');
+    expect(sent).toEqual([]);
+    expect(await reserve('other')).toEqual({ ok: true });
   });
 
-  it('is a no-op for unknown ids', async () => {
-    const { counter, storage } = makeCounter();
-    await counter.release('does-not-exist');
-    // Storage was never written
-    expect(storage.data.has('entries')).toBe(false);
+  it('bills only confirmed container time, preserving the original start on retry', async () => {
+    const { counter, reserve, frames } = makeCounter();
+    await reserve();
+    vi.setSystemTime(START + 60_000);
+    await counter.started('instance', 'run', 1);
+    vi.setSystemTime(START + 65_000);
+    await counter.started('instance', 'run', 1);
+    await counter.heartbeat('instance', 'run', 1);
+    vi.setSystemTime(START + 72_999);
+    await counter.stopped('instance', 'run');
+    expect(await frames()).toMatchObject([
+      { ...ATTRIBUTION, sandboxMeteredFrom: START + 60_000, sandboxMeteredThrough: START + 65_000 },
+      { ...ATTRIBUTION, sandboxMeteredFrom: START + 60_000, sandboxMeteredThrough: START + 72_000 },
+    ]);
   });
 
-  it('allows re-acquire at the boundary after release', async () => {
+  it('does not recover unknown starts or heartbeats by bypassing capacity', async () => {
     const { counter } = makeCounter();
-    expect(await counter.acquire('sb-1', 1)).toEqual({ ok: true });
-    expect(await counter.acquire('sb-2', 1)).toEqual({
+    expect(await counter.started('unknown', 'run', 1)).toEqual({
       ok: false,
-      reason: 'concurrency',
+      reason: 'unavailable',
     });
-
-    await counter.release('sb-1');
-    expect(await counter.acquire('sb-2', 1)).toEqual({ ok: true });
+    expect(await counter.heartbeat('unknown', 'run', 1)).toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
   });
 
-  it('publishes final server-clock usage before removing the lease', async () => {
-    vi.useFakeTimers();
-    const t0 = 1_200_000_000_000;
-    vi.setSystemTime(t0);
-    try {
-      const { counter, storage, sent } = makeCounter();
-      await counter.acquire('lease-release', 1, ATTRIBUTION);
-      vi.setSystemTime(t0 + 12_000);
-      await counter.release('lease-release', ATTRIBUTION);
+  it('protects a new generation against a delayed release or heartbeat', async () => {
+    const { counter, reserve } = makeCounter();
+    await reserve();
+    await counter.stopped('instance', 'run');
+    expect(await reserve('instance', 'next')).toEqual({ ok: true });
+    await counter.stopped('instance', 'run');
+    expect(await counter.heartbeat('instance', 'run', 1)).toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
+    expect(await reserve('other')).toEqual({ ok: false, reason: 'concurrency' });
+    expect(await counter.started('instance', 'next', 1)).toEqual({ ok: true });
+  });
 
-      expect(sent).toHaveLength(1);
-      expect(entries(storage)).toEqual({});
-      const envelope = await verifyUsageEnvelope<UsageEvent>(sent[0], SIGNING_KEY);
-      expect(envelope?.event).toMatchObject({
-        sandboxMeteredFrom: t0,
-        sandboxMeteredThrough: t0 + 12_000,
-      });
-    } finally {
-      vi.useRealTimers();
+  it('fences a reserve that arrives after its confirmed stop', async () => {
+    const { counter, reserve } = makeCounter();
+    await counter.stopped('instance', 'run');
+    expect(await reserve()).toEqual({ ok: false, reason: 'unavailable' });
+  });
+
+  it('rejects delayed reserve retries for a completed generation', async () => {
+    const { counter, reserve } = makeCounter();
+    await reserve();
+    await counter.stopped('instance', 'run');
+    expect(await reserve()).toEqual({ ok: false, reason: 'unavailable' });
+  });
+
+  it('uses different metering identities for starts in the same millisecond', async () => {
+    const first = makeCounter();
+    const second = makeCounter();
+    await first.reserve('instance', 'run-a');
+    await second.reserve('instance', 'run-b');
+    await first.counter.started('instance', 'run-a', 1);
+    await second.counter.started('instance', 'run-b', 1);
+    vi.setSystemTime(START + 10_000);
+    await first.counter.stopped('instance', 'run-a');
+    await second.counter.stopped('instance', 'run-b');
+    expect((await first.frames())[0]?.sandboxInstanceId).not.toBe(
+      (await second.frames())[0]?.sandboxInstanceId,
+    );
+  });
+
+  it('never expires a reservation or live container from elapsed age', async () => {
+    const { counter, reserve, sent } = makeCounter();
+    await reserve('pending', 'run', 2);
+    await reserve('running', 'run', 2);
+    await counter.started('running', 'run', 2);
+    vi.setSystemTime(START + 30 * 24 * 3600_000);
+    await counter.alarm();
+    expect(await reserve('third', 'run', 2)).toEqual({ ok: false, reason: 'concurrency' });
+    expect(sent).toEqual([]);
+  });
+
+  it('enforces the current concurrency cap after a plan downgrade', async () => {
+    const { counter, reserve } = makeCounter();
+    await reserve('a', 'run', 2);
+    await reserve('b', 'run', 2);
+    expect(await counter.heartbeat('a', 'run', 1)).toEqual({ ok: true });
+    expect(await counter.heartbeat('b', 'run', 1)).toEqual({ ok: false, reason: 'concurrency' });
+  });
+
+  it('supports unlimited account capacity', async () => {
+    const { reserve } = makeCounter();
+    for (let n = 0; n < 20; n++) {
+      expect(await reserve(`instance-${n}`, 'run', 0)).toEqual({ ok: true });
     }
   });
 
-  it('retains the lease when publishing fails so later release can retry', async () => {
-    vi.useFakeTimers();
-    const t0 = 1_300_000_000_000;
-    vi.setSystemTime(t0);
+  it('revokes every confirmed-gone container for one deployment without touching another', async () => {
+    const { counter, reserve, frames } = makeCounter();
+    const first = JSON.stringify(['p', 'deployment-a', 'instance-a']);
+    const second = JSON.stringify(['p', 'deployment-a', 'instance-b']);
+    const retained = JSON.stringify(['p', 'deployment-b', 'instance']);
+    await reserve(first, 'run-a', 3);
+    await reserve(second, 'run-b', 3);
+    await reserve(retained, 'run-c', 3);
+    await counter.started(first, 'run-a', 3);
+    await counter.started(retained, 'run-c', 3);
+    vi.setSystemTime(START + 10_000);
+
+    await counter.revokeDeployment('p', 'deployment-a');
+
+    expect(await frames()).toMatchObject([
+      { sandboxMeteredFrom: START, sandboxMeteredThrough: START + 10_000 },
+    ]);
+    expect(await reserve(first, 'run-a', 3)).toEqual({ ok: false, reason: 'unavailable' });
+    expect(await counter.heartbeat(retained, 'run-c', 3)).toEqual({ ok: true });
+    expect(await reserve('replacement', 'run', 3)).toEqual({ ok: true });
+  });
+
+  it('does not adopt legacy tenant-controlled leases', async () => {
+    const { data, reserve } = makeCounter();
+    data.set('entries', { untrusted: { acquiredAt: START } });
+    expect(await reserve()).toEqual({ ok: true });
+  });
+});
+
+describe('Sandbox stop recovery', () => {
+  it('persists confirmed stop before publishing and never bills retry delay', async () => {
     let fail = true;
-    try {
-      const { counter, storage, sent } = makeCounter({
-        send: async () => {
-          if (fail) {
-            fail = false;
-            throw new Error('queue unavailable');
-          }
-        },
-      });
-      await counter.acquire('lease-retry', 1, ATTRIBUTION);
-      vi.setSystemTime(t0 + 10_000);
-      await expect(counter.release('lease-retry', ATTRIBUTION)).rejects.toThrow(
-        'queue unavailable',
-      );
-      expect(entries(storage)['lease-retry']).toBeDefined();
-
-      vi.setSystemTime(t0 + 15_000);
-      await counter.release('lease-retry', ATTRIBUTION);
-      expect(sent).toHaveLength(1);
-      expect(entries(storage)).toEqual({});
-      const envelope = await verifyUsageEnvelope<UsageEvent>(sent[0], SIGNING_KEY);
-      expect(envelope?.event).toMatchObject({
-        sandboxMeteredFrom: t0,
-        sandboxMeteredThrough: t0 + 15_000,
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-});
-
-describe('SandboxConcurrencyCounter.refresh', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it('touches acquiredAt for an existing slot and returns ok', async () => {
-    const t0 = 4_000_000_000_000;
-    vi.setSystemTime(t0);
-    const { counter, storage } = makeCounter();
-    await counter.acquire('sb-live', 10);
-    // Advance halfway through the stale window so the refresh's effect is
-    // visible (timestamp must end up at the new clock, not the old one).
-    vi.setSystemTime(t0 + STALE_MS / 2);
-
-    const result = await counter.refresh('sb-live');
-    expect(result).toEqual({ ok: true });
-    expect(entries(storage)['sb-live']?.acquiredAt).toBe(t0 + STALE_MS / 2);
-    // Slot count unchanged — refresh never adds entries.
-    expect(Object.keys(entries(storage))).toEqual(['sb-live']);
-  });
-
-  it('publishes heartbeat usage from the server clock', async () => {
-    const t0 = 4_100_000_000_000;
-    vi.setSystemTime(t0);
-    const { counter, sent } = makeCounter();
-    await counter.acquire('lease-heartbeat', 10, ATTRIBUTION);
-    vi.setSystemTime(t0 + 5 * 60_000);
-
-    await counter.refresh('lease-heartbeat', ATTRIBUTION);
-
-    expect(sent).toHaveLength(1);
-    const envelope = await verifyUsageEnvelope<UsageEvent>(sent[0], SIGNING_KEY);
-    expect(envelope?.event).toMatchObject({
-      sandboxMeteredFrom: t0,
-      sandboxMeteredThrough: t0 + 5 * 60_000,
-    });
-  });
-
-  it('returns not_held when the slot is missing (already swept or never acquired)', async () => {
-    const { counter, storage } = makeCounter();
-    const result = await counter.refresh('sb-ghost');
-    expect(result).toEqual({ ok: false, reason: 'not_held' });
-    // Storage must not be touched — refresh is a no-op for unknown slots so
-    // it doesn't auto-acquire and bypass the planLimit check.
-    expect(storage.data.has('entries')).toBe(false);
-  });
-
-  it('keeps refreshed slots alive across an alarm sweep that reaps unrefreshed ones', async () => {
-    const t0 = 5_000_000_000_000;
-    vi.setSystemTime(t0);
-    const { counter, storage } = makeCounter();
-    await counter.acquire('sb-refreshed', 10);
-    await counter.acquire('sb-stale', 10);
-
-    // Jump just past STALE_MS — both slots would be reaped if left alone.
-    // Refresh one to simulate the framework's heartbeat keepalive.
-    vi.setSystemTime(t0 + STALE_MS + 1);
-    expect(await counter.refresh('sb-refreshed')).toEqual({ ok: true });
-
-    storage.fireAlarm();
-    await counter.alarm();
-    const stored = entries(storage);
-    expect(Object.keys(stored)).toEqual(['sb-refreshed']);
-  });
-});
-
-describe('SandboxConcurrencyCounter.alarm', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it('sweeps stale entries, leaves recent ones, and re-arms while entries remain', async () => {
-    const t0 = 2_000_000_000_000;
-    vi.setSystemTime(t0);
-    const { counter, storage } = makeCounter();
-    // Two slots acquired at t0
-    await counter.acquire('sb-old', 10);
-    await counter.acquire('sb-recent', 10);
-
-    // Advance past STALE_MS for sb-old, refresh sb-recent right before sweep.
-    vi.setSystemTime(t0 + STALE_MS + 60_000);
-    await counter.acquire('sb-recent', 10); // idempotent refresh
-
-    // Simulate CF firing the alarm: clear it first, then run the handler.
-    storage.fireAlarm();
-    const setAlarmCallsBeforeAlarm = storage.setAlarmCalls.length;
-    await counter.alarm();
-
-    const stored = entries(storage);
-    expect(Object.keys(stored)).toEqual(['sb-recent']);
-
-    // Re-armed because still has entries: exactly one new setAlarm call.
-    expect(storage.setAlarmCalls.length).toBe(setAlarmCallsBeforeAlarm + 1);
-    expect(storage.setAlarmCalls.at(-1)).toBe(t0 + STALE_MS + 60_000 + RECONCILE_INTERVAL_MS);
-    expect(storage.getAlarmRef()).toBe(t0 + STALE_MS + 60_000 + RECONCILE_INTERVAL_MS);
-  });
-
-  it('does not re-arm when no entries remain after sweep', async () => {
-    const t0 = 3_000_000_000_000;
-    vi.setSystemTime(t0);
-    const { counter, storage } = makeCounter();
-    await counter.acquire('sb-old', 10);
-
-    // Advance well past STALE_MS so the only entry is reaped.
-    vi.setSystemTime(t0 + STALE_MS + 1);
-    storage.fireAlarm();
-    const setAlarmCallsBeforeAlarm = storage.setAlarmCalls.length;
-    await counter.alarm();
-
-    expect(entries(storage)).toEqual({});
-    // No new alarm scheduled — DO is idle, leave it cold.
-    expect(storage.setAlarmCalls.length).toBe(setAlarmCallsBeforeAlarm);
-    expect(storage.getAlarmRef()).toBe(null);
-  });
-});
-
-describe('SandboxConcurrencyCounter operation ordering and persistence', () => {
-  const t0 = 1_800_000_000_000;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(t0);
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it('finishes a blocked heartbeat before release and a distinct acquire claim the slot', async () => {
-    const publishing = deferred();
-    const resume = deferred();
-    const { counter, storage, sent } = makeCounter({
+    const { counter, reserve, frames } = makeCounter({
       send: async () => {
-        publishing.resolve();
-        await resume.promise;
-      },
-    });
-    await counter.acquire('lease-1', 1, ATTRIBUTION);
-    vi.setSystemTime(t0 + 30_000);
-    const heartbeat = counter.refresh('lease-1', ATTRIBUTION);
-    await publishing.promise;
-
-    vi.setSystemTime(t0 + 45_000);
-    const release = counter.release('lease-1', ATTRIBUTION);
-    const acquire = counter.acquire('lease-2', 1, ATTRIBUTION);
-    resume.resolve();
-    expect(await heartbeat).toEqual({ ok: true });
-    await release;
-    expect(await acquire).toEqual({ ok: true });
-
-    expect(Object.keys(entries(storage))).toEqual(['lease-2']);
-    const frames = await Promise.all(
-      sent.map((message) => verifyUsageEnvelope<UsageEvent>(message, SIGNING_KEY)),
-    );
-    expect(frames.map((frame) => frame?.event)).toMatchObject([
-      { sandboxMeteredFrom: t0, sandboxMeteredThrough: t0 + 30_000 },
-      { sandboxMeteredFrom: t0, sandboxMeteredThrough: t0 + 45_000 },
-    ]);
-  });
-
-  it('finishes a blocked stale sweep before a heartbeat and acquire inspect capacity', async () => {
-    const publishing = deferred();
-    const resume = deferred();
-    const { counter, storage, sent } = makeCounter({
-      send: async () => {
-        publishing.resolve();
-        await resume.promise;
-      },
-    });
-    await counter.acquire('lease-stale', 1, ATTRIBUTION);
-    vi.setSystemTime(t0 + STALE_MS + 1);
-    storage.fireAlarm();
-    const sweep = counter.alarm();
-    await publishing.promise;
-    const heartbeat = counter.refresh('lease-stale', ATTRIBUTION);
-    const acquire = counter.acquire('lease-new', 1, ATTRIBUTION);
-    resume.resolve();
-    await sweep;
-    expect(await heartbeat).toEqual({ ok: false, reason: 'not_held' });
-    expect(await acquire).toEqual({ ok: true });
-    expect(Object.keys(entries(storage))).toEqual(['lease-new']);
-    expect(sent).toHaveLength(1);
-    expect((await verifyUsageEnvelope<UsageEvent>(sent[0], SIGNING_KEY))?.event).toMatchObject({
-      sandboxMeteredFrom: t0,
-      sandboxMeteredThrough: t0 + STALE_MS,
-    });
-  });
-
-  it('keeps capacity held after publish succeeds but the release storage put fails', async () => {
-    const { counter, storage, sent } = makeCounter();
-    await counter.acquire('lease-retry', 1, ATTRIBUTION);
-    vi.setSystemTime(t0 + 10_000);
-    vi.spyOn(storage, 'put').mockRejectedValueOnce(new Error('storage unavailable'));
-    await expect(counter.release('lease-retry')).rejects.toThrow('storage unavailable');
-    expect(await counter.acquire('lease-new', 1, ATTRIBUTION)).toEqual({
-      ok: false,
-      reason: 'concurrency',
-    });
-
-    vi.setSystemTime(t0 + 15_000);
-    await counter.release('lease-retry');
-    expect(entries(storage)).toEqual({});
-    const frames = await Promise.all(
-      sent.map((message) => verifyUsageEnvelope<UsageEvent>(message, SIGNING_KEY)),
-    );
-    expect(frames.map((frame) => frame?.event)).toMatchObject([
-      { sandboxMeteredFrom: t0, sandboxMeteredThrough: t0 + 10_000 },
-      { sandboxMeteredFrom: t0, sandboxMeteredThrough: t0 + 15_000 },
-    ]);
-  });
-
-  it('does not cache a slot whose initial storage put failed', async () => {
-    const { counter, storage } = makeCounter();
-    vi.spyOn(storage, 'put').mockRejectedValueOnce(new Error('storage unavailable'));
-    await expect(counter.acquire('lease-failed', 1, ATTRIBUTION)).rejects.toThrow(
-      'storage unavailable',
-    );
-    expect(await counter.acquire('lease-new', 1, ATTRIBUTION)).toEqual({ ok: true });
-    expect(Object.keys(entries(storage))).toEqual(['lease-new']);
-  });
-
-  it('retries every stale lease when a later publish fails before the sweep is saved', async () => {
-    let sends = 0;
-    const { counter, storage, sent } = makeCounter({
-      send: async () => {
-        if (++sends === 2) {
+        if (fail) {
           throw new Error('queue unavailable');
         }
       },
     });
-    await counter.acquire('lease-1', 2, ATTRIBUTION);
-    await counter.acquire('lease-2', 2, ATTRIBUTION);
-    vi.setSystemTime(t0 + STALE_MS + 1);
-    await expect(counter.alarm()).rejects.toThrow('queue unavailable');
-    expect(Object.keys(entries(storage))).toEqual(['lease-1', 'lease-2']);
-
+    await reserve();
+    await counter.started('instance', 'run', 1);
+    vi.setSystemTime(START + 10_000);
+    await expect(counter.stopped('instance', 'run')).rejects.toThrow('queue unavailable');
+    expect(await reserve('other')).toEqual({ ok: false, reason: 'concurrency' });
+    vi.setSystemTime(START + 60_000);
+    fail = false;
     await counter.alarm();
-    expect(entries(storage)).toEqual({});
-    const frames = await Promise.all(
-      sent.map((message) => verifyUsageEnvelope<UsageEvent>(message, SIGNING_KEY)),
-    );
-    expect(frames.map((frame) => frame?.event.sandboxInstanceId)).toEqual([
-      'lease-1',
-      'lease-1',
-      'lease-2',
+    expect(await frames()).toMatchObject([
+      { sandboxMeteredFrom: START, sandboxMeteredThrough: START + 10_000 },
     ]);
-    expect(frames[0]?.eventId).toBe(frames[1]?.eventId);
+    expect(await reserve('other')).toEqual({ ok: true });
   });
 
-  it('starts a fresh cumulative generation when the same instance reacquires after idle time', async () => {
-    const { counter, sent } = makeCounter();
-    await counter.acquire('lease-1', 1, ATTRIBUTION);
-    vi.setSystemTime(t0 + 10_000);
-    await counter.release('lease-1');
-    vi.setSystemTime(t0 + 60_000);
-    await counter.acquire('lease-1', 1, ATTRIBUTION);
-    vi.setSystemTime(t0 + 80_000);
-    await counter.release('lease-1');
-    const frames = await Promise.all(
-      sent.map((message) => verifyUsageEnvelope<UsageEvent>(message, SIGNING_KEY)),
-    );
-    expect(frames.map((frame) => frame?.event)).toMatchObject([
-      { sandboxMeteredFrom: t0, sandboxMeteredThrough: t0 + 10_000 },
-      { sandboxMeteredFrom: t0 + 60_000, sandboxMeteredThrough: t0 + 80_000 },
-    ]);
-  });
-
-  it('preserves the cumulative generation start after a cold load', async () => {
-    const first = makeCounter();
-    await first.counter.acquire('lease-1', 1, ATTRIBUTION);
-    vi.setSystemTime(t0 + 10_000);
-    await first.counter.refresh('lease-1');
-
-    const next = makeCounter();
-    next.storage.data.set('entries', structuredClone(first.storage.data.get('entries')));
-    vi.setSystemTime(t0 + 25_000);
-    await next.counter.release('lease-1');
-    expect((await verifyUsageEnvelope<UsageEvent>(next.sent[0], SIGNING_KEY))?.event).toMatchObject(
-      {
-        sandboxMeteredFrom: t0,
-        sandboxMeteredThrough: t0 + 25_000,
-      },
-    );
-  });
-
-  it('adopts a pre-metering lease at the first trusted refresh without billing its unknown history', async () => {
-    const { counter, storage, sent } = makeCounter();
-    storage.data.set('entries', { 'lease-old': { acquiredAt: t0 - 30_000 } });
-    await counter.refresh('lease-old', ATTRIBUTION);
-    expect(sent).toHaveLength(0);
-    vi.setSystemTime(t0 + 10_000);
-    await counter.release('lease-old');
-    expect((await verifyUsageEnvelope<UsageEvent>(sent[0], SIGNING_KEY))?.event).toMatchObject({
-      sandboxMeteredFrom: t0,
-      sandboxMeteredThrough: t0 + 10_000,
+  it('keeps capacity held when the final capacity release cannot persist', async () => {
+    const { counter, reserve, storage, frames } = makeCounter();
+    await reserve();
+    await counter.started('instance', 'run', 1);
+    vi.setSystemTime(START + 10_000);
+    const put = storage.put.getMockImplementation()!;
+    storage.put.mockImplementation(async (key, value) => {
+      if (key === 'controlled-entries-v1' && Object.keys(value as object).length === 0) {
+        throw new Error('storage unavailable');
+      }
+      await put(key, value);
     });
+    await expect(counter.stopped('instance', 'run')).rejects.toThrow('storage unavailable');
+    expect(await reserve('other')).toEqual({ ok: false, reason: 'concurrency' });
+    storage.put.mockImplementation(put);
+    vi.setSystemTime(START + 60_000);
+    await counter.stopped('instance', 'run');
+    const messages = await frames();
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toEqual(messages[1]);
+  });
+
+  it('does not cache a failed reservation write', async () => {
+    const { reserve, storage } = makeCounter();
+    storage.put.mockRejectedValueOnce(new Error('storage unavailable'));
+    await expect(reserve()).rejects.toThrow('storage unavailable');
+    expect(await reserve('other')).toEqual({ ok: true });
+  });
+
+  it('serializes release behind a heartbeat blocked on the usage queue', async () => {
+    let unblock!: () => void;
+    let publishing!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      unblock = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      publishing = resolve;
+    });
+    const { counter, reserve, frames } = makeCounter({
+      send: async () => {
+        publishing();
+        await blocked;
+      },
+    });
+    await reserve();
+    await counter.started('instance', 'run', 1);
+    vi.setSystemTime(START + 10_000);
+    const heartbeat = counter.heartbeat('instance', 'run', 1);
+    await started;
+    vi.setSystemTime(START + 15_000);
+    const stopped = counter.stopped('instance', 'run');
+    const next = reserve('other');
+    unblock();
+    await heartbeat;
+    await stopped;
+    expect(await next).toEqual({ ok: true });
+    expect(await frames()).toMatchObject([
+      { sandboxMeteredThrough: START + 10_000 },
+      { sandboxMeteredThrough: START + 15_000 },
+    ]);
+  });
+
+  it('recovers the run and final timestamp after a cold start', async () => {
+    const first = makeCounter({
+      send: async () => {
+        throw new Error('queue unavailable');
+      },
+    });
+    await first.reserve();
+    await first.counter.started('instance', 'run', 1);
+    vi.setSystemTime(START + 10_000);
+    await expect(first.counter.stopped('instance', 'run')).rejects.toThrow();
+    const recovered = makeCounter();
+    for (const [key, value] of first.data) {
+      recovered.data.set(key, structuredClone(value));
+    }
+    vi.setSystemTime(START + 60_000);
+    await recovered.counter.alarm();
+    expect(await recovered.frames()).toMatchObject([
+      { sandboxMeteredFrom: START, sandboxMeteredThrough: START + 10_000 },
+    ]);
+    expect(await recovered.reserve()).toEqual({ ok: false, reason: 'unavailable' });
   });
 });

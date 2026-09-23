@@ -100,7 +100,7 @@ export type PlatformInstallationManifest = Readonly<{
   platformVersion: string;
   resources: ReadonlyArray<InstallationResource>;
   runtime: PlatformRuntimeProvenance | null;
-  safetyProtocols: Readonly<{ sandboxDrain: 0 | 1 | 2 }>;
+  safetyProtocols: Readonly<{ sandboxDrain: 0 | 1 | 2 | 3 }>;
   schemaVersion: typeof PLATFORM_INSTALLATION_SCHEMA_VERSION;
   status: InstallationStatus;
   steps: ReadonlyArray<InstallationStep>;
@@ -250,7 +250,7 @@ export function createPlatformInstallationManifest(input: {
   id: string;
   ownershipNonce: string;
   platformVersion: string;
-  safetyProtocols?: Readonly<{ sandboxDrain: 0 | 1 | 2 }>;
+  safetyProtocols?: Readonly<{ sandboxDrain: 0 | 1 | 2 | 3 }>;
   usageProtocolVersion?: 0 | 1 | 2;
 }): PlatformInstallationManifest {
   const createdAt = assertTimestamp(input.createdAt, 'createdAt');
@@ -555,8 +555,13 @@ function parseSafetyProtocols(value: unknown): PlatformInstallationManifest['saf
     return { sandboxDrain: 0 };
   }
   assertRecord(value, 'safetyProtocols');
-  if (value.sandboxDrain !== 0 && value.sandboxDrain !== 1 && value.sandboxDrain !== 2) {
-    throw new Error('safetyProtocols.sandboxDrain must be 0, 1, or 2.');
+  if (
+    value.sandboxDrain !== 0 &&
+    value.sandboxDrain !== 1 &&
+    value.sandboxDrain !== 2 &&
+    value.sandboxDrain !== 3
+  ) {
+    throw new Error('safetyProtocols.sandboxDrain must be 0, 1, 2, or 3.');
   }
   return { sandboxDrain: value.sandboxDrain };
 }

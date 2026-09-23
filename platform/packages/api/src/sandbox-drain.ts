@@ -77,7 +77,9 @@ export async function readSandboxDrainCheckpoint(db: Db): Promise<SandboxDrainCh
 
 function assertValidCheckpoint(row: SandboxDrainCheckpoint): void {
   if (
-    (row.admission_protocol !== 0 && row.admission_protocol !== 2) ||
+    (row.admission_protocol !== 0 &&
+      row.admission_protocol !== 2 &&
+      row.admission_protocol !== 3) ||
     !row.generation ||
     (row.state !== 'draining' && row.state !== 'complete') ||
     (row.phase !== 'deployments' && row.phase !== 'resources') ||
@@ -200,11 +202,13 @@ export async function completeSandboxDrain(
   return row;
 }
 
-/** Any lifecycle document closes container creation until the beta is reintroduced. */
+/** The legacy tenant-owned provisioner remains closed after its drain. */
 export async function assertSandboxContainerCreationAllowed(
   routing: Pick<KVNamespace, 'get'>,
 ): Promise<void> {
   if (await readSandboxDrainState(routing)) {
-    throw new Error('Managed Sandbox container creation is disabled by the platform drain gate.');
+    throw new Error(
+      'Legacy tenant-owned Sandbox container creation is disabled by the platform drain gate.',
+    );
   }
 }

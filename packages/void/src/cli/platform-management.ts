@@ -248,6 +248,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       repairMissing: args.subcommand === 'repair',
       allowUnverifiedAiGateway: args.plan,
       includeEmailGateway: runtime!.manifest.artifacts.emailGateway !== undefined,
+      enableSandbox: runtime!.manifest.safetyProtocols.sandboxDrain >= 3,
     });
     note(
       formatPlatformInstallPlan(plan),
@@ -392,6 +393,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
             authoritativeProvisionIntents: true,
             repairMissing: true,
             includeEmailGateway: runtime!.manifest.artifacts.emailGateway !== undefined,
+            enableSandbox: runtime!.manifest.safetyProtocols.sandboxDrain >= 3,
           })
         ).actions.filter((action) => action.kind === 'worker'),
       revalidateBeforeWorkerDeploy: (manifest, action) =>

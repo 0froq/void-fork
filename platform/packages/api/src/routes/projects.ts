@@ -72,6 +72,7 @@ import {
   // rather than shadowing it — they match different CF error wordings.
   isAlreadyExistsError as isDestinationAlreadyExistsError,
 } from '../provisioning/email-routing.ts';
+import { isManagedSandbox, verifySandboxController } from '../provisioning/sandbox-controller.ts';
 import { EMAIL_RESERVED_SLUGS } from '../reserved-slugs.ts';
 import {
   buildRoutingJson,
@@ -948,6 +949,18 @@ const app = new Hono<ApiEnv>()
         501,
       );
     }
+    if (preCheck.manifest) {
+      const manifest = JSON.parse(preCheck.manifest) as DeployManifest;
+      if (manifest.sandbox && (!isManagedSandbox(manifest) || preCheck.admission_protocol < 3)) {
+        return context.json(
+          {
+            error:
+              'This deployment predates managed Sandbox controllers. Redeploy the app before rolling back to it.',
+          },
+          409,
+        );
+      }
+    }
 
     // A committed rollback lease blocks deploys and other rollbacks while
     // the cutover transaction commits or external compensation runs. Keeping
@@ -1133,6 +1146,31 @@ const app = new Hono<ApiEnv>()
               501,
               'This Void platform does not enable rollback to Sandbox deployments.',
             );
+          }
+          if (target.manifest) {
+            const manifest = JSON.parse(target.manifest) as DeployManifest;
+            if (manifest.sandbox) {
+              if (!isManagedSandbox(manifest) || target.admission_protocol < 3) {
+                throw new RollbackError(
+                  409,
+                  'This deployment predates managed Sandbox controllers. Redeploy the app before rolling back to it.',
+                );
+              }
+              try {
+                await verifySandboxController(
+                  context.env.CF_ACCOUNT_ID,
+                  context.env.CF_API_TOKEN,
+                  projectId,
+                  deploymentId,
+                  manifest.sandbox,
+                );
+              } catch (error) {
+                throw new RollbackError(
+                  409,
+                  error instanceof Error ? error.message : 'Sandbox controller is unavailable.',
+                );
+              }
+            }
           }
 
           // Re-read project so `active_deployment_id` and `type` reflect

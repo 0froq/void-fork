@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, gt, lt, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
 import { TERMINAL_DEPLOYMENT_STATUSES, type Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
@@ -172,12 +172,15 @@ export async function loadSandboxDeploymentPageProjection(
     .from(deployments)
     .innerJoin(projects, eq(deployments.project_id, projects.id))
     .where(
-      createdAt && id
-        ? or(
-            gt(deployments.created_at, createdAt),
-            and(eq(deployments.created_at, createdAt), gt(deployments.id, id)),
-          )
-        : undefined,
+      and(
+        lt(deployments.admission_protocol, 3),
+        createdAt && id
+          ? or(
+              gt(deployments.created_at, createdAt),
+              and(eq(deployments.created_at, createdAt), gt(deployments.id, id)),
+            )
+          : undefined,
+      ),
     )
     .orderBy(asc(deployments.created_at), asc(deployments.id))
     .limit(PAGE_SIZE + 1);
@@ -518,7 +521,7 @@ export async function drainManagedSandboxes(
         checkpoint,
         complete: true,
         nextCursor: null,
-        effect: 'Managed Sandbox is already drained and remains disabled.',
+        effect: 'Legacy tenant-owned Sandbox containers are already drained.',
       });
     }
     const position = previewCursor
@@ -541,7 +544,7 @@ export async function drainManagedSandboxes(
       nextCursor: next.complete ? null : JSON.stringify({ phase: next.phase, cursor: next.cursor }),
       complete: false,
       effect:
-        'Block managed Sandbox activation, cancel active Sandbox deployments, delete verified container applications, and verify two bounded passes.',
+        'Block legacy tenant-owned Sandbox activation, cancel active legacy deployments, delete verified container applications, and verify two bounded passes.',
     });
   }
 
@@ -591,8 +594,7 @@ export async function drainManagedSandboxes(
       complete: true,
       checkpoint,
       ...page,
-      message:
-        'Managed Sandbox container applications are drained and activation remains disabled.',
+      message: 'Legacy tenant-owned Sandbox container applications are drained.',
     };
   }
   const checkpoint = await checkpointSandboxDrain(db, leaseIdentity, next);

@@ -229,6 +229,23 @@ describe('platform installation planning', () => {
     );
   });
 
+  it('enables managed Sandbox for current installs and upgrades without adding a resource action', async () => {
+    const legacy = legacyInstallation();
+    expect(legacy.deployment.capabilities.sandbox).toBe(false);
+    const upgraded = await createPlatformInstallPlan(client(), input, legacy, {
+      enableSandbox: true,
+    });
+    expect(upgraded.deployment.capabilities.sandbox).toBe(true);
+    expect(upgraded.actions.map((action) => action.key)).toEqual(
+      expect.not.arrayContaining([expect.stringContaining('sandbox')]),
+    );
+
+    const fresh = await createPlatformInstallPlan(client(), input, null, {
+      enableSandbox: true,
+    });
+    expect(fresh.deployment.capabilities.sandbox).toBe(true);
+  });
+
   it('resumes the recorded namespaces using the real unfiltered KV API response', async () => {
     const initial = await createPlatformInstallPlan(client(), input, null);
     let manifest = createPlatformInstallationManifest({

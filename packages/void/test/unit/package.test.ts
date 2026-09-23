@@ -28,6 +28,34 @@ afterEach(() => {
 });
 
 describe('worker packaging', () => {
+  it('marks Sandbox bundles as controller-capable and omits metadata for apps without Sandbox', () => {
+    const bindings = {
+      needsD1: false,
+      needsKV: false,
+      needsR2: false,
+      needsAuth: false,
+      needsQueues: false,
+      needsAI: false,
+      needsSandbox: true,
+    };
+    const manifest = buildVoidManifest({
+      bindings,
+      options: {
+        sandbox: {
+          binding: 'SANDBOX',
+          className: 'Sandbox',
+          containerName: 'void-sandbox',
+          image: 'docker.io/cloudflare/sandbox:0.12.9',
+          platformImage: 'docker.io/cloudflare/sandbox:0.12.9',
+        },
+      },
+    });
+    expect(manifest.sandbox).toMatchObject({ controllerProtocol: 1, bindingName: 'SANDBOX' });
+    expect(
+      buildVoidManifest({ bindings: { ...bindings, needsSandbox: false } }).sandbox,
+    ).toBeUndefined();
+  });
+
   it('keeps the manifest workerMain aligned with uploaded worker modules', () => {
     writeFileSync(join(TMP, 'index.mjs'), 'export default { fetch() {} };');
     writeFileSync(join(TMP, 'index.js.map'), '{}');

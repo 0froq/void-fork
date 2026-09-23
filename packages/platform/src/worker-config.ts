@@ -165,6 +165,7 @@ export function createPlatformWorkerConfigs(input: {
         : {}),
       TAIL_SERVICE_NAME: names.tailWorker,
       VOID_PROXY_SERVICE: names.proxyWorker,
+      SANDBOX_CONTROL_SERVICE: names.apiWorker,
     },
   };
   if (publicEndpoints && deployment.controlPlane.apiHostname) {

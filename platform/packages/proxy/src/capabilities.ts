@@ -1,4 +1,6 @@
 export function proxyCapabilityEnabled(value: string | undefined, capability: string): boolean {
+  // The current managed controller never uses the old tenant acquire/release
+  // routes. Keep that unsafe protocol closed even when Sandbox is enabled.
   if (capability === 'sandbox') {
     return false;
   }

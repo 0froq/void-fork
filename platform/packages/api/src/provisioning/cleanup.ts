@@ -49,6 +49,7 @@ import {
   perDeployContainerApplicationName,
 } from './containers.ts';
 import { runEmailDestinationCleanup } from './email-destination-cleanup.ts';
+import { deleteSandboxController, isManagedSandbox } from './sandbox-controller.ts';
 
 function deleteCloudflareResource(
   accountId: string,
@@ -151,6 +152,18 @@ async function sweepPerDeployContainerOrphans(
   for (const deployment of allDeployments) {
     const manifest = parseDeploymentManifest(deployment.manifest);
     if (!manifest?.sandbox) {
+      continue;
+    }
+    if (isManagedSandbox(manifest)) {
+      await deleteSandboxController(
+        context.env.CF_ACCOUNT_ID,
+        context.env.CF_API_TOKEN,
+        projectId,
+        deployment.id,
+        manifest.sandbox,
+        context.env.SANDBOX_CONCURRENCY_COUNTER,
+        context.get('db'),
+      );
       continue;
     }
     const orphanName = perDeployContainerApplicationName(

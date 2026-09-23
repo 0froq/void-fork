@@ -95,7 +95,17 @@ function namespace(payload: unknown, status = 200) {
   };
 }
 
-test('database admission rejects a pre-upgrade deployment after the v2 barrier is armed', async () => {
+async function createLegacySandboxDeployment(
+  projectId: string,
+  status: 'pending' | 'live',
+  source?: string,
+) {
+  return createTestDeployment(env.db, projectId, status, source, undefined, {
+    admissionProtocol: 2,
+  });
+}
+
+test('database admission rejects protocol zero after the v2 barrier is armed', async () => {
   const project = await createTestProject(env.db, ownerId, 'admission-barrier');
   await env.db.insert(sandboxDrainCheckpoints).values({
     admission_protocol: 2,
@@ -125,7 +135,7 @@ test('database admission rejects a pre-upgrade deployment after the v2 barrier i
     .select({ admissionProtocol: deployments.admission_protocol })
     .from(deployments)
     .where(eq(deployments.id, 'dpl_v2_admission'));
-  expect(admitted?.admissionProtocol).toBe(2);
+  expect(admitted?.admissionProtocol).toBe(3);
 });
 
 test.runIf(Boolean(process.env.VOID_TEST_DATABASE_URL))(
@@ -871,7 +881,7 @@ describe('operator installation-aware system and worker operations', () => {
   });
   test('previews, cancels, resumes, and audits an orphan Sandbox application drain', async () => {
     const project = await createTestProject(env.db, ownerId, 'sandbox-drain');
-    const deployment = await createTestDeployment(env.db, project.id, 'pending');
+    const deployment = await createLegacySandboxDeployment(project.id, 'pending');
     const applicationName = `${project.id}-${deployment.id}-void-sandbox`
       .toLowerCase()
       .replaceAll('_', '-');
@@ -982,7 +992,7 @@ describe('operator installation-aware system and worker operations', () => {
   });
   test('settles an abandoned manifest-less deployment through the operator drain', async () => {
     const project = await createTestProject(env.db, ownerId, 'sandbox-manifestless');
-    const deployment = await createTestDeployment(env.db, project.id, 'pending');
+    const deployment = await createLegacySandboxDeployment(project.id, 'pending');
     await env.db
       .update(deployments)
       .set({ manifest: null })
@@ -1013,12 +1023,12 @@ describe('operator installation-aware system and worker operations', () => {
   });
   test('adopts and compensates an abandoned rollback lease through the operator drain', async () => {
     const project = await createTestProject(env.db, ownerId, 'sandbox-rollback-lease');
-    const current = await createTestDeployment(env.db, project.id, 'live');
+    const current = await createLegacySandboxDeployment(project.id, 'live');
     await env.db
       .update(deployments)
       .set({ manifest: JSON.stringify({ version: 4, type: 'static' }) })
       .where(eq(deployments.id, current.id));
-    const lease = await createTestDeployment(env.db, project.id, 'pending', 'rollback-lease');
+    const lease = await createLegacySandboxDeployment(project.id, 'pending', 'rollback-lease');
     await env.db
       .update(deployments)
       .set({
@@ -1043,12 +1053,12 @@ describe('operator installation-aware system and worker operations', () => {
   });
   test('waits for a fresh cutover, then fences and compensates it before deletion', async () => {
     const project = await createTestProject(env.db, ownerId, 'sandbox-cutover-recovery');
-    const current = await createTestDeployment(env.db, project.id, 'live');
+    const current = await createLegacySandboxDeployment(project.id, 'live');
     await env.db
       .update(deployments)
       .set({ manifest: JSON.stringify({ version: 4, type: 'static' }) })
       .where(eq(deployments.id, current.id));
-    const deployment = await createTestDeployment(env.db, project.id, 'pending');
+    const deployment = await createLegacySandboxDeployment(project.id, 'pending');
     const applicationName = `${project.id}-${deployment.id}-void-sandbox`
       .toLowerCase()
       .replaceAll('_', '-');
@@ -1130,7 +1140,7 @@ describe('operator installation-aware system and worker operations', () => {
   });
   test('projects a bounded Sandbox identity from a large deployment manifest', async () => {
     const project = await createTestProject(env.db, ownerId, 'sandbox-large-manifest');
-    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const deployment = await createLegacySandboxDeployment(project.id, 'live');
     const unrelatedPayload = `manifest-payload-${'x'.repeat(4 * 1024 * 1024)}`;
     await env.db
       .update(deployments)
@@ -1181,7 +1191,7 @@ describe('operator installation-aware system and worker operations', () => {
   });
   test('blocks oversized Sandbox identity metadata before any Container API call', async () => {
     const project = await createTestProject(env.db, ownerId, 'sandbox-oversized-identity');
-    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const deployment = await createLegacySandboxDeployment(project.id, 'live');
     await env.db
       .update(deployments)
       .set({
@@ -1251,7 +1261,7 @@ describe('operator installation-aware system and worker operations', () => {
   });
   test('does not delete a same-name application after its managed script is missing', async () => {
     const project = await createTestProject(env.db, ownerId, 'sandbox-missing-script');
-    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const deployment = await createLegacySandboxDeployment(project.id, 'live');
     await env.db
       .update(deployments)
       .set({
@@ -1299,7 +1309,7 @@ describe('operator installation-aware system and worker operations', () => {
   test('advances a durable cursor through more than one deployment page', async () => {
     const project = await createTestProject(env.db, ownerId, 'sandbox-many-deployments');
     for (let index = 0; index < 17; index++) {
-      await createTestDeployment(env.db, project.id, 'live');
+      await createLegacySandboxDeployment(project.id, 'live');
     }
     const cf = mockCfApi();
 

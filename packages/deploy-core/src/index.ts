@@ -203,6 +203,10 @@ export type SandboxManifestMeta = {
   instanceType?: string;
   maxInstances?: number;
   migrations?: ReadonlyArray<SandboxMigrationMeta>;
+  /** Written by the managed platform, never accepted from deployment clients. */
+  runtime?: { protocol: 1 };
+  /** Managed transport implemented by the application's bundled Void runtime. */
+  controllerProtocol?: 1;
 };
 
 export type LiveMigrationMeta = {

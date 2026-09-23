@@ -1,6 +1,8 @@
 import {
   Sandbox,
   getSandbox as getCloudflareSandbox,
+  type ExecutionSession,
+  type Process,
   type SandboxOptions,
 } from '@cloudflare/sandbox';
 import { getRawRuntimeEnv } from './env-raw.ts';
@@ -11,34 +13,9 @@ export type { SandboxOptions };
 
 export const DEFAULT_SANDBOX_ID = 'default';
 export const DEFAULT_SANDBOX_BINDING = 'SANDBOX';
-export const SANDBOX_USAGE_QUEUE_BINDING = 'USAGE_EVENTS_QUEUE';
-export const SANDBOX_GATE_BINDING = '__VOID_PROXY';
-
-// 5 min balances queue write volume against the crash-loss accounting window:
-// at most one heartbeat-interval of container runtime is lost if the DO dies
-// between flushes (orphan recovery in onStart() picks up the rest).
-export const HEARTBEAT_MS: number = 5 * 60_000;
-
+export const SANDBOX_SERVICE_BINDING = '__VOID_SANDBOX';
 export type VoidSandboxOptions = SandboxOptions & { binding?: string };
 
-export type SandboxUsageEvent = Readonly<{
-  // requests/responseBytes are literal zeros so the platform's existing
-  // `groupEventsByUser` consumer (which expects `UsageEvent`) can ingest
-  // sandbox runtime events without a separate shape.
-  requests: 0;
-  responseBytes: 0;
-  userId?: string;
-  projectId?: string;
-  slug?: string;
-  sandboxRuntimeSeconds: number;
-  sandboxInstanceId: string;
-}>;
-
-/**
- * Thrown by `getSandbox()` when the platform gate denies a new acquire because
- * the user has hit a concurrency or runtime budget cap. Surface this to the
- * caller so they can render a friendly error; do not retry transparently.
- */
 export class SandboxLimitError extends Error {
   override readonly name = 'SandboxLimitError';
   readonly reason: 'concurrency' | 'runtime_budget';
@@ -49,7 +26,6 @@ export class SandboxLimitError extends Error {
   }
 }
 
-/** Managed platform Sandbox is unavailable or its activation gate cannot be verified. */
 export class SandboxUnavailableError extends Error {
   override readonly name = 'SandboxUnavailableError';
 
@@ -58,395 +34,194 @@ export class SandboxUnavailableError extends Error {
   }
 }
 
+type SandboxCapability = {
+  invoke(operation: string, args: Array<unknown>): Promise<unknown>;
+};
+type NestedCapability = {
+  invoke(operation: string, args: Array<unknown>): Promise<unknown>;
+};
+type ProcessWire = Omit<
+  Process,
+  'kill' | 'getStatus' | 'getLogs' | 'waitForLog' | 'waitForPort' | 'waitForExit'
+> & {
+  __voidSandboxType: 'process';
+  capability: NestedCapability;
+};
+type SessionWire = {
+  __voidSandboxType: 'session';
+  capability: NestedCapability;
+  id: string;
+};
+type SandboxService = {
+  getSandbox(id: string, options: SandboxOptions): Promise<SandboxCapability>;
+};
+
 let sandboxBindingName = DEFAULT_SANDBOX_BINDING;
 
 export function __setSandboxBindingName(bindingName: string): void {
   sandboxBindingName = bindingName;
 }
 
-// --- Storage keys ---
+function rethrowSandboxError(error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error);
+  for (const reason of ['concurrency', 'runtime_budget'] as const) {
+    if (message.includes(`VOID_SANDBOX_${reason}`)) {
+      throw new SandboxLimitError(reason);
+    }
+  }
+  if (message.includes('VOID_SANDBOX_unavailable')) {
+    throw new SandboxUnavailableError();
+  }
+  throw error;
+}
 
-const STORAGE_KEY_START_TS = '__voidStartTs';
-const STORAGE_KEY_LAST_FLUSH_TS = '__voidLastFlushTs';
-
-// --- Internal helpers ---
-
-function getUsageContext(): { userId?: string; projectId?: string; slug?: string } {
-  // Resolve the raw env so we can read platform-injected bindings that the
-  // public `getRuntimeBinding()` helper intentionally hides from user code.
-  const runtimeEnv = getRawRuntimeEnv();
-  return {
-    userId: runtimeEnv.__VOID_USER_ID as string | undefined,
-    projectId: runtimeEnv.__PROJECT_ID as string | undefined,
-    slug: runtimeEnv.__VOID_PROJECT_SLUG as string | undefined,
+function managedClient<T extends Sandbox>(capability: SandboxCapability): T {
+  const call = async (
+    target: NestedCapability,
+    operation: string,
+    args: Array<unknown>,
+  ): Promise<unknown> => {
+    try {
+      return decodeManagedResult(
+        await target.invoke(operation, prepareManagedArgs(operation, args)),
+      );
+    } catch (error) {
+      rethrowSandboxError(error);
+    }
   };
-}
+  // The server owns the operation allowlist. The Proxy preserves the upstream
+  // SDK's method-shaped API without serializing streams, callback functions or
+  // session/process objects through JSON. It never contains a raw DO stub.
+  return new Proxy(Object.create(null) as T, {
+    get(_target, property) {
+      if (typeof property !== 'string' || property === 'then') {
+        return undefined;
+      }
+      if (property === 'tunnels') {
+        return new Proxy(Object.create(null) as object, {
+          get(_tunnels, method) {
+            if (typeof method !== 'string' || method === 'then') {
+              return undefined;
+            }
+            return (...args: Array<unknown>) => call(capability, 'tunnels', [method, ...args]);
+          },
+        });
+      }
+      return (...args: Array<unknown>) => call(capability, property, args);
+    },
+  });
 
-function getSandboxInstanceId(ctx: DurableObjectState): string {
-  return ctx.id.toString();
-}
-
-/**
- * Flush the accumulated runtime delta to the usage queue. No-op when the
- * usage-queue binding is not bound (e.g. local dev without the platform
- * proxy). Errors are swallowed and logged — usage emission must never crash
- * the sandbox lifecycle.
- */
-async function emitRuntimeSeconds(
-  ctx: DurableObjectState,
-  sandboxRuntimeSeconds: number,
-): Promise<void> {
-  if (sandboxRuntimeSeconds <= 0) {
-    return;
-  }
-  const runtimeEnv = getRawRuntimeEnv();
-  const queue = runtimeEnv[SANDBOX_USAGE_QUEUE_BINDING] as Queue<SandboxUsageEvent> | undefined;
-  if (!queue) {
-    return;
-  }
-  const event: SandboxUsageEvent = {
-    requests: 0,
-    responseBytes: 0,
-    sandboxRuntimeSeconds,
-    sandboxInstanceId: getSandboxInstanceId(ctx),
-    ...getUsageContext(),
-  };
-  try {
-    await queue.send(event);
-  } catch (error) {
-    // Best-effort metering — never break the sandbox on queue failure.
-    console.error('[void/sandbox] failed to emit usage event:', error);
-  }
-}
-
-/**
- * Resolve the `{ gate, projectId, aiToken }` triple needed to call a gate
- * route. Returns `null` when any piece is missing. The caller distinguishes a
- * native deployment with no reserved bindings from a partial managed identity,
- * which must fail closed.
- *
- * Wire field is named `aiToken` because the shared proxy auth middleware
- * (packages/proxy/src/index.ts) verifies HMAC against `body.aiToken` for
- * every route. Naming it `proxyToken` here would diverge from the existing
- * AI/ISR convention without changing the on-the-wire contract.
- */
-type SandboxGateIdentity = { gate: Fetcher; projectId: string; aiToken: string };
-
-function isManagedPlatformSandbox(runtimeEnv: Record<string, unknown>): boolean {
-  return [
-    SANDBOX_GATE_BINDING,
-    '__PROJECT_ID',
-    '__VOID_PROXY_TOKEN',
-    '__VOID_USER_ID',
-    '__VOID_PROJECT_SLUG',
-  ].some((binding) => runtimeEnv[binding] !== undefined);
-}
-
-function resolveGateIdentity(runtimeEnv = getRawRuntimeEnv()): SandboxGateIdentity | null {
-  const gate = runtimeEnv[SANDBOX_GATE_BINDING] as Fetcher | undefined;
-  if (!gate) {
-    return null;
-  }
-  const projectId = runtimeEnv.__PROJECT_ID as string | undefined;
-  const aiToken = runtimeEnv.__VOID_PROXY_TOKEN as string | undefined;
-  if (!projectId || !aiToken) {
-    return null;
-  }
-  return { gate, projectId, aiToken };
-}
-
-async function acquireManagedSandbox(
-  sandboxId: string,
-  runtimeEnv = getRawRuntimeEnv(),
-): Promise<void> {
-  if (!isManagedPlatformSandbox(runtimeEnv)) {
-    // A native Cloudflare deploy has no Void platform identity. Preserve the
-    // upstream SDK behavior for that path.
-    return;
-  }
-  const identity = resolveGateIdentity(runtimeEnv);
-  if (!identity) {
-    throw new SandboxUnavailableError(
-      'Managed Sandbox activation could not verify the platform identity bindings.',
-    );
+  function decodeManagedResult(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map(decodeManagedResult);
+    }
+    if (!value || typeof value !== 'object') {
+      return value;
+    }
+    const record = value as Record<string, unknown>;
+    if (record.__voidSandboxType === 'process') {
+      const {
+        capability: processCapability,
+        __voidSandboxType: _type,
+        ...snapshot
+      } = value as ProcessWire;
+      return Object.assign(snapshot, {
+        kill: (...args: Array<unknown>) => call(processCapability, 'kill', args),
+        getStatus: (...args: Array<unknown>) => call(processCapability, 'getStatus', args),
+        getLogs: (...args: Array<unknown>) => call(processCapability, 'getLogs', args),
+        waitForLog: (...args: Array<unknown>) => call(processCapability, 'waitForLog', args),
+        waitForPort: (...args: Array<unknown>) => call(processCapability, 'waitForPort', args),
+        waitForExit: (...args: Array<unknown>) => call(processCapability, 'waitForExit', args),
+      } as unknown as Pick<
+        Process,
+        'kill' | 'getStatus' | 'getLogs' | 'waitForLog' | 'waitForPort' | 'waitForExit'
+      >);
+    }
+    if (record.__voidSandboxType === 'session') {
+      const session = value as SessionWire;
+      return new Proxy({ id: session.id } as ExecutionSession, {
+        get(target, property) {
+          if (property === 'id') {
+            return target.id;
+          }
+          if (typeof property !== 'string' || property === 'then') {
+            return undefined;
+          }
+          return (...args: Array<unknown>) => call(session.capability, property, args);
+        },
+      });
+    }
+    return value;
   }
 
-  let response: Response;
-  try {
-    response = await identity.gate.fetch('https://gate/sandbox/acquire', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        projectId: identity.projectId,
-        aiToken: identity.aiToken,
-        sandboxId,
-      }),
-    });
-  } catch {
-    throw new SandboxUnavailableError(
-      'Managed Sandbox activation could not reach the platform gate.',
-    );
-  }
-  if (response.status === 409) {
-    const body = (await response.json().catch(() => ({}))) as { reason?: string };
-    const reason =
-      body.reason === 'concurrency' || body.reason === 'runtime_budget'
-        ? body.reason
-        : 'concurrency';
-    throw new SandboxLimitError(reason);
-  }
-  if (!response.ok) {
-    throw new SandboxUnavailableError(
-      `Managed Sandbox activation was rejected by the platform gate (HTTP ${response.status}).`,
-    );
+  function prepareManagedArgs(operation: string, args: Array<unknown>): Array<unknown> {
+    if (operation !== 'startProcess') {
+      return args;
+    }
+    const [command, options, ...rest] = args;
+    if (!options || typeof options !== 'object' || Array.isArray(options)) {
+      return args;
+    }
+    const onStart = (options as { onStart?: unknown }).onStart;
+    if (typeof onStart !== 'function') {
+      return args;
+    }
+    return [
+      command,
+      {
+        ...options,
+        onStart: (process: unknown) => onStart(decodeManagedResult(process)),
+      },
+      ...rest,
+    ];
   }
 }
 
 /**
- * Release notification to the gate so it can drop the active lease counter.
- * Returns the in-flight fetch as a Promise (errors swallowed) so callers can
- * route it through `ctx.waitUntil()` and keep it alive past lifecycle
- * teardown. Failure is silent — the gate maintains its own TTL fallback.
- */
-function notifyGateRelease(ctx: DurableObjectState): Promise<void> {
-  const identity = resolveGateIdentity();
-  if (!identity) {
-    return Promise.resolve();
-  }
-  const sandboxId = getSandboxInstanceId(ctx);
-  return identity.gate
-    .fetch('https://gate/sandbox/release', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        projectId: identity.projectId,
-        aiToken: identity.aiToken,
-        sandboxId,
-      }),
-    })
-    .then(() => undefined)
-    .catch(() => {
-      // Best-effort — the gate has its own lease-expiry safety net.
-    });
-}
-
-/**
- * Heartbeat-driven keepalive ping for the gate's concurrency slot. The DO's
- * `STALE_MS` (1h) sweep would otherwise reap slots for long-running sandbox
- * sessions whose `acquiredAt` ages past the threshold between acquire and
- * release, letting new acquires exceed `sandboxMaxConcurrentInstances`. The
- * 5 min heartbeat sits well inside the sweep window, so each successful
- * refresh resets the stale clock. Returns the in-flight fetch as a Promise
- * (errors swallowed) so callers can route it through `ctx.waitUntil()` and
- * keep the alarm path itself off the critical path — a failed refresh just
- * means the slot ages out naturally, which matches the pre-existing failure
- * mode if the gate goes down entirely.
- */
-function notifyGateRefresh(ctx: DurableObjectState): Promise<void> {
-  const identity = resolveGateIdentity();
-  if (!identity) {
-    return Promise.resolve();
-  }
-  const sandboxId = getSandboxInstanceId(ctx);
-  return identity.gate
-    .fetch('https://gate/sandbox/refresh', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        projectId: identity.projectId,
-        aiToken: identity.aiToken,
-        sandboxId,
-      }),
-    })
-    .then(() => undefined)
-    .catch(() => {
-      // Best-effort — a failed refresh just means the slot ages out via the
-      // gate's existing STALE_MS sweep. No retry, no surfaced error.
-    });
-}
-
-// --- VoidPlatformSandbox ---
-
-/**
- * Sandbox variant that participates in Void platform metering: it records
- * container runtime seconds into DO storage, emits periodic heartbeats to
- * the usage queue, and notifies the gate when the container stops.
- *
- * Generated code from `void inference` wires user `Sandbox` subclasses to
- * extend this class on platform deploys so per-tenant accounting works
- * without user opt-in. On local dev (no usage-queue / gate bindings), all
- * overrides degrade to no-ops and the sandbox behaves like the upstream
- * `Sandbox` class.
+ * Retained for generated native/local Worker entries. Managed deployments host
+ * the platform-owned Sandbox class in a separate Worker and never use this DO.
  */
 export class VoidPlatformSandbox<Env = unknown> extends Sandbox<Env> {
   override async onStart(): Promise<void> {
-    // This lifecycle check is deliberate duplication of getSandbox(). Legacy
-    // code can address a raw Durable Object stub without calling the SDK
-    // helper; no container may start until the managed gate approves it.
-    await acquireManagedSandbox(
-      getSandboxInstanceId(this.ctx),
-      this.env as Record<string, unknown>,
-    );
-
-    const now = Date.now();
-    const stored = await this.ctx.storage.get<number>([
-      STORAGE_KEY_START_TS,
-      STORAGE_KEY_LAST_FLUSH_TS,
-    ]);
-
-    // Crash recovery: if a stale start timestamp survives in storage, the
-    // previous instance died without onStop firing. Emit one reconciliation
-    // event covering the orphaned window so usage isn't undercounted, then
-    // reset the timestamps for the new run.
-    const orphanedAnchor =
-      stored.get(STORAGE_KEY_LAST_FLUSH_TS) ?? stored.get(STORAGE_KEY_START_TS);
-    if (orphanedAnchor !== undefined && orphanedAnchor < now) {
-      const sandboxRuntimeSeconds = (now - orphanedAnchor) / 1000;
-      await emitRuntimeSeconds(this.ctx, sandboxRuntimeSeconds);
-      // Clear the orphan anchor BEFORE super.onStart() so a failed super
-      // (bad image, platform scheduling error) doesn't leave the same
-      // anchor in storage for the next retry to re-emit, double-counting
-      // runtime that's already been billed.
-      await this.ctx.storage.delete([STORAGE_KEY_START_TS, STORAGE_KEY_LAST_FLUSH_TS]);
+    const env = this.env as Record<string, unknown>;
+    if (env.__PROJECT_ID !== undefined || env.__VOID_PROXY !== undefined) {
+      throw new SandboxUnavailableError(
+        'Managed Sandboxes require the platform Sandbox controller. Redeploy this application.',
+      );
     }
-
-    try {
-      await super.onStart();
-    } catch (err) {
-      // super.onStart() failures (bad image, scheduling error) leave the
-      // gate's acquire counter stuck — `getSandbox()` POSTs to /acquire
-      // BEFORE the first method call that triggers onStart, so this is the
-      // first lifecycle hook that runs. Without releasing here, neither
-      // onStop nor onActivityExpired fires for a failed startup, and the
-      // lease leaks until the gate's STALE_MS sweep — surfacing as false
-      // concurrency-denied errors on the user's next retry. Route through
-      // waitUntil because Workers may already be tearing down during throw.
-      this.ctx.waitUntil(notifyGateRelease(this.ctx));
-      throw err;
-    }
-
-    // Persist start/flush timestamps and arm the heartbeat alarm only AFTER
-    // super.onStart() succeeds. If super throws (container failed to start),
-    // we must not leave anchors behind — the next onStart() would treat them
-    // as an orphaned window and bill wall-clock time during which no
-    // container ever ran. Re-read the clock so timestamps reflect the actual
-    // container-ready instant rather than the pre-super entry point.
-    //
-    // Heartbeat alarm is set after super for the same single-alarm-slot
-    // reason the alarm() override relies on: upstream Sandbox/Container may
-    // arm its own alarm (e.g. for sleepAfter idle management) and clobber
-    // ours if we set it first.
-    const startedAt = Date.now();
-    await this.ctx.storage.put({
-      [STORAGE_KEY_START_TS]: startedAt,
-      [STORAGE_KEY_LAST_FLUSH_TS]: startedAt,
-    });
-    await this.ctx.storage.setAlarm(startedAt + HEARTBEAT_MS);
-  }
-
-  override async alarm(alarmProps?: AlarmInvocationInfo): Promise<void> {
-    // Container's alarm() dispatches any scheduled() tasks. Run it first so
-    // upstream behaviour (idle timeouts, user-scheduled work) is preserved
-    // before we layer our metering heartbeat on top.
-    await super.alarm(alarmProps);
-
-    const lastFlush = await this.ctx.storage.get<number>(STORAGE_KEY_LAST_FLUSH_TS);
-    if (typeof lastFlush !== 'number') {
-      // Heartbeat fired without an active start window — nothing to meter
-      // and no reason to re-arm (onStart() will set the alarm again).
-      return;
-    }
-    const now = Date.now();
-    const sandboxRuntimeSeconds = Math.max(0, (now - lastFlush) / 1000);
-    await emitRuntimeSeconds(this.ctx, sandboxRuntimeSeconds);
-    // Fire-and-forget keepalive to the gate's concurrency slot so the
-    // STALE_MS sweep doesn't reap long-running sessions. waitUntil keeps
-    // the request alive past this hook without gating heartbeat completion
-    // on the gate's response — heartbeat-emitted metering must always make
-    // forward progress even if the gate is unreachable.
-    this.ctx.waitUntil(notifyGateRefresh(this.ctx));
-    await Promise.all([
-      this.ctx.storage.put(STORAGE_KEY_LAST_FLUSH_TS, now),
-      this.ctx.storage.setAlarm(now + HEARTBEAT_MS),
-    ]);
-  }
-
-  // Sandbox narrows Container's `onStop(params)` to zero-arg — exitCode/reason aren't visible here.
-  override async onStop(): Promise<void> {
-    await this.flushFinal();
-    // Route the release POST through waitUntil so it survives lifecycle
-    // teardown. A bare `void fetch(...)` here can be canceled when the hook
-    // returns, stranding the gate's acquire counter until TTL sweep — the
-    // exact false-concurrency-denial path this metering layer must avoid.
-    this.ctx.waitUntil(notifyGateRelease(this.ctx));
-    await super.onStop();
-  }
-
-  override async onActivityExpired(): Promise<void> {
-    await this.flushFinal();
-    this.ctx.waitUntil(notifyGateRelease(this.ctx));
-    await super.onActivityExpired();
-  }
-
-  private async flushFinal(): Promise<void> {
-    const lastFlush = await this.ctx.storage.get<number>(STORAGE_KEY_LAST_FLUSH_TS);
-    if (typeof lastFlush === 'number') {
-      const sandboxRuntimeSeconds = Math.max(0, (Date.now() - lastFlush) / 1000);
-      await emitRuntimeSeconds(this.ctx, sandboxRuntimeSeconds);
-    }
-    await this.ctx.storage.delete(STORAGE_KEY_START_TS);
-    await this.ctx.storage.delete(STORAGE_KEY_LAST_FLUSH_TS);
+    await super.onStart();
   }
 }
 
-// --- getSandbox ---
-
-/**
- * Resolve the platform-provided sandbox stub for the given id, optionally
- * coordinating with the platform gate to enforce per-user concurrency and
- * runtime budgets.
- *
- * When the gate binding (`__VOID_PROXY` by default) is present AND the
- * platform's `__PROJECT_ID` + `__VOID_PROXY_TOKEN` identity vars are
- * available, we POST to `https://gate/sandbox/acquire` with the HMAC-signed
- * body the shared proxy auth middleware expects. A `409` response means the
- * user has exceeded a budget — we throw `SandboxLimitError` so the caller
- * can render a clear message. Any other non-OK status (or a thrown transport
- * error from the service binding) fails closed before returning a usable
- * managed stub.
- *
- * When all reserved platform identity bindings are absent, this is a native
- * Cloudflare or local deployment and returns the upstream stub directly.
- *
- * The stub is constructed BEFORE calling the gate so we can pass its opaque,
- * namespace-specific Durable Object id (`stub.id.toString()`) as `sandboxId`.
- * The same id is available as `ctx.id.toString()` inside lifecycle hooks, so
- * acquire, heartbeat, and release use one globally unique instance identity
- * even when separate projects or deployments both request the name `default`.
- * Constructing the stub does NOT start a container — that only happens on
- * the first method call against the stub.
- */
+/** Resolve an isolated Sandbox on the current deployment. Starts on first use. */
 export async function getSandbox<T extends Sandbox = Sandbox>(
   id: string = DEFAULT_SANDBOX_ID,
   options?: VoidSandboxOptions,
 ): Promise<T> {
   const { binding = sandboxBindingName, ...sandboxOptions } = options ?? {};
-
-  const namespace = requireRuntimeBinding<DurableObjectNamespace<T>>(binding);
-  const stub = getCloudflareSandbox<T>(namespace, id, {
+  const runtimeEnv = getRawRuntimeEnv();
+  const service = runtimeEnv[SANDBOX_SERVICE_BINDING] as SandboxService | undefined;
+  if (service) {
+    if (binding !== sandboxBindingName) {
+      throw new SandboxUnavailableError(`Managed Sandbox binding ${binding} is unavailable.`);
+    }
+    try {
+      return managedClient<T>(
+        await service.getSandbox(id, { normalizeId: true, ...sandboxOptions }),
+      );
+    } catch (error) {
+      rethrowSandboxError(error);
+    }
+  }
+  if (runtimeEnv.__PROJECT_ID !== undefined || runtimeEnv.__VOID_PROXY !== undefined) {
+    throw new SandboxUnavailableError(
+      'This deployment has no managed Sandbox controller. Redeploy this application.',
+    );
+  }
+  return getCloudflareSandbox<T>(requireRuntimeBinding<DurableObjectNamespace<T>>(binding), id, {
     normalizeId: true,
     ...sandboxOptions,
   });
-  // The opaque id includes the DO namespace identity. Human-readable names
-  // such as `default` are only unique within a namespace and cannot safely
-  // key an account-wide concurrency counter.
-  const sandboxId = (stub as unknown as DurableObjectStub).id.toString();
-
-  await acquireManagedSandbox(sandboxId);
-
-  return stub;
 }
 
-export const sandbox: { get: typeof getSandbox } = {
-  get: getSandbox,
-};
+export const sandbox: { get: typeof getSandbox } = { get: getSandbox };

@@ -78,6 +78,7 @@ import {
   getCustomHostname,
 } from './provisioning/cloudflare-api.ts';
 import { reconcileEmailDestinationCleanups } from './provisioning/email-destination-cleanup.ts';
+import { retrySandboxControllerCleanup } from './provisioning/sandbox-controller.ts';
 import { oidcRoutes } from './routes/auth-oidc.ts';
 import auth from './routes/auth.ts';
 import deleteRoute from './routes/delete.ts';
@@ -109,6 +110,7 @@ import { projectUsage, accountUsage } from './routes/usage.ts';
 import { webhookRoutes } from './routes/webhooks.ts';
 import { setProjectsRoutingSuspension } from './routing.ts';
 import { SandboxConcurrencyCounter } from './sandbox-concurrency-counter.ts';
+import { SandboxControl } from './sandbox-control.ts';
 import {
   operatorSessions,
   platformAuthAttempts,
@@ -590,6 +592,12 @@ async function scheduled(
   }
 
   // Hourly tier (every :00): full maintenance.
+
+  if (capabilities.sandbox) {
+    await retrySandboxControllerCleanup(db, env).catch((error) =>
+      console.error('[scheduled] Sandbox controller cleanup failed:', error),
+    );
+  }
 
   // Auto-fail deployments stuck in active states for more than 30 minutes
   await failStaleDeployments(db)
@@ -1096,6 +1104,7 @@ export {
   CronScheduler,
   ErrorAlertMonitor,
   SandboxConcurrencyCounter,
+  SandboxControl,
   BuildScheduler,
   BuildManager,
   BuildManagerLarge,

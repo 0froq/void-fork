@@ -52,7 +52,7 @@ describe('Sandbox drain database compatibility', () => {
     expect(drainMigration).not.toMatch(/\b(?:ALTER|DROP|TRUNCATE|DELETE|UPDATE)\b/i);
   });
 
-  it('adds a database-enforced v2 deployment admission barrier', () => {
+  it('preserves the v2 barrier and defaults new deployments to protocol v3', () => {
     const admissionMigration = readFileSync(
       new URL('0038_deployment_admission_protocol.sql', drizzleRoot),
       'utf8',
@@ -77,7 +77,7 @@ describe('Sandbox drain database compatibility', () => {
       (column) => column.name === 'admission_protocol',
     );
     expect(deploymentAdmission?.default).toBe(0);
-    expect(deploymentAdmission?.defaultFn?.()).toBe(2);
+    expect(deploymentAdmission?.defaultFn?.()).toBe(3);
     expect(checkpointAdmission?.default).toBe(0);
   });
 });

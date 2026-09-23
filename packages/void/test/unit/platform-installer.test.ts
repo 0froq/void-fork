@@ -123,7 +123,7 @@ const TEST_PLATFORM_PROJECT_SECRET_KEY = Buffer.alloc(32, 5).toString('base64');
 function sandboxDrainPreparation(state: 'complete' | 'pending') {
   const checkpointState = state === 'complete' ? 'complete' : 'draining';
   return {
-    admissionProtocol: 2 as const,
+    admissionProtocol: 3 as const,
     generation: 'generation-1',
     mirrorValue: JSON.stringify({
       completedAt: state === 'complete' ? '2026-09-16T00:00:00.000Z' : undefined,
@@ -4195,7 +4195,7 @@ describe('platform installer', () => {
       },
     );
     expect(emptyCoreUpgrade.waitingForSandboxDrain).toBe(false);
-    expect(emptyCoreUpgrade.manifest.safetyProtocols).toEqual({ sandboxDrain: 2 });
+    expect(emptyCoreUpgrade.manifest.safetyProtocols).toEqual({ sandboxDrain: 3 });
     expect(emptyCoreUpgrade.manifest.deployment).toMatchObject({
       schemaVersion: 3,
       authentication: { configurable: true, providers: ['google', 'oidc'] },
@@ -4306,7 +4306,7 @@ describe('platform installer', () => {
     expect(waitingForSandboxDrain.waitingForSandboxDrain).toBe(true);
     expect(waitingForSandboxDrain.manifest).toMatchObject({
       platformVersion: '0.10.13',
-      safetyProtocols: { sandboxDrain: 2 },
+      safetyProtocols: { sandboxDrain: 3 },
       status: 'verifying',
     });
     expect(sandboxDrainDeployments).toEqual([
@@ -4370,7 +4370,7 @@ describe('platform installer', () => {
     );
     expect(resumedAfterSandboxDrain.waitingForSandboxDrain).toBe(false);
     expect(resumedAfterSandboxDrain.manifest).toMatchObject({
-      safetyProtocols: { sandboxDrain: 2 },
+      safetyProtocols: { sandboxDrain: 3 },
       status: 'installed',
     });
     expect(resumedDrainDeployments).toHaveLength(10);
@@ -4686,7 +4686,7 @@ describe('platform installer', () => {
     });
     expect(disabledLegacyUpgrade.manifest).toMatchObject({
       desiredState: 'disabled',
-      safetyProtocols: { sandboxDrain: 2 },
+      safetyProtocols: { sandboxDrain: 3 },
       status: 'disabled',
     });
 
