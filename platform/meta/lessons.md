@@ -7,6 +7,9 @@
   `.worktrees/`; do not copy their changes back without authorization.
 - Keep design work separate from implementation until implementation is
   requested. Prefer a clean cutover for features that have never been live.
+- Preserve existing features when asked to fix defects. If a feature-removal
+  choice was explicitly left pending, do not silently treat a later broad
+  bug-fixing request as resolving it; reconcile that product decision directly.
 - Code defines current behavior; public docs may intentionally omit paused
   features. Distinguish implemented code from shipped behavior and verified
   release status. Read package scripts before documenting their scope.

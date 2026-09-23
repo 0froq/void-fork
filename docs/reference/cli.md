@@ -711,7 +711,7 @@ void platform system sandbox-drain [--cursor <opaque-cursor>]
 
 `events` shows the administrator, target, and outcome of changes. A pending event means the outcome has not been recorded. Previews and session login/logout do not create these events. `backfill-queue-tokens` repairs older queue entries that are missing authentication tokens and supports `--plan` before applying the repair.
 
-Use `sandbox-drain` when an upgrade asks you to finish Sandbox cleanup. Preview with `--plan`; pass the returned `nextCursor` as `--cursor` to inspect later pages. Apply with `--yes` and rerun until it reports `complete: true`, then rerun the interrupted upgrade. Application traffic stays paused during cleanup, while administrator login remains available.
+Use `sandbox-drain` when an upgrade from the legacy tenant-owned Sandbox runtime asks you to finish cleanup. Preview with `--plan`; pass the returned `nextCursor` as `--cursor` to inspect later pages. Apply with `--yes` and rerun until it reports `complete: true`, then rerun the interrupted upgrade. Application traffic stays paused during cleanup, while administrator login remains available. The completed upgrade enables the current managed Sandbox controller automatically.
 
 <span id="operator-workers"></span>
 

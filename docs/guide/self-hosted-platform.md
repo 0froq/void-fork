@@ -10,7 +10,7 @@ If you're deploying an app for yourself, [deploy directly to Cloudflare](../inte
 
 The core platform supports GitHub, Google, generic OIDC, and Cloudflare Access login, CLI deploys, D1, KV, R2, Queues, cron jobs, Workers AI, WebSockets, SSE, ISR, routing, logs, and rollback.
 
-The core installation includes an email gateway; email is enabled when you configure a shared mail domain and zone. The user dashboard, GitHub builds and webhooks, build Containers, custom project domains, and sandbox orchestration aren't part of the core installation. Source-built platforms that add the optional GitHub services should follow the [isolated webhook ingress setup](./platform-development.md#optional-github-webhook-ingress-for-access-protected-apis) when Access protects the API.
+The core installation includes managed Sandboxes and an email gateway; email is enabled when you configure a shared mail domain and zone. The user dashboard, GitHub builds and webhooks, build Containers, and custom project domains aren't part of the core installation. Source-built platforms that add the optional GitHub services should follow the [isolated webhook ingress setup](./platform-development.md#optional-github-webhook-ingress-for-access-protected-apis) when Access protects the API.
 
 ## Before You Start {#prerequisites}
 
@@ -554,7 +554,9 @@ manager so they can also restore a missing Worker during repair.
 
 Database migrations only move forward. Void checks compatibility before upgrading and tells you if an intermediate release is needed. If deployment fails, it attempts to restore the previous Workers against the compatible database schema. Retrying does not repeat completed migrations.
 
-If an upgrade asks you to finish Sandbox cleanup, follow the [`sandbox-drain` instructions](../reference/cli.md#operator-system), then rerun the upgrade. Administrator login remains available during that maintenance step.
+Upgrades automatically enable managed Sandboxes. The platform runtime token needs Account / Containers: Edit and Account / Cloudchamber: Edit, and the Cloudflare account must use Workers Paid before its first Sandbox application deploy. The upgrade itself does not probe Containers access, so platforms that do not deploy Sandbox applications need no additional plan or permissions.
+
+When upgrading from a release that used tenant-owned Sandbox containers, the upgrade may first ask you to finish the legacy cleanup. Follow the [`sandbox-drain` instructions](../reference/cli.md#operator-system), then rerun the upgrade. Administrator login remains available during that maintenance step.
 
 After a successful upgrade, you can restore a declared-compatible earlier runtime without reversing migrations:
 
