@@ -250,7 +250,7 @@ export async function getOperatorProject(db: Db, id: string) {
 }
 
 type OwnershipTransferBlocker = Readonly<{
-  kind: 'deletion' | 'deployment' | 'rollback' | 'build';
+  kind: 'deletion' | 'deployment' | 'rollback' | 'build' | 'sandbox_controller';
   id: string;
   status: string;
 }>;
@@ -274,7 +274,7 @@ async function getOwnershipTransferBlockers(
   db: Db,
   projectId: string,
 ): Promise<Array<OwnershipTransferBlocker>> {
-  const [activeDeployments, activeBuilds] = await Promise.all([
+  const [activeDeployments, activeBuilds, sandboxControllers] = await Promise.all([
     db
       .select({ id: deployments.id, status: deployments.status, source: deployments.source })
       .from(deployments)
@@ -295,6 +295,20 @@ async function getOwnershipTransferBlockers(
         ),
       )
       .orderBy(asc(builds.created_at), asc(builds.id)),
+    // Live/failed/canceled deployments no longer block as active work, but
+    // their owner-bound Sandbox controllers still do until cleanup completes.
+    db
+      .select({ id: deployments.id, status: deployments.status })
+      .from(deployments)
+      .where(
+        and(
+          eq(deployments.project_id, projectId),
+          inArray(deployments.status, TERMINAL_DEPLOYMENT_STATUSES),
+          sql`${deployments.manifest}::jsonb #>> '{sandbox,runtime,protocol}' = '1'`,
+          sql`COALESCE(${deployments.manifest}::jsonb #>> '{sandbox,runtime,cleanupComplete}', 'false') <> 'true'`,
+        ),
+      )
+      .orderBy(asc(deployments.created_at), asc(deployments.id)),
   ]);
   return [
     ...activeDeployments.map((deployment) => ({
@@ -307,6 +321,11 @@ async function getOwnershipTransferBlockers(
       kind: 'build' as const,
       id: build.id,
       status: build.status,
+    })),
+    ...sandboxControllers.map((deployment) => ({
+      kind: 'sandbox_controller' as const,
+      id: deployment.id,
+      status: deployment.status,
     })),
   ];
 }
@@ -490,7 +509,7 @@ async function commitOwnershipTransfer(
     if (blockers.length > 0) {
       throw new OperatorError(
         409,
-        'Project ownership cannot change while project work is active.',
+        'Project ownership cannot change while project work or a managed Sandbox controller remains.',
         'ownership_transfer_blocked',
         { blockers },
       );

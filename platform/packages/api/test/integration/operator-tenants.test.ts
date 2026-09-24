@@ -794,9 +794,11 @@ describe('operator tenant mutations', () => {
         blockers: [{ kind: 'sandbox_controller', id: deployment.id, status: 'failed' }],
       },
     });
-    expect(
-      (await env.db.select().from(projects).where(eq(projects.id, project.id))[0]).user_id,
-    ).toBe(owner.id);
+    const [unchangedProject] = await env.db
+      .select()
+      .from(projects)
+      .where(eq(projects.id, project.id));
+    expect(unchangedProject?.user_id).toBe(owner.id);
     expect(counterCalls).toEqual([]);
 
     await env.db
@@ -813,9 +815,11 @@ describe('operator tenant mutations', () => {
       },
     );
     expect(transferred.status).toBe(200);
-    expect(
-      (await env.db.select().from(projects).where(eq(projects.id, project.id))[0]).user_id,
-    ).toBe(target.id);
+    const [transferredProject] = await env.db
+      .select()
+      .from(projects)
+      .where(eq(projects.id, project.id));
+    expect(transferredProject?.user_id).toBe(target.id);
   });
 
   test('converges routing despite counter failure and resumes after the former owner is deleted', async () => {
