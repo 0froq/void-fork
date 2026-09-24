@@ -26,7 +26,7 @@ vp test run
 
 Void Cloud deploys the API after PostgreSQL migrations, then the proxy, email gateway, tail, dispatch, and dashboard Workers. The API hosts the build scheduler and build-container Durable Objects. The optional dashboard uses the API for authentication and is deployed after the API it depends on.
 
-The `deploy` and `deploy:staging` scripts in `platform/package.json` target these existing hosted environments. Forks should use `void platform upgrade --runtime` as described in [source deployment](../../docs/guide/platform/development/runtime.md#source-build-ci).
+The `deploy` and `deploy:staging` scripts in `platform/package.json` target these existing hosted environments. Forks should use `void platform upgrade --runtime` as described in [source deployment](../../docs/guide/platform/development/runtime.md#deploying-source-builds-from-ci).
 
 ### GitHub Actions
 

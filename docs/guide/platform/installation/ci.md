@@ -2,7 +2,7 @@
 outline: deep
 ---
 
-# Install from CI {#install-from-ci}
+# Install from CI
 
 For your first installation, follow the [interactive setup](/guide/platform/installation/setup). Use this page when automating a configured installation.
 
@@ -45,6 +45,6 @@ Mutations require `--yes` in CI; a read-only `--plan` does not. Custom runtimes 
 
 :::
 
-## Customize the Platform {#continuously-deploy-a-source-build}
+## Customize the Platform
 
 To change the platform's implementation or deploy your own build, follow [Platform Development](/guide/platform-development). It covers local development, source builds, and CI for a fork.

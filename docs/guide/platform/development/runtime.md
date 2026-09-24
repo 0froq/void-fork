@@ -89,7 +89,7 @@ Access, or manage either Worker's secrets. Its body limit is 25 MiB, based on
 GitHub's [documented 25 MB webhook payload cap](https://docs.github.com/en/webhooks/webhook-events-and-payloads#payload-cap);
 malformed or larger deliveries are rejected before event processing.
 
-## Deploying Source Builds from CI {#source-build-ci}
+## Deploying Source Builds from CI
 
 Build `@void/platform` from your checkout and pass its runtime directory to `install`, `upgrade`, `repair`, `enable`, or `rollback` with `--runtime`. Custom runtimes get the same integrity, migration, health, and rollback checks as packaged releases.
 

@@ -2,15 +2,13 @@
 outline: deep
 ---
 
-# Prerequisites {#prerequisites}
+# Prerequisites
 
 Start with a Cloudflare account you can administer, an account with your chosen login provider, and an empty hosted PostgreSQL database. GitHub is the default and is optional when another method is selected. A domain is recommended. If yours is not ready, choose **Use workers.dev for testing** during installation and [add a domain later](/guide/platform/installation/domains#adding-a-domain). The steps below explain how to get the credentials the installer asks for.
 
 Void creates the Workers, storage, queues, routing, and database tables through the CLI.
 
 This setup has costs: Workers for Platforms requires a paid plan, and your database and Cloudflare usage have their own pricing. External PostgreSQL is required in either mode. Native single-app deployments remain Workers Free-compatible unless the app uses a paid-only product.
-
-<span id="_1-prepare-your-cloudflare-account-and-domain"></span>
 
 ## Prepare Your Cloudflare Account and Domain
 
@@ -24,7 +22,7 @@ If that domain is already in this Cloudflare account, use its existing zone. Oth
 
 You can also let Void create the zone during installation. Setting it up now lets you scope the API tokens to that zone and finish installation without a DNS pause. The platform API uses `workers.dev` by default, so it needs no additional domain.
 
-## Install the CLI and Preview {#preview-the-installation}
+## Install the CLI and Preview
 
 With Node.js 24.21.0 or later, install the CLI:
 

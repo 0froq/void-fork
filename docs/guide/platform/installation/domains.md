@@ -4,8 +4,6 @@ outline: deep
 
 # Domains and Resources
 
-<span id="add-a-domain-later"></span>
-
 ## Adding a Domain
 
 When your domain is ready, run:
@@ -15,7 +13,7 @@ void platform domain set example.app --plan
 void platform domain set example.app
 ```
 
-The command selects your installed platform (or offers a picker), finds or creates its zone, sets up DNS and routing, and verifies HTTPS before publishing the new application URLs. Set the management token as described in [installation setup](/guide/platform/installation/setup#install) when creating DNS or a zone. Grant the existing runtime token **Cache Purge: Purge** on the new zone; Void checks that permission through the running platform without asking you to paste its token again.
+The command selects your installed platform (or offers a picker), finds or creates its zone, sets up DNS and routing, and verifies HTTPS before publishing the new application URLs. Set the management token as described in [installation setup](/guide/platform/installation/setup) when creating DNS or a zone. Grant the existing runtime token **Cache Purge: Purge** on the new zone; Void checks that permission through the running platform without asking you to paste its token again.
 
 If nameservers or certificates are pending, follow the printed guidance and rerun the same command. Your workers.dev app URLs continue working during and after setup. Projects, deployments, secrets, and the platform API URL stay the same, so developers do not reconnect and the platform's GitHub OAuth callback does not change. DNS and configuration changes may take time to propagate.
 

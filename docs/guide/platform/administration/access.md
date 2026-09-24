@@ -40,7 +40,7 @@ that uses prerendering or remote bindings needs entries for both the exact API
 and proxy HTTPS origins, even when both entries contain the same admitted
 service-token pair. `VOID_ACCESS_ORIGIN` selects only one recipient and therefore
 cannot cover both calls. Keep the JSON value in your secret manager, not in
-application configuration. See [CI deployment setup](/guide/platform/installation/first-deployment#connect-and-deploy-an-app)
+application configuration. See [CI deployment setup](/guide/platform/installation/first-deployment)
 for the required shape.
 
 ## Choosing a Platform

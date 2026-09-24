@@ -4,8 +4,6 @@ outline: deep
 
 # Credentials
 
-<span id="_4-prepare-credentials"></span>
-
 Keep one password-manager entry for this platform. Paste the saved values into the installer when asked; most do not need shell environment variables.
 
 ## Cloudflare API Tokens {#runtime-token-permissions}

@@ -506,7 +506,7 @@ Browser login offers the platform's enabled methods; `--provider <connection-id>
 
 `protection enable` creates or connects Cloudflare Access applications independently
 of login methods. Its `--file` accepts the `cloudflareAccess` object described in
-[installation setup](../guide/platform/installation/setup.md#configure-github-oauth).
+[installation setup](../guide/platform/installation/setup.md#choose-login-methods).
 Protection changes require installation ownership, the saved recovery credentials,
 and a human administrator session. They revoke current human sessions. Before
 removing protection, change any signup rule that depends on that gate. Cloudflare
@@ -713,8 +713,6 @@ void platform system sandbox-drain [--cursor <opaque-cursor>]
 
 Use `sandbox-drain` when an upgrade from the legacy tenant-owned Sandbox runtime asks you to finish cleanup. Preview with `--plan`; pass the returned `nextCursor` as `--cursor` to inspect later pages. Apply with `--yes` and rerun until it reports `complete: true`, then rerun the interrupted upgrade. Application traffic stays paused during cleanup, while administrator login remains available. The completed upgrade enables the current managed Sandbox controller automatically.
 
-<span id="operator-workers"></span>
-
 Use the [platform lifecycle commands](#lifecycle-commands) to maintain your installation's Workers.
 
 #### Pagination and JSON
@@ -749,7 +747,7 @@ For a first installation, follow [Install a Void Platform](../guide/self-hosted-
 
 Read-only plans, workers.dev installations with the default API hostname, and supported lifecycle operations can use Cloudflare browser login and the system keychain. Installation that writes DNS or creates a zone needs an explicit management token through `CLOUDFLARE_API_TOKEN` or `CF_API_TOKEN`.
 
-The installed platform needs a separate runtime token to provision resources for apps. The interactive installer prompts for it and the other setup values. For non-interactive installs, inject the variables listed in [Install from CI](../guide/platform/installation/ci.md#install-from-ci).
+The installed platform needs a separate runtime token to provision resources for apps. The interactive installer prompts for it and the other setup values. For non-interactive installs, inject the variables listed in [Install from CI](../guide/platform/installation/ci.md).
 
 To enable email during install or upgrade, set both `VOID_EMAIL_SENDER_DOMAIN` and `VOID_EMAIL_SHARED_ZONE_ID`. Void records the pair for later upgrades; supplying only one is an error.
 
@@ -825,7 +823,7 @@ Uninstall verifies remote ownership before removing anything. Data resources are
 
 Resources that may have been shared or repurposed are retained for manual review. Platform traffic stays blocked. External PostgreSQL and its data are never deleted.
 
-See [Disable and safely uninstall](../guide/platform/installation/uninstall.md#disable-and-safely-uninstall) for the full removal policy.
+See [Disable and Uninstall](../guide/platform/installation/uninstall.md) for the full removal policy.
 
 ## Deploy
 

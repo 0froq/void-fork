@@ -4,8 +4,6 @@ outline: deep
 
 # Disable and Uninstall
 
-<span id="disable-and-safely-uninstall"></span>
-
 To pause a platform without removing its data:
 
 ```sh

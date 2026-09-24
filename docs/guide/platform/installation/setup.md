@@ -2,7 +2,7 @@
 outline: deep
 ---
 
-# Install and Configure Login {#install}
+# Install and Configure Login
 
 For workers.dev testing, start the interactive install and continue to the GitHub setup below:
 
@@ -31,7 +31,7 @@ void platform install
 
 Use the same name, account, and domain as the preview, then confirm the installation plan. Void saves a local setup draft and opens the runtime-token page when that token is missing. Paste the token into the masked prompt. As you continue, it opens GitHub and R2 at their respective steps. Each page has a short checklist and a clickable fallback link in the terminal. Values already supplied through the environment or saved setup are reused without opening their pages again.
 
-## Choose login methods {#configure-github-oauth}
+## Choose login methods
 
 The installer offers GitHub, Google, generic OIDC, and Cloudflare Access login.
 Cloudflare Access protection is a separate choice from Access login. The
@@ -79,7 +79,7 @@ environment-variable references for secrets. For example:
 `--plan` reads this configuration without requiring the referenced secret.
 Supply the secret through your secret manager when applying the installation.
 
-### Cloudflare Access {#cloudflare-access-setup}
+### Cloudflare Access
 
 Choose Access login, platform protection, or both. Protection can also be used
 with GitHub or another login method. With company-approved signup, a colleague
@@ -142,7 +142,7 @@ This OAuth App handles sign-in. A GitHub App with repository access and build we
 
 The prompts collect the runtime token, administrator GitHub username, PostgreSQL URL, GitHub client ID and secret, R2 credentials, and signing/encryption keys. Secret values are masked and setup progress is encrypted locally using the system keychain. Keep a password-manager copy for recovery on another machine.
 
-Void shows installation progress while it prepares the database, provisions Cloudflare resources, deploys the services, and verifies platform health. Progress is checkpointed for recovery. When installation finishes, open the printed admin dashboard link and sign in with the GitHub account you selected as administrator. This creates your first admin user; no app or CLI login is required. Void also prints the API URL to use when you [connect and deploy an app](/guide/platform/installation/first-deployment#connect-and-deploy-an-app).
+Void shows installation progress while it prepares the database, provisions Cloudflare resources, deploys the services, and verifies platform health. Progress is checkpointed for recovery. When installation finishes, open the printed admin dashboard link and sign in with the GitHub account you selected as administrator. This creates your first admin user; no app or CLI login is required. Void also prints the API URL to use when you [connect and deploy an app](/guide/platform/installation/first-deployment).
 
 Remove the management token from the shell when finished:
 

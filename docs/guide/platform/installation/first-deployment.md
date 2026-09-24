@@ -2,7 +2,7 @@
 outline: deep
 ---
 
-# First Deployment {#connect-and-deploy-an-app}
+# First Deployment
 
 First verify the new platform and sign in as the GitHub administrator you chose:
 

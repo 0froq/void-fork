@@ -34,7 +34,7 @@ Advancing the production branch does not change the selected baseline. Fork
 workflows that call platform CI must grant `deployments: read` alongside
 `contents: read`.
 
-The upstream repository also contains workflows for deploying Void Cloud and publishing the official npm packages. Forks should configure their own release workflow around the built CLI and `platform upgrade --runtime`; the [source-build CI example](/guide/platform/development/runtime#source-build-ci) shows the required inputs. Keep production credentials in protected environments restricted to the appropriate release refs.
+The upstream repository also contains workflows for deploying Void Cloud and publishing the official npm packages. Forks should configure their own release workflow around the built CLI and `platform upgrade --runtime`; the [source-build CI example](/guide/platform/development/runtime#deploying-source-builds-from-ci) shows the required inputs. Keep production credentials in protected environments restricted to the appropriate release refs.
 
 Public releases use matching versions for the CLI, scaffolder, adapters, and
 packaged platform. The publish workflow rejects mismatched versions and previously
