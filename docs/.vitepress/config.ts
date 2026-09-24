@@ -98,6 +98,19 @@ const integrationLinks = {
   items: integrationItems,
 };
 
+const platformSidebar = [
+  {
+    text: 'Platform',
+    icon: 'lucide:cloud',
+    collapsed: false,
+    items: [
+      { text: 'Installation', link: '/guide/self-hosted-platform' },
+      { text: 'Administration', link: '/guide/platform-administration' },
+      { text: 'Development & Customization', link: '/guide/platform-development' },
+    ],
+  },
+];
+
 const socialLinks = [
   { icon: 'discord', link: 'https://discord.gg/cC6TEVFKSx' },
   { icon: 'x', link: 'https://x.com/voidzerodev' },
@@ -143,7 +156,18 @@ export default extendConfig(
       },
 
       nav: [
-        { text: 'Guide', link: '/guide/', activeMatch: '/guide/' },
+        {
+          text: 'SDK',
+          link: '/guide/',
+          activeMatch:
+            '^/guide/(?!self-hosted-platform|platform-administration|platform-development)',
+        },
+        {
+          text: 'Platform',
+          link: '/guide/self-hosted-platform',
+          activeMatch:
+            '^/guide/(self-hosted-platform|platform-administration|platform-development)',
+        },
         referenceLinks,
         integrationLinks,
         // { text: "Dashboard", link: "https://dash.void.cloud" },
@@ -152,6 +176,9 @@ export default extendConfig(
       socialLinks,
 
       sidebar: {
+        '/guide/self-hosted-platform': platformSidebar,
+        '/guide/platform-administration': platformSidebar,
+        '/guide/platform-development': platformSidebar,
         '/guide/': [
           {
             text: 'Getting Started',
@@ -248,16 +275,6 @@ export default extendConfig(
               { text: 'Remote Development', link: '/guide/remote-dev' },
               { text: 'Deploying Your App', link: '/guide/deployment' },
               { text: 'Project Collaboration', link: '/guide/project-collaboration' },
-            ],
-          },
-          {
-            text: 'Platform',
-            icon: 'lucide:cloud',
-            collapsed: false,
-            items: [
-              { text: 'Installation', link: '/guide/self-hosted-platform' },
-              { text: 'Administration', link: '/guide/platform-administration' },
-              { text: 'Development & Customization', link: '/guide/platform-development' },
             ],
           },
         ],
