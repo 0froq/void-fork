@@ -157,7 +157,10 @@ vp run --filter @voidcloud/proxy deploy --env production
 vp run --filter @voidcloud/proxy deploy --env staging
 ```
 
-Deployed as part of the root `vp run deploy` and `vp run deploy:staging` scripts.
+For a full hosted-platform deployment from the repository root, run
+`vp run --filter @voidcloud/platform deploy` or
+`vp run --filter @voidcloud/platform deploy:staging`. The commands above deploy
+only the proxy Worker.
 
 ## Tests
 
