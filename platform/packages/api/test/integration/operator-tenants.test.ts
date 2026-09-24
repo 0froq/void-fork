@@ -743,6 +743,81 @@ describe('operator tenant mutations', () => {
     }
   });
 
+  test('previews a live managed Sandbox controller as an ownership transfer blocker', async () => {
+    const owner = await createTestUser(env.db, 'sandbox-preview-owner');
+    const target = await createTestUser(env.db, 'sandbox-preview-target');
+    const project = await createTestProject(env.db, owner.id, 'sandbox-preview-project');
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    await env.db
+      .update(deployments)
+      .set({ manifest: JSON.stringify({ sandbox: { runtime: { protocol: 1 } } }) })
+      .where(eq(deployments.id, deployment.id));
+
+    const response = await req(`/projects/${project.id}/owner`, {
+      userId: target.id,
+      dryRun: true,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      blockers: [{ kind: 'sandbox_controller', id: deployment.id, status: 'live' }],
+    });
+  });
+
+  test('blocks transfer until a managed Sandbox controller finishes cleanup', async () => {
+    const owner = await createTestUser(env.db, 'sandbox-transfer-owner');
+    const target = await createTestUser(env.db, 'sandbox-transfer-target');
+    const project = await createTestProject(env.db, owner.id, 'sandbox-transfer-project');
+    const deployment = await createTestDeployment(env.db, project.id, 'failed');
+    await env.db
+      .update(deployments)
+      .set({ manifest: JSON.stringify({ sandbox: { runtime: { protocol: 1 } } }) })
+      .where(eq(deployments.id, deployment.id));
+    const counterCalls: Array<{
+      ownerId: string;
+      path: string;
+      body: Record<string, unknown>;
+    }> = [];
+    const USAGE_COUNTER = captureUsageCounter(counterCalls);
+
+    const blocked = await req(
+      `/projects/${project.id}/owner`,
+      { userId: target.id },
+      {
+        USAGE_COUNTER,
+      },
+    );
+    expect(blocked.status).toBe(409);
+    expect(await blocked.json()).toMatchObject({
+      error: 'ownership_transfer_blocked',
+      details: {
+        blockers: [{ kind: 'sandbox_controller', id: deployment.id, status: 'failed' }],
+      },
+    });
+    expect(
+      (await env.db.select().from(projects).where(eq(projects.id, project.id))[0]).user_id,
+    ).toBe(owner.id);
+    expect(counterCalls).toEqual([]);
+
+    await env.db
+      .update(deployments)
+      .set({
+        manifest: JSON.stringify({ sandbox: { runtime: { protocol: 1, cleanupComplete: true } } }),
+      })
+      .where(eq(deployments.id, deployment.id));
+    const transferred = await req(
+      `/projects/${project.id}/owner`,
+      { userId: target.id },
+      {
+        USAGE_COUNTER,
+      },
+    );
+    expect(transferred.status).toBe(200);
+    expect(
+      (await env.db.select().from(projects).where(eq(projects.id, project.id))[0]).user_id,
+    ).toBe(target.id);
+  });
+
   test('converges routing despite counter failure and resumes after the former owner is deleted', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const owner = await createTestUser(env.db, 'partial-transfer-owner');
