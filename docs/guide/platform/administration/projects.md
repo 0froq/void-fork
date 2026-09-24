@@ -32,7 +32,7 @@ void platform project owner <project-id> <new-owner-user-id> --plan
 void platform project owner <project-id> <new-owner-user-id> --yes
 ```
 
-The preview shows both owners, their plans and suspension state, blockers, and the changes to routing and usage counters. Wait for or cancel any active deploy, rollback, or build before retrying. A managed Sandbox controller also blocks transfer until its cleanup completes, even if no Sandbox container is running; the preview identifies the deployment that owns it.
+The preview shows both owners, their plans and suspension state, blockers, and the changes to routing and usage counters. Wait for active rollbacks and builds to finish. For an ordinary active deployment, wait or use `void platform deployment cancel <id>`; rollback deployments cannot be canceled. A managed Sandbox controller also blocks transfer until its cleanup completes, even if no Sandbox container is running; the preview identifies the deployment that owns it.
 
 After the transfer, the former owner becomes a project administrator. Existing project-scoped CI deploy credentials are revoked; create replacements as the new owner. The new owner's plan and limits apply immediately. Usage before the transfer remains charged to the former owner; later usage is charged to the new owner. If an apply reports partial convergence, inspect the project and operator event log before repeating it.
 
