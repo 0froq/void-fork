@@ -22,7 +22,7 @@ Deployed user worker            Proxy                       Downstream
 
 ## Authentication
 
-Two auth paths are supported:
+Project requests use these authentication paths:
 
 | Path            | When               | Auth                                      |
 | --------------- | ------------------ | ----------------------------------------- |
@@ -30,9 +30,11 @@ Two auth paths are supported:
 | HTTPS           | Local development  | `Authorization: Bearer <api-jwt>`         |
 | HTTPS           | Managed prerender  | Five-minute, project-scoped prerender JWT |
 
-All routes require `projectId` in the JSON body. Prerender JWTs are accepted only
-when their signed project claim exactly matches that value; they are not valid
-at deployment or project-management APIs.
+Project-scoped POST routes require `projectId` in the JSON body. The public
+`GET /health` route has no project body, and `/email/verify-receipt` checks a
+separate internal proof. Prerender JWTs are accepted only when their signed
+project claim exactly matches `projectId`; they are not valid at deployment or
+project-management APIs.
 
 ## Endpoints
 
