@@ -30,6 +30,7 @@ Use the Node.js version recorded in `.node-version`. The workspace uses public n
 | `platform/packages/api`                              | Users, projects, deployments, provisioning, and administrator API/UI |
 | `platform/packages/dispatch`                         | Application routing and static assets                                |
 | `platform/packages/proxy`                            | AI, remote bindings, and revalidation                                |
+| `platform/packages/email-gateway`                    | Inbound mail routing and tenant delivery                             |
 | `platform/packages/tail`                             | Runtime log ingestion                                                |
 | `platform/packages/dashboard`                        | Dashboard source and local UI components in `ui/`                    |
 

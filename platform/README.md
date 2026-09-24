@@ -158,21 +158,21 @@ Void is one repository with an explicit dependency boundary:
 
 ### Top-Level Map
 
-| Path                                                   | Purpose                                                                   |
-| ------------------------------------------------------ | ------------------------------------------------------------------------- |
-| [`packages/api`](./packages/api/README.md)             | Control plane API, deploy pipeline, provisioning, administrator UI        |
-| [`packages/dashboard`](./packages/dashboard/README.md) | User-facing dashboard app                                                 |
-| [`packages/dispatch`](./packages/dispatch/README.md)   | Edge router for installation app domains and custom domains               |
-| `packages/email-gateway`                               | Email ingress, bounded tenant delivery, and validated email actions       |
-| [`packages/proxy`](./packages/proxy/README.md)         | AI proxy, remote D1/KV/R2 proxy, ISR revalidation bridge                  |
-| [`packages/tail`](./packages/tail/README.md)           | Runtime log ingestion into Analytics Engine                               |
-| [`../packages/void`](../packages/void/AGENTS.md)       | Main `void` package: Vite plugin, CLI, runtime, codegen, deploy packaging |
-| `../packages/{vue,react,svelte,solid}`                 | Pages-mode adapters and runtime helpers                                   |
-| `../packages/create-void`                              | Scaffolding package                                                       |
-| `../packages/md`                                       | Markdown package                                                          |
-| `../docs`                                              | Public-facing SDK docs                                                    |
-| `meta/design-docs`                                     | Historical design archive                                                 |
-| `meta/operations.md`                                   | Operations/runbook                                                        |
+| Path                                                           | Purpose                                                                   |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| [`packages/api`](./packages/api/README.md)                     | Control plane API, deploy pipeline, provisioning, administrator UI        |
+| [`packages/dashboard`](./packages/dashboard/README.md)         | User-facing dashboard app                                                 |
+| [`packages/dispatch`](./packages/dispatch/README.md)           | Edge router for installation app domains and custom domains               |
+| [`packages/email-gateway`](./packages/email-gateway/README.md) | Email ingress, bounded tenant delivery, and validated email actions       |
+| [`packages/proxy`](./packages/proxy/README.md)                 | AI proxy, remote D1/KV/R2 proxy, ISR revalidation bridge                  |
+| [`packages/tail`](./packages/tail/README.md)                   | Runtime log ingestion into Analytics Engine                               |
+| [`../packages/void`](../packages/void/AGENTS.md)               | Main `void` package: Vite plugin, CLI, runtime, codegen, deploy packaging |
+| `../packages/{vue,react,svelte,solid}`                         | Pages-mode adapters and runtime helpers                                   |
+| `../packages/create-void`                                      | Scaffolding package                                                       |
+| `../packages/md`                                               | Markdown package                                                          |
+| `../docs`                                                      | Public-facing SDK docs                                                    |
+| `meta/design-docs`                                             | Historical design archive                                                 |
+| `meta/operations.md`                                           | Operations/runbook                                                        |
 
 ### Where Code for X Lives
 

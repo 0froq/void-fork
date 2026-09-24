@@ -23,6 +23,7 @@ The framework, CLI, and platform share one workspace:
 | `platform/packages/api`                              | Control plane, provisioning, administrator API and UI           |
 | `platform/packages/dispatch`                         | Application ingress, asset serving, queue delivery and metering |
 | `platform/packages/proxy`                            | Workers AI, remote bindings and ISR revalidation                |
+| `platform/packages/email-gateway`                    | Email ingress, route checks and bounded tenant delivery         |
 | `platform/packages/tail`                             | Runtime log ingestion into Analytics Engine                     |
 | `platform/packages/dashboard`                        | User dashboard and its local UI components, styles and assets   |
 
@@ -42,7 +43,7 @@ platform's discovery document advertises its capabilities.
 Developer                       Installed platform
 ---------                       ------------------
 void connect <url>       ------> Discovery document
-void auth login         ------> API + GitHub OAuth
+void auth login         ------> API + enabled login provider
 void deploy             ------> API
                                  | validate manifest and provision resources
                                  | upload worker and assets; run migrations
@@ -54,6 +55,7 @@ Browser ---------------------> Dispatch
                                  `----> Request metering
 
 Application worker ----------> Proxy (AI, remote bindings, revalidation)
+Inbound email ---------------> Email gateway -> API route check -> Application worker
 Application tail events -----> Tail -> Analytics Engine -> API log queries
 void platform user list ------> Administrator API
 ```
