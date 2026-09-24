@@ -1,14 +1,19 @@
 # Design archive
 
 These records preserve the reasoning behind Void's framework and platform.
-They include technical proposals, implementation plans, incident analyses and
-decisions that were later revised. Keep commercial strategy, pricing research,
-competitor analysis and private operational inventories out of this archive.
+Keep completed design decisions here after their implementation is in the
+repository. Keep open decisions and implementation task lists in working
+discussions until resolved; Git history preserves superseded plans and review
+transcripts. Keep commercial strategy, pricing research, competitor analysis
+and private operational inventories out of this archive.
 
-A document's date and status describe the decision when it was recorded.
-These records are not a current roadmap or an operator runbook. Retain the
-reasoning and constraints that still explain code; completed task checklists,
-copied implementations and review transcripts belong in Git history.
+Older records have not all been reconciled to this rule: a draft or proposed
+status, open question, or future-tense implementation plan may describe work
+that is now shipped, changed, or still absent. Do not infer current behavior
+from those sections. When touching one of these files, verify its claims
+against source, tests, and maintained guides; keep the final rationale and
+actual behavior, then remove resolved questions and completed task lists.
+These records are not an operator runbook.
 
 For current behavior, start with:
 
