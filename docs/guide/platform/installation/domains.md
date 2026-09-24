@@ -4,7 +4,9 @@ outline: deep
 
 # Domains and Resources
 
-## Add a Domain Later
+<span id="add-a-domain-later"></span>
+
+## Adding a Domain
 
 When your domain is ready, run:
 

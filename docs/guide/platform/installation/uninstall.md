@@ -4,7 +4,7 @@ outline: deep
 
 # Disable and Uninstall
 
-## Disable and safely uninstall
+<span id="disable-and-safely-uninstall"></span>
 
 To pause a platform without removing its data:
 
@@ -24,7 +24,7 @@ Add `--yes` to commands that make changes in a non-interactive shell.
 
 While disabled, the platform retries queue batches after five minutes instead of delivering them to apps. Queue retention and retry limits still apply. For a long pause, plan a dead-letter queue or another way to recover messages.
 
-### Uninstall
+## Uninstall
 
 Preview removal before applying it:
 

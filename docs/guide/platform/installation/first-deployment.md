@@ -2,9 +2,7 @@
 outline: deep
 ---
 
-# First Deployment
-
-## 6. Verify and Deploy Your First App {#connect-and-deploy-an-app}
+# First Deployment {#connect-and-deploy-an-app}
 
 First verify the new platform and sign in as the GitHub administrator you chose:
 

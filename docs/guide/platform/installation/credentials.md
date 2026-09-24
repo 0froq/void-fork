@@ -4,11 +4,11 @@ outline: deep
 
 # Credentials
 
-## 4. Prepare Credentials
+<span id="_4-prepare-credentials"></span>
 
 Keep one password-manager entry for this platform. Paste the saved values into the installer when asked; most do not need shell environment variables.
 
-### Cloudflare API Tokens {#runtime-token-permissions}
+## Cloudflare API Tokens {#runtime-token-permissions}
 
 For a domain installation, create two custom tokens using Cloudflare's [API token setup](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/). Name them **Void Platform Management** and **Void Platform Runtime**. Scope them to your selected account and application zone.
 
@@ -53,11 +53,11 @@ Void checks access before provisioning. If it reports a missing permission, upda
 
 :::
 
-### R2 Upload Credentials
+## R2 Upload Credentials
 
 The installer opens the **R2 token creation** form directly, requesting an account token (or a user token if your role cannot create account tokens). Select **Object Read & Write**—the form starts with read-only access—and keep **Apply to all buckets in this account (including newly created buckets)** selected. This lets the token access the buckets Void creates afterward. Create the token and save its **Access Key ID** and **Secret Access Key**. These are different from the management/runtime tokens above. See [R2's token instructions](https://developers.cloudflare.com/r2/api/tokens/).
 
-### Signing and Encryption Keys {#signing-and-encryption-keys}
+## Signing and Encryption Keys {#signing-and-encryption-keys}
 
 The **JWT signing key** signs platform login tokens. The **Project encryption key** encrypts app secrets stored by your platform. Generate a separate key for each by running this command twice:
 
