@@ -6,7 +6,7 @@ mode app. The administrator UI is served by the API Worker.
 ## Architecture
 
 - **React Pages mode** - `voidPlugin()` + `voidReact()`, SSR with client hydration.
-- **Auth** - OAuth (GitHub/Google) via the platform's `/auth/login` flow. The JWT is
+- **Auth** - enabled platform login methods via the API's `/auth/login` flow. The JWT is
   stored in an httpOnly cookie (`void_token`). Middleware validates the token with
   `GET /me`.
 - **Styling** - Tailwind CSS v4 with dashboard-local styles, fonts, assets,
@@ -14,12 +14,13 @@ mode app. The administrator UI is served by the API Worker.
 
 ## Pages
 
-| Route            | Purpose                                  |
-| ---------------- | ---------------------------------------- |
-| `/login`         | OAuth buttons (GitHub, Google)           |
-| `/auth/callback` | Exchanges the login response for a token |
-| `/`              | Minimal authenticated confirmation page  |
-| `/logout`        | Clears cookie, redirects to login        |
+| Route            | Purpose                                   |
+| ---------------- | ----------------------------------------- |
+| `/login`         | Currently enabled platform login methods  |
+| `/auth/callback` | Exchanges the login response for a token  |
+| `/`              | Minimal authenticated confirmation page   |
+| `/account`       | Links another login method to the account |
+| `/logout`        | Clears cookie, redirects to login         |
 
 ## Local Development
 
@@ -75,8 +76,10 @@ middleware/
   01.auth.ts                # void_token validation through /me
 pages/
   layout.tsx                # Authenticated shell with logout
-  login.tsx                 # OAuth login buttons
-  login.server.ts           # Builds provider login URLs
+  login.tsx                 # Enabled login method buttons
+  login.server.ts           # Builds configured login URLs
+  account.tsx               # Account linking form
+  account.server.ts          # Starts the identity-linking flow
   logout.tsx
   logout.server.ts          # Cookie clear + redirect
   index.tsx                 # Authenticated confirmation page
