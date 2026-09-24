@@ -123,7 +123,7 @@ the standalone `src/github-webhook-ingress.ts` Worker with
 `wrangler.github-webhook-ingress.jsonc`. It validates the raw GitHub HMAC and
 forwards only `POST /internal/github-webhook` over its `API` service binding with
 a short-lived, body-bound proof. The API revalidates that proof and the GitHub
-HMAC. See [Platform Development](../../../docs/guide/platform-development.md#optional-github-webhook-ingress-for-access-protected-apis).
+HMAC. See [Platform Development](../../../docs/guide/platform/development/runtime.md#optional-github-webhook-ingress-for-access-protected-apis).
 
 ### Service-to-service API
 

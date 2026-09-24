@@ -506,7 +506,7 @@ Browser login offers the platform's enabled methods; `--provider <connection-id>
 
 `protection enable` creates or connects Cloudflare Access applications independently
 of login methods. Its `--file` accepts the `cloudflareAccess` object described in
-[installation setup](../guide/self-hosted-platform.md#configure-github-oauth).
+[installation setup](../guide/platform/installation/setup.md#configure-github-oauth).
 Protection changes require installation ownership, the saved recovery credentials,
 and a human administrator session. They revoke current human sessions. Before
 removing protection, change any signup rule that depends on that gate. Cloudflare
@@ -521,7 +521,7 @@ original recovery keys, and a successful browser provider test. Use
 
 `auth token` prints your current operator token. With `--token-stdin`, it exchanges a full administrator API login session from standard input for a new operator token. `auth login --token-stdin` saves the exchanged token to the keychain instead of printing it.
 
-For automation, supply `VOID_OPERATOR_TOKEN` with an explicit `VOID_API_URL` or `--connection`. Operator tokens are stored separately from application deployment credentials. The API checks your current administrator access on every request. See [Using Scripts](../guide/platform-administration.md#using-scripts) for an example.
+For automation, supply `VOID_OPERATOR_TOKEN` with an explicit `VOID_API_URL` or `--connection`. Operator tokens are stored separately from application deployment credentials. The API checks your current administrator access on every request. See [Using Scripts](../guide/platform/administration/operations.md#using-scripts) for an example.
 
 #### Users {#operator-users}
 
@@ -749,7 +749,7 @@ For a first installation, follow [Install a Void Platform](../guide/self-hosted-
 
 Read-only plans, workers.dev installations with the default API hostname, and supported lifecycle operations can use Cloudflare browser login and the system keychain. Installation that writes DNS or creates a zone needs an explicit management token through `CLOUDFLARE_API_TOKEN` or `CF_API_TOKEN`.
 
-The installed platform needs a separate runtime token to provision resources for apps. The interactive installer prompts for it and the other setup values. For non-interactive installs, inject the variables listed in [Install from CI](../guide/self-hosted-platform.md#install-from-ci).
+The installed platform needs a separate runtime token to provision resources for apps. The interactive installer prompts for it and the other setup values. For non-interactive installs, inject the variables listed in [Install from CI](../guide/platform/installation/ci.md#install-from-ci).
 
 To enable email during install or upgrade, set both `VOID_EMAIL_SENDER_DOMAIN` and `VOID_EMAIL_SHARED_ZONE_ID`. Void records the pair for later upgrades; supplying only one is an error.
 
@@ -775,7 +775,7 @@ void platform domain set <domain> [--installation <id>] [--zone <domain>] [--ded
 
 Add an application domain to a workers.dev test platform. Domain-based installations remain the recommended default. The command detects the zone when possible, creates missing DNS and routes after confirmation, and checks HTTPS before making the domain canonical. If DNS or certificates are pending, rerun the same command to resume. `--plan` is read-only; non-interactive mutations require `--yes`.
 
-Existing workers.dev URLs remain available, and the platform API origin, OAuth callback, projects, and deployments stay unchanged. The command verifies the running runtime token's Cache Purge permission for the new zone. A disabled platform stays disabled. Use the database URL from the original installation when administering from another machine. Replacing an already configured application domain is not supported. See [Add a Domain Later](../guide/self-hosted-platform.md#add-a-domain-later).
+Existing workers.dev URLs remain available, and the platform API origin, OAuth callback, projects, and deployments stay unchanged. The command verifies the running runtime token's Cache Purge permission for the new zone. A disabled platform stays disabled. Use the database URL from the original installation when administering from another machine. Replacing an already configured application domain is not supported. See [Add a Domain Later](../guide/platform/installation/domains.md#add-a-domain-later).
 
 ### Lifecycle commands
 
@@ -811,7 +811,7 @@ Repair and upgrade preserve disabled state. New, resumed, and previously disable
 
 Commands preserve existing routes and domains, verify the configured database, and coordinate concurrent administrators before making changes.
 
-`--runtime` selects a custom platform build. Relative paths resolve from your current directory. Void verifies the build before making changes; see [Platform Development](../guide/platform-development.md#deploying-your-runtime) for creating one.
+`--runtime` selects a custom platform build. Relative paths resolve from your current directory. Void verifies the build before making changes; see [Platform Development](../guide/platform/development/runtime.md#deploying-your-runtime) for creating one.
 
 Without `--runtime`, the CLI uses its packaged platform version.
 
@@ -825,7 +825,7 @@ Uninstall verifies remote ownership before removing anything. Data resources are
 
 Resources that may have been shared or repurposed are retained for manual review. Platform traffic stays blocked. External PostgreSQL and its data are never deleted.
 
-See [Disable and safely uninstall](../guide/self-hosted-platform.md#disable-and-safely-uninstall) for the full removal policy.
+See [Disable and safely uninstall](../guide/platform/installation/uninstall.md#disable-and-safely-uninstall) for the full removal policy.
 
 ## Deploy
 

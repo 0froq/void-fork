@@ -17,10 +17,10 @@ export function platformSetupLink(
 export function platformSetupFieldHelp(
   key: string,
 ): Readonly<{ description: string; placeholder?: string }> | undefined {
-  const docs = (section: string, title: string) =>
+  const docs = (page: string, section: string, title: string) =>
     platformSetupLink({
       title,
-      url: 'https://void.cloud/guide/self-hosted-platform#' + section,
+      url: `https://void.cloud/guide/platform/installation/${page}#${section}`,
     });
   switch (key) {
     case 'databaseUrl':
@@ -30,19 +30,19 @@ export function platformSetupFieldHelp(
           'Stores platform users, projects, and deployments; use an empty hosted database, e.g. ' +
           platformSetupLink({ title: 'Neon', url: 'https://neon.com/' }) +
           '. ' +
-          docs('platform-database', 'Database setup'),
+          docs('prerequisites', 'platform-database', 'Database setup'),
       };
     case 'jwtSecret':
       return {
         description:
           'Signs platform login tokens. Run openssl rand -base64 32; save the key in your password manager. ' +
-          docs('signing-and-encryption-keys', 'Key setup'),
+          docs('credentials', 'signing-and-encryption-keys', 'Key setup'),
       };
     case 'projectSecretKey':
       return {
         description:
           'Encrypts app secrets. Run openssl rand -base64 32 separately; save this key for recovery. ' +
-          docs('signing-and-encryption-keys', 'Key setup'),
+          docs('credentials', 'signing-and-encryption-keys', 'Key setup'),
       };
     default:
       return undefined;

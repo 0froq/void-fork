@@ -26,7 +26,7 @@ vp test run
 
 Void Cloud deploys the API after PostgreSQL migrations, then the proxy, email gateway, tail, dispatch, and dashboard Workers. The API hosts the build scheduler and build-container Durable Objects. The optional dashboard uses the API for authentication and is deployed after the API it depends on.
 
-The `deploy` and `deploy:staging` scripts in `platform/package.json` target these existing hosted environments. Forks should use `void platform upgrade --runtime` as described in [source deployment](../../docs/guide/platform-development.md#source-build-ci).
+The `deploy` and `deploy:staging` scripts in `platform/package.json` target these existing hosted environments. Forks should use `void platform upgrade --runtime` as described in [source deployment](../../docs/guide/platform/development/runtime.md#source-build-ci).
 
 ### GitHub Actions
 
@@ -62,7 +62,7 @@ Each command accepts `--environment production|staging`. By default, it uses the
 
 Choose a version from `worker show` for a single rollback. `rollback-all` selects the previous version of each Worker, shows those versions in its preview, and rolls them back in dependency order. A failure stops the remaining changes and reports which Workers succeeded, failed, or were skipped. Use `worker events <batch-id>` to inspect the result.
 
-These commands are for Void Cloud's Workers. Self-hosted installations use the [platform lifecycle commands](../../docs/guide/self-hosted-platform.md#resume-repair-recover-and-upgrade).
+These commands are for Void Cloud's Workers. Self-hosted installations use the [platform lifecycle commands](../../docs/guide/platform/installation/maintenance.md#resume-repair-recover-and-upgrade).
 
 ## Secrets
 
@@ -91,7 +91,7 @@ The API and proxy share their JWT signing configuration. Change it as a coordina
 
 The GitHub App used to build connected repositories is separate from the OAuth application used for platform sign-in. Its repository permissions are Contents read, Metadata read, Pull requests read, and Checks write.
 
-Subscribe to `push`, `installation`, `installation_repositories`, `pull_request`, `workflow_run`, `check_run`, and `check_suite`. The last two subscriptions deliver requests from GitHub's rerun buttons; granting Checks write alone does not enable those events. An API hostname protected by Access cannot receive these deliveries. Deploy the optional ingress described in [Platform Development](../../docs/guide/platform-development.md#optional-github-webhook-ingress-for-access-protected-apis) and set the App webhook URL to that environment's isolated `/github` endpoint. Keep `/webhooks/github` only for an API origin that is not Access-protected.
+Subscribe to `push`, `installation`, `installation_repositories`, `pull_request`, `workflow_run`, `check_run`, and `check_suite`. The last two subscriptions deliver requests from GitHub's rerun buttons; granting Checks write alone does not enable those events. An API hostname protected by Access cannot receive these deliveries. Deploy the optional ingress described in [Platform Development](../../docs/guide/platform/development/runtime.md#optional-github-webhook-ingress-for-access-protected-apis) and set the App webhook URL to that environment's isolated `/github` endpoint. Keep `/webhooks/github` only for an API origin that is not Access-protected.
 
 GitHub issues a PKCS#1 private key. The API expects PKCS#8:
 

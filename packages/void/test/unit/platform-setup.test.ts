@@ -46,13 +46,13 @@ describe('platform credential setup links', () => {
     expect(database.description).toContain('users, projects, and deployments');
     expect(database.description).toContain('https://neon.com/');
     expect(database.description).toContain(
-      'https://void.cloud/guide/self-hosted-platform#platform-database',
+      'https://void.cloud/guide/platform/installation/prerequisites#platform-database',
     );
     for (const key of ['jwtSecret', 'projectSecretKey']) {
       const help = platformSetupFieldHelp(key)!;
       expect(help.description).toContain('Run openssl rand -base64 32');
       expect(help.description).toContain(
-        'https://void.cloud/guide/self-hosted-platform#signing-and-encryption-keys',
+        'https://void.cloud/guide/platform/installation/credentials#signing-and-encryption-keys',
       );
       expect(help.description).not.toContain('\n');
     }

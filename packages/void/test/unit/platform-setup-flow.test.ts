@@ -489,7 +489,7 @@ describe('platform credential onboarding', () => {
     );
     const descriptions = info.mock.calls.map(([message]) => message).join('\n');
     expect(descriptions).toContain(
-      'https://void.cloud/guide/self-hosted-platform#platform-database',
+      'https://void.cloud/guide/platform/installation/prerequisites#platform-database',
     );
     expect(descriptions).toContain('Signs platform login tokens. Run openssl rand -base64 32');
     expect(descriptions).toContain('Encrypts app secrets. Run openssl rand -base64 32 separately');

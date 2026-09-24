@@ -30,7 +30,7 @@ account. Both use the same application APIs, with the following differences:
 
 Ordinary native applications remain compatible with Workers Free within its
 quotas. Installing a team platform requires Workers for Platforms and the
-[documented infrastructure](./self-hosted-platform.md#cloudflare-footprint).
+[documented infrastructure](./platform/installation/domains.md#cloudflare-footprint).
 Application rollback never reverses database migrations.
 
 Routing-rule parity applies to native Void applications and static deployments.

@@ -41,7 +41,7 @@ This removes Cloudflare Access protection for these Workers.
 Void’s own authentication stays enabled. Keep account-wide Default-Deny on.
 
 For platforms that must remain Access-protected:
-https://void.cloud/guide/self-hosted-platform#cloudflare-access`);
+https://void.cloud/guide/platform/installation/maintenance#cloudflare-access`);
 });
 
 it('does not tell upgrades or repairs to restart installation', () => {

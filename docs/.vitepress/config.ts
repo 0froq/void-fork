@@ -100,13 +100,42 @@ const integrationLinks = {
 
 const platformSidebar = [
   {
-    text: 'Platform',
+    text: 'Installation',
     icon: 'lucide:cloud',
     collapsed: false,
     items: [
-      { text: 'Installation', link: '/guide/self-hosted-platform' },
-      { text: 'Administration', link: '/guide/platform-administration' },
-      { text: 'Development & Customization', link: '/guide/platform-development' },
+      { text: 'Overview', link: '/guide/self-hosted-platform' },
+      { text: 'Prerequisites', link: '/guide/platform/installation/prerequisites' },
+      { text: 'Credentials', link: '/guide/platform/installation/credentials' },
+      { text: 'Install and Configure Login', link: '/guide/platform/installation/setup' },
+      { text: 'First Deployment', link: '/guide/platform/installation/first-deployment' },
+      { text: 'Domains and Resources', link: '/guide/platform/installation/domains' },
+      { text: 'Maintenance and Recovery', link: '/guide/platform/installation/maintenance' },
+      { text: 'Install from CI', link: '/guide/platform/installation/ci' },
+      { text: 'Disable and Uninstall', link: '/guide/platform/installation/uninstall' },
+    ],
+  },
+  {
+    text: 'Administration',
+    icon: 'lucide:settings',
+    collapsed: false,
+    items: [
+      { text: 'Overview', link: '/guide/platform-administration' },
+      { text: 'Sign-in and Access', link: '/guide/platform/administration/access' },
+      { text: 'Users and Projects', link: '/guide/platform/administration/projects' },
+      { text: 'Email', link: '/guide/platform/administration/email' },
+      { text: 'Operations', link: '/guide/platform/administration/operations' },
+    ],
+  },
+  {
+    text: 'Development & Customization',
+    icon: 'lucide:code',
+    collapsed: false,
+    items: [
+      { text: 'Overview', link: '/guide/platform-development' },
+      { text: 'Local Development', link: '/guide/platform/development/local' },
+      { text: 'Runtime and Source Builds', link: '/guide/platform/development/runtime' },
+      { text: 'Schema and CI', link: '/guide/platform/development/schema-ci' },
     ],
   },
 ];
@@ -160,13 +189,13 @@ export default extendConfig(
           text: 'SDK',
           link: '/guide/',
           activeMatch:
-            '^/guide/(?!self-hosted-platform|platform-administration|platform-development)',
+            '^/guide/(?!platform/|self-hosted-platform|platform-administration|platform-development)',
         },
         {
           text: 'Platform',
           link: '/guide/self-hosted-platform',
           activeMatch:
-            '^/guide/(self-hosted-platform|platform-administration|platform-development)',
+            '^/guide/(platform/|self-hosted-platform|platform-administration|platform-development)',
         },
         referenceLinks,
         integrationLinks,
@@ -176,6 +205,7 @@ export default extendConfig(
       socialLinks,
 
       sidebar: {
+        '/guide/platform/': platformSidebar,
         '/guide/self-hosted-platform': platformSidebar,
         '/guide/platform-administration': platformSidebar,
         '/guide/platform-development': platformSidebar,
