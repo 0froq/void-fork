@@ -56,7 +56,8 @@ export const MAX_ISR_VARIANTS_PER_PATH = 200;
 
 /**
  * Read an ISR cache entry from KV.
- * Returns null on cache miss or if metadata is malformed.
+ * Returns null on cache miss, malformed metadata, or a KV read failure so the
+ * caller renders the page live.
  */
 export async function readIsrCache(
   env: Env,
@@ -67,11 +68,15 @@ export async function readIsrCache(
   originalUrl?: string | null,
 ): Promise<IsrCacheEntry | null> {
   const key = isrCacheKey(projectId, deploymentId, host, pathname, originalUrl);
-  const { value, metadata } = await env.ISR_CACHE.getWithMetadata<IsrCacheMetadata>(
-    key,
-    'arrayBuffer',
-  );
-  return decodeIsrCacheEntry(value, metadata);
+  try {
+    const { value, metadata } = await env.ISR_CACHE.getWithMetadata<IsrCacheMetadata>(
+      key,
+      'arrayBuffer',
+    );
+    return decodeIsrCacheEntry(value, metadata);
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -747,8 +747,7 @@ describe('ISR (stale-while-revalidate)', () => {
     expect(await response.text()).toBe('<html>cached</html>');
   });
 
-  // Known failure: dispatch currently propagates the KV error before reaching the Worker.
-  it.fails('renders an ISR page when the platform KV read fails', async () => {
+  it('renders an ISR page when the platform KV read fails', async () => {
     const { env, workerFetch } = createEnv({
       routing: { workerName: 'user-app', projectId: 'proj_1', ssr: true, revalidate: 60 },
       workerResponse: new Response('<html>live</html>', {
@@ -765,6 +764,7 @@ describe('ISR (stale-while-revalidate)', () => {
 
     expect(workerFetch).toHaveBeenCalledOnce();
     expect(response.status).toBe(200);
+    expect(response.headers.get('x-isr-cache')).toBe('MISS');
     expect(await response.text()).toBe('<html>live</html>');
   });
 

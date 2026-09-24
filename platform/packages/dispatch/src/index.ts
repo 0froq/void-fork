@@ -1033,8 +1033,8 @@ export default {
     }
 
     // ISR: stale-while-revalidate for configured paths
-    // Two-layer cache: Edge (per-colo, sub-ms) → R2 (global, ~50ms) → Worker (render)
-    // Pages protocol (X-VoidPages) uses a separate JSON edge cache; HTML uses R2+edge.
+    // Two-layer cache: Edge (per-colo) → KV → Worker (render)
+    // Pages protocol (X-VoidPages) uses a separate JSON edge cache; HTML uses KV+edge.
     // ISR applies to SSR page paths only. An API route or an asset-extension
     // path that happens to match a catch-all page pattern must render live and
     // never enter the ISR cache — mirrors the write-back guard (requestType ===
@@ -1099,7 +1099,7 @@ export default {
           }
           // Miss — fall through to general dispatch (worker returns JSON for X-VoidPages)
         } else {
-          // HTML path: Edge → R2 → Worker
+          // HTML path: Edge → KV → Worker
           const purgePoisonedIsrEntry = async (): Promise<void> => {
             await deleteSharedIsrEntry(env, sharedIsrEntry!);
           };
@@ -1132,7 +1132,7 @@ export default {
             await cache.delete(cacheKey);
           }
 
-          // L2: R2 (global)
+          // L2: KV
           const cached = await readIsrCache(
             env,
             routing.projectId,
@@ -2171,7 +2171,7 @@ function getWorker(env: Env, routing: RoutingEntry): Fetcher {
 /**
  * Revalidate an ISR page in the background.
  * Dispatches to the user worker (always as HTML, no X-VoidPages), writes HTML
- * to R2 + HTML edge cache, and populates JSON edge cache from embedded page data.
+ * to KV + HTML edge cache, and populates JSON edge cache from embedded page data.
  * Errors are caught and logged — serve stale, don't retry.
  */
 async function revalidateInBackground(
@@ -2240,7 +2240,7 @@ async function revalidateInBackground(
     }
     const ttl = resolveRevalidateTtl(response, defaultTtl);
     const cache = applicationEdgeCache;
-    // Evict every shared representation of this entry: R2/KV + HTML edge + JSON edge.
+    // Evict every shared representation of this entry: KV + HTML edge + JSON edge.
     const evictSharedEntry = async () => {
       await deleteIsrCache(
         env,
@@ -2321,7 +2321,7 @@ async function revalidateInBackground(
       // non-200 (even one carrying `x-revalidate: 0`) likewise must NOT evict — keep
       // serving the last known-good entry (stale-while-revalidate resilience). The
       // write gate already refuses to cache non-authoritative content, so eviction
-      // must mirror it. Removes R2/KV + HTML + JSON edge.
+      // must mirror it. Removes KV + HTML + JSON edge.
       try {
         await evictSharedEntry();
       } catch (error) {
