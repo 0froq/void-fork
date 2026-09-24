@@ -99,10 +99,10 @@
 - Resolve a dispatched Worker's DO namespace through its bindings endpoint,
   not an account-wide namespace scan. Preserve the Queue-based dispatch path
   where a DO or WorkerEntrypoint cannot make the required service fetch.
-- Container namespace bindings are immutable. Verify namespaces on recovery,
+- Legacy container namespace bindings are immutable. Verify namespaces on recovery,
   handle concurrent creation, and delete container applications explicitly;
-  deleting their Workers is insufficient. See
-  [ownership and teardown](./design-docs/0067-cross-script-do-host-architecture.md).
+  deleting their Workers is insufficient. The [managed Sandbox design](./design-docs/0082-managed-sandbox-restoration.md)
+  records the current controller path and legacy drain boundary.
 - Recovery lookups after provider conflicts must preserve retryable rate-limit
   errors and otherwise fall back to the original diagnostic.
 - Preserve chronological DO migration tags and configured class names.
