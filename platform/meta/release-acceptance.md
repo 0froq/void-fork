@@ -55,3 +55,16 @@ account resources outside the test.
 Record the candidate commit, artifact digest, nonsecret resource identifiers,
 results and times outside this reusable checklist. Keep credentials in the
 secret manager. This document records a procedure, not a completed signoff.
+
+## Email acceptance
+
+Before enabling production email, verify the native and platform paths with live Cloudflare resources and disposable accounts:
+
+- Route a shared sender and two project subdomains on one zone. Exercise unknown and disabled domains, BCC, plus tags, conflicting rules, concurrent add/remove, and sibling routes after project deletion.
+- Reject cross-zone secret replay, forged project or domain claims, public access to the reserved tenant handler, expired capabilities, and unauthorized owner or administrator actions.
+- Inject failures around provider writes and database commits. Kill and resume reconciliation, delay a provider response, fail cache publication, and verify both phases of secret rotation. Resolve an uncertain write only after proving or attesting its outcome.
+- Verify concurrent recipient-attempt quotas, duplicate and conflicting idempotency keys, partial batches, month rollover, provider refusals, and unknown outcomes.
+- Test oversized and stalled tenant responses, truncated MIME, excessive frames, and concurrent dispatch. Measure memory use under adversarial payloads.
+- Confirm that provider acceptance, forwarding and reply outcomes, blocked actions, lost responses, and crashes around attempt recording remain visible without replaying a successful recipient.
+- Exercise scoped tokens, routing and Sending permissions, plan refusals, real MIME and recipient limits, and original-event failure behavior against Cloudflare.
+- Confirm native Workers Free routing and verified sends, plus the paid Sending opt-in. Apps without email must emit no paid binding or entitlement probe.

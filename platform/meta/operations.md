@@ -155,7 +155,7 @@ preserve staged secret state until the operation completes.
 
 PostgreSQL is authoritative for consent, policy, suspension, and recipient-attempt quotas. Cache publication retries independently. `void email logs` exposes receipt and action metadata: provider acceptance is not proof of delivery, and an unknown result must not be retried with a new idempotency key. Removing one domain or project must preserve sibling routes and unresolved cleanup records.
 
-Before production enablement, complete the [email design's acceptance gates](./design-docs/0078-email-cf-native.md#acceptance-gates), including live Cloudflare routing, forwarding/reply, scoped-token, rotation, and failure-recovery checks.
+Before production enablement, complete the [email acceptance checks](./release-acceptance.md#email-acceptance), including live Cloudflare routing, forwarding/reply, scoped-token, rotation, and failure-recovery checks.
 
 ## Staging Access Control
 
