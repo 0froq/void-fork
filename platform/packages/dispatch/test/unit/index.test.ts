@@ -747,6 +747,27 @@ describe('ISR (stale-while-revalidate)', () => {
     expect(await response.text()).toBe('<html>cached</html>');
   });
 
+  // Known failure: dispatch currently propagates the KV error before reaching the Worker.
+  it.fails('renders an ISR page when the platform KV read fails', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', ssr: true, revalidate: 60 },
+      workerResponse: new Response('<html>live</html>', {
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    });
+    vi.spyOn(env.ISR_CACHE, 'getWithMetadata').mockRejectedValueOnce(new Error('KV unavailable'));
+
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/dashboard'),
+      env,
+      createCtx(),
+    );
+
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('<html>live</html>');
+  });
+
   it('bypasses ISR cache when Cookie header is present', async () => {
     const { env, workerFetch } = createEnv({
       routing: {
