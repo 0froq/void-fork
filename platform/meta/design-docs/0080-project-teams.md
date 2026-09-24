@@ -107,9 +107,9 @@ The actor's personal plan never raises or lowers the project's limits. This
 applies to request and AI usage, deploys per day, build concurrency and timeout,
 build instance size, CPU and subrequest limits, deployment retention, and future
 account-level storage enforcement. Managed Sandbox runtime and concurrency
-limits are enforced against the controller's owner account. A live Sandbox
-controller retains that owner identity across a project ownership transfer;
-the transfer path currently does not rebind it or block the transfer.
+limits are enforced against the controller's owner account. Ownership transfer
+is blocked until every managed Sandbox controller for the project has completed
+cleanup under that owner.
 
 A manually suspended actor cannot authenticate, even if they are a member. An
 actor automatically suspended for usage on projects they own may still work on
@@ -140,9 +140,10 @@ former owner afterward.
 
 The target must be an existing Platform user. The preview names the target's
 plan and suspension state. A transfer is rejected while the project is deleting
-or has a nonterminal deploy, rollback, or managed build. The administrator can
-cancel or wait for that work and retry. This keeps a single operation from
-beginning under one owner's plan and publishing under another's.
+or has a nonterminal deploy, rollback, managed build, or managed Sandbox
+controller awaiting cleanup. The administrator can cancel or wait for active
+work, and retry after Sandbox controller cleanup completes. This keeps a single
+operation from beginning under one owner's plan and publishing under another's.
 
 ## Data model
 
