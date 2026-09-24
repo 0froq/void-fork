@@ -203,17 +203,21 @@ recovery or promotion bypass.
 
 ## Auth Flow
 
-`GET /auth/login?redirect=...&provider=github|google` starts OAuth. After callback:
+`GET /auth/login?redirect=...&provider=<connection-id>` starts an enabled
+login method. Configurable installations read GitHub, Google, OIDC, or
+Cloudflare Access connections from the database; older installations retain
+their deployment-time GitHub/Google configuration. After callback, the API
+validates the signed state and provider identity, then signs in the linked
+account or applies the installation's signup policy to a new account. In a
+configurable installation, a matching email address does not automatically
+link another login method; users link it explicitly with `void auth link` or
+the optional dashboard's **Account** page.
 
-1. the API validates the signed state
-2. exchanges the code with GitHub or Google
-3. looks up an existing OAuth account
-4. if needed, links the provider to an existing user with the same email
-5. otherwise creates a new user
-6. signs a JWT and redirects back:
-   - dashboard redirects receive a short-lived `?code=...` for `POST /auth/exchange`
-   - new CLI redirects with `code_challenge_method=S256` receive a short-lived `?code=...` for `POST /auth/cli/token`
-   - legacy localhost CLI redirects still receive `?token=...`
+A successful login signs a JWT and redirects back:
+
+- dashboard redirects receive a short-lived `?code=...` for `POST /auth/exchange`
+- new CLI redirects with `code_challenge_method=S256` receive a short-lived `?code=...` for `POST /auth/cli/token`
+- legacy localhost CLI redirects still receive `?token=...`
 
 The CLI entrypoint is `void auth login`, not `void login`.
 
