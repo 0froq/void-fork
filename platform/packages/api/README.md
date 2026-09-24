@@ -392,8 +392,9 @@ When enabling email on a self-hosted or custom-origin platform, configure
 `EMAIL_FROM` with a Cloudflare-verified sender and `AUTH_REDIRECT_URI` with the
 platform's public OAuth callback URL. Emails use that origin and
 `PLATFORM_DISPLAY_NAME`; an installed platform does not default to Void Cloud
-senders or dashboard links. Email remains optional and is not part of the core
-installer.
+senders or dashboard links. The core installer includes the email gateway and
+enables platform email when both `VOID_EMAIL_SENDER_DOMAIN` and
+`VOID_EMAIL_SHARED_ZONE_ID` are configured.
 
 Administrators manage access with `void platform signup` and `void platform invitation`. Signup eligibility comes from the installation's own allowlist and bootstrap administrator configuration.
 
