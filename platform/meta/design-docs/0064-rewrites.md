@@ -1,6 +1,6 @@
 ---
 title: URL Rewrites
-status: draft
+status: implemented
 created: 2026-04-14
 ---
 
@@ -12,7 +12,7 @@ created: 2026-04-14
 
 ## Context
 
-Void supports URL redirects (3xx) at the edge but not URL rewrites (status 200). A rewrite serves content from a different internal path without changing the browser URL. This is a fundamental routing primitive that unlocks several real-world patterns:
+Void supports URL redirects (3xx) and rewrites (status 200) at the edge. A rewrite serves content from a different internal path without changing the browser URL. This routing primitive supports several patterns:
 
 ### Motivation
 
@@ -39,7 +39,7 @@ Rewrites use the existing `RedirectRule` type with `status: 200`. The deploy man
 - `redirectRules` (pre-asset) — all 3xx redirects plus status-200 "force" rewrites from `routing.rewrites` or `_redirects` `200!` entries. Evaluated before static-asset resolution and worker dispatch.
 - `fallbackRules` (post-resolution) — plain status-200 entries from `routing.fallbacks` or `_redirects` `200` lines. For static/SPA deployments, evaluated only when the static-asset resolver would otherwise 404. For WfP/framework deployments, evaluated only when the first user-worker dispatch returns 404.
 
-Last-match-wins applies within each list. Interleaved ordering from `_redirects` files is preserved within the pre-asset array; the post-asset array is its own independent pass.
+First-match-wins applies within each list. Interleaved ordering from `_redirects` files is preserved within the pre-asset array; the post-asset array is its own independent pass. Rules from `void.json` precede file-based rules within their phase.
 
 The `void.json` config has separate `routing.rewrites` and `routing.fallbacks` keys for DX clarity:
 
