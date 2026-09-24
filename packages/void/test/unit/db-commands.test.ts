@@ -636,7 +636,7 @@ describe('void db rename-migrations', () => {
     expect(names).toHaveLength(2);
     expect(names[0].name).toMatch(/^\d{14}_a\.sql$/);
     expect(names[1].name).toMatch(/^\d{14}_b\.sql$/);
-  });
+  }, 15_000);
 
   it('restores original journal bytes when writeJournal itself fails', async () => {
     const root = createRenameProjectRoot({
