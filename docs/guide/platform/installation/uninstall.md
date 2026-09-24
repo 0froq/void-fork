@@ -31,7 +31,7 @@ void platform uninstall [id] --plan
 void platform uninstall [id]
 ```
 
-Uninstall blocks platform traffic, removes transient Queues, and records the resources left for you to review. By default, Workers, KV, R2, Hyperdrive, the dispatch namespace, and AI Gateway remain in your account. Adopted resources, external PostgreSQL, zones, DNS records, routes, and custom domains are always retained.
+Uninstall blocks platform traffic, removes transient Queues, and records the resources left for you to review. By default, Workers, KV, R2, Hyperdrive, the dispatch namespace, and AI Gateway remain in your account. Adopted resources, external PostgreSQL, zones, DNS records, routes, custom domains, and Cloudflare Access resources are always retained.
 
 To also remove eligible data resources owned by the installer:
 
@@ -39,7 +39,9 @@ To also remove eligible data resources owned by the installer:
 void platform uninstall [id] --purge-data
 ```
 
-Even with `--purge-data`, Void retains Workers, R2, AI Gateway, DNS records, routes, custom domains, adopted resources, external PostgreSQL, and zones. Review those in the Cloudflare dashboard if you want to remove them.
+Even with `--purge-data`, Void retains Workers, R2, AI Gateway, DNS records, routes, custom domains, Access resources, adopted resources, external PostgreSQL, and zones. Review those in the Cloudflare dashboard if you want to remove them.
+
+If installation configured Cloudflare Access, the uninstall plan lists its recorded applications and service tokens with their ownership and IDs. Review them in Zero Trust after uninstall. Remove installer-created resources only when nothing else uses them; resources connected from an existing company setup remain under their owner's control.
 
 ::: details Why some resources require manual cleanup
 
