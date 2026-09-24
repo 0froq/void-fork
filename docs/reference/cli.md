@@ -715,6 +715,25 @@ Use `sandbox-drain` when an upgrade from the legacy tenant-owned Sandbox runtime
 
 Use the [platform lifecycle commands](#lifecycle-commands) to maintain your installation's Workers.
 
+#### Hosted Workers {#operator-workers}
+
+The following commands manage the Workers of the hosted Void Cloud platform.
+They are unavailable on a self-hosted installation; use the
+[lifecycle commands](#lifecycle-commands) there instead.
+
+```sh
+void platform worker list [--environment <production|staging>]
+void platform worker show <worker-name> [--environment <production|staging>]
+void platform worker rollback <worker-name> <version-id> [--environment <production|staging>]
+void platform worker rollback-all [--environment <production|staging>]
+void platform worker events [batch-id] [--environment <production|staging>]
+```
+
+Use a name from `worker list`, such as `api` or `proxy`. `show` lists its
+versions and current deployment. Preview either rollback with `--plan`, then
+apply it interactively or with `--yes` in a script. `events` lists worker
+operation events or inspects one batch by ID.
+
 #### Pagination and JSON
 
 User, project, deployment, invitation, and event lists default to page `1` with 20 items. `--limit` accepts 1 to 100 for these lists. Their JSON responses include the page, limit, and total count.
