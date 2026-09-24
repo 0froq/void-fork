@@ -18,7 +18,7 @@ The preview shows which account will be suspended and the effect on its projects
 void platform user suspend <user-id> --reason "Investigating unexpected traffic" --yes
 ```
 
-Scripts must use `--yes` to apply these changes. Authentication commands run directly and do not use `--plan` or `--yes`. After a change, `void platform system events` shows the administrator, affected objects, and recorded outcome.
+Scripts must use `--yes` to apply these changes. The `void platform auth` session commands run directly and do not use `--plan` or `--yes`; changes under `void platform config auth` do use previews and confirmation. After a change, `void platform system events` shows the administrator, affected objects, and recorded outcome.
 
 Changes can take longer when an account owns many resources. Requests that change the platform allow five minutes by default; use `--timeout` to set a different limit in seconds:
 
