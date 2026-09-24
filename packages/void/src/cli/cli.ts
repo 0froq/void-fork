@@ -62,6 +62,13 @@ async function runSubcommandGroup<T>(
   try {
     if ((!sub || (sub.startsWith('-') && !hasNamedSubcommand)) && process.stdin.isTTY) {
       const { promptSubcommand } = await import('./subcommand-prompt.ts');
+      if (command === 'platform' && !sub) {
+        log.info(
+          'A Void platform lets a team deploy Void apps to a shared Cloudflare account.\n' +
+            'This command sets up and manages platforms. Join with `void connect <url>`.\n' +
+            'Docs: https://void.cloud/guide/self-hosted-platform',
+        );
+      }
       const result = await promptSubcommand(command, subcommands);
       if (!result) {
         process.exit(0);
