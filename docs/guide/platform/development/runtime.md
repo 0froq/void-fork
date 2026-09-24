@@ -41,8 +41,14 @@ Then run it without `--plan` to apply the upgrade. Source-built runtimes go thro
 ## Optional GitHub Webhook Ingress for Access-Protected APIs
 
 The core installer does not deploy the dashboard, GitHub App, build Containers,
-or webhook ingress. If a source-built installation adds those optional services
-and Cloudflare Access protects its API hostname, GitHub cannot deliver directly
+or webhook ingress. Passing a source build with `--runtime` does not provision
+their infrastructure, bindings, credentials, or platform capabilities. The
+repository's hosted deployment scripts target Void Cloud; they are not a
+general setup procedure for adding these services to a self-hosted platform.
+Use the core CLI deployment workflow unless your fork supplies and maintains
+that optional integration.
+
+If your fork has added managed GitHub builds and Cloudflare Access protects its API hostname, GitHub cannot deliver directly
 to `/webhooks/github`: GitHub does not present your Access credentials. Do not add
 an Everyone or bypass policy to the API application.
 
@@ -55,11 +61,10 @@ protection can continue using the API's direct `/webhooks/github` endpoint.
 
 To deploy the optional ingress:
 
-1. Deploy the source API/build runtime containing the internal operation and its
-   build bindings, then finish the separate GitHub App/build-service
-   configuration. A core install or upgrade alone does not add managed builds.
-   Enable the platform's managed-build capability only when that infrastructure
-   is ready.
+1. Provision the GitHub App, build executors, API bindings, credentials, and
+   managed-build capability in your fork, then deploy its source API runtime
+   with the internal operation. A core install or upgrade alone does not add
+   managed builds.
 2. Edit `platform/packages/api/wrangler.github-webhook-ingress.jsonc`. Give the
    ingress a name unique to the installation and set its `API` service binding to
    the exact installed API Worker name. Keep its public hostname separate from
