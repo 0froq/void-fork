@@ -4,7 +4,7 @@ outline: deep
 
 # First Deployment
 
-First verify the new platform and sign in as the GitHub administrator you chose:
+First verify the new platform and sign in with the administrator login method selected during setup:
 
 ```sh
 void platform status
@@ -68,7 +68,7 @@ void platform status [id]
 
 ## Managing Access
 
-After installation, sign in with the GitHub account you chose as the first administrator:
+After installation, sign in as the first administrator. For a teammate who uses GitHub, add their login to the signup allowlist:
 
 ```sh
 void platform auth login

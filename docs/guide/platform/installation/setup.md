@@ -4,7 +4,7 @@ outline: deep
 
 # Install and Configure Login
 
-For workers.dev testing, start the interactive install and continue to the GitHub setup below:
+For workers.dev testing, start the interactive install and choose your login method below:
 
 ```sh
 void platform install --workers-dev
@@ -35,7 +35,7 @@ Use the same name, account, and domain as the preview, then confirm the installa
 
 The installer offers GitHub, Google, generic OIDC, and Cloudflare Access login.
 Cloudflare Access protection is a separate choice from Access login. The
-GitHub-only setup below retains the existing workflow.
+GitHub OAuth steps below apply when you select GitHub login.
 
 For Google, create an OAuth client and register the printed callback URL. You
 can restrict it to named Google Workspace domains. For OIDC or Access login,
@@ -140,9 +140,9 @@ For the default GitHub-only setup:
 
 This OAuth App handles sign-in. A GitHub App with repository access and build webhooks is not required for the core platform.
 
-The prompts collect the runtime token, administrator GitHub username, PostgreSQL URL, GitHub client ID and secret, R2 credentials, and signing/encryption keys. Secret values are masked and setup progress is encrypted locally using the system keychain. Keep a password-manager copy for recovery on another machine.
+For the default GitHub-only setup, the prompts collect the runtime token, administrator GitHub username, PostgreSQL URL, GitHub client ID and secret, R2 credentials, and signing/encryption keys. Other login methods collect their configured provider credentials and use the one-time administrator setup code described above. Secret values are masked and setup progress is encrypted locally using the system keychain. Keep a password-manager copy for recovery on another machine.
 
-Void shows installation progress while it prepares the database, provisions Cloudflare resources, deploys the services, and verifies platform health. Progress is checkpointed for recovery. When installation finishes, open the printed admin dashboard link and sign in with the GitHub account you selected as administrator. This creates your first admin user; no app or CLI login is required. Void also prints the API URL to use when you [connect and deploy an app](/guide/platform/installation/first-deployment).
+Void shows installation progress while it prepares the database, provisions Cloudflare resources, deploys the services, and verifies platform health. Progress is checkpointed for recovery. When installation finishes, follow the printed administrator sign-in instructions and open the admin dashboard link. GitHub-only setup creates the first admin user when the selected GitHub account signs in; configurable setup uses the one-time `/setup` code and selected administrator login method. No app or CLI login is required. Void also prints the API URL to use when you [connect and deploy an app](/guide/platform/installation/first-deployment).
 
 Remove the management token from the shell when finished:
 

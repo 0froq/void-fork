@@ -6,7 +6,7 @@ outline: deep
 
 ## Signing In
 
-For the browser dashboard, open `<API URL>/admin` and sign in with GitHub. On a new installation, signing in with the administrator account selected during setup creates the first admin user. You do not need to create an app or sign in through the CLI first.
+For the browser admin UI, open `<API URL>/admin` and use the administrator login method selected during setup. On a new installation, follow the printed administrator setup instructions to create the first admin user. You do not need to create an app or sign in through the CLI first.
 
 Connect to your platform's API URL, then sign in as an administrator:
 

@@ -15,9 +15,6 @@ Inject the following values from protected CI secrets. Do not commit them in a w
 | `CLOUDFLARE_API_TOKEN`                       | Management API token                                                                        |
 | `VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN` | Runtime API token                                                                           |
 | `VOID_PLATFORM_DATABASE_URL`                 | Dedicated PostgreSQL URL                                                                    |
-| `VOID_PLATFORM_GITHUB_CLIENT_ID`             | OAuth App client ID                                                                         |
-| `VOID_PLATFORM_GITHUB_CLIENT_SECRET`         | OAuth App client secret                                                                     |
-| `VOID_PLATFORM_ADMIN_GITHUB_LOGIN`           | Initial administrator's GitHub username                                                     |
 | `VOID_PLATFORM_R2_ACCESS_KEY_ID`             | R2 Access Key ID                                                                            |
 | `VOID_PLATFORM_R2_SECRET_ACCESS_KEY`         | R2 Secret Access Key                                                                        |
 | `VOID_PLATFORM_JWT_SECRET`                   | Original JWT signing secret                                                                 |
@@ -26,6 +23,14 @@ Inject the following values from protected CI secrets. Do not commit them in a w
 | `VOID_PLATFORM_RECOVERY_KEY`                 | Base64-encoded 32-byte key for local encrypted recovery state when no keychain is available |
 | `VOID_EMAIL_SENDER_DOMAIN`                   | Optional shared mail domain; requires `VOID_EMAIL_SHARED_ZONE_ID`                           |
 | `VOID_EMAIL_SHARED_ZONE_ID`                  | Cloudflare zone ID for that mail domain; requires `VOID_EMAIL_SENDER_DOMAIN`                |
+
+For the default GitHub-only login, also set `VOID_PLATFORM_GITHUB_CLIENT_ID`,
+`VOID_PLATFORM_GITHUB_CLIENT_SECRET`, and `VOID_PLATFORM_ADMIN_GITHUB_LOGIN`.
+For Google, OIDC, or Access login, pass `--auth-config <path>` using the
+[configuration format](/guide/platform/installation/setup#choose-login-methods).
+Inject each `clientSecretEnv` named in that file from your CI secret manager.
+Automatic Access protection may also need `VOID_PLATFORM_ACCESS_SETUP_TOKEN`
+with the [setup permissions](/guide/platform/installation/setup#cloudflare-access).
 
 Use that installation's saved signing and encryption keys on every resume or repair that needs them. After a keyring rotation, use the [complete keyring recovery inputs](/guide/platform/installation/maintenance#manage-an-installation-from-another-machine). The database claim and tables remain after uninstall; use a fresh database for a different installation.
 
@@ -41,7 +46,7 @@ void platform install \
   --yes
 ```
 
-Mutations require `--yes` in CI; a read-only `--plan` does not. Custom runtimes also require `--runtime <directory>`. For a new installation, register the GitHub callback shown by `--plan` before running the unattended install with the same account, name, and domain options. A custom API hostname is optional.
+Mutations require `--yes` in CI; a read-only `--plan` does not. Custom runtimes also require `--runtime <directory>`. For a new installation, run `--plan` with the same account, name, and domain options as the unattended install. If you use `--auth-config`, pass the same file to both commands. Register the printed callback with your selected login provider before installing. A custom API hostname is optional.
 
 :::
 

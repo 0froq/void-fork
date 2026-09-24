@@ -54,7 +54,7 @@ For a domain installation, use these answers. Testing mode skips the application
 
 Platform resources use your installation name: `team` creates names such as `void-team-api`, `void-team-proxy`, and `void-team-routing`, with no random suffix. Use a different installation name for another platform in the same account. If a required resource already exists and belongs to another installation, Void stops without overwriting it. Existing installations keep their recorded resource names.
 
-The preview shows the actual resource names and GitHub callback URL that installation will use with the same configuration. It also links directly to the runtime-token form, the account's R2 token page, and GitHub OAuth registration. It does not open credential setup pages or save an installation draft; Cloudflare browser login still opens when needed.
+The preview shows the actual resource names and login callback URL that installation will use with the same configuration. It also links directly to the runtime-token form and the account's R2 token page. When you select GitHub login, it links to GitHub OAuth registration. It does not open credential setup pages or save an installation draft; Cloudflare browser login still opens when needed.
 
 You can select either path directly:
 
