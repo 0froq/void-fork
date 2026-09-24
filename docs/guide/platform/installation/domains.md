@@ -51,7 +51,7 @@ The management token needs **SSL and Certificates: Read** (or Edit) on that zone
 
 ## Cloudflare footprint
 
-Resources use a `void-<installation-name>-<random-suffix>-*` prefix where Cloudflare allows names. This keeps installations recognizable and avoids predictable Worker names colliding during setup.
+New platform resources use deterministic `void-<installation-name>-<role>` names where Cloudflare allows them, such as `void-team-api`. Choose an unused installation name in the account; Void stops on an unowned name conflict instead of replacing that resource. Existing installations keep their recorded names, including older names with suffixes.
 
 | Resource                                  |                                 Count | Purpose                                                                                       |
 | ----------------------------------------- | ------------------------------------: | --------------------------------------------------------------------------------------------- |
