@@ -11,8 +11,10 @@ metadata records status, creation time, TTL, and cache policy version.
 Keys scope entries to the project, deployment, host, and path so unrelated
 versions or domains do not share rendered HTML.
 
-A cache miss or failed cache operation falls back to rendering. Revalidation
-removes the persistent entry and purges the relevant edge variant. This
-replaced the earlier R2-backed ISR store while preserving the two-layer
-serving model. The shared implementation is in
-[ISR runtime](../../../packages/isr/src/runtime.ts).
+A cache miss falls back to rendering. The direct runtime also renders when a KV
+operation fails; platform dispatch currently propagates a KV read failure.
+Revalidation removes the persistent entry and purges the relevant edge
+variant. This replaced the earlier R2-backed ISR store while preserving the
+two-layer serving model. The implementations are in
+[ISR runtime](../../../packages/isr/src/runtime.ts) and
+[platform dispatch](../../packages/dispatch/src/isr.ts).
