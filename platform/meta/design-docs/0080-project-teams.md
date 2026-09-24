@@ -106,9 +106,10 @@ For every project operation, authorization has two independent inputs:
 The actor's personal plan never raises or lowers the project's limits. This
 applies to request and AI usage, deploys per day, build concurrency and timeout,
 build instance size, CPU and subrequest limits, deployment retention, and future
-account-level storage enforcement. Managed Sandbox is currently hard-disabled;
-its runtime and concurrency attribution must be specified before that capability
-is reintroduced.
+account-level storage enforcement. Managed Sandbox runtime and concurrency
+limits are enforced against the controller's owner account. A live Sandbox
+controller retains that owner identity across a project ownership transfer;
+the transfer path currently does not rebind it or block the transfer.
 
 A manually suspended actor cannot authenticate, even if they are a member. An
 actor automatically suspended for usage on projects they own may still work on
@@ -210,8 +211,9 @@ Account usage queries intersect these ownership periods with each user's
 billing window. Project usage remains a complete project history, while an
 owner's aggregate contains only the portions billed to that owner. Request
 events use their queue enqueue time, and AI queries start at the later of the
-billing-period or ownership-period boundary. Managed Sandbox interval splitting
-is deferred until that hard-disabled capability is reintroduced.
+billing-period or ownership-period boundary. Managed Sandbox usage is recorded
+against the controller's owner identity; ownership periods do not split its
+runtime accounting.
 
 ### Actor and billing attribution
 
