@@ -12,20 +12,18 @@ import { OperatorError } from '../../operator/common.ts';
 import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { getAllowlist } from '../../signup-allowlist.ts';
 import { renderOperationError } from '../operation-error.tsx';
-import { SignupControlPage } from '../views/signup-control.tsx';
+import { renderAdminPage } from '../react/server.ts';
 
 const app = new Hono<ApiEnv>();
 app.onError(renderOperationError);
 
 app.get('/', async (context) => {
   const signup = await getOperatorSignup(context);
-  return context.html(
-    <SignupControlPage
-      platformName={getPlatformDisplayName(context.env, context.req.url)}
-      {...signup}
-      username={context.get('user').login}
-    />,
-  );
+  return renderAdminPage(context, 'signupControl', 'Signup Control', {
+    platformName: getPlatformDisplayName(context.env, context.req.url),
+    ...signup,
+    username: context.get('user').login,
+  });
 });
 
 app.post('/toggle', async (context) => {

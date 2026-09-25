@@ -13,10 +13,10 @@ import {
 import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { projectUrl, projectWithUrl } from '../../project-url.ts';
 import { renderOperationError } from '../operation-error.tsx';
+import { renderAdminPage } from '../react/server.ts';
 import { BuildTable } from '../views/build-table.tsx';
 import { DeploymentTable } from '../views/deployment-table.tsx';
 import { Layout } from '../views/layout.tsx';
-import { ProjectsListPage } from '../views/projects-list.tsx';
 
 const PAGE_SIZE = 20;
 const app = new Hono<ApiEnv>();
@@ -40,15 +40,13 @@ app.get('/', async (context) => {
   const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
   if (search) {
     const projects = await searchProjects(context.get('db'), search);
-    return context.html(
-      <ProjectsListPage
-        platformName={getPlatformDisplayName(context.env, context.req.url)}
-        projects={projects.map((project) => projectWithUrl(project, context.env))}
-        search={search}
-        siteDomain={siteDomain}
-        username={context.get('user').login}
-      />,
-    );
+    return renderAdminPage(context, 'projects', 'Projects', {
+      platformName: getPlatformDisplayName(context.env, context.req.url),
+      projects: projects.map((project) => projectWithUrl(project, context.env)),
+      search,
+      siteDomain,
+      username: context.get('user').login,
+    });
   }
   const page = Math.max(1, parseInt(context.req.query('page') ?? '1', 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
@@ -57,16 +55,14 @@ app.get('/', async (context) => {
     countProjects(context.get('db')),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  return context.html(
-    <ProjectsListPage
-      platformName={getPlatformDisplayName(context.env, context.req.url)}
-      projects={projects.map((project) => projectWithUrl(project, context.env))}
-      page={page}
-      totalPages={totalPages}
-      siteDomain={siteDomain}
-      username={context.get('user').login}
-    />,
-  );
+  return renderAdminPage(context, 'projects', 'Projects', {
+    platformName: getPlatformDisplayName(context.env, context.req.url),
+    projects: projects.map((project) => projectWithUrl(project, context.env)),
+    page,
+    totalPages,
+    siteDomain,
+    username: context.get('user').login,
+  });
 });
 
 // GET /projects/:id

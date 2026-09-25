@@ -37,6 +37,10 @@ import {
 let env: TestEnv;
 let manifestCounter = 0;
 
+function visibleMarkup(html: string): string {
+  return html.replaceAll('<!-- -->', '');
+}
+
 beforeAll(async () => {
   env = await setupEnv();
 });
@@ -108,6 +112,29 @@ describe('auth middleware', () => {
     const admin = await createTestUser(env.db, 'admin', 'github', undefined, 'free', 'admin');
     const res = await req('/admin/', admin.adminJwt);
     expect(res.status).toBe(200);
+  });
+
+  test('serves authenticated React pages and Void navigation data', async () => {
+    const admin = await createTestUser(env.db, 'react-admin', 'github', undefined, 'free', 'admin');
+    const htmlResponse = await req('/admin/', admin.adminJwt);
+    const html = await htmlResponse.text();
+    expect(html).toContain('id="__VOID_PAGE_DATA__"');
+    expect(html).toContain('<div id="app">');
+    expect(html).toContain('src="/admin/client.js"');
+    expect(htmlResponse.headers.get('Cache-Control')).toBe('private, no-store');
+
+    const navigation = await req('/admin/users', admin.adminJwt, {
+      headers: { 'X-VoidPages': 'true' },
+    });
+    expect(navigation.headers.get('X-VoidPages')).toBe('true');
+    expect(navigation.headers.get('Vary')).toBe('X-VoidPages');
+    expect(navigation.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(((await navigation.json()) as { component: string }).component).toBe('users');
+
+    expect((await req('/admin/client.js')).status).toBe(302);
+    const client = await req('/admin/client.js', admin.adminJwt);
+    expect(client.status).toBe(200);
+    expect(client.headers.get('Content-Type')).toContain('text/javascript');
   });
 
   test('does not expose the retired platform operations pages', async () => {
@@ -364,13 +391,13 @@ describe('GET /admin/users', () => {
     const res1 = await req('/admin/users', admin.adminJwt);
     expect(res1.status).toBe(200);
     const html1 = await res1.text();
-    expect(html1).toContain('1 / 2');
+    expect(visibleMarkup(html1)).toContain('1 / 2');
     expect(html1).toContain('?page=2');
 
     const res2 = await req('/admin/users?page=2', admin.adminJwt);
     expect(res2.status).toBe(200);
     const html2 = await res2.text();
-    expect(html2).toContain('2 / 2');
+    expect(visibleMarkup(html2)).toContain('2 / 2');
   });
 
   test('searches users', async () => {
@@ -430,7 +457,7 @@ describe('GET /admin/users/:id', () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     // Should show "2 / 100" (2 deploys today, free tier limit 100)
-    expect(html).toContain('2 / 100');
+    expect(visibleMarkup(html)).toContain('2 / 100');
 
     vi.restoreAllMocks();
   });
@@ -998,14 +1025,14 @@ describe('GET /admin/projects', () => {
     const res1 = await req('/admin/projects?page=1', admin.adminJwt);
     expect(res1.status).toBe(200);
     const html1 = await res1.text();
-    expect(html1).toContain('1 / 2');
+    expect(visibleMarkup(html1)).toContain('1 / 2');
     expect(html1).toContain('?page=2');
 
     // Page 2: should have 1 project and no Next link
     const res2 = await req('/admin/projects?page=2', admin.adminJwt);
     expect(res2.status).toBe(200);
     const html2 = await res2.text();
-    expect(html2).toContain('2 / 2');
+    expect(visibleMarkup(html2)).toContain('2 / 2');
     expect(html2).toContain('?page=1');
   });
 
@@ -1161,13 +1188,13 @@ describe('GET /admin/deployments', () => {
     const res1 = await req('/admin/deployments?page=1', admin.adminJwt);
     expect(res1.status).toBe(200);
     const html1 = await res1.text();
-    expect(html1).toContain('1 / 2');
+    expect(visibleMarkup(html1)).toContain('1 / 2');
     expect(html1).toContain('?page=2');
 
     const res2 = await req('/admin/deployments?page=2', admin.adminJwt);
     expect(res2.status).toBe(200);
     const html2 = await res2.text();
-    expect(html2).toContain('2 / 2');
+    expect(visibleMarkup(html2)).toContain('2 / 2');
     expect(html2).toContain('?page=1');
   });
 });
@@ -1933,7 +1960,7 @@ describe('POST /admin/signup-control/add + delete', () => {
     const page = await req('/admin/signup-control', admin.adminJwt);
     const html = await page.text();
     expect(html).toContain('Exact provider subject');
-    expect(html).toContain('Company SSO (company)');
+    expect(visibleMarkup(html)).toContain('Company SSO (company)');
 
     const body = new URLSearchParams({
       type: 'identity',

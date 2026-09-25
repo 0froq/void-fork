@@ -10,7 +10,7 @@ import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audi
 import { OperatorError } from '../../operator/common.ts';
 import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { renderOperationError } from '../operation-error.tsx';
-import { InvitationsPage } from '../views/invitations.tsx';
+import { renderAdminPage } from '../react/server.ts';
 
 const PAGE_SIZE = 50;
 const app = new Hono<ApiEnv>();
@@ -23,15 +23,13 @@ app.get('/', async (context) => {
     limit: PAGE_SIZE,
     offset: (page - 1) * PAGE_SIZE,
   });
-  return context.html(
-    <InvitationsPage
-      platformName={getPlatformDisplayName(context.env, context.req.url)}
-      invitations={result.invitations}
-      page={page}
-      totalPages={result.totalPages}
-      username={context.get('user').login}
-    />,
-  );
+  return renderAdminPage(context, 'invitations', 'Invitations', {
+    platformName: getPlatformDisplayName(context.env, context.req.url),
+    invitations: result.invitations,
+    page,
+    totalPages: result.totalPages,
+    username: context.get('user').login,
+  });
 });
 
 app.post('/send', async (context) => {

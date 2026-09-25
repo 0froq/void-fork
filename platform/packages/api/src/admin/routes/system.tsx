@@ -11,22 +11,19 @@ import {
 import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { projectWithUrl } from '../../project-url.ts';
 export type { HealthCheck, HealthResult } from '../../operator/system-operations.ts';
-import { CliVersionsPage } from '../views/cli-versions.tsx';
-import { DashboardPage } from '../views/dashboard.tsx';
+import { renderAdminPage } from '../react/server.ts';
 
 export const adminSystem = new Hono<ApiEnv>();
 
 adminSystem.get('/cli-versions', async (context) => {
   const stats = await cliVersionStats(context.get('db'));
   const tz = (context.req.raw.cf?.timezone as string | undefined) ?? undefined;
-  return context.html(
-    <CliVersionsPage
-      platformName={getPlatformDisplayName(context.env, context.req.url)}
-      {...stats}
-      username={context.get('user').login}
-      tz={tz}
-    />,
-  );
+  return renderAdminPage(context, 'cliVersions', 'CLI Versions', {
+    platformName: getPlatformDisplayName(context.env, context.req.url),
+    ...stats,
+    username: context.get('user').login,
+    tz,
+  });
 });
 
 adminSystem.get('/health', async (context) =>
@@ -44,13 +41,11 @@ adminSystem.post('/backfill-queue-tokens', async (context) =>
 
 export const dashboardHandler: Handler<ApiEnv> = async (context) => {
   const overview = await systemOverview(context.get('db'), context.env);
-  return context.html(
-    <DashboardPage
-      platformName={getPlatformDisplayName(context.env, context.req.url)}
-      {...overview}
-      projects={overview.projects.map((project) => projectWithUrl(project, context.env))}
-      topProjects={overview.topProjects.map((project) => projectWithUrl(project, context.env))}
-      username={context.get('user').login}
-    />,
-  );
+  return renderAdminPage(context, 'dashboard', 'Dashboard', {
+    platformName: getPlatformDisplayName(context.env, context.req.url),
+    ...overview,
+    projects: overview.projects.map((project) => projectWithUrl(project, context.env)),
+    topProjects: overview.topProjects.map((project) => projectWithUrl(project, context.env)),
+    username: context.get('user').login,
+  });
 };

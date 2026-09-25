@@ -15,9 +15,9 @@ import {
 } from '../../operator/deployment-operations.ts';
 import { getPlatformDisplayName } from '../../platform-identity.ts';
 import type { DeployManifest } from '../../types.ts';
+import { renderAdminPage } from '../react/server.ts';
 import { DeploymentLogs } from '../views/deployment-logs.tsx';
 import { displayStatus } from '../views/deployment-table.tsx';
-import { DeploymentsListPage } from '../views/deployments-list.tsx';
 import { formatDateTime } from '../views/format.ts';
 import { Layout } from '../views/layout.tsx';
 
@@ -32,15 +32,13 @@ app.get('/', async (context) => {
   const tz = (context.req.raw.cf?.timezone as string | undefined) ?? undefined;
   if (search) {
     const deployments = await searchDeployments(context.get('db'), search);
-    return context.html(
-      <DeploymentsListPage
-        platformName={getPlatformDisplayName(context.env, context.req.url)}
-        deployments={deployments}
-        search={search}
-        username={context.get('user').login}
-        tz={tz}
-      />,
-    );
+    return renderAdminPage(context, 'deployments', 'Deployments', {
+      platformName: getPlatformDisplayName(context.env, context.req.url),
+      deployments,
+      search,
+      username: context.get('user').login,
+      tz,
+    });
   }
   const page = Math.max(1, parseInt(context.req.query('page') ?? '1', 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
@@ -49,16 +47,14 @@ app.get('/', async (context) => {
     countDeployments(context.get('db')),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  return context.html(
-    <DeploymentsListPage
-      platformName={getPlatformDisplayName(context.env, context.req.url)}
-      deployments={deployments}
-      page={page}
-      totalPages={totalPages}
-      username={context.get('user').login}
-      tz={tz}
-    />,
-  );
+  return renderAdminPage(context, 'deployments', 'Deployments', {
+    platformName: getPlatformDisplayName(context.env, context.req.url),
+    deployments,
+    page,
+    totalPages,
+    username: context.get('user').login,
+    tz,
+  });
 });
 
 // GET /deployments/:id

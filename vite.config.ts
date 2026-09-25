@@ -39,6 +39,9 @@ const platformAlias = {
   'vite-plus/test': fileURLToPath(
     new URL('node_modules/vite-plus/dist/test/index.js', import.meta.url),
   ),
+  'void:admin-client-script': fileURLToPath(
+    new URL('platform/packages/api/test/__mocks__/admin-client-script.ts', import.meta.url),
+  ),
 };
 
 export default defineConfig({

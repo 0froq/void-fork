@@ -13,6 +13,7 @@ const runtimeRoot = join(packageRoot, 'dist', 'runtime');
 const temporaryRoot = mkdtempSync(join(tmpdir(), 'void-platform-runtime-'));
 const wrangler = fileURLToPath(import.meta.resolve('wrangler'));
 const drizzleRoot = join(repositoryRoot, 'platform', 'packages', 'api', 'drizzle');
+const apiRoot = join(repositoryRoot, 'platform', 'packages', 'api');
 const { parsePlatformRuntimeManifest, platformDatabaseSchemaDigest } = await import(
   pathToFileURL(join(packageRoot, 'dist', 'installer.mjs')).href
 );
@@ -35,9 +36,36 @@ const sourceAliases = {
   '@void/edge': join(repositoryRoot, 'packages', 'edge', 'src', 'index.ts'),
   '@void/isr': join(repositoryRoot, 'packages', 'isr', 'src', 'index.ts'),
   '@void/isr/core': join(repositoryRoot, 'packages', 'isr', 'src', 'core.ts'),
+  '@void/react/pages-server': join(
+    repositoryRoot,
+    'packages',
+    'react',
+    'src',
+    'runtime',
+    'pages-server.ts',
+  ),
+  '@void/react': join(repositoryRoot, 'packages', 'react', 'src', 'runtime', 'index.ts'),
+  'void/pages-client': join(repositoryRoot, 'packages', 'void', 'src', 'pages', 'client.ts'),
+  'void/pages-head': join(repositoryRoot, 'packages', 'void', 'src', 'pages', 'head.ts'),
+  'void/pages-server': join(repositoryRoot, 'packages', 'void', 'src', 'pages', 'serialize.ts'),
+  'void:admin-client-script': join(apiRoot, 'dist', 'admin-client.js'),
 };
 
 try {
+  const adminClient = spawnSync(
+    process.execPath,
+    [join(apiRoot, 'scripts', 'build-admin-client.mjs')],
+    {
+      cwd: apiRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+  if (adminClient.status !== 0) {
+    process.stderr.write(adminClient.stdout);
+    process.stderr.write(adminClient.stderr);
+    throw new Error('Failed to build the platform admin client.');
+  }
   rmSync(runtimeRoot, { force: true, recursive: true });
   mkdirSync(runtimeRoot, { recursive: true });
   const artifacts = {};
@@ -58,6 +86,7 @@ try {
         compatibility_date: '2026-02-24',
         compatibility_flags:
           name === 'api' || name === 'proxy' || name === 'emailGateway' ? ['nodejs_compat'] : [],
+        ...(name === 'api' ? { rules: [{ type: 'Text', globs: ['**/admin-client.js'] }] } : {}),
       }),
     );
     const result = spawnSync(

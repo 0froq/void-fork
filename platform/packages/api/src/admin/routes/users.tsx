@@ -11,8 +11,7 @@ import {
 } from '../../operator/tenant-service.ts';
 import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { renderOperationError } from '../operation-error.tsx';
-import { UserDetailPage } from '../views/user-detail.tsx';
-import { UsersListPage } from '../views/users-list.tsx';
+import { renderAdminPage } from '../react/server.ts';
 
 const PAGE_SIZE = 20;
 const app = new Hono<ApiEnv>();
@@ -23,14 +22,12 @@ app.get('/', async (context) => {
   const search = context.req.query('search');
   if (search) {
     const users = await searchUsers(context.get('db'), search);
-    return context.html(
-      <UsersListPage
-        platformName={getPlatformDisplayName(context.env, context.req.url)}
-        users={users}
-        search={search}
-        username={context.get('user').login}
-      />,
-    );
+    return renderAdminPage(context, 'users', 'Users', {
+      platformName: getPlatformDisplayName(context.env, context.req.url),
+      users,
+      search,
+      username: context.get('user').login,
+    });
   }
   const page = Math.max(1, parseInt(context.req.query('page') ?? '1', 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
@@ -39,27 +36,23 @@ app.get('/', async (context) => {
     countUsers(context.get('db')),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  return context.html(
-    <UsersListPage
-      platformName={getPlatformDisplayName(context.env, context.req.url)}
-      users={users}
-      page={page}
-      totalPages={totalPages}
-      username={context.get('user').login}
-    />,
-  );
+  return renderAdminPage(context, 'users', 'Users', {
+    platformName: getPlatformDisplayName(context.env, context.req.url),
+    users,
+    page,
+    totalPages,
+    username: context.get('user').login,
+  });
 });
 
 // GET /users/:id
 app.get('/:id', async (context) => {
   const detail = await getOperatorUser(context, context.req.param('id'));
-  return context.html(
-    <UserDetailPage
-      platformName={getPlatformDisplayName(context.env, context.req.url)}
-      {...detail}
-      username={context.get('user').login}
-    />,
-  );
+  return renderAdminPage(context, 'userDetail', detail.user.login, {
+    platformName: getPlatformDisplayName(context.env, context.req.url),
+    ...detail,
+    username: context.get('user').login,
+  });
 });
 
 app.post('/:id/plan', async (context) => {

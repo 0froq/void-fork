@@ -31,7 +31,7 @@ import { setOperatorEmailPolicy, setOperatorEmailSettings } from '../../operator
 import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { runEmailDestinationCleanup } from '../../provisioning/email-destination-cleanup.ts';
 import { renderOperationError } from '../operation-error.tsx';
-import { EmailSettingsPage } from '../views/email-settings.tsx';
+import { renderAdminPage } from '../react/server.ts';
 import { STATUS_COLORS, formatDateTime } from '../views/format.ts';
 import { Layout } from '../views/layout.tsx';
 
@@ -91,15 +91,13 @@ app.get('/', async (context) => {
     getEmailRecipientPolicy(db),
     getEmailDomainManagement(db),
   ]);
-  return context.html(
-    <EmailSettingsPage
-      platformName={getPlatformDisplayName(context.env, context.req.url)}
-      policy={policy}
-      management={management}
-      senderDomain={context.env.EMAIL_SENDER_DOMAIN}
-      username={context.get('user').login}
-    />,
-  );
+  return renderAdminPage(context, 'email', 'Email', {
+    platformName: getPlatformDisplayName(context.env, context.req.url),
+    policy,
+    management,
+    senderDomain: context.env.EMAIL_SENDER_DOMAIN,
+    username: context.get('user').login,
+  });
 });
 
 // POST /email/policy — the shared-sender recipient policy
