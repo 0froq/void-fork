@@ -6985,6 +6985,22 @@ describe('createDefaultRunWrangler — post-spawn child `error` events confirm/q
     return pid;
   }
 
+  function injectErrorAfterChildStarts(
+    child: import('node:child_process').ChildProcess,
+    pidFile: string,
+    message: string,
+  ): void {
+    // A fixed delay can fire before Node loads the child script on a busy runner.
+    // Wait until the child has written its PID so this is truly a post-spawn error.
+    void (async () => {
+      const deadline = Date.now() + 5_000;
+      while (!existsSync(pidFile) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      child.emit('error', new Error(message));
+    })();
+  }
+
   it('pre-spawn ENOENT still settles directly as a hard failure (the one carve-out: no pid, nothing to confirm)', async () => {
     const run = createDefaultRunWrangler(POST_SPAWN_TMP, {
       launcher: [join(POST_SPAWN_TMP, 'no-such-wrangler-binary')],
@@ -7006,7 +7022,7 @@ describe('createDefaultRunWrangler — post-spawn child `error` events confirm/q
       launcher: [process.execPath, hang, pidFile],
       timeoutMs: 30_000,
       onSpawnedChild: (child) => {
-        setTimeout(() => child.emit('error', new Error('injected kill-delivery failure')), 150);
+        injectErrorAfterChildStarts(child, pidFile, 'injected kill-delivery failure');
       },
     });
     const result = await run(['d1', 'list'], { accountId: 'acct' });
@@ -7038,7 +7054,7 @@ describe('createDefaultRunWrangler — post-spawn child `error` events confirm/q
         throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' });
       },
       onSpawnedChild: (child) => {
-        setTimeout(() => child.emit('error', new Error('injected post-spawn failure')), 150);
+        injectErrorAfterChildStarts(child, pidFile, 'injected post-spawn failure');
       },
     });
     let thrown: unknown;

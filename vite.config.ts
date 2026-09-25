@@ -359,6 +359,7 @@ export default defineConfig({
           name: 'unit',
           include: ['packages/*/test/unit/**/*.test.ts'],
           sequence: { groupOrder: 2 },
+          pool: 'threads',
           maxWorkers,
         },
       },

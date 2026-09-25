@@ -9,6 +9,9 @@ vp test run packages/void
 vp run check
 ```
 
+Type-only contracts use `*.typecheck.ts`. Package typechecking verifies them; the Vitest runtime
+does not need to execute their `expectTypeOf` assertions.
+
 The named shortcuts select the current test projects:
 
 ```sh
@@ -29,9 +32,10 @@ vpr test:all
 `vpr test:all` formats, lints, builds, typechecks, and tests the merged monorepo. Investigate slow
 or hanging tests when they occur instead of routinely increasing timeouts.
 
-Platform projects run first; SDK unit and integration files then share a worker pool. This keeps
-database engines from competing with all framework compilers at startup. Keep module isolation
-enabled: these suites mock globals, keep database state, and exercise real process/lock boundaries.
+Platform projects run first; SDK unit and integration files then share a scheduling phase. Unit files
+use worker threads to reduce startup time; integration files use forks. This keeps database engines
+from competing with all framework compilers at startup. Keep module isolation enabled: these suites
+mock globals, keep database state, and exercise real process/lock boundaries.
 The full verification command builds before running the platform's type-aware lint, so it also
 works without a pre-existing dashboard `.void/tsconfig.json`.
 

@@ -1,5 +1,14 @@
 import { eq } from 'drizzle-orm';
-import { describe, test, expect, beforeAll, afterAll, beforeEach, vi } from 'vite-plus/test';
+import {
+  describe,
+  test,
+  expect,
+  beforeAll,
+  afterAll,
+  beforeEach,
+  afterEach,
+  vi,
+} from 'vite-plus/test';
 import { app } from '../../src/index.ts';
 import {
   deployments,
@@ -21,6 +30,7 @@ import {
   createTestProject,
   createTestDeployment,
   mockCfApi,
+  skipOrphanSweepDelay,
   type TestEnv,
 } from './helpers.ts';
 
@@ -38,6 +48,10 @@ afterAll(async () => {
 beforeEach(async () => {
   await clearTables(env.db);
   env.REQUESTS_DATASET = 'void_requests';
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 function req(path: string, cookie?: string, init?: RequestInit): Response | Promise<Response> {
@@ -1536,6 +1550,7 @@ describe('POST /admin/projects/:id/owner', () => {
 describe('POST /admin/projects/:id/delete', () => {
   test('deletes project and redirects to list', async () => {
     mockCfApi();
+    skipOrphanSweepDelay();
     const admin = await createTestUser(env.db, 'admin-pdel1', 'github', undefined, 'free', 'admin');
     const user = await createTestUser(env.db, 'projdel-owner');
     const project = await createTestProject(env.db, user.id, 'del-proj');
@@ -1581,6 +1596,7 @@ describe('POST /admin/projects/:id/delete', () => {
 describe('POST /admin/users/:id/delete', () => {
   test('deletes user and cascades to projects, redirects to list', async () => {
     mockCfApi();
+    skipOrphanSweepDelay();
     const admin = await createTestUser(env.db, 'admin-udel1', 'github', undefined, 'free', 'admin');
     const user = await createTestUser(env.db, 'delusertarget');
     const project1 = await createTestProject(env.db, user.id, 'udel-proj1');

@@ -22,6 +22,7 @@ import {
   createTestUser,
   createTestProject,
   mockCfApi,
+  skipOrphanSweepDelay,
   readAllEvents,
   type TestEnv,
 } from './helpers.ts';
@@ -721,6 +722,7 @@ describe('per-deploy sandbox integration', () => {
   // 10. Project teardown deletes all retained deployments' container apps
   // ----------------------------------------------------------------------
   it('project teardown deletes per-deploy container apps for ALL retained deployments via deterministic-name orphan recovery', async () => {
+    skipOrphanSweepDelay();
     // Solo plan: retainedDeployments=5 — both v1 and v2 stay retained.
     const user = await createTestUser(env.db, 'sb-td-user', 'github', undefined, 'solo');
     const project = await createTestProject(env.db, user.id, 'sb-teardown');

@@ -48,6 +48,7 @@ import {
   mockCfApi,
   recordingBuildManager,
   setupEnv,
+  skipOrphanSweepDelay,
   teardownEnv,
   type TestEnv,
 } from './helpers.ts';
@@ -1051,6 +1052,7 @@ describe('operator tenant mutations', () => {
   });
 
   test('deletes a user and its projects with structured teardown results', async () => {
+    skipOrphanSweepDelay();
     const user = await createTestUser(env.db, 'deleted-user');
     const project = await createTestProject(env.db, user.id, 'deleted-project');
     mockCfApi();
@@ -1130,6 +1132,7 @@ describe('operator tenant mutations', () => {
   });
 
   test('deletes invitation actors while preserving invitation history and revoking sessions', async () => {
+    skipOrphanSweepDelay();
     const inviter = await createTestUser(
       env.db,
       'inviting-admin',

@@ -33,6 +33,7 @@ import {
   createTestProject,
   createTestUser,
   setupEnv,
+  skipOrphanSweepDelay,
   teardownEnv,
   type TestEnv,
 } from './helpers.ts';
@@ -456,6 +457,7 @@ describe('operator email domain management', () => {
   });
 
   it('reclaims an admin-removed final owner connection during project teardown', async () => {
+    skipOrphanSweepDelay();
     const owner = await createTestUser(env.db, 'teardown-owner-cleanup-owner');
     const first = await createTestProject(env.db, owner.id, 'teardown-owner-cleanup-first');
     const second = await createTestProject(env.db, owner.id, 'teardown-owner-cleanup-second');

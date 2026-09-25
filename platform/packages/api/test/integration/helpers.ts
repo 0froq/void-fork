@@ -582,6 +582,14 @@ export async function clearTables(db: Db): Promise<void> {
   await db.delete(platformSettings);
 }
 
+/** Keep both orphan sweeps while skipping the provider-settling wait in in-memory tests. */
+export function skipOrphanSweepDelay(): void {
+  const schedule = globalThis.setTimeout;
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) =>
+    schedule(callback, delay === 2000 ? 0 : delay, ...args),
+  );
+}
+
 /** Establish a real revocable operator session for integration requests. */
 export async function createOperatorToken(
   db: Db,

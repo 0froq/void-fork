@@ -9,6 +9,7 @@ import {
   createTestProject,
   createTestUser,
   mockCfApi,
+  skipOrphanSweepDelay,
   setupEnv,
   teardownEnv,
   type TestEnv,
@@ -24,11 +25,7 @@ afterAll(async () => {
 beforeEach(async () => {
   // PostgreSQL ownership timestamps are stored without a zone; Workers interpret them in UTC.
   vi.stubEnv('TZ', 'UTC');
-  // Only remove the orphan sweep's provider-settling delay for this in-memory provider.
-  const schedule = globalThis.setTimeout;
-  vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) =>
-    schedule(callback, delay === 2000 ? 0 : delay, ...args),
-  );
+  skipOrphanSweepDelay();
   await clearTables(env.db);
 });
 afterEach(() => {
