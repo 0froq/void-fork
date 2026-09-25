@@ -16,7 +16,7 @@ declare module 'void' {
   }
 }
 
-const PUBLIC_PATHS = new Set(['/login', '/logout']);
+const PUBLIC_PATHS = new Set(['/favicon.svg', '/login', '/logout']);
 const PUBLIC_PREFIXES = ['/assets/', '/auth/'];
 
 export function isPublicDashboardPath(path: string): boolean {

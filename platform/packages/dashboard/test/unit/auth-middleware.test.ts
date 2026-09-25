@@ -5,6 +5,7 @@ describe('dashboard auth middleware', () => {
   it('allows unauthenticated public pages and built assets', () => {
     expect(isPublicDashboardPath('/login')).toBe(true);
     expect(isPublicDashboardPath('/logout')).toBe(true);
+    expect(isPublicDashboardPath('/favicon.svg')).toBe(true);
     expect(isPublicDashboardPath('/auth/callback')).toBe(true);
     expect(isPublicDashboardPath('/assets/pages-client.js')).toBe(true);
     expect(isPublicDashboardPath('/assets/layout.css')).toBe(true);
