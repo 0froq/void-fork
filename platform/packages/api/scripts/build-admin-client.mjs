@@ -10,6 +10,7 @@ await build({
   configFile: false,
   root: apiRoot,
   publicDir: false,
+  define: { 'process.env.NODE_ENV': JSON.stringify('production') },
   resolve: {
     alias: {
       '@void/react/pages-client': source('packages/react/src/runtime/pages-client.ts'),
