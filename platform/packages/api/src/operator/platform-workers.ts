@@ -12,7 +12,6 @@ type PlatformWorkerDef = Readonly<{
   stagingScript: string;
   dependsOn: ReadonlyArray<PlatformWorkerName>;
   deployOrder: number;
-  rollbackWarning?: string;
 }>;
 
 export type PlatformWorker = PlatformWorkerDef & {
@@ -47,8 +46,6 @@ const WORKER_DEFS: ReadonlyArray<PlatformWorkerDef> = [
     stagingScript: 'void-api-staging',
     dependsOn: ['proxy'],
     deployOrder: 3,
-    rollbackWarning:
-      'Rolling back void-api also rolls back this admin panel. The CF API call completes before the redirect, so the rollback will succeed — but you may lose access to this page afterward. Also note: DB migrations are forward-only. The schema-compat CI job ensures backward compatibility, so old code should work against the newer schema.',
   },
   {
     name: 'dashboard',

@@ -110,6 +110,18 @@ describe('auth middleware', () => {
     expect(res.status).toBe(200);
   });
 
+  test('does not expose the retired platform operations pages', async () => {
+    const admin = await createTestUser(env.db, 'admin', 'github', undefined, 'free', 'admin');
+    const dashboard = await req('/admin/', admin.adminJwt);
+    expect(dashboard.status).toBe(200);
+    expect(await dashboard.text()).not.toContain('href="/admin/platform"');
+
+    for (const path of ['/admin/platform', '/admin/platform/api']) {
+      const response = await req(path, admin.adminJwt);
+      expect(response.status).toBe(404);
+    }
+  });
+
   test('uses the installation name in admin login and page titles', async () => {
     const namedEnv = { ...env, PLATFORM_DISPLAY_NAME: '<Example Platform>' };
     const login = await app.fetch(new Request('http://localhost/admin/login'), namedEnv);

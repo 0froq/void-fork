@@ -18,8 +18,8 @@ import {
   unique,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-import type { PlatformWorkerName, PlatformEnv } from './admin/platform-workers.ts';
 import type { PlatformOidcIdentity, CompanyIdentity } from './auth/identity-types.ts';
+import type { PlatformWorkerName, PlatformEnv } from './operator/platform-workers.ts';
 import type { PlanId } from './tiers.ts';
 import type {
   InvitationStatus,

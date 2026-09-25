@@ -249,31 +249,6 @@ test('browser backfill records a failed outcome when its 200 response reports er
   ]);
 });
 
-test('browser rollback-all records a failed outcome when its result page is HTML 200', async () => {
-  cloudflareWorkerStub('void-dashboard');
-  const response = await adminRequest(
-    '/platform/rollback-all',
-    new URLSearchParams({
-      version_dispatch: 'previous',
-      'version_email-gateway': 'previous',
-      version_dashboard: 'previous',
-      version_api: 'previous',
-      version_tail: 'previous',
-      version_proxy: 'previous',
-    }),
-  );
-
-  expect(response.status).toBe(200);
-  expect(response.headers.get('Content-Type')).toContain('text/html');
-  expect(await env.db.select().from(operatorEvents)).toEqual([
-    expect.objectContaining({
-      action: 'workers/rollback-all',
-      status: 'failed',
-      http_status: 200,
-    }),
-  ]);
-});
-
 test('records the effective worker environment for implicit and explicit rollbacks', async () => {
   cloudflareWorkerStub();
   const staging = { ...env, PLATFORM_ENV: 'staging' };

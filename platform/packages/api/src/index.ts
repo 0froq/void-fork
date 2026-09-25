@@ -15,7 +15,6 @@ import adminDeployments from './admin/routes/deployments.tsx';
 import adminEmail from './admin/routes/email.tsx';
 import adminInvitations from './admin/routes/invitations.tsx';
 import adminLogin from './admin/routes/login.ts';
-import adminPlatform from './admin/routes/platform.tsx';
 import adminProjects from './admin/routes/projects.tsx';
 import adminSignupControl from './admin/routes/signup-control.tsx';
 import { dashboardHandler, adminSystem } from './admin/routes/system.tsx';
@@ -497,7 +496,6 @@ app.route('/admin/deployments', adminDeployments);
 app.route('/admin/signup-control', adminSignupControl);
 app.route('/admin/config/auth', adminAuthConfig);
 app.route('/admin/invitations', adminInvitations);
-app.route('/admin/platform', adminPlatform);
 app.route('/admin', adminSystem);
 
 const BATCH_SIZE = 50;

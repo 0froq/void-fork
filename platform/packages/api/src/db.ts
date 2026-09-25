@@ -3528,19 +3528,6 @@ export async function getPlatformEventsByBatchId(
     .orderBy(asc(platformEvents.created_at));
 }
 
-export async function getRecentPlatformEvents(
-  db: Db,
-  environment: PlatformEvent['environment'],
-  limit = 20,
-): Promise<ReadonlyArray<PlatformEvent>> {
-  return db
-    .select()
-    .from(platformEvents)
-    .where(eq(platformEvents.environment, environment))
-    .orderBy(desc(platformEvents.created_at))
-    .limit(limit);
-}
-
 // --- Invitations ---
 
 export async function createInvitation(

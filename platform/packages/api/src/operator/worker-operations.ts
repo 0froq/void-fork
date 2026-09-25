@@ -1,10 +1,4 @@
 import { count, desc, eq } from 'drizzle-orm';
-import {
-  PLATFORM_WORKERS,
-  getScriptName,
-  getWorkerByName,
-  type PlatformEnv,
-} from '../admin/platform-workers.ts';
 import { getPlatformEventsByBatchId, updatePlatformEventStatus, type Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { generateId } from '../id.ts';
@@ -16,6 +10,12 @@ import {
 import { platformEvents } from '../schema.ts';
 import type { PlatformEvent, User } from '../types.ts';
 import { OperatorError } from './common.ts';
+import {
+  PLATFORM_WORKERS,
+  getScriptName,
+  getWorkerByName,
+  type PlatformEnv,
+} from './platform-workers.ts';
 
 export function requireHostedPlatform(env: ApiEnv['Bindings']) {
   if (env.PLATFORM_INSTALLATION_ID) {
