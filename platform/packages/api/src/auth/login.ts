@@ -11,6 +11,7 @@ import {
 } from '../db.ts';
 import { escapeHtml } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
+import { getPlatformPageTitle } from '../platform-identity.ts';
 import { platformAuthAttempts, platformLoginTests } from '../schema.ts';
 import { stageBootstrapIdentity, verifyBootstrapCode } from './bootstrap.ts';
 import {
@@ -539,7 +540,11 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
       context.header('Cache-Control', 'no-store');
       context.header('Referrer-Policy', 'no-referrer');
       return context.html(
-        '<!doctype html><title>Confirm platform administrator</title><h1>Confirm the first administrator</h1><p>Account: ' +
+        '<!doctype html><title>' +
+          escapeHtml(
+            getPlatformPageTitle('Confirm platform administrator', context.env, context.req.url),
+          ) +
+          '</title><h1>Confirm the first administrator</h1><p>Account: ' +
           escapeHtml(identity.login) +
           '</p><p>Provider: ' +
           escapeHtml(identity.issuer) +
@@ -620,7 +625,9 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
           maxAge: 300,
         });
         return context.html(
-          '<!doctype html><title>Link login method</title><h1>Link this identity to your Void account?</h1><p>' +
+          '<!doctype html><title>' +
+            escapeHtml(getPlatformPageTitle('Link login method', context.env, context.req.url)) +
+            '</title><h1>Link this identity to your Void account?</h1><p>' +
             escapeHtml(identity.login) +
             '</p><p>' +
             escapeHtml(identity.issuer) +
@@ -633,7 +640,9 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
         return context.redirect(`/admin/config/auth?test=${encodeURIComponent(saved.testId!)}`);
       }
       return context.html(
-        '<!doctype html><title>Void login test</title><p>Login verified. Return to Void to review the identity and finish configuration.</p>',
+        '<!doctype html><title>' +
+          escapeHtml(getPlatformPageTitle('Login test', context.env, context.req.url)) +
+          '</title><p>Login verified. Return to Void to review the identity and finish configuration.</p>',
       );
     }
     const { user } = await resolvePlatformLogin(
@@ -817,7 +826,9 @@ export async function confirmIdentityLink(context: Context<ApiEnv>): Promise<Res
     deleteCookie(context, 'void_link_confirm', { path: '/auth/link/confirm' });
     context.header('Cache-Control', 'no-store');
     return context.html(
-      '<!doctype html><title>Login linked</title><p>Your login method is linked. You can close this window and return to Void.</p>',
+      '<!doctype html><title>' +
+        escapeHtml(getPlatformPageTitle('Login linked', context.env, context.req.url)) +
+        '</title><p>Your login method is linked. You can close this window and return to Void.</p>',
     );
   } catch (error) {
     return authenticationError(context, error);

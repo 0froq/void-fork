@@ -9,6 +9,7 @@ import {
   restoreOperatorUser,
   suspendOperatorUser,
 } from '../../operator/tenant-service.ts';
+import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { renderOperationError } from '../operation-error.tsx';
 import { UserDetailPage } from '../views/user-detail.tsx';
 import { UsersListPage } from '../views/users-list.tsx';
@@ -23,7 +24,12 @@ app.get('/', async (context) => {
   if (search) {
     const users = await searchUsers(context.get('db'), search);
     return context.html(
-      <UsersListPage users={users} search={search} username={context.get('user').login} />,
+      <UsersListPage
+        platformName={getPlatformDisplayName(context.env, context.req.url)}
+        users={users}
+        search={search}
+        username={context.get('user').login}
+      />,
     );
   }
   const page = Math.max(1, parseInt(context.req.query('page') ?? '1', 10) || 1);
@@ -35,6 +41,7 @@ app.get('/', async (context) => {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   return context.html(
     <UsersListPage
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
       users={users}
       page={page}
       totalPages={totalPages}
@@ -46,7 +53,13 @@ app.get('/', async (context) => {
 // GET /users/:id
 app.get('/:id', async (context) => {
   const detail = await getOperatorUser(context, context.req.param('id'));
-  return context.html(<UserDetailPage {...detail} username={context.get('user').login} />);
+  return context.html(
+    <UserDetailPage
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
+      {...detail}
+      username={context.get('user').login}
+    />,
+  );
 });
 
 app.post('/:id/plan', async (context) => {

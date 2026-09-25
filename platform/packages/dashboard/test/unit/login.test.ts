@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { fetchApi } from '../../lib/api.ts';
-import { loader } from '../../pages/login.server.ts';
+import { head, loader } from '../../pages/login.server.ts';
 
 afterEach(() => vi.unstubAllGlobals());
 describe('dashboard login discovery', () => {
@@ -12,6 +12,7 @@ describe('dashboard login discovery', () => {
       vi.fn(async () =>
         Response.json({
           schemaVersion: 3,
+          displayName: 'Example Platform',
           authentication: { methods: [{ id: 'company', kind: 'oidc', label: 'Company <SSO>' }] },
         }),
       ),
@@ -22,11 +23,15 @@ describe('dashboard login discovery', () => {
       { API_URL: 'https://api.example.com' },
     );
     expect(await response.json()).toMatchObject({
+      platformName: 'Example Platform',
       methods: [
         { id: 'company', label: 'Company <SSO>', url: expect.stringContaining('provider=company') },
       ],
     });
     expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(head({} as never, { platformName: 'Example Platform', methods: [] })?.title).toBe(
+      'Sign in · Example Platform · Void',
+    );
   });
   it('binds localhost dashboard login to a complete PKCE code flow', async () => {
     vi.stubGlobal(

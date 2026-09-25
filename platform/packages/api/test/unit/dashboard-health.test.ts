@@ -35,6 +35,7 @@ function dashboard(fetch: ReturnType<typeof vi.fn>) {
       deployments: [],
       topProjects: [],
       siteDomain: 'example.com',
+      platformName: 'Example Platform',
       username: 'admin',
     }),
   );

@@ -8,6 +8,7 @@ import {
 } from '../../operator/access-service.ts';
 import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
 import { OperatorError } from '../../operator/common.ts';
+import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { renderOperationError } from '../operation-error.tsx';
 import { InvitationsPage } from '../views/invitations.tsx';
 
@@ -24,6 +25,7 @@ app.get('/', async (context) => {
   });
   return context.html(
     <InvitationsPage
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
       invitations={result.invitations}
       page={page}
       totalPages={result.totalPages}

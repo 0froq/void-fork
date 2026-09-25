@@ -662,13 +662,22 @@ describe('provider-independent first administrator setup', () => {
     expect(
       (await app.fetch(new Request(`${origin}/admin/login`), bindings())).headers.get('Location'),
     ).toBe('/setup');
+    const setupPage = await app.fetch(new Request(`${origin}/setup`), {
+      ...bindings(),
+      PLATFORM_DISPLAY_NAME: '<Example Platform>',
+    });
+    expect(await setupPage.text()).toContain(
+      '<title>Set up administrator · &lt;Example Platform&gt; · Void</title>',
+    );
     expect((await form('/auth/bootstrap', { code: randomLoginProof() })).status).toBe(403);
     expect(
       (await form('/auth/bootstrap', { code }, '', 'https://attacker.example.com')).status,
     ).toBe(403);
     const callback = await authenticateSetup();
     expect(callback.status).toBe(200);
-    expect(await callback.text()).toContain('administrator@example.com');
+    const callbackHtml = await callback.text();
+    expect(callbackHtml).toContain('administrator@example.com');
+    expect(callbackHtml).toContain('<title>Confirm platform administrator · Void Platform</title>');
     expect(await env.db.select().from(users)).toHaveLength(0);
     const proofCookie = callback.headers
       .getSetCookie()

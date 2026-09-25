@@ -30,6 +30,7 @@ describe('platform onboarding pages', () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain('&lt;Example Platform&gt;');
+    expect(html).toContain('<title>Get Started · &lt;Example Platform&gt; · Void</title>');
     expect(html).not.toContain('<Example Platform>');
     // `escapeHtml` escapes the quotes too; the browser renders them back.
     expect(html).toContain('void connect &#39;https://api.example.com&#39;');
@@ -67,7 +68,7 @@ describe('platform onboarding pages', () => {
 
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain('<title>Accept Project Invitation - Void Platform</title>');
+    expect(html).toContain('<title>Accept Project Invitation · Void Platform</title>');
     expect(html).toContain('void connect &#39;https://api.example.com&#39;');
     expect(html).toContain('void project team accept pinv_a1b2c3d4e5f6');
     expect(html).toContain('The CLI checks that it is still valid');
@@ -92,7 +93,7 @@ describe('platform onboarding pages', () => {
 
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain('<title>Get Started - Void Platform</title>');
+    expect(html).toContain('<title>Get Started · Void Platform</title>');
     expect(html).not.toContain('void project team accept');
     expect(html).not.toContain('evil.example');
   });

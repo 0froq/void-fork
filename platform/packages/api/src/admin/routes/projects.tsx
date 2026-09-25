@@ -10,6 +10,7 @@ import {
   previewOperatorProjectOwner,
   transferOperatorProjectOwner,
 } from '../../operator/tenant-service.ts';
+import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { projectUrl, projectWithUrl } from '../../project-url.ts';
 import { renderOperationError } from '../operation-error.tsx';
 import { BuildTable } from '../views/build-table.tsx';
@@ -41,6 +42,7 @@ app.get('/', async (context) => {
     const projects = await searchProjects(context.get('db'), search);
     return context.html(
       <ProjectsListPage
+        platformName={getPlatformDisplayName(context.env, context.req.url)}
         projects={projects.map((project) => projectWithUrl(project, context.env))}
         search={search}
         siteDomain={siteDomain}
@@ -57,6 +59,7 @@ app.get('/', async (context) => {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   return context.html(
     <ProjectsListPage
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
       projects={projects.map((project) => projectWithUrl(project, context.env))}
       page={page}
       totalPages={totalPages}
@@ -78,7 +81,11 @@ app.get('/:id', async (context) => {
   const tz = (context.req.raw.cf?.timezone as string | undefined) ?? undefined;
 
   return context.html(
-    <Layout title={project.slug} username={context.get('user').login}>
+    <Layout
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
+      title={project.slug}
+      username={context.get('user').login}
+    >
       <h1>{project.slug}</h1>
 
       <table>
@@ -234,6 +241,7 @@ app.post('/:id/owner/preview', async (context) => {
 
   return context.html(
     <Layout
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
       title={`${convergenceOnly ? 'Converge' : 'Transfer'} ${result.target.slug}`}
       username={context.get('user').login}
     >

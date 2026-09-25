@@ -1,15 +1,33 @@
-import { defineHandler } from 'void';
+import { defineHandler, defineHead } from 'void';
 import { fetchApi, getApiErrorMessage, readApiJson } from '../lib/api.ts';
 import { dashboardRequestOrigin } from '../lib/origin.ts';
+import { discoveryDisplayName, platformPageTitle } from '../lib/platform-title.ts';
 
-export type Props = { methods: Array<{ id: string; label: string }>; error?: string };
+export type Props = {
+  methods: Array<{ id: string; label: string }>;
+  platformName: string;
+  error?: string;
+};
+export const head = defineHead<Props>((_context, props) => ({
+  title: platformPageTitle('Login methods', props.platformName),
+}));
 export const loader = defineHandler<Props>(async (context) => {
   const response = await fetchApi(context, '/.well-known/void-platform');
   if (!response.ok) {
-    return { methods: [], error: 'Login methods are unavailable. Try again shortly.' };
+    return {
+      methods: [],
+      platformName: 'Void Cloud',
+      error: 'Login methods are unavailable. Try again shortly.',
+    };
   }
-  const discovery = (await response.json()) as { authentication?: { methods?: Props['methods'] } };
-  return { methods: discovery.authentication?.methods ?? [] };
+  const discovery = (await response.json()) as {
+    displayName?: unknown;
+    authentication?: { methods?: Props['methods'] };
+  };
+  return {
+    methods: discovery.authentication?.methods ?? [],
+    platformName: discoveryDisplayName(discovery),
+  };
 });
 export const action = defineHandler(async (context) => {
   // Cookie-authenticated mutations must originate in this dashboard.

@@ -16,6 +16,7 @@ import { hmacVerifyState } from '../auth/hmac.ts';
 import { startBootstrapLogin } from '../auth/login.ts';
 import { escapeHtml } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
+import { getPlatformPageTitle } from '../platform-identity.ts';
 
 const app = new Hono<ApiEnv>();
 const noStore: MiddlewareHandler<ApiEnv> = async (context, next) => {
@@ -123,14 +124,18 @@ app.get('/setup', async (context) => {
   const revision = await readLoginRevision(context.get('db'), pending.connection_id, 1);
   if (Date.parse(pending.expires_at) <= Date.now()) {
     return context.html(
-      '<!doctype html><title>Void setup expired</title><h1>Setup code expired</h1><p>Run <code>void platform repair ' +
+      '<!doctype html><title>' +
+        escapeHtml(getPlatformPageTitle('Setup code expired', context.env, context.req.url)) +
+        '</title><h1>Setup code expired</h1><p>Run <code>void platform repair ' +
         escapeHtml(pending.installation_id) +
         '</code> from the installing computer to generate a new code. If installation was interrupted, resume the original install command instead.</p>',
       410,
     );
   }
   return context.html(
-    '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>Set up Void</title>' +
+    '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>' +
+      escapeHtml(getPlatformPageTitle('Set up administrator', context.env, context.req.url)) +
+      '</title>' +
       '<main style="font-family:system-ui;max-width:40rem;margin:4rem auto;padding:1rem"><h1>Set up your platform administrator</h1>' +
       '<p>Enter the setup code printed by the installer. You will sign in and review the account before it becomes the first administrator.</p>' +
       '<form method="post" action="/auth/bootstrap"><label>Setup code <input name="code" type="password" autocomplete="one-time-code" required></label>' +

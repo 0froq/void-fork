@@ -23,11 +23,23 @@ import {
 } from '../../db.ts';
 import { escapeHtml } from '../../email.ts';
 import type { ApiEnv } from '../../env.ts';
+import { getPlatformPageTitle } from '../../platform-identity.ts';
 import { isAdminSuspended } from '../../suspension.ts';
 import { adminAccessRejected } from '../middleware/request-rejection.ts';
 
 const app = new Hono<ApiEnv>();
 type AdminProvider = 'github' | 'google';
+
+function loginFailure(
+  context: Context<ApiEnv>,
+  message: string,
+  status: 400 | 404 | 501,
+): Response {
+  return context.html(
+    `<!doctype html><title>${escapeHtml(getPlatformPageTitle('Login failed', context.env, context.req.url))}</title><h1>Login failed</h1><p>${escapeHtml(message)}</p>`,
+    status,
+  );
+}
 
 export function isAdminOAuthState(state: string): boolean {
   try {
@@ -66,7 +78,7 @@ app.get('/login', async (context) => {
       ].join('');
   return context.html(`<!DOCTYPE html>
 <html>
-<head><title>Admin Login - Void</title></head>
+<head><title>${escapeHtml(getPlatformPageTitle('Admin Login', context.env, context.req.url))}</title></head>
 <body style="font-family: monospace; line-height: 1.5">
 <div style="max-width: 800px; margin: 0 auto; padding: 20px">
 <h1>Void Admin</h1>
@@ -85,14 +97,14 @@ app.get('/login/:provider', async (context) => {
     return managed;
   }
   if (provider !== 'github' && provider !== 'google') {
-    return context.html('<h1>Login failed</h1><p>Unknown authentication provider.</p>', 404);
+    return loginFailure(context, 'Unknown authentication provider.', 404);
   }
   const capabilities = getPlatformCapabilities(context.env);
   if (
     (provider === 'github' && !capabilities.githubOAuth) ||
     (provider === 'google' && !capabilities.googleOAuth)
   ) {
-    return context.html('<h1>Login failed</h1><p>Authentication provider unavailable.</p>', 501);
+    return loginFailure(context, 'Authentication provider unavailable.', 501);
   }
   const redirectUri =
     context.env.AUTH_REDIRECT_URI ?? new URL('/auth/callback', context.req.url).toString();
@@ -122,12 +134,12 @@ export async function handleAdminOAuthCallback(context: Context<ApiEnv>): Promis
   const state = context.req.query('state');
 
   if (!code || !state) {
-    return context.html('<h1>Login failed</h1><p>Missing code or state.</p>', 400);
+    return loginFailure(context, 'Missing code or state.', 400);
   }
 
   const dotIndex = state.lastIndexOf('.');
   if (dotIndex === -1) {
-    return context.html('<h1>Login failed</h1><p>Invalid state.</p>', 400);
+    return loginFailure(context, 'Invalid state.', 400);
   }
 
   const stateEncoded = state.slice(0, dotIndex);
@@ -135,7 +147,7 @@ export async function handleAdminOAuthCallback(context: Context<ApiEnv>): Promis
 
   const valid = await hmacVerifyState(stateEncoded, signature, context.env.JWT_SECRET);
   if (!valid) {
-    return context.html('<h1>Login failed</h1><p>Invalid state signature.</p>', 400);
+    return loginFailure(context, 'Invalid state signature.', 400);
   }
 
   // Consume the nonce atomically — prevents replay of the callback URL
@@ -157,7 +169,7 @@ export async function handleAdminOAuthCallback(context: Context<ApiEnv>): Promis
       throw new Error('unknown provider');
     }
   } catch {
-    return context.html('<h1>Login failed</h1><p>Invalid state data.</p>', 400);
+    return loginFailure(context, 'Invalid state data.', 400);
   }
 
   // Verify the nonce matches the cookie set during login redirect.
@@ -165,12 +177,12 @@ export async function handleAdminOAuthCallback(context: Context<ApiEnv>): Promis
   // preventing login CSRF / session swapping attacks.
   const cookieNonce = getCookie(context, 'oauth_nonce');
   if (!cookieNonce || cookieNonce !== nonce) {
-    return context.html('<h1>Login failed</h1><p>OAuth session mismatch.</p>', 400);
+    return loginFailure(context, 'OAuth session mismatch.', 400);
   }
 
   const nonceValid = await consumeOAuthNonce(context.get('db'), nonce);
   if (!nonceValid) {
-    return context.html('<h1>Login failed</h1><p>Invalid or expired login state.</p>', 400);
+    return loginFailure(context, 'Invalid or expired login state.', 400);
   }
 
   deleteCookie(context, 'oauth_nonce', { path: '/auth/callback' });

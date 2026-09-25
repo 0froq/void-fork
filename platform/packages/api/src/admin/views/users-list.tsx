@@ -7,16 +7,18 @@ export function UsersListPage({
   search,
   page,
   totalPages,
+  platformName,
   username,
 }: {
   users: ReadonlyArray<User>;
   search?: string;
   page?: number;
   totalPages?: number;
+  platformName: string;
   username?: string;
 }) {
   return (
-    <Layout title="Users" username={username}>
+    <Layout platformName={platformName} title="Users" username={username}>
       <h1>Users</h1>
       <form method="get" action="/admin/users" style="margin-bottom: 10px">
         <input type="text" name="search" placeholder="Search users..." value={search ?? ''} />{' '}

@@ -23,6 +23,7 @@ import {
   getAuthenticationConfiguration,
 } from '../../operator/auth-config.ts';
 import { OperatorError } from '../../operator/common.ts';
+import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { platformLoginTests } from '../../schema.ts';
 import { Layout } from '../views/layout.tsx';
 
@@ -36,7 +37,11 @@ app.use('*', async (context, next) => {
 app.onError((error, context) => {
   if (error instanceof OperatorError || error instanceof AuthenticationConfigurationError) {
     return context.html(
-      <Layout title="Authentication settings" username={context.get('user')?.login}>
+      <Layout
+        platformName={getPlatformDisplayName(context.env, context.req.url)}
+        title="Authentication settings"
+        username={context.get('user')?.login}
+      >
         <h1>Authentication settings</h1>
         <p>{error.message}</p>
         <p>
@@ -151,7 +156,11 @@ app.get('/', async (context) => {
     : [];
   const admission = 'admission' in data ? data.admission : undefined;
   return context.html(
-    <Layout title="Authentication settings" username={context.get('user').login}>
+    <Layout
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
+      title="Authentication settings"
+      username={context.get('user').login}
+    >
       <h1>Authentication settings</h1>
       <p>
         Platform protection:{' '}
@@ -341,7 +350,11 @@ app.get('/new', async (context) => {
   }
   const id = kind === 'oidc' ? 'company' : kind === 'cloudflare-access' ? 'access' : kind;
   return context.html(
-    <Layout title="Add login method" username={context.get('user').login}>
+    <Layout
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
+      title="Add login method"
+      username={context.get('user').login}
+    >
       <h1>Add login method</h1>
       <ConnectionForm
         configuration={{
@@ -377,7 +390,11 @@ app.get('/connections/:id', async (context) => {
     throw new OperatorError(404, 'Login method not found.');
   }
   return context.html(
-    <Layout title="Edit login method" username={context.get('user').login}>
+    <Layout
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
+      title="Edit login method"
+      username={context.get('user').login}
+    >
       <h1>Edit {method.label}</h1>
       <ConnectionForm
         configuration={parsePlatformLoginConfiguration(method.configuration)}

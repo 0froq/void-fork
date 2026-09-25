@@ -15,6 +15,7 @@ type WorkerStatus = Readonly<{
 export function PlatformPage({
   workers,
   env,
+  platformName,
   username,
   tz,
   entries,
@@ -23,6 +24,7 @@ export function PlatformPage({
 }: {
   workers: ReadonlyArray<WorkerStatus>;
   env: PlatformEnv;
+  platformName: string;
   username: string;
   tz?: string;
   entries: ReadonlyArray<ActivityEntry>;
@@ -33,7 +35,7 @@ export function PlatformPage({
   const anyHasError = workers.some((w) => w.error);
 
   return (
-    <Layout title="Platform Workers" username={username}>
+    <Layout platformName={platformName} title="Platform Workers" username={username}>
       <h1>Platform Workers</h1>
       <p style="margin-bottom: 16px">
         Environment: <strong>{env}</strong>

@@ -1,11 +1,14 @@
 import type { Child } from 'hono/jsx';
+import { formatPlatformPageTitle } from '../../platform-identity.ts';
 
 export function Layout({
   title,
+  platformName,
   username,
   children,
 }: {
   title: string;
+  platformName: string;
   username?: string;
   children: Child;
 }) {
@@ -14,7 +17,7 @@ export function Layout({
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>{title} - Void Admin</title>
+        <title>{formatPlatformPageTitle(title, platformName)}</title>
         <style>{`
           * { box-sizing: border-box; margin: 0; padding: 0; }
           body { font-family: monospace; line-height: 1.5; }

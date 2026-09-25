@@ -3,6 +3,7 @@ import { getBuild } from '../../db.ts';
 import type { ApiEnv } from '../../env.ts';
 import { buildLogs } from '../../operator/build-operations.ts';
 import { OperatorError } from '../../operator/common.ts';
+import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { BuildLogs, isTerminalBuildStatus } from '../views/build-logs.tsx';
 import { formatDateTime } from '../views/format.ts';
 import { Layout } from '../views/layout.tsx';
@@ -59,7 +60,11 @@ app.get('/:id', async (context) => {
   const tz = (context.req.raw.cf?.timezone as string | undefined) ?? undefined;
 
   return context.html(
-    <Layout title={`Build ${build.id}`} username={context.get('user').login}>
+    <Layout
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
+      title={`Build ${build.id}`}
+      username={context.get('user').login}
+    >
       <h1>Build {build.id}</h1>
 
       <table>

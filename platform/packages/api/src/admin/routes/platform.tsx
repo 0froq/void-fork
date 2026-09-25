@@ -12,6 +12,7 @@ import {
   executeWorkerRollbacks,
   workerBatch,
 } from '../../operator/worker-operations.ts';
+import { getPlatformDisplayName } from '../../platform-identity.ts';
 import type { PlatformEvent } from '../../types.ts';
 import { PLATFORM_WORKERS } from '../platform-workers.ts';
 import { PlatformRollbackResultPage } from '../views/platform-rollback-result.tsx';
@@ -105,6 +106,7 @@ app.get('/', async (context) => {
   const page = Math.max(1, parseInt(context.req.query('page') ?? '1', 10) || 1);
   return context.html(
     <PlatformPage
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
       workers={result.workers}
       env={environment}
       username={context.get('user').login}
@@ -138,6 +140,7 @@ app.post('/rollback-all', async (context) => {
       return {
         response: await context.html(
           <PlatformRollbackResultPage
+            platformName={getPlatformDisplayName(context.env, context.req.url)}
             events={result.events}
             batchId={result.batchId!}
             env={environment}
@@ -157,6 +160,7 @@ app.get('/events/:batchId', async (context) => {
   const result = await workerBatch(context.get('db'), context.env, context.req.param('batchId'));
   return context.html(
     <PlatformRollbackResultPage
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
       events={result.events}
       batchId={result.batchId}
       env={result.environment}
@@ -171,6 +175,7 @@ app.get('/:name', async (context) => {
   const result = await workerDetail(context.env, environment, context.req.param('name'));
   return context.html(
     <PlatformWorkerDetailPage
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
       {...result}
       env={environment}
       username={context.get('user').login}
@@ -212,6 +217,7 @@ app.post('/:name/rollback', async (context) => {
         return {
           response: await context.html(
             <PlatformWorkerDetailPage
+              platformName={getPlatformDisplayName(context.env, context.req.url)}
               {...detail}
               env={environment}
               error={`Rollback outcome: ${outcome.status}. ${outcome.error_message ?? outcome.auditError ?? ''}`}

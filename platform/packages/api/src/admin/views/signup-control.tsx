@@ -9,18 +9,20 @@ function BooleanBadge({ value }: { value: boolean }) {
 export function SignupControlPage({
   enabled,
   entries,
+  platformName,
   username,
   admission,
   connections,
 }: {
   enabled: boolean;
   entries: ReadonlyArray<AllowlistEntryStatus>;
+  platformName: string;
   username?: string;
   admission?: PlatformAdmissionPolicy;
   connections: ReadonlyArray<{ id: string; kind: string; label: string }>;
 }) {
   return (
-    <Layout title="Signup Control" username={username}>
+    <Layout platformName={platformName} title="Signup Control" username={username}>
       <h1>Signup Control</h1>
       {admission?.mode === 'company' && (
         <p>

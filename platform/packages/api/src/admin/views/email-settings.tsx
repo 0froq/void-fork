@@ -7,15 +7,17 @@ export function EmailSettingsPage({
   policy,
   management,
   senderDomain,
+  platformName,
   username,
 }: {
   policy: EmailRecipientPolicy;
   management: EmailDomainManagement;
   senderDomain: string | undefined;
+  platformName: string;
   username?: string;
 }) {
   return (
-    <Layout title="Email" username={username}>
+    <Layout platformName={platformName} title="Email" username={username}>
       <h1>Email</h1>
       <p style={META}>
         Installation-wide settings. Per-project usage, caps and domains live on each project's email

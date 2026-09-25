@@ -110,6 +110,28 @@ describe('auth middleware', () => {
     expect(res.status).toBe(200);
   });
 
+  test('uses the installation name in admin login and page titles', async () => {
+    const namedEnv = { ...env, PLATFORM_DISPLAY_NAME: '<Example Platform>' };
+    const login = await app.fetch(new Request('http://localhost/admin/login'), namedEnv);
+    expect(await login.text()).toContain(
+      '<title>Admin Login · &lt;Example Platform&gt; · Void</title>',
+    );
+
+    const admin = await createTestUser(env.db, 'named-admin', 'github', undefined, 'free', 'admin');
+    for (const path of ['/admin/', '/admin/users']) {
+      const response = await app.fetch(
+        new Request(`http://localhost${path}`, {
+          headers: { Cookie: `admin_token=${admin.adminJwt}` },
+        }),
+        namedEnv,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain(
+        `<title>${path === '/admin/' ? 'Dashboard' : 'Users'} · &lt;Example Platform&gt; · Void</title>`,
+      );
+    }
+  });
+
   test('returns 403 for an administrator suspended by another administrator', async () => {
     const admin = await createTestUser(
       env.db,

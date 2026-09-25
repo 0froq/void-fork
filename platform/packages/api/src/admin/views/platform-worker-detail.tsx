@@ -10,6 +10,7 @@ export function PlatformWorkerDetailPage({
   versions,
   deployment,
   error,
+  platformName,
   username,
   tz,
 }: {
@@ -19,13 +20,14 @@ export function PlatformWorkerDetailPage({
   versions: ReadonlyArray<WorkerVersion>;
   deployment?: WorkerDeployment;
   error?: string;
+  platformName: string;
   username: string;
   tz?: string;
 }) {
   const activeVersionId = deployment?.versions.find((v) => v.percentage === 100)?.version_id;
 
   return (
-    <Layout title={`${worker.name} — Platform`} username={username}>
+    <Layout platformName={platformName} title={`${worker.name} — Platform`} username={username}>
       <p style="margin-bottom: 16px">
         <a href={'/admin/platform'}>&larr; Back to Platform</a>
       </p>

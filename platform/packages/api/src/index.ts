@@ -68,6 +68,7 @@ import { sandboxDrainStatus } from './operator/sandbox-operations.ts';
 import {
   getPlatformApiUrl,
   getPlatformDisplayName,
+  getPlatformPageTitle,
   platformConnectCommand,
 } from './platform-identity.ts';
 import { processPlatformQueue } from './platform-queue.ts';
@@ -395,7 +396,7 @@ const app = new Hono<ApiEnv>()
 <html><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Signup Restricted - ${name}</title>
+<title>${escapeHtml(getPlatformPageTitle('Signup Restricted', context.env, context.req.url))}</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fafafa}.card{text-align:center;max-width:400px;padding:40px}h1{font-size:1.25rem;margin-bottom:12px}p{color:#666;line-height:1.6}</style>
 </head><body>
 <div class="card"><h1>Signup Restricted</h1><p>New accounts on ${name} require administrator approval.</p><p>Ask your platform administrator for an invitation, then sign in with an account whose verified email address matches that invitation.</p></div>
@@ -416,7 +417,7 @@ const app = new Hono<ApiEnv>()
 <html><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${invitationCommand ? 'Accept Project Invitation' : 'Get Started'} - ${name}</title>
+<title>${escapeHtml(getPlatformPageTitle(invitationCommand ? 'Accept Project Invitation' : 'Get Started', context.env, context.req.url))}</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fafafa}.card{max-width:520px;padding:40px}h1{font-size:1.5rem;margin-bottom:12px}p{color:#666;line-height:1.6;margin-bottom:20px}pre{background:#eee;padding:16px;overflow:auto}a{color:inherit}</style>
 </head><body>
 <div class="card">

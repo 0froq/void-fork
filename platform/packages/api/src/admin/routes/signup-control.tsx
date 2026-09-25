@@ -9,6 +9,7 @@ import {
 } from '../../operator/access-service.ts';
 import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
 import { OperatorError } from '../../operator/common.ts';
+import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { getAllowlist } from '../../signup-allowlist.ts';
 import { renderOperationError } from '../operation-error.tsx';
 import { SignupControlPage } from '../views/signup-control.tsx';
@@ -18,7 +19,13 @@ app.onError(renderOperationError);
 
 app.get('/', async (context) => {
   const signup = await getOperatorSignup(context);
-  return context.html(<SignupControlPage {...signup} username={context.get('user').login} />);
+  return context.html(
+    <SignupControlPage
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
+      {...signup}
+      username={context.get('user').login}
+    />,
+  );
 });
 
 app.post('/toggle', async (context) => {

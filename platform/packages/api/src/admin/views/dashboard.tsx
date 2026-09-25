@@ -26,6 +26,7 @@ type DashboardProps = Readonly<{
   deployments: ReadonlyArray<Deployment & { project_slug: string | null }>;
   topProjects: ReadonlyArray<TopProjectRow>;
   siteDomain: string;
+  platformName: string;
   username?: string;
 }>;
 
@@ -195,10 +196,11 @@ export function DashboardPage({
   deployments,
   topProjects,
   siteDomain,
+  platformName,
   username,
 }: DashboardProps) {
   return (
-    <Layout title="Dashboard" username={username}>
+    <Layout platformName={platformName} title="Dashboard" username={username}>
       <h1>Dashboard</h1>
       <HealthStatusBanner />
       <div style="display: flex; gap: 12px">

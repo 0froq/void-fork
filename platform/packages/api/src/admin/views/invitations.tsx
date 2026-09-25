@@ -20,15 +20,17 @@ export function InvitationsPage({
   invitations,
   page,
   totalPages,
+  platformName,
   username,
 }: {
   invitations: ReadonlyArray<InvitationRow>;
   page: number;
   totalPages: number;
+  platformName: string;
   username?: string;
 }) {
   return (
-    <Layout title="Invitations" username={username}>
+    <Layout platformName={platformName} title="Invitations" username={username}>
       <h1>Invitations</h1>
 
       <form

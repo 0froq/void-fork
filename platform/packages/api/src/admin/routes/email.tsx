@@ -28,6 +28,7 @@ import type { ApiEnv } from '../../env.ts';
 import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
 import { OperatorError } from '../../operator/common.ts';
 import { setOperatorEmailPolicy, setOperatorEmailSettings } from '../../operator/email-routes.ts';
+import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { runEmailDestinationCleanup } from '../../provisioning/email-destination-cleanup.ts';
 import { renderOperationError } from '../operation-error.tsx';
 import { EmailSettingsPage } from '../views/email-settings.tsx';
@@ -63,7 +64,11 @@ async function incompleteEmailOperationResponse(
 ): Promise<Response> {
   const status = outcome.operationStatus ?? 'pending';
   return context.html(
-    <Layout title={label} username={context.get('user').login}>
+    <Layout
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
+      title={label}
+      username={context.get('user').login}
+    >
       <h1>
         {label} {status}
       </h1>
@@ -88,6 +93,7 @@ app.get('/', async (context) => {
   ]);
   return context.html(
     <EmailSettingsPage
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
       policy={policy}
       management={management}
       senderDomain={context.env.EMAIL_SENDER_DOMAIN}
@@ -213,7 +219,11 @@ app.get('/:projectId', async (context) => {
   const tz = (context.req.raw.cf?.timezone as string | undefined) ?? undefined;
 
   return context.html(
-    <Layout title={`Email - ${project.slug}`} username={context.get('user').login}>
+    <Layout
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
+      title={`Email - ${project.slug}`}
+      username={context.get('user').login}
+    >
       <h1>
         Email &mdash; <a href={`/admin/projects/${projectId}`}>{project.slug}</a>
       </h1>

@@ -3,17 +3,20 @@ import { defineHandler, defineHead } from 'void';
 import { fetchApi, getPublicApiUrl } from '../lib/api.ts';
 import { isLocalDashboardHost } from '../lib/origin.ts';
 import { createPkceChallenge, createPkceVerifier } from '../lib/pkce.ts';
+import { discoveryDisplayName, platformPageTitle } from '../lib/platform-title.ts';
 import apkProtocolMedium from '../ui/fonts/APK-Protocol-Medium.woff2';
 import interRomanLatin from '../ui/fonts/inter-roman-latin.woff2';
 import khTekaMonoRegular from '../ui/fonts/KHTekaMono-Regular.woff2';
 
 export type Props = Readonly<{
   methods: ReadonlyArray<{ id: string; label: string; url: string }>;
+  platformName: string;
   unavailable?: boolean;
   devLoginUrl?: string;
 }>;
 
-export const head = defineHead<Props>(() => ({
+export const head = defineHead<Props>((_context, props) => ({
+  title: platformPageTitle('Sign in', props.platformName),
   link: [
     { rel: 'preload', href: apkProtocolMedium, as: 'font', type: 'font/woff2', crossorigin: '' },
     { rel: 'preload', href: interRomanLatin, as: 'font', type: 'font/woff2', crossorigin: '' },
@@ -63,6 +66,7 @@ export const loader = defineHandler<Props>(async (context) => {
   }
   const callbackWithNonce = callback.href;
   let methods: Props['methods'] = [];
+  let platformName = 'Void Cloud';
   let unavailable = false;
   try {
     const response = await fetchApi(context, '/.well-known/void-platform');
@@ -71,12 +75,14 @@ export const loader = defineHandler<Props>(async (context) => {
     }
     const document = (await response.json()) as {
       schemaVersion?: number;
+      displayName?: unknown;
       authentication?: { methods: Array<{ id: string; label: string }> };
       authenticationProviders?: Array<string>;
     };
     if (![1, 2, 3].includes(document.schemaVersion ?? 0)) {
       throw new Error('Unsupported platform');
     }
+    platformName = discoveryDisplayName(document);
     const descriptors =
       document.schemaVersion === 3
         ? document.authentication?.methods
@@ -121,5 +127,5 @@ export const loader = defineHandler<Props>(async (context) => {
     // malformed platformUrl — treat as non-local
   }
 
-  return { methods, unavailable, devLoginUrl };
+  return { methods, platformName, unavailable, devLoginUrl };
 });

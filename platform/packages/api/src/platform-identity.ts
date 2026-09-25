@@ -5,18 +5,34 @@ type PlatformIdentityEnv = Pick<
   'AUTH_REDIRECT_URI' | 'PLATFORM_DISPLAY_NAME' | 'PLATFORM_INSTALLATION_ID' | 'PLATFORM_ENV'
 >;
 
-export function getPlatformDisplayName(env: PlatformIdentityEnv, requestUrl?: string): string {
-  const name = env.PLATFORM_DISPLAY_NAME?.trim();
+export function getPlatformDisplayName(
+  env: PlatformIdentityEnv | undefined,
+  requestUrl?: string,
+): string {
+  const bindings = env ?? {};
+  const name = bindings.PLATFORM_DISPLAY_NAME?.trim();
   if (name) {
     return name;
   }
-  if (env.PLATFORM_INSTALLATION_ID) {
+  if (bindings.PLATFORM_INSTALLATION_ID) {
     return 'Void Platform';
   }
-  const apiUrl = getPlatformApiUrl(env, requestUrl);
+  const apiUrl = getPlatformApiUrl(bindings, requestUrl);
   return ['https://api.void.cloud', 'https://api.staging.void.cloud'].includes(apiUrl)
     ? 'Void Cloud'
     : 'Void Platform';
+}
+
+export function formatPlatformPageTitle(page: string, platformName: string): string {
+  return `${page} · ${platformName}${/\bvoid\b/i.test(platformName) ? '' : ' · Void'}`;
+}
+
+export function getPlatformPageTitle(
+  page: string,
+  env: PlatformIdentityEnv | undefined,
+  requestUrl?: string,
+): string {
+  return formatPlatformPageTitle(page, getPlatformDisplayName(env, requestUrl));
 }
 
 /** Use configured deployment identity or the actual request URL, never forwarded headers. */

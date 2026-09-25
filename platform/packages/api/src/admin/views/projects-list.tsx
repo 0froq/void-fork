@@ -9,6 +9,7 @@ export function ProjectsListPage({
   page,
   totalPages,
   siteDomain,
+  platformName,
   username,
 }: {
   projects: ReadonlyArray<ProjectRow>;
@@ -16,10 +17,11 @@ export function ProjectsListPage({
   page?: number;
   totalPages?: number;
   siteDomain: string;
+  platformName: string;
   username?: string;
 }) {
   return (
-    <Layout title="Projects" username={username}>
+    <Layout platformName={platformName} title="Projects" username={username}>
       <h1>Projects</h1>
       <form method="get" action="/admin/projects" style="margin-bottom: 10px">
         <input

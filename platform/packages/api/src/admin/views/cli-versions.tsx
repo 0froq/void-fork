@@ -51,16 +51,18 @@ function CliVersionTable({
 export function CliVersionsPage({
   allTime,
   last30Days,
+  platformName,
   username,
   tz,
 }: {
   allTime: ReadonlyArray<CliVersionDeploymentStats>;
   last30Days: ReadonlyArray<CliVersionDeploymentStats>;
+  platformName: string;
   username?: string;
   tz?: string;
 }) {
   return (
-    <Layout title="CLI Versions" username={username}>
+    <Layout platformName={platformName} title="CLI Versions" username={username}>
       <h1>CLI Versions</h1>
       <CliVersionTable rows={last30Days} title="Last 30 Days" tz={tz} />
       <CliVersionTable rows={allTime} title="All Time" tz={tz} />

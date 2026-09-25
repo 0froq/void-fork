@@ -1,8 +1,12 @@
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
-import { action } from '../../pages/account.server.ts';
+import { action, head, loader } from '../../pages/account.server.ts';
 
 const app = new Hono().post('/account', async (context) => action(context as never));
+
+const accountPage = new Hono().get('/account', async (context) =>
+  context.json(await loader(context as never)),
+);
 
 function submit(origin = 'https://dashboard.example.com') {
   return app.request(
@@ -22,6 +26,19 @@ afterEach(() => {
 });
 
 describe('account linking error responses', () => {
+  it('uses the discovered platform name for the account title', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ displayName: 'Example Platform' })),
+    );
+    const response = await accountPage.request('https://dashboard.example.com/account', undefined, {
+      API_URL: 'https://api.example.com',
+    });
+    const props = await response.json<{ platformName: string; methods: [] }>();
+    expect(props.platformName).toBe('Example Platform');
+    expect(head({} as never, props)?.title).toBe('Login methods · Example Platform · Void');
+  });
+
   it('renders the API recovery message while preserving its rejection status', async () => {
     vi.stubGlobal(
       'fetch',

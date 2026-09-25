@@ -7,12 +7,14 @@ export function PlatformRollbackResultPage({
   events,
   batchId,
   env,
+  platformName,
   username,
   tz,
 }: {
   events: ReadonlyArray<PlatformEvent>;
   batchId: string;
   env: PlatformEnv;
+  platformName: string;
   username: string;
   tz?: string;
 }) {
@@ -20,7 +22,7 @@ export function PlatformRollbackResultPage({
   const anyFailed = events.some((e) => e.status === 'failed');
 
   return (
-    <Layout title="Rollback Results" username={username}>
+    <Layout platformName={platformName} title="Rollback Results" username={username}>
       <p style="margin-bottom: 16px">
         <a href={'/admin/platform'}>&larr; Back to Platform</a>
       </p>

@@ -8,6 +8,7 @@ export function DeploymentsListPage({
   search,
   page,
   totalPages,
+  platformName,
   username,
   tz,
 }: {
@@ -15,11 +16,12 @@ export function DeploymentsListPage({
   search?: string;
   page?: number;
   totalPages?: number;
+  platformName: string;
   username?: string;
   tz?: string;
 }) {
   return (
-    <Layout title="Deployments" username={username}>
+    <Layout platformName={platformName} title="Deployments" username={username}>
       <h1>Deployments</h1>
       <form method="get" action="/admin/deployments" style="margin-bottom: 10px">
         <input

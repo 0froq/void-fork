@@ -13,6 +13,7 @@ import {
   deploymentLogs,
   requestDeploymentCancellation,
 } from '../../operator/deployment-operations.ts';
+import { getPlatformDisplayName } from '../../platform-identity.ts';
 import type { DeployManifest } from '../../types.ts';
 import { DeploymentLogs } from '../views/deployment-logs.tsx';
 import { displayStatus } from '../views/deployment-table.tsx';
@@ -33,6 +34,7 @@ app.get('/', async (context) => {
     const deployments = await searchDeployments(context.get('db'), search);
     return context.html(
       <DeploymentsListPage
+        platformName={getPlatformDisplayName(context.env, context.req.url)}
         deployments={deployments}
         search={search}
         username={context.get('user').login}
@@ -49,6 +51,7 @@ app.get('/', async (context) => {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   return context.html(
     <DeploymentsListPage
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
       deployments={deployments}
       page={page}
       totalPages={totalPages}
@@ -78,7 +81,11 @@ app.get('/:id', async (context) => {
   }
 
   return context.html(
-    <Layout title={`Deployment ${deployment.id}`} username={context.get('user').login}>
+    <Layout
+      platformName={getPlatformDisplayName(context.env, context.req.url)}
+      title={`Deployment ${deployment.id}`}
+      username={context.get('user').login}
+    >
       <h1>Deployment {deployment.id}</h1>
 
       {canCancel && (
