@@ -48,7 +48,7 @@ const sourceAliases = {
   'void/pages-client': join(repositoryRoot, 'packages', 'void', 'src', 'pages', 'client.ts'),
   'void/pages-head': join(repositoryRoot, 'packages', 'void', 'src', 'pages', 'head.ts'),
   'void/pages-server': join(repositoryRoot, 'packages', 'void', 'src', 'pages', 'serialize.ts'),
-  'void:admin-client-script': join(apiRoot, 'dist', 'admin-client.js'),
+  'void:admin-client-script': join(apiRoot, 'dist', 'admin-client.txt'),
 };
 
 try {
@@ -86,7 +86,7 @@ try {
         compatibility_date: '2026-02-24',
         compatibility_flags:
           name === 'api' || name === 'proxy' || name === 'emailGateway' ? ['nodejs_compat'] : [],
-        ...(name === 'api' ? { rules: [{ type: 'Text', globs: ['**/admin-client.js'] }] } : {}),
+        ...(name === 'api' ? { rules: [{ type: 'Text', globs: ['**/admin-client.txt'] }] } : {}),
       }),
     );
     const result = spawnSync(

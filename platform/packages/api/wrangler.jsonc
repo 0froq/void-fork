@@ -4,14 +4,14 @@
   "build": { "command": "node scripts/build-worker.mjs" },
   "alias": {
     "void:sandbox-controller-source": "./dist/sandbox-controller-source.ts",
-    "void:admin-client-script": "./dist/admin-client.js",
+    "void:admin-client-script": "./dist/admin-client.txt",
     "@void/react/pages-server": "../../../packages/react/src/runtime/pages-server.ts",
     "@void/react": "../../../packages/react/src/runtime/index.ts",
     "void/pages-client": "../../../packages/void/src/pages/client.ts",
     "void/pages-head": "../../../packages/void/src/pages/head.ts",
     "void/pages-server": "../../../packages/void/src/pages/serialize.ts",
   },
-  "rules": [{ "type": "Text", "globs": ["**/admin-client.js"] }],
+  "rules": [{ "type": "Text", "globs": ["**/admin-client.txt"] }],
   "compatibility_date": "2026-02-12",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
