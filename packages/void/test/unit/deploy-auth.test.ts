@@ -576,6 +576,29 @@ describe('buildEnv — local node_modules/.bin on PATH', () => {
     return key ? env[key] : undefined;
   }
 
+  function withInheritedPath(path: string | undefined, assert: () => void): void {
+    const saved = Object.entries(process.env).filter(([key]) => key.toLowerCase() === 'path');
+    for (const [key] of saved) {
+      delete process.env[key];
+    }
+    if (path !== undefined) {
+      process.env[saved[0]?.[0] ?? 'PATH'] = path;
+    }
+
+    try {
+      assert();
+    } finally {
+      for (const key of Object.keys(process.env)) {
+        if (key.toLowerCase() === 'path') {
+          delete process.env[key];
+        }
+      }
+      for (const [key, value] of saved) {
+        process.env[key] = value;
+      }
+    }
+  }
+
   it('prepends <root>/node_modules/.bin', () => {
     const root = mkdtempSync(join(tmpdir(), 'void-build-env-'));
     try {
@@ -588,58 +611,43 @@ describe('buildEnv — local node_modules/.bin on PATH', () => {
 
   it('preserves the inherited PATH after the prepended entry', () => {
     const root = mkdtempSync(join(tmpdir(), 'void-build-env-'));
-    const savedPath = process.env.PATH;
     try {
-      process.env.PATH = `/usr/bin${DELIMITER}/bin`;
-      const childPath = readPath(buildEnv(undefined, { localBinRoot: root }));
-      expect(childPath).toBe(
-        `${join(root, 'node_modules', '.bin')}${DELIMITER}/usr/bin${DELIMITER}/bin`,
-      );
+      withInheritedPath(`/usr/bin${DELIMITER}/bin`, () => {
+        const childPath = readPath(buildEnv(undefined, { localBinRoot: root }));
+        expect(childPath).toBe(
+          `${join(root, 'node_modules', '.bin')}${DELIMITER}/usr/bin${DELIMITER}/bin`,
+        );
+      });
     } finally {
-      if (savedPath === undefined) {
-        delete process.env.PATH;
-      } else {
-        process.env.PATH = savedPath;
-      }
       rmSync(root, { recursive: true, force: true });
     }
   });
 
   it('uses the platform PATH delimiter', () => {
     const root = mkdtempSync(join(tmpdir(), 'void-build-env-'));
-    const savedPath = process.env.PATH;
     try {
-      process.env.PATH = '/usr/bin';
-      const childPath = readPath(buildEnv(undefined, { localBinRoot: root }));
-      const binDir = join(root, 'node_modules', '.bin');
-      expect(childPath).toBe(`${binDir}${DELIMITER}/usr/bin`);
-      // Guard against the classic `:`-everywhere bug: on Windows a `:` would
-      // make the whole variable one unusable entry (`C:\...` already has a `:`).
-      expect(DELIMITER).toBe(process.platform === 'win32' ? ';' : ':');
+      withInheritedPath('/usr/bin', () => {
+        const childPath = readPath(buildEnv(undefined, { localBinRoot: root }));
+        const binDir = join(root, 'node_modules', '.bin');
+        expect(childPath).toBe(`${binDir}${DELIMITER}/usr/bin`);
+        // Guard against the classic `:`-everywhere bug: on Windows a `:` would
+        // make the whole variable one unusable entry (`C:\...` already has a `:`).
+        expect(DELIMITER).toBe(process.platform === 'win32' ? ';' : ':');
+      });
     } finally {
-      if (savedPath === undefined) {
-        delete process.env.PATH;
-      } else {
-        process.env.PATH = savedPath;
-      }
       rmSync(root, { recursive: true, force: true });
     }
   });
 
   it('sets PATH to just the bin dir when nothing was inherited', () => {
     const root = mkdtempSync(join(tmpdir(), 'void-build-env-'));
-    const savedPath = process.env.PATH;
     try {
-      delete process.env.PATH;
-      expect(readPath(buildEnv(undefined, { localBinRoot: root }))).toBe(
-        join(root, 'node_modules', '.bin'),
-      );
+      withInheritedPath(undefined, () => {
+        expect(readPath(buildEnv(undefined, { localBinRoot: root }))).toBe(
+          join(root, 'node_modules', '.bin'),
+        );
+      });
     } finally {
-      if (savedPath === undefined) {
-        delete process.env.PATH;
-      } else {
-        process.env.PATH = savedPath;
-      }
       rmSync(root, { recursive: true, force: true });
     }
   });
@@ -669,27 +677,19 @@ describe('buildEnv — local node_modules/.bin on PATH', () => {
   // runs before the build and, on `void deploy --dir dist` or a static/spa
   // preset with no build command, is the ONLY child the deploy spawns.
   it('leaves PATH untouched when no localBinRoot is given', () => {
-    const savedPath = process.env.PATH;
-    try {
-      process.env.PATH = `/usr/bin${DELIMITER}/bin`;
+    withInheritedPath(`/usr/bin${DELIMITER}/bin`, () => {
       expect(readPath(buildEnv())).toBe(`/usr/bin${DELIMITER}/bin`);
       expect(readPath(buildEnv({ VOID_DEPLOY_PROJECT_ID: 'proj_1' }))).toBe(
         `/usr/bin${DELIMITER}/bin`,
       );
-    } finally {
-      if (savedPath === undefined) {
-        delete process.env.PATH;
-      } else {
-        process.env.PATH = savedPath;
-      }
-    }
+    });
   });
 
   it('hands the child the parent PATH byte-for-byte when no localBinRoot is given', () => {
     // Deliberately NOT asserting on `process.cwd()/node_modules/.bin`: the test
     // runner itself puts that on PATH, so an absence check there would be
     // vacuous. Identity with the parent is the property that matters.
-    expect(readPath(buildEnv())).toBe(process.env.PATH);
+    expect(readPath(buildEnv())).toBe(readPath(process.env));
   });
 });
 
