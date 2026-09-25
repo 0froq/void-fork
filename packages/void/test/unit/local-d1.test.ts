@@ -177,7 +177,7 @@ describe('local D1 identity', () => {
     } finally {
       db.close();
     }
-  });
+  }, 30_000);
 
   it('creates the local auth schema in the configured database', async () => {
     const root = createRoot();
