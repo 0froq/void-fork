@@ -127,6 +127,7 @@ beforeEach(() => {
   vi.spyOn(PlatformCloudflareClient.prototype, 'listAccounts').mockResolvedValue([
     { id: 'account', name: 'Account' },
   ]);
+  vi.spyOn(PlatformCloudflareClient.prototype, 'listHyperdriveConfigs').mockResolvedValue([]);
   mocks.confirm.mockResolvedValue(true);
   mocks.spinner.mockReturnValue(mocks.progress);
   mocks.select.mockImplementation(async ({ message, options }) =>

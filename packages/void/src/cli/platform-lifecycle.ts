@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { confirm, intro, isCancel, log, note, outro, password, select, text } from '@clack/prompts';
 import {
+  createPlatformResourceNames,
   normalizeApplicationDomain,
   normalizeInstallationSlug,
   type PlatformInstallationManifest,
@@ -403,6 +404,58 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         'platform: VOID_PLATFORM_HYPERDRIVE_ID, VOID_PLATFORM_HYPERDRIVE_ORIGIN_HOST, and VOID_PLATFORM_HYPERDRIVE_ORIGIN_USER must be set together.',
       );
     }
+    let externalHyperdrive = externalHyperdriveId
+      ? {
+          id: externalHyperdriveId,
+          host: externalHyperdriveHost,
+          user: externalHyperdriveUser,
+        }
+      : undefined;
+    if (
+      !externalHyperdrive &&
+      process.stdin.isTTY &&
+      (!existing || isPlatformSetupDraft(existing)) &&
+      !existing?.resources.some((resource) => resource.key === 'hyperdrive')
+    ) {
+      const expectedName =
+        existing?.deployment.resources.hyperdrive ??
+        createPlatformResourceNames(installationSlug).hyperdrive;
+      const matches = (await client.listHyperdriveConfigs(accountId)).filter(
+        (resource) => resource.name === expectedName,
+      );
+      if (matches.length > 1) {
+        throw new Error(`platform: More than one Hyperdrive named ${expectedName} exists.`);
+      }
+      if (matches[0]) {
+        const live = await client.getHyperdriveConfig(accountId, matches[0].id);
+        if (live.id !== matches[0].id || live.name !== expectedName || !live.origin.user) {
+          throw new Error(
+            `platform: Could not verify the database user for existing Hyperdrive ${expectedName}.`,
+          );
+        }
+        note(
+          `Database: ${live.origin.database}\nHost: ${live.origin.host}\nPort: ${live.origin.port}\nUser: ${live.origin.user}\nSQL result caching: ${live.cachingDisabled ? 'disabled' : 'enabled'}`,
+          `Existing Hyperdrive ${expectedName}`,
+        );
+        if (!live.cachingDisabled) {
+          throw new Error(
+            `platform: Disable SQL result caching on existing Hyperdrive ${expectedName} before installing.`,
+          );
+        }
+        const useExisting = await confirm({
+          message: `Use existing Hyperdrive ${expectedName} for this installation?`,
+          initialValue: true,
+        });
+        if (isCancel(useExisting) || !useExisting) {
+          throw new Error('platform: Cancelled. The existing Hyperdrive was not changed.');
+        }
+        externalHyperdrive = {
+          id: live.id,
+          host: live.origin.host,
+          user: live.origin.user,
+        };
+      }
+    }
     let authoritativeProvisionIntents = false;
     if (existing && !isPlatformSetupDraft(existing)) {
       if (!databaseUrl) {
@@ -444,15 +497,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       controlPlaneDomain,
       dedicatedZone,
       displayName,
-      ...(externalHyperdriveId
-        ? {
-            externalHyperdrive: {
-              id: externalHyperdriveId,
-              host: externalHyperdriveHost,
-              user: externalHyperdriveUser,
-            },
-          }
-        : {}),
+      ...(externalHyperdrive ? { externalHyperdrive } : {}),
       ...(process.env.VOID_EMAIL_SHARED_ZONE_ID
         ? { emailSharedZoneId: process.env.VOID_EMAIL_SHARED_ZONE_ID }
         : {}),

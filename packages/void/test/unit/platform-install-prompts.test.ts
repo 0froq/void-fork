@@ -66,6 +66,7 @@ beforeEach(() => {
   vi.spyOn(PlatformCloudflareClient.prototype, 'listAccounts').mockResolvedValue([
     { id: 'account', name: 'Account' },
   ]);
+  vi.spyOn(PlatformCloudflareClient.prototype, 'listHyperdriveConfigs').mockResolvedValue([]);
   mocks.text.mockResolvedValue('');
   mocks.select.mockResolvedValue('workers-dev');
   mocks.confirm.mockResolvedValue(false);
@@ -83,6 +84,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   if (ttyDescriptor) {
     Object.defineProperty(process.stdin, 'isTTY', ttyDescriptor);
   } else {
@@ -91,6 +93,93 @@ afterEach(() => {
 });
 
 describe('interactive platform installation prompts', () => {
+  it('offers the matching externally managed Hyperdrive and passes the confirmed origin into the plan', async () => {
+    vi.spyOn(PlatformCloudflareClient.prototype, 'listHyperdriveConfigs').mockResolvedValue([
+      { id: 'terraform-id', name: 'void-test-database' },
+    ]);
+    vi.spyOn(PlatformCloudflareClient.prototype, 'getHyperdriveConfig').mockResolvedValue({
+      id: 'terraform-id',
+      name: 'void-test-database',
+      origin: {
+        database: 'void_platform',
+        host: 'hyperdrive-productiondb.databases.cfdata.org/itdb/primary',
+        port: 5432,
+        scheme: 'postgresql',
+        user: 'hyperdrive_void_platform_service',
+      },
+      cachingDisabled: true,
+    });
+    mocks.confirm.mockResolvedValue(true);
+
+    await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev']));
+
+    expect(mocks.note).toHaveBeenCalledWith(
+      expect.stringContaining('Database: void_platform'),
+      'Existing Hyperdrive void-test-database',
+    );
+    expect(mocks.confirm).toHaveBeenCalledWith({
+      message: 'Use existing Hyperdrive void-test-database for this installation?',
+      initialValue: true,
+    });
+    expect(mocks.plan).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        externalHyperdrive: {
+          id: 'terraform-id',
+          host: 'hyperdrive-productiondb.databases.cfdata.org/itdb/primary',
+          user: 'hyperdrive_void_platform_service',
+        },
+      }),
+      null,
+      expect.anything(),
+    );
+  });
+
+  it('keeps the environment override for unattended installation', async () => {
+    vi.stubEnv('VOID_PLATFORM_HYPERDRIVE_ID', 'terraform-id');
+    vi.stubEnv('VOID_PLATFORM_HYPERDRIVE_ORIGIN_HOST', 'db.example.com');
+    vi.stubEnv('VOID_PLATFORM_HYPERDRIVE_ORIGIN_USER', 'runtime_user');
+
+    await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev']));
+
+    expect(PlatformCloudflareClient.prototype.listHyperdriveConfigs).not.toHaveBeenCalled();
+    expect(mocks.plan).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        externalHyperdrive: {
+          id: 'terraform-id',
+          host: 'db.example.com',
+          user: 'runtime_user',
+        },
+      }),
+      null,
+      expect.anything(),
+    );
+  });
+
+  it('stops before planning if an existing Hyperdrive is declined', async () => {
+    vi.spyOn(PlatformCloudflareClient.prototype, 'listHyperdriveConfigs').mockResolvedValue([
+      { id: 'terraform-id', name: 'void-test-database' },
+    ]);
+    vi.spyOn(PlatformCloudflareClient.prototype, 'getHyperdriveConfig').mockResolvedValue({
+      id: 'terraform-id',
+      name: 'void-test-database',
+      origin: {
+        database: 'void_platform',
+        host: 'db.example.com',
+        port: 5432,
+        scheme: 'postgresql',
+        user: 'runtime_user',
+      },
+      cachingDisabled: true,
+    });
+
+    await expect(
+      runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev'])),
+    ).rejects.toThrow('existing Hyperdrive was not changed');
+    expect(mocks.plan).not.toHaveBeenCalled();
+  });
+
   it('bolds platform runtime labels without styling their values', async () => {
     vi.spyOn(pc, 'bold').mockImplementation(pc.createColors(true).bold);
     const runtime = loadPlatformRuntime('');
