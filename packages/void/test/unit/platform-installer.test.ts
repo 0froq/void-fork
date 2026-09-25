@@ -3124,6 +3124,64 @@ describe('platform installer', () => {
     );
   });
 
+  it('accepts a completed legacy authentication migration without setup authority on later upgrades', async () => {
+    const original = await createPlatformInstallPlan(
+      planningClient(),
+      {
+        accountId: 'account',
+        applicationDomain: 'apps.example.com',
+        controlPlaneDomain: '',
+        dedicatedZone: false,
+        displayName: 'Example',
+        installationSlug: 'example',
+        zoneName: 'example.com',
+      },
+      null,
+    );
+    const plan = {
+      ...original,
+      actions: [],
+      deployment: {
+        ...original.deployment,
+        schemaVersion: 3 as const,
+        authentication: { ...original.deployment.authentication, configurable: true as const },
+      },
+    };
+    let manifest = createPlatformInstallationManifest({
+      account: plan.account,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      deployment: plan.deployment,
+      id: plan.installationId,
+      ownershipNonce: 'ownership-nonce-0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    const secrets = createPlatformInstallationSecrets({
+      bootstrapGitHubId: '',
+      bootstrapGitHubLogin: '',
+      cloudflareApiToken: '',
+      databaseUrl: 'postgres://user:password@db.example.com/void',
+      existingInstallation: true,
+      githubClientId: '',
+      githubClientSecret: '',
+      r2AccessKeyId: '',
+      r2SecretAccessKey: '',
+    });
+
+    expect(() => assertRequiredPlatformSecrets(plan, manifest, secrets)).toThrow(
+      'administrator setup code',
+    );
+    manifest = recordInstallationStep(
+      manifest,
+      {
+        completedAt: '2026-01-01T00:00:00.000Z',
+        key: 'bootstrap-access:v1',
+        resultHash: 'bootstrap-hash',
+      },
+      '2026-01-01T00:00:00.000Z',
+    );
+    expect(() => assertRequiredPlatformSecrets(plan, manifest, secrets)).not.toThrow();
+  });
+
   it('recreates only the email gateway with its email key and no JWT or Cloudflare token', async () => {
     const fullPlan = await createPlatformInstallPlan(
       planningClient(),

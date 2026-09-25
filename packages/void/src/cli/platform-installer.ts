@@ -3044,7 +3044,11 @@ export function assertRequiredPlatformSecrets(
   };
   if (
     plan.deployment.authentication.configurable &&
-    !manifest.steps.some((step) => step.key.startsWith('authentication-initialized:v1:'))
+    !manifest.steps.some((step) => step.key.startsWith('authentication-initialized:v1:')) &&
+    !(
+      manifest.deployment.authentication.configurable &&
+      manifest.steps.some((step) => step.key === 'bootstrap-access:v1')
+    )
   ) {
     if (!authenticationWillBePrepared) {
       requireSecret(secrets.authenticationSetupJson ?? '', 'authentication setup configuration');
