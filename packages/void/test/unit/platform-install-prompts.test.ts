@@ -68,7 +68,9 @@ beforeEach(() => {
   ]);
   vi.spyOn(PlatformCloudflareClient.prototype, 'listHyperdriveConfigs').mockResolvedValue([]);
   mocks.text.mockResolvedValue('');
-  mocks.select.mockResolvedValue('workers-dev');
+  mocks.select.mockImplementation(async ({ message, options }) =>
+    message === 'How should Void set up Hyperdrive?' ? options[0].value : 'workers-dev',
+  );
   mocks.confirm.mockResolvedValue(false);
   mocks.plan.mockResolvedValue({
     account: { id: 'account', name: 'Account' },
@@ -109,17 +111,18 @@ describe('interactive platform installation prompts', () => {
       },
       cachingDisabled: true,
     });
-    mocks.confirm.mockResolvedValue(true);
-
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev']));
 
     expect(mocks.note).toHaveBeenCalledWith(
       expect.stringContaining('Database: void_platform'),
       'Existing Hyperdrive void-test-database',
     );
-    expect(mocks.confirm).toHaveBeenCalledWith({
-      message: 'Use existing Hyperdrive void-test-database for this installation?',
-      initialValue: true,
+    expect(mocks.select).toHaveBeenCalledWith({
+      message: 'How should Void set up Hyperdrive?',
+      options: [
+        { value: 'existing', label: 'Use existing Hyperdrive void-test-database' },
+        { value: 'cancel', label: 'Cancel installation' },
+      ],
     });
     expect(mocks.plan).toHaveBeenCalledWith(
       expect.anything(),
@@ -157,6 +160,25 @@ describe('interactive platform installation prompts', () => {
     );
   });
 
+  it('explains how to set up a separately managed Hyperdrive before planning', async () => {
+    mocks.select.mockResolvedValue('existing');
+
+    await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev']));
+
+    expect(mocks.select).toHaveBeenCalledWith({
+      message: 'How should Void set up Hyperdrive?',
+      options: [
+        { value: 'create', label: 'Let Void create Hyperdrive', hint: 'recommended' },
+        { value: 'existing', label: 'Use a separately managed Hyperdrive' },
+      ],
+    });
+    expect(mocks.note).toHaveBeenCalledWith(
+      expect.stringContaining('Create a Hyperdrive in account account named void-test-database'),
+      'Set up Hyperdrive first',
+    );
+    expect(mocks.plan).not.toHaveBeenCalled();
+  });
+
   it('stops before planning if an existing Hyperdrive is declined', async () => {
     vi.spyOn(PlatformCloudflareClient.prototype, 'listHyperdriveConfigs').mockResolvedValue([
       { id: 'terraform-id', name: 'void-test-database' },
@@ -174,9 +196,11 @@ describe('interactive platform installation prompts', () => {
       cachingDisabled: true,
     });
 
+    mocks.select.mockResolvedValue('cancel');
+
     await expect(
       runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev'])),
-    ).rejects.toThrow('existing Hyperdrive was not changed');
+    ).rejects.toThrow('Cancelled');
     expect(mocks.plan).not.toHaveBeenCalled();
   });
 

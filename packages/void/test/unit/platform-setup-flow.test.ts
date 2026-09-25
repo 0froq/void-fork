@@ -46,7 +46,10 @@ vi.mock('@clack/prompts', async (original) => ({
       ? Promise.resolve(false)
       : mocks.confirm(input),
   multiselect: mocks.multiselect,
-  select: mocks.select,
+  select: (input: { message: string; options: Array<{ value: string }> }) =>
+    input.message === 'How should Void set up Hyperdrive?'
+      ? Promise.resolve(input.options[0]!.value)
+      : mocks.select(input),
   text: mocks.text,
   password: mocks.password,
   intro: vi.fn(),
