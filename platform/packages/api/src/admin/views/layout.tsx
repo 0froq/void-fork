@@ -45,8 +45,7 @@ export function Layout({
               <a href="/admin/deployments">Deployments</a> |{' '}
               <a href="/admin/cli-versions">CLI Versions</a> |{' '}
               <a href="/admin/signup-control">Signup</a> | <a href="/admin/config/auth">Settings</a>{' '}
-              | <a href="/admin/email">Email</a> | <a href="/admin/invitations">Invitations</a> |{' '}
-              <a href="/admin/platform">Platform</a>
+              | <a href="/admin/email">Email</a> | <a href="/admin/invitations">Invitations</a>
             </span>
             <span>
               {username && <>{username} | </>}
