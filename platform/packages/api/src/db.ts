@@ -20,6 +20,8 @@ import {
 } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { alias } from 'drizzle-orm/pg-core';
+import { ACTIVE_BUILD_STATUSES } from './build-status.ts';
+export { ACTIVE_BUILD_STATUSES } from './build-status.ts';
 import { lockAuthSettings } from './auth/configuration.ts';
 import { lockEmailPolicy } from './email/admission.ts';
 import { generateId } from './id.ts';
@@ -3710,14 +3712,6 @@ export async function purgeExpiredAuthCodes(db: Db): Promise<void> {
 // ---------------------------------------------------------------------------
 // builds
 // ---------------------------------------------------------------------------
-
-/**
- * Build statuses that count as "in-flight" for per-user concurrency limits.
- * A build occupies a concurrency slot once it has been claimed (`starting`)
- * through to the moment it stops (`complete`/`failed`/`cancelled`). `queued`
- * builds are NOT counted — they have not yet been assigned a slot.
- */
-export const ACTIVE_BUILD_STATUSES: Array<Build['status']> = ['starting', 'building', 'deploying'];
 
 export async function createBuild(
   db: Db,

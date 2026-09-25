@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import type { Deployment } from '../../../types.ts';
 import { DeploymentTable } from './deployment-table.tsx';
+import { formatAbsoluteDateTime } from './format.ts';
 import { Layout } from './layout.tsx';
 import type { ProjectRow } from './projects-table.tsx';
 import { ProjectsTable } from './projects-table.tsx';
@@ -185,7 +186,7 @@ function TopProjectsWidget({
                 </td>
                 <td>{formatNumber(project.requests)}</td>
                 <td>{formatBytes(project.bandwidthBytes)}</td>
-                <td>{new Date(project.lastSeen).toLocaleString()}</td>
+                <td>{formatAbsoluteDateTime(project.lastSeen)}</td>
               </tr>
             ))}
           </tbody>

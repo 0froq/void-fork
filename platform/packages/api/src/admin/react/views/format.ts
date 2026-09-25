@@ -1,7 +1,22 @@
-export function formatDateTime(iso: string, tz?: string): string {
-  const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+import { createElement } from 'react';
+
+function parseUtcDate(iso: string): Date {
+  const normalized = iso.replace(' ', 'T');
+  return new Date(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized) ? normalized : `${normalized}Z`);
+}
+
+export function formatAbsoluteDate(iso: string): string {
+  return parseUtcDate(iso).toLocaleDateString('en-US', { timeZone: 'UTC' });
+}
+
+export function formatAbsoluteDateTime(iso: string): string {
+  return parseUtcDate(iso).toLocaleString('en-US', { timeZone: 'UTC' });
+}
+
+export function formatDateTime(iso: string, tz?: string) {
+  const d = parseUtcDate(iso);
   if (isNaN(d.getTime())) {
-    return iso;
+    return createElement('span', { suppressHydrationWarning: true }, iso);
   }
   const formatted = d.toLocaleString('en-US', {
     timeZone: tz || 'UTC',
@@ -22,7 +37,9 @@ export function formatDateTime(iso: string, tz?: string): string {
   } else {
     ago = `${Math.floor(seconds / 86400)}d ago`;
   }
-  return `${formatted} (${ago})`;
+  // The relative age may tick between SSR and hydration. Preserve the server
+  // text until the next React render without treating that tick as a mismatch.
+  return createElement('span', { suppressHydrationWarning: true }, `${formatted} (${ago})`);
 }
 
 export function formatBytes(n: number): string {

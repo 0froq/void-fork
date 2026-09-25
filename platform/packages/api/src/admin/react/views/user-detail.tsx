@@ -2,7 +2,7 @@
 import type { PlanId } from '../../../tiers.ts';
 import { PLAN_LIMITS, getPlanLimits } from '../../../tiers.ts';
 import type { User, Project } from '../../../types.ts';
-import { formatLimit, formatNumber, formatBytes } from './format.ts';
+import { formatLimit, formatNumber, formatBytes, formatAbsoluteDate } from './format.ts';
 import { Layout } from './layout.tsx';
 
 type ProjectUsage = Readonly<{
@@ -70,9 +70,9 @@ export function UserDetailPage({
 
       <h2>Plan</h2>
       <form method="post" action={`/admin/users/${user.id}/plan`} style="margin-bottom: 10px">
-        <select name="plan">
+        <select name="plan" defaultValue={user.plan} key={user.id}>
           {plans.map((p) => (
-            <option key={p} value={p} selected={p === user.plan}>
+            <option key={p} value={p}>
               {p}
             </option>
           ))}
@@ -128,7 +128,7 @@ export function UserDetailPage({
         </tbody>
       </table>
 
-      <h2>Current Usage (since {new Date(usage.billingPeriodStart).toLocaleDateString()})</h2>
+      <h2>Current Usage (since {formatAbsoluteDate(usage.billingPeriodStart)})</h2>
       <p>
         Requests: {formatNumber(usage.totalRequests)} / {formatLimit(limits.requestsPerMonth)}
       </p>
@@ -193,7 +193,7 @@ export function UserDetailPage({
                   <a href={`/admin/projects/${p.id}`}>{p.slug}</a>
                 </td>
                 <td>{p.type}</td>
-                <td>{new Date(p.created_at).toLocaleDateString()}</td>
+                <td>{formatAbsoluteDate(p.created_at)}</td>
               </tr>
             ))}
           </tbody>

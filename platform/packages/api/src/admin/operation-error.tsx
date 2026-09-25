@@ -1,25 +1,23 @@
 import type { ErrorHandler } from 'hono';
 import type { ApiEnv } from '../env.ts';
 import { OperatorError } from '../operator/common.ts';
-import { getPlatformPageTitle } from '../platform-identity.ts';
+import { getPlatformDisplayName } from '../platform-identity.ts';
+import { renderAdminPage } from './react/server.ts';
 
 /** Browser and JSON clients share operations, while keeping their own rendering. */
 export const renderOperationError: ErrorHandler<ApiEnv> = (error, context) => {
   if (!(error instanceof OperatorError)) {
     throw error;
   }
-  return context.html(
-    <>
-      <title>{getPlatformPageTitle('Admin error', context.env, context.req.url)}</title>
-      <h1>{error.message}</h1>
-      <p>
-        {error.status === 401 ? (
-          <a href="/admin/logout">Sign in again</a>
-        ) : (
-          <a href="/admin/">Return to admin</a>
-        )}
-      </p>
-    </>,
-    error.status,
+  return renderAdminPage(
+    context,
+    'adminError',
+    'Admin error',
+    {
+      message: error.message,
+      status: error.status,
+      platformName: getPlatformDisplayName(context.env, context.req.url),
+    },
+    { status: error.status, css: false },
   );
 };

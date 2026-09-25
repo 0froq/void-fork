@@ -1,5 +1,6 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import type { Project } from '../../../types.ts';
+import { formatAbsoluteDate, formatAbsoluteDateTime } from './format.ts';
 
 export type ProjectRow = Project & {
   url?: string;
@@ -48,7 +49,7 @@ export function ProjectsTable({
                 {p.owner_login ? <a href={`/admin/users/${p.user_id}`}>{p.owner_login}</a> : '-'}
               </td>
               <td>{p.type}</td>
-              <td>{new Date(p.created_at).toLocaleDateString()}</td>
+              <td>{formatAbsoluteDate(p.created_at)}</td>
               <td>
                 {p.last_deploy ? (
                   <>
@@ -57,10 +58,10 @@ export function ProjectsTable({
                     />
                     {p.last_deploy_id ? (
                       <a href={`/admin/deployments/${p.last_deploy_id}`}>
-                        {new Date(p.last_deploy).toLocaleString()}
+                        {formatAbsoluteDateTime(p.last_deploy)}
                       </a>
                     ) : (
-                      new Date(p.last_deploy).toLocaleString()
+                      formatAbsoluteDateTime(p.last_deploy)
                     )}
                   </>
                 ) : (

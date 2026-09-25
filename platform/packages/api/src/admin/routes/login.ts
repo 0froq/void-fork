@@ -21,11 +21,11 @@ import {
   storeOAuthNonce,
   consumeOAuthNonce,
 } from '../../db.ts';
-import { escapeHtml } from '../../email.ts';
 import type { ApiEnv } from '../../env.ts';
-import { getPlatformPageTitle } from '../../platform-identity.ts';
+import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { isAdminSuspended } from '../../suspension.ts';
 import { adminAccessRejected } from '../middleware/request-rejection.ts';
+import { renderAdminPage } from '../react/server.ts';
 
 const app = new Hono<ApiEnv>();
 type AdminProvider = 'github' | 'google';
@@ -34,10 +34,16 @@ function loginFailure(
   context: Context<ApiEnv>,
   message: string,
   status: 400 | 404 | 501,
-): Response {
-  return context.html(
-    `<!doctype html><title>${escapeHtml(getPlatformPageTitle('Login failed', context.env, context.req.url))}</title><h1>Login failed</h1><p>${escapeHtml(message)}</p>`,
-    status,
+): Promise<Response> {
+  return renderAdminPage(
+    context,
+    'loginError',
+    'Login failed',
+    {
+      message,
+      platformName: getPlatformDisplayName(context.env, context.req.url),
+    },
+    { status, css: false },
   );
 }
 
@@ -62,31 +68,18 @@ app.get('/login', async (context) => {
   const capabilities = getPlatformCapabilities(context.env);
   const configured = await readAuthSettings(context.get('db'));
   const providers = configured
-    ? (await readEnabledLoginConnections(context.get('db')))
-        .map(
-          ({ configuration }) =>
-            `<p><a href="/admin/login/${encodeURIComponent(configuration.id)}">Sign in with ${escapeHtml(configuration.label)}</a></p>`,
-        )
-        .join('')
+    ? (await readEnabledLoginConnections(context.get('db'))).map(({ configuration }) => ({
+        id: configuration.id,
+        label: configuration.label,
+      }))
     : [
-        capabilities.githubOAuth
-          ? '<p><a href="/admin/login/github">Sign in with GitHub</a></p>'
-          : '',
-        capabilities.googleOAuth
-          ? '<p><a href="/admin/login/google">Sign in with Google</a></p>'
-          : '',
-      ].join('');
-  return context.html(`<!DOCTYPE html>
-<html>
-<head><title>${escapeHtml(getPlatformPageTitle('Admin Login', context.env, context.req.url))}</title></head>
-<body style="font-family: monospace; line-height: 1.5">
-<div style="max-width: 800px; margin: 0 auto; padding: 20px">
-<h1>Void Admin</h1>
-<p>Sign in with your admin account</p>
-${providers}
-</div>
-</body>
-</html>`);
+        ...(capabilities.githubOAuth ? [{ id: 'github', label: 'GitHub' }] : []),
+        ...(capabilities.googleOAuth ? [{ id: 'google', label: 'Google' }] : []),
+      ];
+  return renderAdminPage(context, 'adminLogin', 'Admin Login', {
+    platformName: getPlatformDisplayName(context.env, context.req.url),
+    providers,
+  });
 });
 
 // GET /login/:provider

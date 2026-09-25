@@ -486,9 +486,9 @@ app.route('/operator/v1', operatorApi);
 
 // Admin dashboard (HTML, cookie-based auth)
 app.route('/admin', adminLogin);
+app.get('/admin/client.js', () => serveAdminClient());
 app.use('/admin/*', adminAuthMiddleware);
 app.use('/admin/*', adminCsrfMiddleware);
-app.get('/admin/client.js', () => serveAdminClient());
 app.get('/admin/', adminAuthMiddleware, dashboardHandler);
 app.route('/admin/users', adminUsers);
 app.route('/admin/projects', adminProjects);

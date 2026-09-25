@@ -11,7 +11,7 @@ export function serveAdminClient(): Response {
   return new Response(adminClientScript, {
     headers: {
       'Content-Type': 'text/javascript; charset=utf-8',
-      'Cache-Control': 'private, no-store',
+      'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
     },
   });
@@ -22,6 +22,7 @@ export async function renderAdminPage(
   component: AdminPageId,
   title: string,
   props: Record<string, unknown>,
+  options: { status?: number; css?: boolean } = {},
 ): Promise<Response> {
   const platformName = String(props.platformName ?? 'Void');
   const pageObj: PageObject = {
@@ -45,19 +46,20 @@ export async function renderAdminPage(
     'X-VoidPages': 'true',
   };
   if (context.req.header('X-VoidPages') === 'true') {
-    return Response.json(pageObj, { headers });
+    return Response.json(pageObj, { headers, status: options.status ?? 200 });
   }
   const stream = await renderReactPage({
     pageObj,
     components: adminComponents,
     layoutTree: {},
     assetTags: {
-      css: `<style>${ADMIN_CSS}</style>`,
+      css: options.css === false ? '' : `<style>${ADMIN_CSS}</style>`,
       preloads: '',
       body: '<script src="/admin/client.js" defer></script>',
     },
   });
   return new Response(stream, {
+    status: options.status ?? 200,
     headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8' },
   });
 }

@@ -131,7 +131,7 @@ describe('auth middleware', () => {
     expect(navigation.headers.get('Cache-Control')).toBe('private, no-store');
     expect(((await navigation.json()) as { component: string }).component).toBe('users');
 
-    expect((await req('/admin/client.js')).status).toBe(302);
+    expect((await req('/admin/client.js')).status).toBe(200);
     const client = await req('/admin/client.js', admin.adminJwt);
     expect(client.status).toBe(200);
     expect(client.headers.get('Content-Type')).toContain('text/javascript');
@@ -1262,7 +1262,7 @@ describe('GET /admin/deployments/:id', () => {
     expect(html).toContain('KV');
     expect(html).toContain('CACHE');
     expect(html).toContain('sqlite');
-    expect(html).toContain('1 pending');
+    expect(visibleMarkup(html)).toContain('1 pending');
     expect(html).toContain('sync');
     expect(html).toContain('0 * * * *');
     expect(html).toContain('Raw JSON');
@@ -1340,7 +1340,7 @@ describe('GET /admin/login', () => {
     try {
       const res = await app.fetch(new Request('http://localhost/admin/login'), env);
       const html = await res.text();
-      expect(html).toContain('Sign in with GitHub');
+      expect(visibleMarkup(html)).toContain('Sign in with GitHub');
       expect(html).not.toContain('Sign in with Google');
     } finally {
       env.PLATFORM_CAPABILITIES = undefined;
@@ -1501,12 +1501,12 @@ describe('POST /admin/projects/:id/owner', () => {
 
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain(`Transfer Ownership: ${project.slug}`);
+    expect(visibleMarkup(html)).toContain(`Transfer Ownership: ${project.slug}`);
     expect(html).toContain(owner.login);
     expect(html).toContain(target.login);
     expect(html).toContain('pro');
     expect(html).toContain('Suspended (operator_review)');
-    expect(html).toContain(`deployment: ${deployment.id} (pending)`);
+    expect(visibleMarkup(html)).toContain(`deployment: ${deployment.id} (pending)`);
     expect(html).toContain('Resolve or cancel all active work');
     expect(html).not.toContain(`action="/admin/projects/${project.id}/owner"`);
     expect(await env.db.select().from(operatorEvents)).toEqual([]);
@@ -1557,10 +1557,10 @@ describe('POST /admin/projects/:id/owner', () => {
 
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain(`Converge Ownership State: ${project.slug}`);
+    expect(visibleMarkup(html)).toContain(`Converge Ownership State: ${project.slug}`);
     expect(html).toContain('This is a convergence-only operation');
     expect(html).toContain(`detach from <code>${formerOwner.id}</code>`);
-    expect(html).toContain(`deployment: ${deployment.id} (pending)`);
+    expect(visibleMarkup(html)).toContain(`deployment: ${deployment.id} (pending)`);
     expect(html).toContain('Active work does not block convergence.');
     expect(html).toContain('Apply Convergence');
     expect(html).toContain(`action="/admin/projects/${project.id}/owner"`);
@@ -1785,7 +1785,7 @@ describe('GET /admin/deployments/:id (logs section)', () => {
     expect(html).toContain('log-entries');
   });
 
-  test('logs script empty-state branch references the in-scope filter variable (regression: "q is not defined")', async () => {
+  test('renders the client-side runtime log filter', async () => {
     const admin = await createTestUser(
       env.db,
       'admin-logsui3',
@@ -1800,11 +1800,9 @@ describe('GET /admin/deployments/:id (logs section)', () => {
     const res = await req(`/admin/deployments/${deployment.id}`, admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
-    // The "No logs found" branch runs on initial load when a deployment has no
-    // logs in range. It must read the declared `query` var, not a stray `q`,
-    // otherwise renderData throws ReferenceError -> "Failed to load logs: q is not defined".
-    expect(html).toContain('(query ?');
-    expect(html).not.toContain('(q ?');
+    expect(html).toContain('id="log-filter-text"');
+    expect(html).toContain('"component":"deploymentDetail"');
+    expect(html).toContain('src="/admin/client.js"');
   });
 
   test('does not render logs section for failed deployment', async () => {

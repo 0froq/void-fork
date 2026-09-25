@@ -1,5 +1,6 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import type { User } from '../../../types.ts';
+import { formatAbsoluteDate } from './format.ts';
 import { Layout } from './layout.tsx';
 import { Pagination } from './pagination.tsx';
 
@@ -55,7 +56,7 @@ export function UsersListPage({
               <td>{user.plan}</td>
               <td>{user.role}</td>
               <td>{user.suspended_reason ? 'suspended' : 'active'}</td>
-              <td>{new Date(user.created_at).toLocaleDateString()}</td>
+              <td>{formatAbsoluteDate(user.created_at)}</td>
               <td>
                 <form
                   method="post"

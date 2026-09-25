@@ -1,32 +1,221 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
+
+type LogEntry = {
+  timestamp: number;
+  outcome: string;
+  method?: string;
+  url?: string;
+  status?: string;
+  logs?: Array<{ level?: string; message: unknown }>;
+  exceptions?: Array<{ name: string; message: string }>;
+};
+
+const LEVEL_COLORS: Record<string, string> = {
+  error: '#dc2626',
+  warn: '#d97706',
+  info: '#6b7280',
+  log: '#6b7280',
+  debug: '#9ca3af',
+};
+
+function formatMessage(message: unknown): string {
+  if (typeof message === 'string') {
+    return message.slice(0, 500);
+  }
+  if (Array.isArray(message)) {
+    return message.join(' ').slice(0, 500);
+  }
+  return JSON.stringify(message ?? null).slice(0, 500);
+}
+
+function LogRow({ entry }: { entry: LogEntry }) {
+  const [copied, setCopied] = useState(false);
+  const messages = [
+    ...(entry.logs ?? []).map((log) => ({
+      level: log.level ?? 'log',
+      text: formatMessage(log.message),
+    })),
+    ...(entry.exceptions ?? []).map((exception) => ({
+      level: 'error',
+      text: `${exception.name}: ${exception.message}`,
+    })),
+  ];
+  const statusCode = Number.parseInt(entry.status ?? '', 10);
+  const statusColor = statusCode >= 500 ? '#dc2626' : statusCode >= 400 ? '#d97706' : '#16a34a';
+  return (
+    <div style="padding: 4px 0; border-bottom: 1px solid #eee; font-size: 0.8rem">
+      <span style="color: #999; margin-right: 8px">
+        {new Date(entry.timestamp).toLocaleTimeString()}
+      </span>
+      {entry.method && entry.url && (
+        <>
+          <span style="margin-right: 8px; font-weight: 600">{entry.method}</span>
+          <span style="margin-right: 8px">{entry.url}</span>
+        </>
+      )}
+      {entry.status && (
+        <span style={{ color: statusColor, fontWeight: 600, marginRight: 8 }}>{entry.status}</span>
+      )}
+      <span style={{ color: entry.outcome === 'ok' ? '#16a34a' : '#dc2626' }}>{entry.outcome}</span>
+      {messages.length > 0 && (
+        <div style="position: relative; margin-top: 4px; margin-left: 24px">
+          <button
+            type="button"
+            style="position: absolute; top: 4px; right: 4px; font-size: 0.7rem; padding: 2px 6px; cursor: pointer; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 3px"
+            onClick={() => {
+              void navigator.clipboard
+                .writeText(messages.map((message) => message.text).join('\n'))
+                .then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                });
+            }}
+          >
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+          <pre style="margin: 0; padding: 8px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 4px; font-size: 0.78rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all">
+            {messages.map((message, index) => (
+              <div key={index}>
+                <span
+                  style={{
+                    color: LEVEL_COLORS[message.level] ?? '#6b7280',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    width: 50,
+                    display: 'inline-block',
+                  }}
+                >
+                  {message.level}
+                </span>
+                <span>{message.text}</span>
+              </div>
+            ))}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
-  const basePath = `/admin/deployments/${deploymentId}`;
+  const [since, setSince] = useState('1h');
+  const [count, setCount] = useState(100);
+  const [filter, setFilter] = useState('');
+  const [entries, setEntries] = useState<Array<LogEntry> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [tailing, setTailing] = useState(false);
+
+  const loadLogs = useCallback(async () => {
+    setEntries(null);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/admin/deployments/${deploymentId}/logs?since=${since}&limit=${count}`,
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const result = (await response.json()) as { data?: Array<LogEntry> };
+      setEntries(result.data ?? []);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [deploymentId, since, count]);
+
+  useEffect(() => {
+    void loadLogs();
+  }, [loadLogs]);
+
+  useEffect(() => {
+    if (!tailing) {
+      return;
+    }
+    let active = true;
+    const seen = new Set<string>();
+    const poll = async () => {
+      try {
+        const response = await fetch(`/admin/deployments/${deploymentId}/logs?since=1m&limit=50`);
+        if (!response.ok) {
+          return;
+        }
+        const result = (await response.json()) as { data?: Array<LogEntry> };
+        if (!active) {
+          return;
+        }
+        const fresh = (result.data ?? []).filter((entry) => {
+          const key = `${entry.timestamp}:${entry.url}:${entry.status}`;
+          if (seen.has(key)) {
+            return false;
+          }
+          seen.add(key);
+          return true;
+        });
+        if (fresh.length > 0) {
+          setEntries((current) => [...fresh, ...(current ?? [])]);
+        }
+      } catch {
+        // The next tail poll can recover.
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 3_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [deploymentId, tailing]);
+
+  const query = filter.toLowerCase().trim();
+  const visible = (entries ?? []).filter(
+    (entry) =>
+      !query ||
+      [
+        entry.outcome,
+        entry.method,
+        entry.url,
+        entry.status,
+        ...(entry.logs ?? []).map((log) => formatMessage(log.message)),
+        ...(entry.exceptions ?? []).flatMap((exception) => [exception.name, exception.message]),
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(query),
+  );
 
   return (
     <>
       <h2>Runtime Logs</h2>
-
-      {/* Filter bar */}
       <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center">
         <label>
           Time:{' '}
-          <select id="log-since">
-            {['1h', '6h', '24h', '7d'].map((v) => (
-              <option key={v} value={v}>
-                {v}
+          <select
+            id="log-since"
+            value={since}
+            onChange={(event: ChangeEvent<HTMLSelectElement>) => setSince(event.target.value)}
+          >
+            {['1h', '6h', '24h', '7d'].map((value) => (
+              <option key={value} value={value}>
+                {value}
               </option>
             ))}
           </select>
         </label>
-        <button type="button" id="load-logs-btn">
+        <button type="button" id="load-logs-btn" onClick={() => void loadLogs()}>
           Load
         </button>
         <label>
           Count:{' '}
-          <select id="log-count">
-            {[100, 200, 300, 400, 500].map((v) => (
-              <option key={v} value={v}>
-                {v}
+          <select
+            id="log-count"
+            value={count}
+            onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+              setCount(Number(event.target.value))
+            }
+          >
+            {[100, 200, 300, 400, 500].map((value) => (
+              <option key={value} value={value}>
+                {value}
               </option>
             ))}
           </select>
@@ -36,197 +225,51 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
           id="log-filter-text"
           placeholder="Filter..."
           style="font-size: 0.85rem; padding: 2px 6px"
+          value={filter}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => setFilter(event.target.value)}
         />
         <button
           type="button"
           id="live-tail-btn"
-          data-base-path={basePath}
-          style="margin-left: auto"
+          data-base-path={`/admin/deployments/${deploymentId}`}
+          style={{
+            marginLeft: 'auto',
+            borderColor: tailing ? 'red' : undefined,
+            color: tailing ? 'red' : undefined,
+          }}
+          onClick={() => {
+            if (!tailing) {
+              setEntries([]);
+            }
+            setTailing(!tailing);
+          }}
         >
-          Live Tail
+          {tailing ? 'Stop Tail' : 'Live Tail'}
         </button>
       </div>
-
-      {/* Log entries container */}
       <div id="log-entries">
-        <p style="color: #999; font-size: 0.8rem">Loading logs...</p>
+        {error ? (
+          <p style="color: red; font-size: 0.8rem">Failed to load logs: {error}</p>
+        ) : tailing && visible.length === 0 ? (
+          <p style="color: #999; font-size: 0.8rem">
+            Polling for new events... New logs may take up to 2 minutes to appear.
+          </p>
+        ) : entries === null ? (
+          <p style="color: #999; font-size: 0.8rem">Loading logs...</p>
+        ) : visible.length === 0 ? (
+          <p style="color: #999; font-size: 0.8rem">
+            No logs found{query ? ' matching filter' : ' for this time range'}. New logs may take up
+            to 2 minutes to appear.
+          </p>
+        ) : (
+          visible.map((entry, index) => (
+            <LogRow
+              key={`${entry.timestamp}:${entry.url}:${entry.status}:${index}`}
+              entry={entry}
+            />
+          ))
+        )}
       </div>
-
-      {/* Inline script: fetch logs on load + polling-based live tail */}
-      <script
-        dangerouslySetInnerHTML={{
-          __html: `
-(function() {
-  var container = document.getElementById('log-entries');
-  var btn = document.getElementById('live-tail-btn');
-  var loadBtn = document.getElementById('load-logs-btn');
-  var sinceSelect = document.getElementById('log-since');
-  var filterText = document.getElementById('log-filter-text');
-  var countSelect = document.getElementById('log-count');
-  var basePath = btn.dataset.basePath;
-  var pollTimer = null;
-  var tailing = false;
-  var lastData = [];
-  var seenTimestamps = {};
-
-  var levelColors = { error: '#dc2626', warn: '#d97706', info: '#6b7280', log: '#6b7280', debug: '#9ca3af' };
-
-  function formatTime(ts) {
-    return new Date(ts).toLocaleTimeString();
-  }
-
-  function levelBadge(level) {
-    var color = levelColors[level] || '#6b7280';
-    return '<span style="color:' + color + ';font-weight:600;text-transform:uppercase;width:50px;display:inline-block">' + level + '</span>';
-  }
-
-  function renderLogEntry(entry) {
-    var row = document.createElement('div');
-    row.style.cssText = 'padding:4px 0;border-bottom:1px solid #eee;font-size:0.8rem';
-
-    var header = '<span style="color:#999;margin-right:8px">' + formatTime(entry.timestamp) + '</span>';
-    if (entry.method && entry.url) {
-      header += '<span style="margin-right:8px;font-weight:600">' + escapeHtml(entry.method) + '</span>';
-      header += '<span style="margin-right:8px">' + escapeHtml(entry.url) + '</span>';
-    }
-    if (entry.status) {
-      var statusCode = parseInt(entry.status);
-      var statusColor = statusCode >= 500 ? '#dc2626' : statusCode >= 400 ? '#d97706' : '#16a34a';
-      header += '<span style="color:' + statusColor + ';font-weight:600;margin-right:8px">' + escapeHtml(entry.status) + '</span>';
-    }
-    header += '<span style="color:' + (entry.outcome === 'ok' ? '#16a34a' : '#dc2626') + '">' + escapeHtml(entry.outcome) + '</span>';
-
-    var messages = [];
-    if (entry.logs && entry.logs.length > 0) {
-      entry.logs.forEach(function(log) {
-        messages.push({ level: log.level || 'log', text: formatMessage(log.message) });
-      });
-    }
-    if (entry.exceptions && entry.exceptions.length > 0) {
-      entry.exceptions.forEach(function(ex) {
-        messages.push({ level: 'error', text: escapeHtml(ex.name + ': ' + ex.message) });
-      });
-    }
-
-    var body = '';
-    if (messages.length > 0) {
-      var lines = messages.map(function(message) { return message.text; }).join('\\n');
-      var badges = messages.map(function(message) {
-        return '<div>' + levelBadge(message.level) + '<span>' + message.text + '</span></div>';
-      }).join('');
-      body = '<div style="position:relative;margin-top:4px;margin-left:24px">'
-        + '<button onclick="navigator.clipboard.writeText(this.dataset.text).then(function(){this.textContent=\\'Copied!\\';var button=this;setTimeout(function(){button.textContent=\\'Copy\\'},1500)}.bind(this))" '
-        + 'data-text="' + lines.replace(/"/g, '&quot;') + '" '
-        + 'style="position:absolute;top:4px;right:4px;font-size:0.7rem;padding:2px 6px;cursor:pointer;background:#f3f4f6;border:1px solid #d1d5db;border-radius:3px">Copy</button>'
-        + '<pre style="margin:0;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-size:0.78rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all">'
-        + badges
-        + '</pre></div>';
-    }
-
-    row.innerHTML = header + body;
-    return row;
-  }
-
-  function formatMessage(msg) {
-    if (typeof msg === 'string') return escapeHtml(msg.substring(0, 500));
-    if (Array.isArray(msg)) return escapeHtml(msg.join(' ').substring(0, 500));
-    return escapeHtml(JSON.stringify(msg).substring(0, 500));
-  }
-
-  function escapeHtml(value) {
-    var element = document.createElement('span');
-    element.textContent = value;
-    return element.innerHTML;
-  }
-
-  function entryText(entry) {
-    var parts = [entry.outcome, entry.method, entry.url, entry.status];
-    if (entry.logs) entry.logs.forEach(function(log) { parts.push(log.message); });
-    if (entry.exceptions) entry.exceptions.forEach(function(exception) { parts.push(exception.name, exception.message); });
-    return parts.join(' ').toLowerCase();
-  }
-
-  function renderData(data) {
-    var query = filterText.value.toLowerCase().trim();
-    var filtered = query ? data.filter(function(entry) { return entryText(entry).indexOf(query) !== -1; }) : data;
-    container.innerHTML = '';
-    if (filtered.length === 0) {
-      container.innerHTML = '<p style="color:#999;font-size:0.8rem">No logs found' + (query ? ' matching filter' : ' for this time range') + '. New logs may take up to 2 minutes to appear.</p>';
-      return;
-    }
-    filtered.forEach(function(entry) {
-      container.appendChild(renderLogEntry(entry));
-    });
-  }
-
-  function loadLogs() {
-    var since = sinceSelect.value;
-    container.innerHTML = '<p style="color:#999;font-size:0.8rem">Loading logs...</p>';
-    fetch(basePath + '/logs?since=' + since + '&limit=' + countSelect.value)
-      .then(function(r) { return r.json(); })
-      .then(function(result) {
-        lastData = result.data || [];
-        renderData(lastData);
-      })
-      .catch(function(err) {
-        container.innerHTML = '<p style="color:red;font-size:0.8rem">Failed to load logs: ' + escapeHtml(err.message) + '</p>';
-      });
-  }
-
-  function pollTail() {
-    fetch(basePath + '/logs?since=1m&limit=50')
-      .then(function(r) { return r.json(); })
-      .then(function(result) {
-        if (!tailing) return;
-        var entries = result.data || [];
-        var newEntries = [];
-        entries.forEach(function(entry) {
-          var key = entry.timestamp + ':' + entry.url + ':' + entry.status;
-          if (!seenTimestamps[key]) {
-            seenTimestamps[key] = true;
-            newEntries.push(entry);
-          }
-        });
-        if (newEntries.length > 0) {
-          if (container.querySelector('p')) container.innerHTML = '';
-          newEntries.reverse().forEach(function(entry) {
-            container.insertBefore(renderLogEntry(entry), container.firstChild);
-          });
-        }
-      })
-      .catch(function() { /* ignore poll errors */ });
-  }
-
-  loadBtn.addEventListener('click', loadLogs);
-  countSelect.addEventListener('change', loadLogs);
-  filterText.addEventListener('input', function() { renderData(lastData); });
-
-  btn.addEventListener('click', function() {
-    if (tailing) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-      tailing = false;
-      btn.textContent = 'Live Tail';
-      btn.style.borderColor = '';
-      btn.style.color = '';
-      return;
-    }
-
-    tailing = true;
-    seenTimestamps = {};
-    btn.textContent = 'Stop Tail';
-    btn.style.borderColor = 'red';
-    btn.style.color = 'red';
-    container.innerHTML = '<p style="color:#999;font-size:0.8rem">Polling for new events... New logs may take up to 2 minutes to appear.</p>';
-    pollTail();
-    pollTimer = setInterval(pollTail, 3000);
-  });
-
-  loadLogs();
-})();
-`,
-        }}
-      />
     </>
   );
 }

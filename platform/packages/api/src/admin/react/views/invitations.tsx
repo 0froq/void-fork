@@ -1,5 +1,6 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import type { Invitation } from '../../../types.ts';
+import { formatAbsoluteDate } from './format.ts';
 import { Layout } from './layout.tsx';
 import { Pagination } from './pagination.tsx';
 
@@ -69,11 +70,11 @@ export function InvitationsPage({
                 <StatusBadge status={inv.status} />
               </td>
               <td>{inv.invited_by_login ?? inv.invited_by}</td>
-              <td>{inv.created_at ? new Date(inv.created_at).toLocaleDateString() : '-'}</td>
-              <td>{inv.accepted_at ? new Date(inv.accepted_at).toLocaleDateString() : '-'}</td>
+              <td>{inv.created_at ? formatAbsoluteDate(inv.created_at) : '-'}</td>
+              <td>{inv.accepted_at ? formatAbsoluteDate(inv.accepted_at) : '-'}</td>
               <td>
                 {inv.revoked_at
-                  ? `${new Date(inv.revoked_at).toLocaleDateString()} by ${inv.revoked_by_login ?? inv.revoked_by ?? '?'}`
+                  ? `${formatAbsoluteDate(inv.revoked_at)} by ${inv.revoked_by_login ?? inv.revoked_by ?? '?'}`
                   : '-'}
               </td>
               <td>

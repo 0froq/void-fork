@@ -743,7 +743,9 @@ describe('configured platform login routes', () => {
 
   it('shows dynamic admin login methods and never falls back to disabled methods', async () => {
     const response = await app.fetch(new Request(`${origin}/admin/login`), env);
-    expect(await response.text()).toContain('Sign in with Company SSO');
+    expect((await response.text()).replaceAll('<!-- -->', '')).toContain(
+      'Sign in with Company SSO',
+    );
     await env.db
       .update(platformLoginConnections)
       .set({ enabled: false })

@@ -63,7 +63,7 @@ describe('browser authentication configuration', () => {
     expect(html).not.toContain(env.GITHUB_CLIENT_SECRET);
     expect(html).not.toContain(env.GOOGLE_CLIENT_SECRET);
     const editor = await (await request(`${home}/connections/google`)).text();
-    expect(editor).toContain('autocomplete="new-password"');
+    expect(editor.toLowerCase()).toContain('autocomplete="new-password"');
     expect(editor).not.toContain(env.GOOGLE_CLIENT_SECRET);
   });
 

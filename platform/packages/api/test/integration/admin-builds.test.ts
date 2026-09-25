@@ -279,9 +279,10 @@ describe('GET /admin/builds/:id (build page)', () => {
     expect(html).toContain('container');
     expect(html).toContain('building');
     expect(html).toContain('cafebab');
-    // Log panel: a <pre> the poller fills + the poll endpoint embedded.
+    // The React log panel receives the build ID and starts with its loading state.
     expect(html).toContain('id="build-log"');
-    expect(html).toContain(`/admin/builds/${build.id}/logs`);
+    expect(html).toContain('"component":"buildDetail"');
+    expect(html).toContain('Loading logs...');
     // No external GitHub link for a container build.
     expect(html).not.toContain('View logs on GitHub');
   });

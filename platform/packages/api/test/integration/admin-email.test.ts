@@ -37,6 +37,10 @@ import { setTestDb } from './setup.ts';
 
 let env: TestEnv;
 
+function visibleMarkup(html: string): string {
+  return html.replaceAll('<!-- -->', '');
+}
+
 async function seedVerifiedDestination(db: Db, projectId: string, address: string, cfId: string) {
   const [row] = await db
     .insert(emailDestinations)
@@ -274,10 +278,10 @@ describe('GET /admin/email/:projectId', () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain(slug);
-    expect(html).toContain('7 / 200');
+    expect(visibleMarkup(html)).toContain('7 / 200');
     expect(html).toContain('Outbound recipient attempts');
     expect(html).toContain('Inbound (received)</th><td>3</td>');
-    expect(html).toContain('(default)');
+    expect(visibleMarkup(html)).toContain('(default)');
     expect(html).toContain('Suspend email');
     expect(html).toContain('No destinations yet.');
   });
@@ -289,8 +293,8 @@ describe('GET /admin/email/:projectId', () => {
 
     const html = await (await get(`/admin/email/${projectId}`, adminJwt)).text();
 
-    expect(html).toContain('0 / 1000');
-    expect(html).toContain('(override)');
+    expect(visibleMarkup(html)).toContain('0 / 1000');
+    expect(visibleMarkup(html)).toContain('(override)');
     expect(html).toContain('SUSPENDED');
     expect(html).toContain('Unsuspend email');
   });

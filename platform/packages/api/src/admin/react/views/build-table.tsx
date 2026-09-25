@@ -1,5 +1,5 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
-import { ACTIVE_BUILD_STATUSES } from '../../../db.ts';
+import { ACTIVE_BUILD_STATUSES } from '../../../build-status.ts';
 import type { Build } from '../../../types.ts';
 import { formatDateTime } from './format.ts';
 
@@ -91,7 +91,7 @@ export function BuildTable({ builds, tz }: { builds: ReadonlyArray<Build>; tz?: 
               <td>{b.commit_sha ? b.commit_sha.slice(0, 7) : '-'}</td>
               <td>{b.branch ?? '-'}</td>
               <td>{b.started_at ? formatDateTime(b.started_at, tz) : '-'}</td>
-              <td>{duration(b)}</td>
+              <td suppressHydrationWarning>{duration(b)}</td>
             </tr>
           );
         })}
