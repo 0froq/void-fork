@@ -2010,9 +2010,10 @@ export async function installPlatform(
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     }
     dependencies.onProgress?.('Verifying platform health');
-    const emailGatewayUrl = hasEmailGatewayArtifact
-      ? `https://${plan.deployment.resources.emailGatewayWorker}.${plan.workersSubdomain}.workers.dev`
-      : undefined;
+    const emailGatewayUrl =
+      hasEmailGatewayArtifact && plan.deployment.capabilities.email
+        ? `https://${plan.deployment.resources.emailGatewayWorker}.${plan.workersSubdomain}.workers.dev`
+        : undefined;
     if (plan.deployment.authentication.accessProtection) {
       ensurePlatformAccessToken(plan.apiUrl, false, true);
       ensurePlatformAccessToken(plan.proxyUrl, false, true);
@@ -2022,7 +2023,7 @@ export async function installPlatform(
       workers: [
         plan.deployment.resources.apiWorker,
         plan.deployment.resources.proxyWorker,
-        ...(hasEmailGatewayArtifact ? [plan.deployment.resources.emailGatewayWorker] : []),
+        ...(emailGatewayUrl ? [plan.deployment.resources.emailGatewayWorker] : []),
         plan.deployment.resources.dispatchWorker,
       ],
       resumeCommand: dependencies.healthCheckResumeCommand,

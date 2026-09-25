@@ -545,11 +545,9 @@ describe('platform installer', () => {
           );
           expect(context).toEqual({
             accountName: plan.account.name,
-            emailGatewayUrl: `https://${plan.deployment.resources.emailGatewayWorker}.workers-subdomain.workers.dev`,
             workers: [
               plan.deployment.resources.apiWorker,
               plan.deployment.resources.proxyWorker,
-              plan.deployment.resources.emailGatewayWorker,
               plan.deployment.resources.dispatchWorker,
             ],
             resumeCommand: undefined,
