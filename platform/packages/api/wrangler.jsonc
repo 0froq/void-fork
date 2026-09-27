@@ -11,7 +11,6 @@
     "void/pages-head": "../../../packages/void/src/pages/head.ts",
     "void/pages-server": "../../../packages/void/src/pages/serialize.ts",
   },
-  "rules": [{ "type": "Text", "globs": ["**/admin-client.txt"] }],
   "compatibility_date": "2026-02-12",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {

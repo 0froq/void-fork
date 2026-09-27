@@ -1,4 +1,3 @@
-import { copyFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 
@@ -29,11 +28,8 @@ await build({
       entry: source('platform/packages/api/src/admin/react/client.ts'),
       name: 'VoidAdmin',
       formats: ['iife'],
-      fileName: () => 'admin-client.js',
+      // Wrangler imports .txt as text; this remains JavaScript served to the browser.
+      fileName: () => 'admin-client.txt',
     },
   },
 });
-
-// Wrangler treats .js aliases as executable modules even with a Text rule.
-// Give the browser bundle a text extension when importing it into the Worker.
-copyFileSync(`${apiRoot}/dist/admin-client.js`, `${apiRoot}/dist/admin-client.txt`);

@@ -86,7 +86,6 @@ try {
         compatibility_date: '2026-02-24',
         compatibility_flags:
           name === 'api' || name === 'proxy' || name === 'emailGateway' ? ['nodejs_compat'] : [],
-        ...(name === 'api' ? { rules: [{ type: 'Text', globs: ['**/admin-client.txt'] }] } : {}),
       }),
     );
     const result = spawnSync(
