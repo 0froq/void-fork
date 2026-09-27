@@ -1,7 +1,7 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import type { PlatformLoginConfiguration } from '@void/platform';
-import { ConnectionForm } from './auth-connection-form.tsx';
-import { Layout } from './layout.tsx';
+import { ConnectionForm } from './ConnectionForm.tsx';
+import { Layout } from './Layout.tsx';
 export function AuthNewPage({
   kind,
   id,

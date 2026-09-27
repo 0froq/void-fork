@@ -1,7 +1,7 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import type { CliVersionDeploymentStats } from '../../../db.ts';
 import { formatDateTime, formatNumber } from './format.ts';
-import { Layout } from './layout.tsx';
+import { Layout } from './Layout.tsx';
 
 function CliVersionTable({
   rows,

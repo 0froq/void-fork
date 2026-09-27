@@ -1,8 +1,8 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import type { getOperatorProject } from '../../../operator/tenant-service.ts';
-import { BuildTable } from './build-table.tsx';
-import { DeploymentTable } from './deployment-table.tsx';
-import { Layout } from './layout.tsx';
+import { BuildTable } from './BuildTable.tsx';
+import { DeploymentTable } from './DeploymentTable.tsx';
+import { Layout } from './Layout.tsx';
 type Detail = Awaited<ReturnType<typeof getOperatorProject>>;
 export function ProjectDetailPage({
   project,

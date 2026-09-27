@@ -1,7 +1,7 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import type { PlatformAdmissionPolicy } from '@void/platform';
 import type { AllowlistEntryStatus } from '../../../db.ts';
-import { Layout } from './layout.tsx';
+import { Layout } from './Layout.tsx';
 
 function BooleanBadge({ value }: { value: boolean }) {
   return <strong style={`color: ${value ? 'green' : '#666'}`}>{value ? 'yes' : 'no'}</strong>;

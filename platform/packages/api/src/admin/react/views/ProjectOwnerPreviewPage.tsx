@@ -1,6 +1,6 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import type { previewOperatorProjectOwner } from '../../../operator/tenant-service.ts';
-import { Layout } from './layout.tsx';
+import { Layout } from './Layout.tsx';
 type Preview = Awaited<ReturnType<typeof previewOperatorProjectOwner>>;
 function suspensionLabel(owner: { suspended: boolean; suspendedReason: string | null }) {
   return owner.suspended ? `Suspended (${owner.suspendedReason ?? 'unknown reason'})` : 'Active';

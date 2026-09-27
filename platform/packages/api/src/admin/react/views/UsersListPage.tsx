@@ -1,8 +1,8 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import type { User } from '../../../types.ts';
 import { formatAbsoluteDate } from './format.ts';
-import { Layout } from './layout.tsx';
-import { Pagination } from './pagination.tsx';
+import { Layout } from './Layout.tsx';
+import { Pagination } from './Pagination.tsx';
 
 export function UsersListPage({
   users,

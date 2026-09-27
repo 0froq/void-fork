@@ -2,7 +2,7 @@
 import type { PlatformAdmissionPolicy, PlatformLoginConfiguration } from '@void/platform';
 import type { getAuthenticationConfiguration } from '../../../operator/auth-config.ts';
 import type { platformLoginTests } from '../../../schema.ts';
-import { Layout } from './layout.tsx';
+import { Layout } from './Layout.tsx';
 const HOME = '/admin/config/auth';
 const LOGIN_KINDS = [
   'github',

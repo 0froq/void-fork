@@ -1,9 +1,9 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import type { DeployManifest, Deployment, Project } from '../../../types.ts';
-import { DeploymentLogs } from './deployment-logs.tsx';
-import { displayStatus } from './deployment-table.tsx';
+import { DeploymentLogs } from './DeploymentLogs.tsx';
+import { displayStatus } from './DeploymentTable.tsx';
 import { formatDateTime } from './format.ts';
-import { Layout } from './layout.tsx';
+import { Layout } from './Layout.tsx';
 
 export function DeploymentDetailPage({
   deployment,

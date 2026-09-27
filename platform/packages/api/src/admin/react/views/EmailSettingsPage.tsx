@@ -1,6 +1,6 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import type { EmailDomainManagement, EmailRecipientPolicy } from '../../../email/settings.ts';
-import { Layout } from './layout.tsx';
+import { Layout } from './Layout.tsx';
 
 const META = 'font-size: 0.8rem; color: #666';
 

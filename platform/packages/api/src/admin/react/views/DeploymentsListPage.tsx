@@ -1,9 +1,9 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import { useEffect, useState, type ChangeEvent } from 'react';
 import type { Deployment } from '../../../types.ts';
-import { DeploymentTable } from './deployment-table.tsx';
-import { Layout } from './layout.tsx';
-import { Pagination } from './pagination.tsx';
+import { DeploymentTable } from './DeploymentTable.tsx';
+import { Layout } from './Layout.tsx';
+import { Pagination } from './Pagination.tsx';
 
 export function DeploymentsListPage({
   deployments,

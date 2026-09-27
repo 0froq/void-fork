@@ -3,7 +3,7 @@ import type { PlanId } from '../../../tiers.ts';
 import { PLAN_LIMITS, getPlanLimits } from '../../../tiers.ts';
 import type { User, Project } from '../../../types.ts';
 import { formatLimit, formatNumber, formatBytes, formatAbsoluteDate } from './format.ts';
-import { Layout } from './layout.tsx';
+import { Layout } from './Layout.tsx';
 
 type ProjectUsage = Readonly<{
   projectId: string;

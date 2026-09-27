@@ -1,8 +1,8 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import type { Invitation } from '../../../types.ts';
 import { formatAbsoluteDate } from './format.ts';
-import { Layout } from './layout.tsx';
-import { Pagination } from './pagination.tsx';
+import { Layout } from './Layout.tsx';
+import { Pagination } from './Pagination.tsx';
 
 type InvitationRow = Invitation & {
   invited_by_login: string | null;

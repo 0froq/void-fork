@@ -1,11 +1,11 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import { useEffect, useState } from 'react';
 import type { Deployment } from '../../../types.ts';
-import { DeploymentTable } from './deployment-table.tsx';
+import { DeploymentTable } from './DeploymentTable.tsx';
 import { formatAbsoluteDateTime } from './format.ts';
-import { Layout } from './layout.tsx';
-import type { ProjectRow } from './projects-table.tsx';
-import { ProjectsTable } from './projects-table.tsx';
+import { Layout } from './Layout.tsx';
+import type { ProjectRow } from './ProjectsTable.tsx';
+import { ProjectsTable } from './ProjectsTable.tsx';
 
 export type TopProjectRow = Readonly<{
   url?: string;

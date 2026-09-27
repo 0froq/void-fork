@@ -1,25 +1,25 @@
-import { AuthEditPage } from './views/auth-edit.tsx';
-import { AuthErrorPage } from './views/auth-error.tsx';
-import { AuthNewPage } from './views/auth-new.tsx';
-import { AuthSettingsPage } from './views/auth-settings.tsx';
-import { BuildDetailPage } from './views/build-detail.tsx';
-import { CliVersionsPage } from './views/cli-versions.tsx';
-import { DashboardPage } from './views/dashboard.tsx';
-import { DeploymentDetailPage } from './views/deployment-detail.tsx';
-import { DeploymentsListPage } from './views/deployments-list.tsx';
-import { EmailOperationPage } from './views/email-operation.tsx';
-import { EmailProjectPage } from './views/email-project.tsx';
-import { EmailSettingsPage } from './views/email-settings.tsx';
-import { AdminErrorPage } from './views/error.tsx';
-import { InvitationsPage } from './views/invitations.tsx';
-import { LoginErrorPage } from './views/login-error.tsx';
-import { AdminLoginPage } from './views/login.tsx';
-import { ProjectDetailPage } from './views/project-detail.tsx';
-import { ProjectOwnerPreviewPage } from './views/project-owner-preview.tsx';
-import { ProjectsListPage } from './views/projects-list.tsx';
-import { SignupControlPage } from './views/signup-control.tsx';
-import { UserDetailPage } from './views/user-detail.tsx';
-import { UsersListPage } from './views/users-list.tsx';
+import { AdminErrorPage } from './views/AdminErrorPage.tsx';
+import { AdminLoginPage } from './views/AdminLoginPage.tsx';
+import { AuthEditPage } from './views/AuthEditPage.tsx';
+import { AuthErrorPage } from './views/AuthErrorPage.tsx';
+import { AuthNewPage } from './views/AuthNewPage.tsx';
+import { AuthSettingsPage } from './views/AuthSettingsPage.tsx';
+import { BuildDetailPage } from './views/BuildDetailPage.tsx';
+import { CliVersionsPage } from './views/CliVersionsPage.tsx';
+import { DashboardPage } from './views/DashboardPage.tsx';
+import { DeploymentDetailPage } from './views/DeploymentDetailPage.tsx';
+import { DeploymentsListPage } from './views/DeploymentsListPage.tsx';
+import { EmailOperationPage } from './views/EmailOperationPage.tsx';
+import { EmailProjectPage } from './views/EmailProjectPage.tsx';
+import { EmailSettingsPage } from './views/EmailSettingsPage.tsx';
+import { InvitationsPage } from './views/InvitationsPage.tsx';
+import { LoginErrorPage } from './views/LoginErrorPage.tsx';
+import { ProjectDetailPage } from './views/ProjectDetailPage.tsx';
+import { ProjectOwnerPreviewPage } from './views/ProjectOwnerPreviewPage.tsx';
+import { ProjectsListPage } from './views/ProjectsListPage.tsx';
+import { SignupControlPage } from './views/SignupControlPage.tsx';
+import { UserDetailPage } from './views/UserDetailPage.tsx';
+import { UsersListPage } from './views/UsersListPage.tsx';
 
 export const adminComponents = {
   dashboard: async () => ({ default: DashboardPage }),

@@ -1,5 +1,5 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
-import { Layout } from './layout.tsx';
+import { Layout } from './Layout.tsx';
 
 export function AuthErrorPage({
   message,

@@ -1,9 +1,9 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import { useEffect, useState, type ChangeEvent } from 'react';
-import { Layout } from './layout.tsx';
-import { Pagination } from './pagination.tsx';
-import type { ProjectRow } from './projects-table.tsx';
-import { ProjectsTable } from './projects-table.tsx';
+import { Layout } from './Layout.tsx';
+import { Pagination } from './Pagination.tsx';
+import type { ProjectRow } from './ProjectsTable.tsx';
+import { ProjectsTable } from './ProjectsTable.tsx';
 
 export function ProjectsListPage({
   projects,

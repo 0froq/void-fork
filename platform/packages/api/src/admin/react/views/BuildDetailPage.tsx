@@ -1,8 +1,8 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import type { Build } from '../../../types.ts';
-import { BuildLogs } from './build-logs.tsx';
+import { BuildLogs } from './BuildLogs.tsx';
 import { formatDateTime } from './format.ts';
-import { Layout } from './layout.tsx';
+import { Layout } from './Layout.tsx';
 
 export function BuildDetailPage({
   build,
