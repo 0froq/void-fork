@@ -12,6 +12,7 @@ void startReactPages({
   staticPageDataFastPath: false,
   viewTransitions: false,
   prefetchHoverDelay: 75,
-  prefetchDefaultCacheFor: { stale: 0, expires: 0 },
+  prefetchDefaultCacheFor: { stale: 0, expires: 5 * 60_000 },
+  cacheVisitedPageData: true,
   navigationFallback: AdminNavigationFallback,
 });

@@ -328,10 +328,12 @@ The browser uses `POST /admin/fate` for administrator page data. It runs under t
 existing admin-cookie and same-origin middleware, while the CLI/operator API
 stays on `/operator/v1`. First loads hydrate a request-scoped Fate snapshot into
 the React adapter. Page-object navigations send a small shell and read from the
-session-scoped Fate cache, refreshing cached pages in the background. The
-dashboard defers the Analytics Engine top-projects view so it does not delay
-the initial page. Existing audited form actions remain HTML POST endpoints and
-reload the page after writes, which also creates a fresh cache instance.
+session-scoped Fate cache, refreshing cached pages in the background. Recently
+visited page shells are also reused immediately and revalidated in the
+background. The dashboard defers the Analytics Engine top-projects view so it
+does not delay the initial page. Existing audited form actions remain HTML POST
+endpoints and reload the page after writes, which also creates a fresh cache
+instance.
 
 The Fate schema and loaders live in `src/admin/fate/`. The generated client is
 `src/admin/fate/client.generated.ts`; rebuild it through

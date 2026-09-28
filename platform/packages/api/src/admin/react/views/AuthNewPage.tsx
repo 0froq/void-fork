@@ -6,7 +6,7 @@ import { type AdminPageProps } from '../page-utils.ts';
 import { ConnectionForm } from './ConnectionForm.tsx';
 import { Layout } from './Layout.tsx';
 export function AuthNewPage({ path, platformName, username }: AdminPageProps) {
-  const { authNew: ref } = useRequest(authNewRequest(path));
+  const { authNew: ref } = useRequest(authNewRequest(path), { mode: 'stale-while-revalidate' });
   const pageData = useView(AuthNewView, ref);
   if (!pageData) {
     throw new Error('Login method is unavailable.');

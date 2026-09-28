@@ -256,7 +256,9 @@ function DeferredTopProjects({
 }
 
 export function DashboardPage({ platformName, username }: DashboardProps) {
-  const { dashboard: dashboardRef } = useRequest(dashboardRequest);
+  const { dashboard: dashboardRef } = useRequest(dashboardRequest, {
+    mode: 'stale-while-revalidate',
+  });
   const dashboard = useView(DashboardView, dashboardRef);
   if (!dashboard) {
     throw new Error('Dashboard data is unavailable.');
