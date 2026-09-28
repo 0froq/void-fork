@@ -62,3 +62,32 @@ it('preserves the 0038 database schema used by the running 0.10.14 platform', as
     await db.close();
   }
 }, 30_000);
+
+it('allows rollback to the 0.20.3 schema after adding invitation delivery status', () => {
+  const root = resolve(import.meta.dirname, '../../drizzle');
+  const journal = JSON.parse(readFileSync(resolve(root, 'meta/_journal.json'), 'utf8')) as {
+    entries: Array<{ tag: string; idx: number; when: number }>;
+  };
+  const compatibility = JSON.parse(readFileSync(resolve(root, 'compatibility.json'), 'utf8')) as {
+    lineage: string;
+    rollbackSafeFrom: Array<{ platformVersion: string; schemaDigest: string }>;
+  };
+  const previous = journal.entries.filter((entry) => entry.idx <= 48);
+  expect(previous.at(-1)?.tag).toBe('0048_project_teams');
+  const schemaDigest = platformDatabaseSchemaDigest(
+    compatibility.lineage,
+    previous.map((entry) => ({
+      index: entry.idx,
+      tag: entry.tag,
+      timestampMillis: entry.when,
+      sha256: createHash('sha256')
+        .update(readFileSync(resolve(root, `${entry.tag}.sql`)))
+        .digest('hex'),
+    })),
+  );
+  expect(schemaDigest).toBe('089431e230970d03afa429c102613598e88371155cb693c076002c5d632bb0b6');
+  expect(compatibility.rollbackSafeFrom).toContainEqual({
+    platformVersion: '0.20.3',
+    schemaDigest,
+  });
+});

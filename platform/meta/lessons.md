@@ -90,6 +90,8 @@
   [the asset fallback record](./design-docs/0066-wfp-asset-r2-fallback.md).
 - API changes tolerate both the currently deployed dashboard and its next
   version. Use staged rollouts for incompatible changes.
+- A new platform database migration needs a rollback-safe prefix entry for the
+  currently installed version when old Workers can run on the new schema.
 - Hosted staging requires its explicit API origin and Access credentials;
   `STAGING=1` alone does not select it. Keep OAuth callback bypasses.
 - Wrangler vars are strings: compare flags to `'true'` explicitly.
