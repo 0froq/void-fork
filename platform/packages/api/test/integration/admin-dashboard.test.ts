@@ -2277,7 +2277,7 @@ describe('POST /admin/invitations/send', () => {
     await env.ROUTING.put('signup:enabled', 'true');
     try {
       const before = await req('/admin/signup-control', admin.adminJwt);
-      expect(visibleMarkup(await before.text())).toContain('Grant access');
+      expect(visibleMarkup(await before.text())).toContain('Create invitations');
 
       const response = await req('/admin/invitations/send', admin.adminJwt, {
         method: 'POST',
@@ -2289,7 +2289,7 @@ describe('POST /admin/invitations/send', () => {
 
       const page = await req('/admin/signup-control?result=invited', admin.adminJwt);
       const visible = visibleMarkup((await page.text()).split('<div id="app">')[1] ?? '');
-      expect(visible).toContain('Access grants were created');
+      expect(visible).toContain('Invitations created. Share the platform link below');
       expect(visible).toContain('Email off');
       expect(visible.split('Direct grants')[1]?.split('Invitation history')[0]).not.toContain(
         'guest@example.com',

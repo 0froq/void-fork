@@ -235,8 +235,8 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                   {mode === 'public'
                     ? 'Signup is public. Share the platform address with anyone you want to join.'
                     : emailEnabled
-                      ? 'Grant signup access to verified email addresses and send invitation emails.'
-                      : 'Grant signup access to verified email addresses, then share the connection details yourself.'}
+                      ? "Create an invitation for each email address. We'll email them connection instructions."
+                      : 'Create an invitation for each email address. Since email is off, share the platform link below yourself.'}
                 </p>
               </div>
               <Badge
@@ -246,8 +246,9 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
             </div>
             {result === 'invited' && (
               <p role="status" className="void-admin-access-notice">
-                Access grants were created. Check each invitation below for its email delivery
-                result.
+                {emailEnabled
+                  ? 'Invitations created. Check the history below to see whether email was sent.'
+                  : 'Invitations created. Share the platform link below with each person.'}
               </p>
             )}
             {mode !== 'public' && (
@@ -268,7 +269,10 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                   Each person must sign in with a login method that supplies the same verified email
                   address.
                 </p>
-                <Button type="submit" label={emailEnabled ? 'Invite and email' : 'Grant access'} />
+                <Button
+                  type="submit"
+                  label={emailEnabled ? 'Invite and email' : 'Create invitations'}
+                />
               </form>
             )}
             <div className="void-admin-access-share">
@@ -287,8 +291,8 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                   Direct grants
                 </Heading>
                 <p>
-                  Approve a GitHub login, email or domain pattern, or exact provider identity.
-                  Invitation grants appear in the history below.
+                  Allow a GitHub username, email address or domain, or login identity to sign up.
+                  These rules do not create invitations or send email.
                   {mode === 'public' &&
                     ' While signup is public, grants do not limit who can join.'}
                 </p>
