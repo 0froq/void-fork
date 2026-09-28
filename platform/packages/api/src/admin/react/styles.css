@@ -24,7 +24,8 @@ body {
   text-decoration: none;
 }
 .void-admin-metrics .astryx-card {
-  height: 100%;
+  display: grid;
+  gap: var(--spacing-2);
 }
 .void-admin-health-checks {
   display: grid;

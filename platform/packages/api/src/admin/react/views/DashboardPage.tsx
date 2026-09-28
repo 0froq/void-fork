@@ -304,20 +304,32 @@ export function DashboardPage({ platformName, username, healthCheckNames }: Dash
       <div className="void-admin-metrics">
         <a href="/admin/users">
           <Card>
-            <Heading level={2}>{formatNumber(dashboard.userCount)}</Heading>
-            <Text>Users</Text>
+            <Text type="supporting" display="block">
+              Users
+            </Text>
+            <Text type="display-3" display="block" hasTabularNumbers>
+              {formatNumber(dashboard.userCount)}
+            </Text>
           </Card>
         </a>
         <a href="/admin/projects">
           <Card>
-            <Heading level={2}>{formatNumber(dashboard.projectCount)}</Heading>
-            <Text>Projects</Text>
+            <Text type="supporting" display="block">
+              Projects
+            </Text>
+            <Text type="display-3" display="block" hasTabularNumbers>
+              {formatNumber(dashboard.projectCount)}
+            </Text>
           </Card>
         </a>
         <a href="/admin/deployments">
           <Card>
-            <Heading level={2}>{formatNumber(dashboard.deploymentCount)}</Heading>
-            <Text>Deployments</Text>
+            <Text type="supporting" display="block">
+              Deployments
+            </Text>
+            <Text type="display-3" display="block" hasTabularNumbers>
+              {formatNumber(dashboard.deploymentCount)}
+            </Text>
           </Card>
         </a>
       </div>
