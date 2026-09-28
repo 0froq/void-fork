@@ -948,6 +948,21 @@ export async function createPageNavigationEngine(
     resolveLayouts(initialPageData.component),
   ]);
 
+  if (
+    CACHE_VISITED_PAGE_DATA &&
+    initialPageData.url === _currentFetchUrl &&
+    initialPageData.component === matchRoute(_currentFetchUrl) &&
+    initialPageData.errors === null &&
+    !initialPageData.deferredKeys
+  ) {
+    _prefetchCache.set(
+      _currentFetchUrl,
+      'GET',
+      Promise.resolve(clonePageData(initialPageData)),
+      PREFETCH_DEFAULT_CACHE_FOR,
+    );
+  }
+
   const initialDeferredRegistry = new DeferredRegistry();
   initialDeferredRegistry.setupPending(initialPageData);
   _committedDeferredRegistry = initialDeferredRegistry;

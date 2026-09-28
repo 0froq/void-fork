@@ -293,6 +293,64 @@ describe('createVoidRouter prefetch', () => {
     await expect(router.prefetch('/users')).resolves.toMatchObject({ props: { version: 3 } });
   });
 
+  it('reuses the server-rendered initial page on a return visit', async () => {
+    const documentStub = stubClientGlobals();
+    window.location.pathname = '/dashboard';
+    vi.mocked(documentStub.getElementById).mockImplementation((id: string) => {
+      if (id === '__VOID_PAGE_DATA__') {
+        return {
+          textContent: JSON.stringify({
+            component: 'dashboard',
+            props: { version: 1 },
+            params: {},
+            shared: {},
+            url: '/dashboard',
+            errors: null,
+          }),
+        };
+      }
+      return id === 'app' ? { getAttribute: () => null } : null;
+    });
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(
+        Response.json(
+          {
+            component: url === '/users' ? 'users' : 'dashboard',
+            props: { version: url === '/users' ? 2 : 3 },
+          },
+          { headers: { 'X-VoidPages': 'true' } },
+        ),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { router } = await createVoidRouter({
+      adapter: {
+        applyUpdate: vi.fn(),
+        createDeferred: () => ({}),
+        isLoading: () => false,
+        resolveDeferred: (_ref, value) => value,
+        rejectDeferred: (_ref, error) => error,
+      },
+      components: {
+        dashboard: async () => ({ default: {} }),
+        users: async () => ({ default: {} }),
+      },
+      layoutTree: {},
+      routeMeta: {},
+      matchRoute: (url) => (url === '/dashboard' ? 'dashboard' : 'users'),
+      viewTransitions: false,
+      prefetchHoverDelay: 75,
+      prefetchDefaultCacheFor: { stale: 0, expires: 5 * 60_000 },
+      cacheVisitedPageData: true,
+    });
+
+    await router.visit('/users');
+    await expect(router.visit('/dashboard')).resolves.toMatchObject({ props: { version: 1 } });
+    await expect(router.prefetch('/dashboard')).resolves.toMatchObject({ props: { version: 3 } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('does not resolve disposed initial deferred props into a later page', async () => {
     stubClientGlobals();
     const initialPayload = {

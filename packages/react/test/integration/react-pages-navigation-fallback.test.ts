@@ -93,3 +93,60 @@ it('restores the previous page when the destination request fails', async () => 
     await page.close();
   }
 });
+
+it('returns to the initial page before its shell refresh finishes', async () => {
+  const page = await browser.newPage();
+  let releaseRefresh!: () => void;
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  await page.route('**/*', async (route) => {
+    if (route.request().headers()['x-voidpages'] !== 'true') {
+      await route.continue();
+      return;
+    }
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/') {
+      await refreshGate;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'X-VoidPages': 'true' },
+      body: JSON.stringify({
+        component: path === '/' ? 'home' : 'dashboard',
+        props: {},
+        params: {},
+        shared: {},
+        url: path,
+        errors: null,
+      }),
+    });
+  });
+
+  try {
+    await page.goto(base);
+    const initialLayout = await page
+      .locator('[data-layout-instance]')
+      .getAttribute('data-layout-instance');
+    await page.getByRole('button', { name: 'Dashboard' }).click();
+    await page.getByRole('heading', { name: 'Dashboard loaded' }).waitFor({ state: 'visible' });
+    expect(await page.locator('[data-layout-instance]').getAttribute('data-layout-instance')).toBe(
+      initialLayout,
+    );
+    const refresh = page.waitForRequest(
+      (request) =>
+        new URL(request.url()).pathname === '/' && request.headers()['purpose'] === 'prefetch',
+    );
+    await page.getByRole('button', { name: 'Home' }).click();
+    await page.getByRole('heading', { name: 'Home' }).waitFor({ state: 'visible' });
+    await refresh;
+    expect(await page.locator('[data-layout-instance]').getAttribute('data-layout-instance')).toBe(
+      initialLayout,
+    );
+    expect(page.url()).toBe(base);
+  } finally {
+    releaseRefresh();
+    await page.close();
+  }
+});
