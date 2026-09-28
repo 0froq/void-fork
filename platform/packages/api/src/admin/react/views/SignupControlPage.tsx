@@ -197,9 +197,8 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
             ) : (
               <div className="void-admin-access-form">
                 <p>
-                  This installation uses the legacy signup restriction. Initialize{' '}
-                  <a href="/admin/config/auth">Authentication settings</a> to choose all three
-                  policies.
+                  To use company-approved signup, first set up{' '}
+                  <a href="/admin/config/auth">Authentication settings</a>.
                 </p>
                 <form
                   method="post"

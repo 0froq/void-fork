@@ -2018,7 +2018,7 @@ describe('GET /admin/deployments/:id (logs section)', () => {
 });
 
 describe('GET /admin/signup-control', () => {
-  test('renders Access with legacy signup control and manual invitation instructions', async () => {
+  test('renders Access with basic signup control and manual invitation instructions', async () => {
     const admin = await createTestUser(env.db, 'admin-sc1', 'github', undefined, 'free', 'admin');
     const res = await req('/admin/signup-control', admin.adminJwt);
     expect(res.status).toBe(200);
