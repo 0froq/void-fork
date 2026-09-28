@@ -55,8 +55,10 @@ export function Layout({
 
   return (
     <AppShell
+      className="void-admin-shell"
       height="auto"
       contentPadding={6}
+      mobileNav={{ breakpoint: 'lg' }}
       topNav={
         <TopNav
           label="Platform administration"

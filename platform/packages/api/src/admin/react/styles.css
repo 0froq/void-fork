@@ -12,9 +12,18 @@ body {
   font-family: var(--font-family-body);
 }
 
+.void-admin-shell #astryx-app-shell-main,
+.void-admin-content {
+  min-width: 0;
+}
+
+.void-admin-content {
+  width: 100%;
+}
+
 .void-admin-metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
   gap: var(--spacing-4);
   margin-block: var(--spacing-6);
 }
@@ -374,6 +383,9 @@ body {
 }
 .void-admin-top-projects-table {
   min-width: 54rem;
+}
+.void-admin-deployments-table {
+  min-width: 52rem;
 }
 .void-admin-top-projects-table th:nth-child(1) {
   width: 4%;

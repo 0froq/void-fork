@@ -72,7 +72,7 @@ export function DeploymentTable({
     );
   }
   return (
-    <Table hasHover>
+    <Table className="void-admin-deployments-table" hasHover>
       <TableHeader>
         <TableRow>
           <TableHeaderCell>ID</TableHeaderCell>
