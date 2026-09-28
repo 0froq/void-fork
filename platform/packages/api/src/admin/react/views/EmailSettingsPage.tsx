@@ -23,9 +23,11 @@ export function EmailSettingsPage({
     return (
       <Layout platformName={platformName} title="Email" username={username}>
         <h1>Email</h1>
-        <p>Email is not enabled on this platform.</p>
-        <p>Set up a shared sender domain and Cloudflare zone, then upgrade the platform.</p>
-        <Button as="a" href={EMAIL_SETUP_GUIDE} label="How to enable email" variant="secondary" />
+        <div className="void-admin-email-disabled-content">
+          <p>Email is not enabled on this platform.</p>
+          <p>Set up a shared sender domain and Cloudflare zone, then upgrade the platform.</p>
+          <Button as="a" href={EMAIL_SETUP_GUIDE} label="How to enable email" variant="secondary" />
+        </div>
       </Layout>
     );
   }

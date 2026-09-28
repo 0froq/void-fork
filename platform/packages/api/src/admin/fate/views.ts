@@ -162,8 +162,20 @@ export const SignupView = view<AdminSignup>()({
   id: true,
   enabled: true,
   entries: true,
+  directEntries: true,
   admission: true as never,
   connections: true,
+  initialized: true,
+  revision: true,
+  methods: true,
+  protection: true,
+  invitations: true,
+  page: true,
+  totalPages: true,
+  emailEnabled: true,
+  connectCommand: true,
+  inviteUrl: true,
+  result: true,
 });
 export const InvitationsView = view<AdminInvitations>()({
   id: true,
@@ -189,7 +201,6 @@ export const AuthSettingsView = view<AdminAuthSettings>()({
   id: true,
   data: true as never,
   tested: true as never,
-  admission: true as never,
 });
 export const AuthNewView = view<AdminAuthNew>()({
   id: true,

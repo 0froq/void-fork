@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { AuthenticationConfigurationError } from '../../auth/configuration.ts';
 import type { ApiEnv } from '../../env.ts';
 import {
   allowOperatorSignup,
@@ -8,15 +9,53 @@ import {
   setOperatorSignup,
 } from '../../operator/access-service.ts';
 import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
+import { configureAuthenticationAdmission } from '../../operator/auth-config.ts';
 import { OperatorError } from '../../operator/common.ts';
+import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { getAllowlist } from '../../signup-allowlist.ts';
 import { renderFateListPage } from '../fate/render.ts';
 import { renderOperationError } from '../operation-error.tsx';
+import { renderAdminPage } from '../react/server.ts';
 
 const app = new Hono<ApiEnv>();
-app.onError(renderOperationError);
+app.onError((error, context) =>
+  error instanceof AuthenticationConfigurationError
+    ? renderAdminPage(
+        context,
+        'authError',
+        'Access',
+        {
+          message: error.message,
+          platformName: getPlatformDisplayName(context.env, context.req.url),
+          username: context.get('user')?.login,
+        },
+        { status: error.status },
+      )
+    : renderOperationError(error, context),
+);
 
 app.get('/', (context) => renderFateListPage(context, 'signupControl'));
+
+app.post('/policy', async (context) => {
+  const form = await context.req.parseBody({ all: true });
+  const connections = Array.isArray(form.connections)
+    ? form.connections.map(String)
+    : form.connections
+      ? [String(form.connections)]
+      : [];
+  const body = {
+    revision: Number(form.revision),
+    admission: { mode: String(form.mode), connections, access: form.access === 'true' },
+  };
+  return executeAuditedMutation(
+    context,
+    operatorAuditIntent('config/auth/admission', body),
+    async () => {
+      await configureAuthenticationAdmission(context, body);
+      return { response: context.redirect('/admin/signup-control'), succeeded: true };
+    },
+  );
+});
 
 app.post('/toggle', async (context) => {
   const current = (await getOperatorSignup(context)).enabled;

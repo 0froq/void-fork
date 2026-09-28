@@ -2018,13 +2018,16 @@ describe('GET /admin/deployments/:id (logs section)', () => {
 });
 
 describe('GET /admin/signup-control', () => {
-  test('renders signup control page with toggle off by default', async () => {
+  test('renders Access with legacy signup control and manual invitation instructions', async () => {
     const admin = await createTestUser(env.db, 'admin-sc1', 'github', undefined, 'free', 'admin');
     const res = await req('/admin/signup-control', admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain('Signup Control');
-    expect(html).toContain('OFF (open)');
+    expect(visibleMarkup(html)).toContain('>Access</h1>');
+    expect(visibleMarkup(html)).toContain('Signup is open to anyone with an enabled login');
+    expect(html).toContain('Share these details manually');
+    expect(html).toContain("void connect 'http://localhost'");
+    expect(html).toContain('Email not enabled');
   });
 
   test('shows entries when they exist', async () => {
@@ -2072,19 +2075,21 @@ describe('GET /admin/signup-control', () => {
 
     expect(html).toMatch(/<th[^>]*>Accepted<\/th>/);
     expect(html).toMatch(/<th[^>]*>Deployed<\/th>/);
-    expect(rowFor('accepted@example.com').match(/>yes<\/strong>/g)).toHaveLength(2);
-    expect(rowFor('octocat').match(/>yes<\/strong>/g)).toHaveLength(1);
-    expect(rowFor('octocat').match(/>no<\/strong>/g)).toHaveLength(1);
-    expect(rowFor('pending@example.com').match(/>no<\/strong>/g)).toHaveLength(2);
+    expect(rowFor('accepted@example.com').match(/>Yes</g)).toHaveLength(2);
+    expect(rowFor('octocat').match(/>Yes</g)).toHaveLength(1);
+    expect(rowFor('octocat').match(/>No</g)).toHaveLength(1);
+    expect(rowFor('pending@example.com').match(/>No</g)).toHaveLength(2);
 
     await env.ROUTING.delete('signup:allowlist');
   });
 
-  test('nav bar includes Signup link', async () => {
+  test('nav bar has a single Access link', async () => {
     const admin = await createTestUser(env.db, 'admin-sc2b', 'github', undefined, 'free', 'admin');
     const res = await req('/admin/signup-control', admin.adminJwt);
     const html = await res.text();
     expect(html).toContain('href="/admin/signup-control"');
+    expect(visibleMarkup(html)).toContain('Access');
+    expect(html).not.toContain('href="/admin/invitations"');
   });
 });
 
@@ -2259,6 +2264,95 @@ describe('POST /admin/signup-control/add + delete', () => {
 });
 
 describe('POST /admin/invitations/send', () => {
+  test('shows an email-free grant once on Access with separate delivery status', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'admin-inv-no-email',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    await env.ROUTING.delete('signup:allowlist');
+    await env.ROUTING.put('signup:enabled', 'true');
+    try {
+      const before = await req('/admin/signup-control', admin.adminJwt);
+      expect(visibleMarkup(await before.text())).toContain('Grant access');
+
+      const response = await req('/admin/invitations/send', admin.adminJwt, {
+        method: 'POST',
+        body: new URLSearchParams({ email: 'guest@example.com' }).toString(),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+      expect(response.status).toBe(302);
+      expect(response.headers.get('Location')).toBe('/admin/signup-control?result=invited');
+
+      const page = await req('/admin/signup-control?result=invited', admin.adminJwt);
+      const visible = visibleMarkup((await page.text()).split('<div id="app">')[1] ?? '');
+      expect(visible).toContain('Access grants were created');
+      expect(visible).toContain('Email off');
+      expect(visible.split('Direct grants')[1]?.split('Invitation history')[0]).not.toContain(
+        'guest@example.com',
+      );
+      expect(tableRowContaining(visible, 'guest@example.com')).toContain('Revoke');
+
+      const oldPage = await req('/admin/invitations', admin.adminJwt);
+      expect(oldPage.status).toBe(302);
+      expect(oldPage.headers.get('Location')).toBe('/admin/signup-control');
+    } finally {
+      await env.ROUTING.delete('signup:enabled');
+      await env.ROUTING.delete('signup:allowlist');
+    }
+  });
+
+  test('keeps invitation grants out of direct grants across invitation pages', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'admin-inv-pages',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    await env.ROUTING.put(
+      'signup:allowlist',
+      JSON.stringify([{ type: 'email', pattern: 'older@example.com', note: 'Invited' }]),
+    );
+    try {
+      await env.db.insert(invitations).values([
+        {
+          id: 'older-invitation',
+          email: 'older@example.com',
+          invited_by: admin.id,
+          status: 'accepted',
+          created_at: '2026-01-01T00:00:00.000Z',
+        },
+        ...Array.from({ length: 50 }, (_, index) => ({
+          id: `newer-invitation-${index}`,
+          email: `newer-${index}@example.com`,
+          invited_by: admin.id,
+          created_at: '2026-09-01T00:00:00.000Z',
+        })),
+      ]);
+      const first = visibleMarkup(
+        (await (await req('/admin/signup-control', admin.adminJwt)).text()).split(
+          '<div id="app">',
+        )[1] ?? '',
+      );
+      expect(first.split('Direct grants')[1]?.split('Invitation history')[0]).not.toContain(
+        'older@example.com',
+      );
+      const second = visibleMarkup(
+        (await (await req('/admin/signup-control?page=2', admin.adminJwt)).text()).split(
+          '<div id="app">',
+        )[1] ?? '',
+      );
+      expect(tableRowContaining(second, 'older@example.com')).toContain('Remove signup grant');
+    } finally {
+      await env.ROUTING.delete('signup:allowlist');
+    }
+  });
+
   test('invites multiple comma or whitespace separated emails', async () => {
     const admin = await createTestUser(env.db, 'admin-inv1', 'github', undefined, 'free', 'admin');
     await env.ROUTING.delete('signup:allowlist');

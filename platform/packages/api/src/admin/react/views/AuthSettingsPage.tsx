@@ -8,7 +8,6 @@ import type { PlatformLoginConfiguration } from '@void/platform';
 import { useRequest, useView } from 'react-fate';
 import { AuthSettingsView, authSettingsRequest } from '../../fate/views.ts';
 import { type AdminPageProps } from '../page-utils.ts';
-import { FormCheckbox, FormSelector } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 
 const HOME = '/admin/config/auth';
@@ -27,13 +26,13 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
   if (!pageData) {
     throw new Error('Authentication settings are unavailable.');
   }
-  const { data, tested, admission } = pageData;
+  const { data, tested } = pageData;
   return (
     <Layout platformName={platformName} title="Authentication settings" username={username}>
       <div className="void-admin-auth-settings">
         <header className="void-admin-auth-intro">
           <Heading level={1}>Authentication</Heading>
-          <p>Manage how people reach the platform and who can create an account.</p>
+          <p>Manage how people reach the platform and sign in.</p>
         </header>
 
         <section aria-labelledby="platform-protection-heading">
@@ -231,75 +230,26 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
                 </div>
               </Card>
             </section>
-
-            <section aria-labelledby="signup-heading">
-              <Card>
-                <div className="void-admin-auth-section-header">
-                  <div>
-                    <Heading level={2} id="signup-heading">
-                      Who can join?
-                    </Heading>
-                    <p>Set the rules for creating new user accounts.</p>
-                  </div>
-                </div>
-                <form method="post" action={`${HOME}/admission`} className="void-admin-auth-policy">
-                  <input
-                    type="hidden"
-                    name="revision"
-                    value={'revision' in data ? data.revision : 0}
-                  />
-                  <FormSelector
-                    label="Signup policy"
-                    name="mode"
-                    initialValue={admission?.mode ?? 'restricted'}
-                    options={[
-                      { value: 'restricted', label: 'Invited or allowlisted users' },
-                      { value: 'company', label: 'Company-approved users — automatic accounts' },
-                      { value: 'public', label: 'Public signup — all enabled logins' },
-                    ]}
-                  />
-                  <div className="void-admin-auth-company-policy">
-                    <h3>Company-approved methods</h3>
-                    <p>
-                      Select which company policies qualify a new user when that policy is chosen.
-                    </p>
-                    <div className="void-admin-auth-checkboxes">
-                      {data.methods
-                        .filter((method) => method.enabled && method.kind !== 'github')
-                        .map((method) => (
-                          <FormCheckbox
-                            key={method.id}
-                            label={method.label}
-                            name="connections"
-                            submitValue={method.id}
-                            initialValue={
-                              admission?.mode === 'company' &&
-                              admission.connections.includes(method.id)
-                            }
-                          />
-                        ))}
-                      {data.protection && (
-                        <FormCheckbox
-                          label="Anyone who passes Cloudflare Access protection"
-                          name="access"
-                          submitValue="true"
-                          initialValue={admission?.mode === 'company' && admission.access}
-                        />
-                      )}
-                    </div>
-                  </div>
-                  <p className="void-admin-auth-note">
-                    Automatically created accounts are ordinary users. Changing signup policy does
-                    not remove Access protection.
-                  </p>
-                  <div>
-                    <Button type="submit" label="Save signup policy" />
-                  </div>
-                </form>
-              </Card>
-            </section>
           </>
         )}
+        <section aria-labelledby="account-access-heading">
+          <Card>
+            <div className="void-admin-auth-section-header">
+              <div>
+                <Heading level={2} id="account-access-heading">
+                  Who can join?
+                </Heading>
+                <p>Set the signup policy, invite people, and manage individual grants on Access.</p>
+              </div>
+              <Button
+                as="a"
+                href="/admin/signup-control"
+                label="Manage access"
+                variant="secondary"
+              />
+            </div>
+          </Card>
+        </section>
       </div>
     </Layout>
   );

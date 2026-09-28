@@ -145,6 +145,8 @@
 
 ## Dashboard and product surfaces
 
+- Present signup policy, manual grants, and invitations as one access workflow;
+  show notification delivery separately from the permission it creates.
 - Show a short, fixed set of administrator setup steps directly; a disclosure
   adds friction when there is no meaningful detail to hide.
 - Keep admin settings readable by grouping independent controls into clear sections

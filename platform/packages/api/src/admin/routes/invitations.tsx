@@ -13,7 +13,11 @@ import { renderOperationError } from '../operation-error.tsx';
 const app = new Hono<ApiEnv>();
 app.onError(renderOperationError);
 
-app.get('/', (context) => renderFateListPage(context, 'invitations'));
+app.get('/', async (context) =>
+  context.req.header('X-VoidPages') === 'true'
+    ? renderFateListPage(context, 'invitations')
+    : context.redirect('/admin/signup-control'),
+);
 
 app.post('/send', async (context) => {
   const body = await context.req.parseBody();
@@ -23,7 +27,10 @@ app.post('/send', async (context) => {
     operatorAuditIntent('invitations/send', { emails }),
     async () => {
       await sendOperatorInvitations(context, emails);
-      return { response: context.redirect('/admin/invitations'), succeeded: true };
+      return {
+        response: context.redirect('/admin/signup-control?result=invited'),
+        succeeded: true,
+      };
     },
   );
 });
@@ -46,7 +53,7 @@ app.post('/revoke', async (context) => {
         }
         throw error;
       }
-      return { response: context.redirect('/admin/invitations'), succeeded: true };
+      return { response: context.redirect('/admin/signup-control'), succeeded: true };
     },
   );
 });

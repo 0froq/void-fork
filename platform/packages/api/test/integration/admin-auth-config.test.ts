@@ -53,7 +53,7 @@ function request(path: string, form?: Record<string, string>, requestOrigin = or
   );
 }
 describe('browser authentication configuration', () => {
-  it('shows separate protection, login methods, and signup settings without secrets', async () => {
+  it('links from authentication settings to the unified Access page without secrets', async () => {
     const response = await request(home);
     expect(response.status).toBe(200);
     const html = await response.text();
@@ -62,8 +62,12 @@ describe('browser authentication configuration', () => {
     expect(html).toContain('Disable Cloudflare Access');
     expect(html).not.toContain('Change platform protection');
     expect(html).toContain('Login methods');
-    expect(html).toContain('Signup policy');
-    expect(html).toContain('name="mode" value="public"');
+    expect(html).toContain('Manage access');
+    expect(html).toContain('href="/admin/signup-control"');
+    expect(html).not.toContain('name="mode" value="public"');
+    const accessPage = await (await request('/admin/signup-control')).text();
+    expect(accessPage).toContain('Signup policy');
+    expect(accessPage).toContain('name="mode" value="public"');
     expect(html).not.toContain(env.GITHUB_CLIENT_SECRET);
     expect(html).not.toContain(env.GOOGLE_CLIENT_SECRET);
     const editor = await (await request(`${home}/connections/google`)).text();
@@ -110,7 +114,7 @@ describe('browser authentication configuration', () => {
     const initial = (await env.db.select().from(platformAuthSettings))[0]!;
     expect(
       (
-        await request(`${home}/admission`, {
+        await request('/admin/signup-control/policy', {
           revision: String(initial.revision),
           mode: 'company',
           connections: 'google',
@@ -137,7 +141,7 @@ describe('browser authentication configuration', () => {
     const latest = (await env.db.select().from(platformAuthSettings))[0]!;
     expect(
       (
-        await request(`${home}/admission`, {
+        await request('/admin/signup-control/policy', {
           revision: String(latest.revision),
           mode: 'company',
           connections: 'company',

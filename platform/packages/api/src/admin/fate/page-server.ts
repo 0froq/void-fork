@@ -109,8 +109,20 @@ export const signupDataView = dataView<SignupRecord>('AdminSignup')({
   id: true,
   enabled: true,
   entries: true,
+  directEntries: true,
   admission: true,
   connections: true,
+  initialized: true,
+  revision: true,
+  methods: true,
+  protection: true,
+  invitations: true,
+  page: true,
+  totalPages: true,
+  emailEnabled: true,
+  connectCommand: true,
+  inviteUrl: true,
+  result: true,
 });
 export const invitationsDataView = dataView<InvitationsRecord>('AdminInvitations')({
   id: true,
@@ -122,7 +134,6 @@ export const authSettingsDataView = dataView<AuthSettingsRecord>('AdminAuthSetti
   id: true,
   data: true,
   tested: true,
-  admission: true,
 });
 export const authNewDataView = dataView<AuthNewRecord>('AdminAuthNew')({
   id: true,

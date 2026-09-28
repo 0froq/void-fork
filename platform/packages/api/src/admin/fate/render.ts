@@ -75,7 +75,7 @@ export async function renderFateListPage(
     projects: 'Projects',
     deployments: 'Deployments',
     cliVersions: 'CLI Versions',
-    signupControl: 'Signup Control',
+    signupControl: 'Access',
     invitations: 'Invitations',
     authSettings: 'Authentication settings',
     authNew: 'Add login method',

@@ -3,7 +3,7 @@ import {
   parsePlatformLoginConfiguration,
   type PlatformLoginConfiguration,
 } from '@void/platform';
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, inArray, ne } from 'drizzle-orm';
 import type { Context } from 'hono';
 import { getPlatformCapabilities } from '../../capabilities.ts';
 import { SITE_DOMAIN } from '../../constants.ts';
@@ -24,9 +24,10 @@ import {
 import type { ApiEnv } from '../../env.ts';
 import { OperatorError } from '../../operator/common.ts';
 import { cliVersionStats } from '../../operator/system-operations.ts';
+import { getPlatformApiUrl, platformConnectCommand } from '../../platform-identity.ts';
 import { projectWithUrl } from '../../project-url.ts';
 import { projectUrl } from '../../project-url.ts';
-import { platformLoginTests } from '../../schema.ts';
+import { invitations, platformLoginTests } from '../../schema.ts';
 import type { DeployManifest } from '../../types.ts';
 
 type AdminContext = Context<ApiEnv>;
@@ -201,9 +202,76 @@ export async function loadCliVersionsPage(context: AdminContext, path: string) {
 }
 
 export async function loadSignupPage(context: AdminContext, path: string) {
-  pageLocation(path, '/admin/signup-control');
-  const { getOperatorSignup } = await import('../../operator/access-service.ts');
-  return { id: path, ...(await getOperatorSignup(context)) };
+  const url = pageLocation(path, '/admin/signup-control');
+  const page = pageNumber(url);
+  const { getOperatorSignup, listOperatorInvitations } =
+    await import('../../operator/access-service.ts');
+  const { getAuthenticationConfiguration } = await import('../../operator/auth-config.ts');
+  const [signup, invitationPage, authentication] = await Promise.all([
+    getOperatorSignup(context),
+    listOperatorInvitations(context.get('db'), {
+      page,
+      limit: 50,
+      offset: (page - 1) * 50,
+    }),
+    getAuthenticationConfiguration(context),
+  ]);
+  const exactEmailGrants = signup.entries.flatMap((entry) =>
+    entry.type === 'email' && !entry.pattern.startsWith('*@') ? [entry.pattern.toLowerCase()] : [],
+  );
+  const invitationGrants = exactEmailGrants.length
+    ? await context
+        .get('db')
+        .select({ email: invitations.email })
+        .from(invitations)
+        .where(and(inArray(invitations.email, exactEmailGrants), ne(invitations.status, 'revoked')))
+    : [];
+  const invitedEmails = new Set(invitationGrants.map(({ email }) => email));
+  const invitationGrantIndexes = new Map(
+    signup.entries.flatMap((entry, index) =>
+      entry.type === 'email' &&
+      !entry.pattern.startsWith('*@') &&
+      invitedEmails.has(entry.pattern.toLowerCase())
+        ? [[entry.pattern.toLowerCase(), index] as const]
+        : [],
+    ),
+  );
+  const directEntries = signup.entries
+    .map((entry, index) => ({ ...entry, index }))
+    .filter(
+      (entry) =>
+        entry.type !== 'email' ||
+        entry.pattern.startsWith('*@') ||
+        !invitedEmails.has(entry.pattern.toLowerCase()),
+    );
+  const apiUrl = getPlatformApiUrl(context.env, context.req.url);
+  return {
+    id: path,
+    ...signup,
+    directEntries,
+    initialized: authentication.initialized,
+    revision: authentication.initialized ? authentication.revision : null,
+    methods: authentication.methods.map(({ id, kind, label, enabled }) => ({
+      id,
+      kind,
+      label,
+      enabled,
+    })),
+    protection: Boolean(authentication.protection),
+    invitations: invitationPage.invitations.map((invitation) => ({
+      ...invitation,
+      grantIndex:
+        invitation.status === 'revoked'
+          ? null
+          : (invitationGrantIndexes.get(invitation.email.toLowerCase()) ?? null),
+    })),
+    page: invitationPage.page,
+    totalPages: invitationPage.totalPages,
+    emailEnabled: Boolean(context.env.EMAIL),
+    connectCommand: platformConnectCommand(apiUrl),
+    inviteUrl: `${apiUrl}/invite`,
+    result: url.searchParams.get('result') === 'invited' ? 'invited' : null,
+  };
 }
 
 export async function loadInvitationsPage(context: AdminContext, path: string) {
@@ -236,8 +304,7 @@ export async function loadAuthSettingsPage(context: AdminContext, path: string) 
           ),
         )
     : [];
-  const admission = 'admission' in data ? data.admission : undefined;
-  return { id: path, data, tested, admission };
+  return { id: path, data, tested };
 }
 
 export async function loadAuthNewPage(context: AdminContext, path: string) {

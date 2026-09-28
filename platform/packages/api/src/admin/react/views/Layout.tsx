@@ -78,9 +78,11 @@ export function Layout({
               isSelected={path.startsWith('/admin/users')}
             />
             <SideNavItem
-              label="Invitations"
-              href="/admin/invitations"
-              isSelected={path === '/admin/invitations'}
+              label="Access"
+              href="/admin/signup-control"
+              isSelected={
+                path.startsWith('/admin/signup-control') || path.startsWith('/admin/invitations')
+              }
             />
           </SideNavSection>
           <SideNavSection title="Platform">
@@ -93,11 +95,6 @@ export function Layout({
               label="Email"
               href="/admin/email"
               isSelected={path.startsWith('/admin/email')}
-            />
-            <SideNavItem
-              label="Signup"
-              href="/admin/signup-control"
-              isSelected={path === '/admin/signup-control'}
             />
             <SideNavItem
               label="CLI Versions"
