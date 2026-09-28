@@ -1,6 +1,7 @@
 import { FateRequestError } from '@nkzw/fate/server';
 import type { Context } from 'hono';
 import type { ApiEnv } from '../../env.ts';
+import { systemHealthCheckNames } from '../../operator/system-operations.ts';
 import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { renderAdminPage } from '../react/server.ts';
 import { createFateClient } from './client.generated.ts';
@@ -37,27 +38,22 @@ function createServerClient(context: Context<ApiEnv>) {
 }
 
 export async function renderDashboardFatePage(context: Context<ApiEnv>): Promise<Response> {
+  const props = {
+    platformName: getPlatformDisplayName(context.env, context.req.url),
+    username: context.get('user').login,
+    healthCheckNames: systemHealthCheckNames(Boolean(context.env.PLATFORM_INSTALLATION_ID)),
+  };
   // Page-object navigations carry a cheap route shell. The persistent browser
   // Fate client resolves it from cache or requests the missing view.
   if (context.req.header('X-VoidPages') === 'true') {
-    return renderAdminPage(context, 'dashboard', 'Dashboard', {
-      platformName: getPlatformDisplayName(context.env, context.req.url),
-      username: context.get('user').login,
-    });
+    return renderAdminPage(context, 'dashboard', 'Dashboard', props);
   }
 
   const client = createServerClient(context);
   await client.request(dashboardRequest);
-  return renderAdminPage(
-    context,
-    'dashboard',
-    'Dashboard',
-    {
-      platformName: getPlatformDisplayName(context.env, context.req.url),
-      username: context.get('user').login,
-    },
-    { fateSnapshot: client.dehydrate() },
-  );
+  return renderAdminPage(context, 'dashboard', 'Dashboard', props, {
+    fateSnapshot: client.dehydrate(),
+  });
 }
 
 export async function renderFateListPage(

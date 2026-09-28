@@ -145,6 +145,8 @@
 
 ## Dashboard and product surfaces
 
+- Render the expected system-health check slots before polling and keep their
+  status details on one line so asynchronous updates do not shift dashboard content.
 - Cloudflare Tail sees top-level logs and uncaught throws. Log caught errors
   explicitly; `void project logs --filter` filters message text and
   `--level` filters severity.

@@ -27,9 +27,30 @@ body {
   height: 100%;
 }
 .void-admin-health-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  gap: var(--spacing-2) var(--spacing-4);
+}
+.void-admin-health-summary {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.void-admin-health-check {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--spacing-4);
+  min-width: 0;
+  gap: var(--spacing-2);
+  white-space: nowrap;
+}
+.void-admin-health-indicator {
+  flex: 0 0 1ch;
+  text-align: center;
+}
+.void-admin-health-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .void-admin-auth {
   max-width: 480px;

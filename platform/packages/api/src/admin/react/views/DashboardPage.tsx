@@ -62,6 +62,7 @@ const isServerRender = () => false;
 type DashboardProps = Readonly<{
   platformName: string;
   username?: string;
+  healthCheckNames: ReadonlyArray<string>;
 }>;
 
 function formatNumber(value: number) {
@@ -82,7 +83,7 @@ function formatBytes(bytes: number) {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
-function HealthStatusBanner() {
+function HealthStatusBanner({ checkNames }: { checkNames: ReadonlyArray<string> }) {
   const client = useFateClient();
   const [healthRef, setHealthRef] = useState<ViewRef<'AdminHealth'> | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
@@ -115,6 +116,7 @@ function HealthStatusBanner() {
     };
   }, [client]);
   const failed = health?.checks.filter((check) => !check.ok).length ?? 0;
+  const checksByName = new Map(health?.checks.map((check) => [check.name, check]));
   const summary =
     status === 'loading'
       ? 'Loading...'
@@ -136,18 +138,38 @@ function HealthStatusBanner() {
                 : 'error'
         }
         title="System Status"
-        description={<span id="health-summary">{summary}</span>}
+        description={
+          <span id="health-summary" className="void-admin-health-summary">
+            {summary}
+          </span>
+        }
         collapsible={false}
       >
         <div id="health-checks" className="void-admin-health-checks">
-          {status === 'ready' &&
-            health?.checks.map((check) => (
-              <span key={check.name}>
-                <span aria-hidden="true">{check.ok ? '✓' : '✗'}</span> {check.name}
-                {check.latencyMs > 0 ? ` (${check.latencyMs}ms)` : ''}
-                {!check.ok && <span> — {check.error || 'Health check failed.'}</span>}
+          {checkNames.map((name) => {
+            const check = status === 'ready' ? checksByName.get(name) : undefined;
+            const detail =
+              status === 'loading'
+                ? 'Checking…'
+                : !check
+                  ? 'Unavailable'
+                  : !check.ok
+                    ? (check.error ?? 'Health check failed.')
+                    : check.latencyMs > 0
+                      ? `${check.latencyMs}ms`
+                      : 'Healthy';
+            return (
+              <span key={name} className="void-admin-health-check">
+                <span className="void-admin-health-indicator" aria-hidden="true">
+                  {check ? (check.ok ? '✓' : '✗') : '·'}
+                </span>
+                <span>{name}</span>
+                <span className="void-admin-health-detail" title={detail}>
+                  {detail}
+                </span>
               </span>
-            ))}
+            );
+          })}
         </div>
       </Banner>
     </div>
@@ -266,7 +288,7 @@ function DeferredTopProjects({
   );
 }
 
-export function DashboardPage({ platformName, username }: DashboardProps) {
+export function DashboardPage({ platformName, username, healthCheckNames }: DashboardProps) {
   const { dashboard: dashboardRef } = useRequest(dashboardRequest, {
     mode: 'stale-while-revalidate',
   });
@@ -277,7 +299,7 @@ export function DashboardPage({ platformName, username }: DashboardProps) {
   return (
     <Layout platformName={platformName} title="Dashboard" username={username}>
       <Heading level={1}>Dashboard</Heading>
-      <HealthStatusBanner />
+      <HealthStatusBanner checkNames={healthCheckNames} />
       <div className="void-admin-metrics">
         <a href="/admin/users">
           <Card>

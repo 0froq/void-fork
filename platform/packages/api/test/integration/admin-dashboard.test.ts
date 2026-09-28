@@ -184,6 +184,38 @@ describe('auth middleware', () => {
     expect(res.status).toBe(200);
   });
 
+  test.each([
+    { installed: true, names: ['api', 'proxy', 'dispatch', 'db'] },
+    { installed: false, names: ['api', 'proxy', 'dashboard', 'dispatch', 'db'] },
+  ])(
+    'renders all system-status checks before polling (installed: $installed)',
+    async ({ installed, names }) => {
+      const admin = await createTestUser(
+        env.db,
+        'health-admin',
+        'github',
+        undefined,
+        'free',
+        'admin',
+      );
+      const response = await app.fetch(
+        new Request('http://localhost/admin/', {
+          headers: { Cookie: `admin_token=${admin.adminJwt}` },
+        }),
+        { ...env, PLATFORM_INSTALLATION_ID: installed ? 'inst_test' : undefined },
+      );
+      expect(response.status).toBe(200);
+      const html = visibleMarkup(await response.text());
+      const checks = html.split('id="health-checks"')[1]?.split('</div>')[0];
+      expect(checks).toBeDefined();
+      expect(checks?.match(/class="void-admin-health-check"/g)).toHaveLength(names.length);
+      for (const name of names) {
+        expect(checks).toContain(`>${name}</span>`);
+      }
+      expect(checks?.match(/>Checking…<\/span>/g)).toHaveLength(names.length);
+    },
+  );
+
   test('serves authenticated React pages and Void navigation data', async () => {
     const admin = await createTestUser(env.db, 'react-admin', 'github', undefined, 'free', 'admin');
     const htmlResponse = await req('/admin/', admin.adminJwt);

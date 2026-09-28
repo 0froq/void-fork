@@ -32,6 +32,10 @@ export type HealthResult = Readonly<{
   allOk: boolean;
 }>;
 
+export function systemHealthCheckNames(installed: boolean): ReadonlyArray<string> {
+  return ['api', 'proxy', ...(installed ? [] : ['dashboard']), 'dispatch', 'db'];
+}
+
 async function checkUrl(
   name: string,
   url: string,
@@ -86,9 +90,8 @@ async function checkDb(db: Db): Promise<HealthCheck> {
 }
 
 function mockHealthResult(installed: boolean): HealthResult {
-  const names = ['api', 'proxy', ...(installed ? [] : ['dashboard']), 'dispatch', 'db'];
   return {
-    checks: names.map((name) => ({ name, ok: true, latencyMs: 0 })),
+    checks: systemHealthCheckNames(installed).map((name) => ({ name, ok: true, latencyMs: 0 })),
     allOk: true,
   };
 }
