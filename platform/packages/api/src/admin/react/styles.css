@@ -33,6 +33,7 @@ body {
 }
 .void-admin-health-summary {
   display: block;
+  min-height: calc(var(--text-supporting-size) * var(--text-supporting-leading));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

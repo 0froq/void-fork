@@ -119,7 +119,7 @@ function HealthStatusBanner({ checkNames }: { checkNames: ReadonlyArray<string> 
   const checksByName = new Map(health?.checks.map((check) => [check.name, check]));
   const summary =
     status === 'loading'
-      ? 'Loading...'
+      ? ''
       : status === 'unavailable' || !health
         ? 'Unable to check system status'
         : health.allOk
@@ -150,7 +150,7 @@ function HealthStatusBanner({ checkNames }: { checkNames: ReadonlyArray<string> 
             const check = status === 'ready' ? checksByName.get(name) : undefined;
             const detail =
               status === 'loading'
-                ? 'Checking…'
+                ? ''
                 : !check
                   ? 'Unavailable'
                   : !check.ok
@@ -161,10 +161,10 @@ function HealthStatusBanner({ checkNames }: { checkNames: ReadonlyArray<string> 
             return (
               <span key={name} className="void-admin-health-check">
                 <span className="void-admin-health-indicator" aria-hidden="true">
-                  {check ? (check.ok ? '✓' : '✗') : '·'}
+                  {check ? (check.ok ? '✓' : '✗') : null}
                 </span>
                 <span>{name}</span>
-                <span className="void-admin-health-detail" title={detail}>
+                <span className="void-admin-health-detail" title={detail || undefined}>
                   {detail}
                 </span>
               </span>

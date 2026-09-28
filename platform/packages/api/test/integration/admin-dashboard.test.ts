@@ -212,7 +212,7 @@ describe('auth middleware', () => {
       for (const name of names) {
         expect(checks).toContain(`>${name}</span>`);
       }
-      expect(checks?.match(/>Checking…<\/span>/g)).toHaveLength(names.length);
+      expect(checks).not.toContain('Checking…');
     },
   );
 
