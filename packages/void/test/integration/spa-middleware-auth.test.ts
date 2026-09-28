@@ -224,7 +224,7 @@ describe('SPA asset routing policy', () => {
     writeFileSync(wranglerConfig, staleWranglerSource);
     rmSync(dist, { recursive: true, force: true });
 
-    execSync(`vp run --filter ${playgroundFilter} build`, { cwd: ROOT, stdio: 'pipe' });
+    execSync('vp build', { cwd: playground.root, stdio: 'pipe' });
 
     const assetConfig = readBuiltAssetConfig();
     expect(assetConfig.not_found_handling).toBe('single-page-application');
@@ -253,8 +253,8 @@ describe('SPA asset routing policy', () => {
     const buildEnv = { ...process.env };
     delete buildEnv.VOID_DEPLOY_PROJECT_ID;
     delete buildEnv.VOID_DEPLOY_BUILD;
-    execSync(`vp run --filter ${playgroundFilter} build`, {
-      cwd: ROOT,
+    execSync('vp build', {
+      cwd: playground.root,
       stdio: 'pipe',
       env: buildEnv,
     });

@@ -33,15 +33,13 @@ describe('Cloudflare compatibility flags in real builds', () => {
         writeFileSync(voidPath, JSON.stringify(config));
       }
 
-      const result = spawn.sync(
-        'vp',
-        ['run', '--filter', `./${playground.workspacePath}`, 'build'],
-        {
-          cwd: ROOT,
-          encoding: 'utf8',
-          maxBuffer: 10 * 1024 * 1024,
-        },
-      );
+      // Build the isolated fixture directly: parallel tests add and remove other
+      // playgrounds, which can race with workspace package-graph discovery.
+      const result = spawn.sync('vp', ['build'], {
+        cwd: playground.root,
+        encoding: 'utf8',
+        maxBuffer: 10 * 1024 * 1024,
+      });
       expect(result.status, `${result.stdout ?? ''}${result.stderr ?? ''}`).toBe(0);
 
       const generated = JSON.parse(

@@ -196,8 +196,8 @@ describe('runFullDeploy emits manifest.pages (Void pages app, end-to-end)', () =
 
     // Real build of the minimal React pages fixture so runDeploy(skipBuild:true)
     // finds dist/client/.vite/manifest.json + dist/ssr/{index.js,wrangler.json}.
-    const result = spawn.sync('vp', ['run', '--filter', `./${playground.workspacePath}`, 'build'], {
-      cwd: ROOT,
+    const result = spawn.sync('vp', ['build'], {
+      cwd: fixture,
       encoding: 'utf8',
       maxBuffer: 10 * 1024 * 1024,
       env: { ...process.env, VOID_TOKEN: 'test-token-do-not-use' },

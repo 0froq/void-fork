@@ -148,8 +148,8 @@ describe('playground/kitchen-sink --backend cloudflare real-build deploy guard',
       expectedCrons,
     };
 
-    const result = spawn.sync('vp', ['run', '--filter', `./${playground.workspacePath}`, 'build'], {
-      cwd: ROOT,
+    const result = spawn.sync('vp', ['build'], {
+      cwd: pg,
       encoding: 'utf8',
       maxBuffer: 10 * 1024 * 1024,
     });
