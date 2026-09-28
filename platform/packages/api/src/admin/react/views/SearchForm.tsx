@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
 import { Button } from '@astryxdesign/core/Button';
 import { Link } from '@astryxdesign/core/Link';
-import { SearchTypeahead } from './SearchTypeahead.tsx';
+import { SearchTypeahead, type SearchSuggestion } from './SearchTypeahead.tsx';
 
 export function SearchForm({
   action,
@@ -16,7 +16,7 @@ export function SearchForm({
   label: string;
   value: string;
   onChange: (value: string) => void;
-  suggestions: ReadonlyArray<string | null | undefined>;
+  suggestions: ReadonlyArray<string | SearchSuggestion | null | undefined>;
   initialValue?: string;
   showClear: boolean;
 }) {
