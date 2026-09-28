@@ -9,40 +9,25 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@astryxdesign/core/Table';
+import { useRequest, useView } from 'react-fate';
 import type { PlanId } from '../../../tiers.ts';
 import { PLAN_LIMITS, getPlanLimits } from '../../../tiers.ts';
-import type { User, Project } from '../../../types.ts';
+import { UserDetailView, userDetailRequest } from '../../fate/views.ts';
+import { useDetailTitle, type AdminPageProps } from '../page-utils.ts';
 import { formatLimit, formatNumber, formatBytes, formatAbsoluteDate } from './format.ts';
 import { FormSelector, FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 
-type ProjectUsage = Readonly<{
-  projectId: string;
-  slug: string;
-  requests: number;
-  bandwidthBytes: number;
-}>;
-
-export function UserDetailPage({
-  user,
-  projects,
-  deploysToday,
-  usage,
-  platformName,
-  username,
-}: {
-  user: User;
-  projects: ReadonlyArray<Project>;
-  deploysToday: number;
-  usage: {
-    billingPeriodStart: string;
-    totalRequests: number;
-    totalBandwidth: number;
-    projects: ReadonlyArray<ProjectUsage>;
-  };
-  platformName: string;
-  username?: string;
-}) {
+export function UserDetailPage({ path, platformName, username }: AdminPageProps) {
+  const { userDetail: ref } = useRequest(userDetailRequest(path), {
+    mode: 'stale-while-revalidate',
+  });
+  const pageData = useView(UserDetailView, ref);
+  if (!pageData) {
+    throw new Error('User data is unavailable.');
+  }
+  const { user, projects, deploysToday, usage } = pageData;
+  useDetailTitle(pageData.user.login, platformName);
   const plans = Object.keys(PLAN_LIMITS) as ReadonlyArray<PlanId>;
   const limits = getPlanLimits(user.plan);
 

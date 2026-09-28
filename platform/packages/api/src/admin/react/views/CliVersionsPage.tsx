@@ -1,4 +1,5 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+
 import {
   Table,
   TableBody,
@@ -8,7 +9,10 @@ import {
   TableRow,
 } from '@astryxdesign/core/Table';
 import { Heading } from '@astryxdesign/core/Text';
+import { useRequest, useView } from 'react-fate';
 import type { CliVersionDeploymentStats } from '../../../db.ts';
+import { CliVersionsView, cliVersionsRequest } from '../../fate/views.ts';
+import { type AdminPageProps } from '../page-utils.ts';
 import { formatDateTime, formatNumber } from './format.ts';
 import { Layout } from './Layout.tsx';
 
@@ -58,19 +62,15 @@ function CliVersionTable({
   );
 }
 
-export function CliVersionsPage({
-  allTime,
-  last30Days,
-  platformName,
-  username,
-  tz,
-}: {
-  allTime: ReadonlyArray<CliVersionDeploymentStats>;
-  last30Days: ReadonlyArray<CliVersionDeploymentStats>;
-  platformName: string;
-  username?: string;
-  tz?: string;
-}) {
+export function CliVersionsPage({ path, platformName, username }: AdminPageProps) {
+  const { cliVersions: ref } = useRequest(cliVersionsRequest(path), {
+    mode: 'stale-while-revalidate',
+  });
+  const pageData = useView(CliVersionsView, ref);
+  if (!pageData) {
+    throw new Error('CLI version data is unavailable.');
+  }
+  const { allTime, last30Days, tz } = pageData;
   return (
     <Layout platformName={platformName} title="CLI Versions" username={username}>
       <Heading level={1}>CLI Versions</Heading>

@@ -3,25 +3,24 @@
 import { Button } from '@astryxdesign/core/Button';
 import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList';
 import { useState } from 'react';
+import { useRequest, useView } from 'react-fate';
 import type { EmailDomainManagement, EmailRecipientPolicy } from '../../../email/settings.ts';
+import { EmailSettingsView, emailSettingsRequest } from '../../fate/views.ts';
+import { type AdminPageProps } from '../page-utils.ts';
 import { FormTextArea } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 
 const META = 'font-size: 0.8rem; color: #666';
 
-export function EmailSettingsPage({
-  policy,
-  management,
-  senderDomain,
-  platformName,
-  username,
-}: {
-  policy: EmailRecipientPolicy;
-  management: EmailDomainManagement;
-  senderDomain: string | undefined;
-  platformName: string;
-  username?: string;
-}) {
+export function EmailSettingsPage({ path, platformName, username }: AdminPageProps) {
+  const { emailSettings: ref } = useRequest(emailSettingsRequest(path), {
+    mode: 'stale-while-revalidate',
+  });
+  const pageData = useView(EmailSettingsView, ref);
+  if (!pageData) {
+    throw new Error('Email settings are unavailable.');
+  }
+  const { policy, management, senderDomain } = pageData;
   const [mode, setMode] = useState(policy.mode);
   const [domainManagement, setDomainManagement] = useState(management);
   return (

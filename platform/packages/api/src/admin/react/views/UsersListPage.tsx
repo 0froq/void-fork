@@ -1,4 +1,5 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+
 import { Button } from '@astryxdesign/core/Button';
 import {
   Table,
@@ -9,27 +10,21 @@ import {
   TableRow,
 } from '@astryxdesign/core/Table';
 import { useEffect, useState } from 'react';
-import type { User } from '../../../types.ts';
+import { useRequest, useView } from 'react-fate';
+import { UsersPageView, usersPageRequest } from '../../fate/views.ts';
+import { type AdminPageProps } from '../page-utils.ts';
 import { formatAbsoluteDate } from './format.ts';
 import { Layout } from './Layout.tsx';
 import { Pagination } from './Pagination.tsx';
 import { SearchForm } from './SearchForm.tsx';
 
-export function UsersListPage({
-  users,
-  search,
-  page,
-  totalPages,
-  platformName,
-  username,
-}: {
-  users: ReadonlyArray<User>;
-  search?: string;
-  page?: number;
-  totalPages?: number;
-  platformName: string;
-  username?: string;
-}) {
+export function UsersListPage({ path, platformName, username }: AdminPageProps) {
+  const { usersPage: ref } = useRequest(usersPageRequest(path), { mode: 'stale-while-revalidate' });
+  const pageData = useView(UsersPageView, ref);
+  if (!pageData) {
+    throw new Error('Users page data is unavailable.');
+  }
+  const { users, search, page, totalPages } = pageData;
   const [filter, setFilter] = useState(search ?? '');
   useEffect(() => setFilter(search ?? ''), [search]);
   const visibleUsers = users.filter((user) =>

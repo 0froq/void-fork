@@ -1,4 +1,5 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+
 import {
   Table,
   TableBody,
@@ -7,22 +8,23 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@astryxdesign/core/Table';
-import type { Build } from '../../../types.ts';
+import { useRequest, useView } from 'react-fate';
+import { BuildDetailView, buildDetailRequest } from '../../fate/views.ts';
+import { useDetailTitle, type AdminPageProps } from '../page-utils.ts';
 import { BuildLogs } from './BuildLogs.tsx';
 import { formatDateTime } from './format.ts';
 import { Layout } from './Layout.tsx';
 
-export function BuildDetailPage({
-  build,
-  tz,
-  platformName,
-  username,
-}: {
-  build: Build;
-  tz?: string;
-  platformName: string;
-  username?: string;
-}) {
+export function BuildDetailPage({ path, platformName, username }: AdminPageProps) {
+  const { buildDetail: ref } = useRequest(buildDetailRequest(path), {
+    mode: 'stale-while-revalidate',
+  });
+  const pageData = useView(BuildDetailView, ref);
+  if (!pageData) {
+    throw new Error('Build data is unavailable.');
+  }
+  const { build, tz } = pageData;
+  useDetailTitle(`Build ${pageData.build.id}`, platformName);
   return (
     <Layout platformName={platformName} title={`Build ${build.id}`} username={username}>
       <h1>Build {build.id}</h1>

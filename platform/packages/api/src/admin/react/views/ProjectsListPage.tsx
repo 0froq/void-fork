@@ -1,28 +1,23 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+
 import { useEffect, useState } from 'react';
+import { useRequest, useView } from 'react-fate';
+import { ProjectsPageView, projectsPageRequest } from '../../fate/views.ts';
+import { type AdminPageProps } from '../page-utils.ts';
 import { Layout } from './Layout.tsx';
 import { Pagination } from './Pagination.tsx';
-import type { ProjectRow } from './ProjectsTable.tsx';
 import { ProjectsTable } from './ProjectsTable.tsx';
 import { SearchForm } from './SearchForm.tsx';
 
-export function ProjectsListPage({
-  projects,
-  search,
-  page,
-  totalPages,
-  siteDomain,
-  platformName,
-  username,
-}: {
-  projects: ReadonlyArray<ProjectRow>;
-  search?: string;
-  page?: number;
-  totalPages?: number;
-  siteDomain: string;
-  platformName: string;
-  username?: string;
-}) {
+export function ProjectsListPage({ path, platformName, username }: AdminPageProps) {
+  const { projectsPage: ref } = useRequest(projectsPageRequest(path), {
+    mode: 'stale-while-revalidate',
+  });
+  const pageData = useView(ProjectsPageView, ref);
+  if (!pageData) {
+    throw new Error('Projects page data is unavailable.');
+  }
+  const { projects, search, page, totalPages, siteDomain } = pageData;
   const [filter, setFilter] = useState(search ?? '');
   useEffect(() => setFilter(search ?? ''), [search]);
   const visibleProjects = projects.filter((project) =>

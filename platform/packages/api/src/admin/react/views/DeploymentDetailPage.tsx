@@ -10,30 +10,27 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@astryxdesign/core/Table';
-import type { DeployManifest, Deployment, Project } from '../../../types.ts';
+import { useRequest, useView } from 'react-fate';
+import type { DeployManifest } from '../../../types.ts';
+import { DeploymentDetailView, deploymentDetailRequest } from '../../fate/views.ts';
+import { useDetailTitle, type AdminPageProps } from '../page-utils.ts';
 import { CopyButton } from './CopyButton.tsx';
 import { DeploymentLogs } from './DeploymentLogs.tsx';
 import { displayStatus } from './DeploymentTable.tsx';
 import { formatDateTime } from './format.ts';
 import { Layout } from './Layout.tsx';
 
-export function DeploymentDetailPage({
-  deployment,
-  project,
-  manifest,
-  canCancel,
-  tz,
-  platformName,
-  username,
-}: {
-  deployment: Deployment;
-  project: Project | null;
-  manifest: DeployManifest | null;
-  canCancel: boolean;
-  tz?: string;
-  platformName: string;
-  username?: string;
-}) {
+export function DeploymentDetailPage({ path, platformName, username }: AdminPageProps) {
+  const { deploymentDetail: ref } = useRequest(deploymentDetailRequest(path), {
+    mode: 'stale-while-revalidate',
+  });
+  const pageData = useView(DeploymentDetailView, ref);
+  if (!pageData) {
+    throw new Error('Deployment data is unavailable.');
+  }
+  const { deployment, project, canCancel, tz } = pageData;
+  const manifest = pageData.manifest as DeployManifest | null;
+  useDetailTitle(`Deployment ${pageData.deployment.id}`, platformName);
   const status = displayStatus(deployment, project?.active_deployment_id);
   const statusStyle =
     status === 'live'

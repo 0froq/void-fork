@@ -9,10 +9,13 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@astryxdesign/core/Table';
+import { useRequest, useView } from 'react-fate';
 import {
   DEFAULT_EMAIL_BURST_LIMIT as DEFAULT_BURST_LIMIT,
   DEFAULT_EMAIL_MONTHLY_LIMIT as DEFAULT_MONTHLY_LIMIT,
 } from '../../../email/limits.ts';
+import { EmailProjectView, emailProjectRequest } from '../../fate/views.ts';
+import { useDetailTitle, type AdminPageProps } from '../page-utils.ts';
 import { STATUS_COLORS, formatDateTime } from './format.ts';
 import { FormNumberInput, FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
@@ -26,58 +29,29 @@ function domainStatusColor(status: string): string {
   }
   return STATUS_COLORS.failed;
 }
-type Destination = {
-  id: string;
-  address: string;
-  status: string;
-  verification_source: string;
-  verified_at: string | null;
-};
-type Domain = {
-  id: string;
-  domain: string;
-  inbound: string;
-  inboundReason: string | null;
-  outbound: string;
-  outboundReason: string | null;
-  management: string;
-  managementReason: string | null;
-  managed_by: string;
-  relay_worker_name: string | null;
-  relay_version: number | null;
-  operation?: { id: string; status: string } | null;
-};
-export function EmailProjectPage({
-  projectId,
-  project,
-  month,
-  attempts,
-  received,
-  monthlyLimit,
-  burstLimit,
-  isSuspended,
-  domains,
-  destinations,
-  senderDomain,
-  tz,
-  platformName,
-  username,
-}: {
-  projectId: string;
-  project: { id: string; slug: string };
-  month: string;
-  attempts: number;
-  received: number;
-  monthlyLimit?: number;
-  burstLimit?: number;
-  isSuspended: boolean;
-  domains: Array<Domain>;
-  destinations: Array<Destination>;
-  senderDomain?: string;
-  tz?: string;
-  platformName: string;
-  username?: string;
-}) {
+export function EmailProjectPage({ path, platformName, username }: AdminPageProps) {
+  const { emailProject: ref } = useRequest(emailProjectRequest(path), {
+    mode: 'stale-while-revalidate',
+  });
+  const pageData = useView(EmailProjectView, ref);
+  if (!pageData) {
+    throw new Error('Project email data is unavailable.');
+  }
+  const {
+    projectId,
+    project,
+    month,
+    attempts,
+    received,
+    monthlyLimit,
+    burstLimit,
+    isSuspended,
+    domains,
+    destinations,
+    senderDomain,
+    tz,
+  } = pageData;
+  useDetailTitle(`Email - ${pageData.project.slug}`, platformName);
   return (
     <Layout platformName={platformName} title={`Email - ${project.slug}`} username={username}>
       <h1>

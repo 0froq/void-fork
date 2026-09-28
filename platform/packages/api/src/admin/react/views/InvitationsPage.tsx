@@ -1,4 +1,5 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+
 import { Badge } from '@astryxdesign/core/Badge';
 import { Button } from '@astryxdesign/core/Button';
 import {
@@ -10,16 +11,14 @@ import {
   TableRow,
 } from '@astryxdesign/core/Table';
 import { Heading } from '@astryxdesign/core/Text';
+import { useRequest, useView } from 'react-fate';
 import type { Invitation } from '../../../types.ts';
+import { InvitationsView, invitationsRequest } from '../../fate/views.ts';
+import { type AdminPageProps } from '../page-utils.ts';
 import { formatAbsoluteDate } from './format.ts';
 import { FormTextArea } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 import { Pagination } from './Pagination.tsx';
-
-type InvitationRow = Invitation & {
-  invited_by_login: string | null;
-  revoked_by_login: string | null;
-};
 
 function StatusBadge({ status }: { status: Invitation['status'] }) {
   return (
@@ -30,19 +29,15 @@ function StatusBadge({ status }: { status: Invitation['status'] }) {
   );
 }
 
-export function InvitationsPage({
-  invitations,
-  page,
-  totalPages,
-  platformName,
-  username,
-}: {
-  invitations: ReadonlyArray<InvitationRow>;
-  page: number;
-  totalPages: number;
-  platformName: string;
-  username?: string;
-}) {
+export function InvitationsPage({ path, platformName, username }: AdminPageProps) {
+  const { invitations: ref } = useRequest(invitationsRequest(path), {
+    mode: 'stale-while-revalidate',
+  });
+  const pageData = useView(InvitationsView, ref);
+  if (!pageData) {
+    throw new Error('Invitations are unavailable.');
+  }
+  const { invitations, page, totalPages } = pageData;
   return (
     <Layout platformName={platformName} title="Invitations" username={username}>
       <Heading level={1}>Invitations</Heading>

@@ -9,31 +9,24 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@astryxdesign/core/Table';
-import type { getOperatorProject } from '../../../operator/tenant-service.ts';
+import { useRequest, useView } from 'react-fate';
+import { ProjectDetailView, projectDetailRequest } from '../../fate/views.ts';
+import { useDetailTitle, type AdminPageProps } from '../page-utils.ts';
 import { BuildTable } from './BuildTable.tsx';
 import { DeploymentTable } from './DeploymentTable.tsx';
 import { FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
-type Detail = Awaited<ReturnType<typeof getOperatorProject>>;
-export function ProjectDetailPage({
-  project,
-  deployments,
-  resources,
-  owner,
-  domains,
-  builds,
-  cfAccountId,
-  deployUrl,
-  tz,
-  platformName,
-  username,
-}: Detail & {
-  cfAccountId?: string;
-  deployUrl: string;
-  tz?: string;
-  platformName: string;
-  username?: string;
-}) {
+export function ProjectDetailPage({ path, platformName, username }: AdminPageProps) {
+  const { projectDetail: ref } = useRequest(projectDetailRequest(path), {
+    mode: 'stale-while-revalidate',
+  });
+  const pageData = useView(ProjectDetailView, ref);
+  if (!pageData) {
+    throw new Error('Project data is unavailable.');
+  }
+  const { project, deployments, resources, owner, domains, builds, cfAccountId, deployUrl, tz } =
+    pageData;
+  useDetailTitle(pageData.project.slug, platformName);
   return (
     <Layout platformName={platformName} title={project.slug} username={username}>
       <h1>{project.slug}</h1>

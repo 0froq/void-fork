@@ -10,9 +10,10 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@astryxdesign/core/Table';
-import type { PlatformAdmissionPolicy, PlatformLoginConfiguration } from '@void/platform';
-import type { getAuthenticationConfiguration } from '../../../operator/auth-config.ts';
-import type { platformLoginTests } from '../../../schema.ts';
+import type { PlatformLoginConfiguration } from '@void/platform';
+import { useRequest, useView } from 'react-fate';
+import { AuthSettingsView, authSettingsRequest } from '../../fate/views.ts';
+import { type AdminPageProps } from '../page-utils.ts';
 import { FormCheckbox, FormSelector } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 const HOME = '/admin/config/auth';
@@ -22,21 +23,15 @@ const LOGIN_KINDS = [
   'oidc',
   'cloudflare-access',
 ] as const satisfies ReadonlyArray<PlatformLoginConfiguration['kind']>;
-type Data = Awaited<ReturnType<typeof getAuthenticationConfiguration>>;
-type Tested = typeof platformLoginTests.$inferSelect;
-export function AuthSettingsPage({
-  data,
-  tested,
-  admission,
-  platformName,
-  username,
-}: {
-  data: Data;
-  tested?: Tested;
-  admission?: PlatformAdmissionPolicy;
-  platformName: string;
-  username?: string;
-}) {
+export function AuthSettingsPage({ path, platformName, username }: AdminPageProps) {
+  const { authSettings: ref } = useRequest(authSettingsRequest(path), {
+    mode: 'stale-while-revalidate',
+  });
+  const pageData = useView(AuthSettingsView, ref);
+  if (!pageData) {
+    throw new Error('Authentication settings are unavailable.');
+  }
+  const { data, tested, admission } = pageData;
   return (
     <Layout platformName={platformName} title="Authentication settings" username={username}>
       <h1>Authentication settings</h1>

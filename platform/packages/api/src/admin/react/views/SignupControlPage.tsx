@@ -9,8 +9,9 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@astryxdesign/core/Table';
-import type { PlatformAdmissionPolicy } from '@void/platform';
-import type { AllowlistEntryStatus } from '../../../db.ts';
+import { useRequest, useView } from 'react-fate';
+import { SignupView, signupRequest } from '../../fate/views.ts';
+import { type AdminPageProps } from '../page-utils.ts';
 import { FormSelector, FormTextArea, FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 
@@ -18,21 +19,15 @@ function BooleanBadge({ value }: { value: boolean }) {
   return <strong style={`color: ${value ? 'green' : '#666'}`}>{value ? 'yes' : 'no'}</strong>;
 }
 
-export function SignupControlPage({
-  enabled,
-  entries,
-  platformName,
-  username,
-  admission,
-  connections,
-}: {
-  enabled: boolean;
-  entries: ReadonlyArray<AllowlistEntryStatus>;
-  platformName: string;
-  username?: string;
-  admission?: PlatformAdmissionPolicy;
-  connections: ReadonlyArray<{ id: string; kind: string; label: string }>;
-}) {
+export function SignupControlPage({ path, platformName, username }: AdminPageProps) {
+  const { signupControl: ref } = useRequest(signupRequest(path), {
+    mode: 'stale-while-revalidate',
+  });
+  const pageData = useView(SignupView, ref);
+  if (!pageData) {
+    throw new Error('Signup settings are unavailable.');
+  }
+  const { enabled, entries, admission, connections } = pageData;
   return (
     <Layout platformName={platformName} title="Signup Control" username={username}>
       <h1>Signup Control</h1>
