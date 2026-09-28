@@ -1,9 +1,10 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
-import { useEffect, useState, type ChangeEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { Layout } from './Layout.tsx';
 import { Pagination } from './Pagination.tsx';
 import type { ProjectRow } from './ProjectsTable.tsx';
 import { ProjectsTable } from './ProjectsTable.tsx';
+import { SearchForm } from './SearchForm.tsx';
 
 export function ProjectsListPage({
   projects,
@@ -32,23 +33,13 @@ export function ProjectsListPage({
   return (
     <Layout platformName={platformName} title="Projects" username={username}>
       <h1>Projects</h1>
-      <form method="get" action="/admin/projects" style="margin-bottom: 10px">
-        <input
-          type="text"
-          name="search"
-          placeholder="Search projects..."
-          value={filter}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => setFilter(event.target.value)}
-          id="search-input"
-        />{' '}
-        <button type="submit">Search</button>
-        {search && (
-          <>
-            {' '}
-            | <a href="/admin/projects">Clear</a>
-          </>
-        )}
-      </form>
+      <SearchForm
+        action="/admin/projects"
+        label="Search projects"
+        value={filter}
+        onChange={setFilter}
+        showClear={Boolean(search)}
+      />
       <ProjectsTable projects={visibleProjects} siteDomain={siteDomain} />
       {page != null && totalPages != null && (
         <Pagination page={page} totalPages={totalPages} baseUrl="/admin/projects" />

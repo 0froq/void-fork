@@ -1,4 +1,6 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import { Button } from '@astryxdesign/core/Button';
+
 export function Pagination({
   page,
   totalPages,
@@ -12,12 +14,20 @@ export function Pagination({
     return <></>;
   }
   return (
-    <p style="margin-top: 10px">
-      {page > 1 ? <a href={`${baseUrl}?page=${page - 1}`}>Previous</a> : <>Previous</>}
-      {' | '}
-      {page} / {totalPages}
-      {' | '}
-      {page < totalPages ? <a href={`${baseUrl}?page=${page + 1}`}>Next</a> : <>Next</>}
-    </p>
+    <nav aria-label="Pagination" className="void-admin-pagination">
+      {page > 1 ? (
+        <Button as="a" href={`${baseUrl}?page=${page - 1}`} label="Previous" variant="secondary" />
+      ) : (
+        <Button label="Previous" variant="secondary" isDisabled />
+      )}
+      <span>
+        {page} / {totalPages}
+      </span>
+      {page < totalPages ? (
+        <Button as="a" href={`${baseUrl}?page=${page + 1}`} label="Next" variant="secondary" />
+      ) : (
+        <Button label="Next" variant="secondary" isDisabled />
+      )}
+    </nav>
   );
 }

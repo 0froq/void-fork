@@ -1,15 +1,18 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import { Banner } from '@astryxdesign/core/Banner';
+import { Button } from '@astryxdesign/core/Button';
+
 export function AdminErrorPage({ message, status }: { message: string; status: number }) {
   return (
-    <>
-      <h1>{message}</h1>
-      <p>
-        {status === 401 ? (
-          <a href="/admin/logout">Sign in again</a>
-        ) : (
-          <a href="/admin/">Return to admin</a>
-        )}
-      </p>
-    </>
+    <main className="void-admin-auth">
+      <Banner status="error" title={message} />
+      <div className="void-admin-auth-actions">
+        <Button
+          as="a"
+          href={status === 401 ? '/admin/logout' : '/admin/'}
+          label={status === 401 ? 'Sign in again' : 'Return to admin'}
+        />
+      </div>
+    </main>
   );
 }

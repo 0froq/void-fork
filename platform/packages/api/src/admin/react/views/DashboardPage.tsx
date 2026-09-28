@@ -1,4 +1,15 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import { Banner } from '@astryxdesign/core/Banner';
+import { Card } from '@astryxdesign/core/Card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+} from '@astryxdesign/core/Table';
+import { Heading, Text } from '@astryxdesign/core/Text';
 import { useEffect, useState } from 'react';
 import type { Deployment } from '../../../types.ts';
 import { DeploymentTable } from './DeploymentTable.tsx';
@@ -99,34 +110,24 @@ function HealthStatusBanner() {
           : `${failed} health check${failed === 1 ? '' : 's'} failed`;
   const error = health === 'unavailable' || (typeof health === 'object' && !health.allOk);
   return (
-    <div
-      id="health-status"
-      style={{ marginBottom: 20, padding: 12, border: `1px solid ${error ? '#ef4444' : '#ccc'}` }}
-    >
-      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px">
-        <strong>System Status</strong>
-        <span
-          id="health-summary"
-          style={{
-            fontSize: '0.8rem',
-            color: error ? '#ef4444' : health === 'loading' ? '#666' : '#22c55e',
-          }}
-        >
-          {summary}
-        </span>
-      </div>
-      <div id="health-checks" style="display: flex; gap: 16px; flex-wrap: wrap">
-        {typeof health === 'object' &&
-          health.checks.map((check) => (
-            <span key={check.name} style="font-size: 0.8rem">
-              <span style={{ color: check.ok ? '#22c55e' : '#ef4444' }}>●</span> {check.name}
-              {check.latencyMs > 0 ? ` (${check.latencyMs}ms)` : ''}
-              {!check.ok && (
-                <span style="color: #ef4444"> — {check.error || 'Health check failed.'}</span>
-              )}
-            </span>
-          ))}
-      </div>
+    <div id="health-status">
+      <Banner
+        status={error ? 'error' : health === 'loading' ? 'info' : 'success'}
+        title="System Status"
+        description={<span id="health-summary">{summary}</span>}
+        collapsible={false}
+      >
+        <div id="health-checks" className="void-admin-health-checks">
+          {typeof health === 'object' &&
+            health.checks.map((check) => (
+              <span key={check.name}>
+                <span aria-hidden="true">{check.ok ? '✓' : '✗'}</span> {check.name}
+                {check.latencyMs > 0 ? ` (${check.latencyMs}ms)` : ''}
+                {!check.ok && <span> — {check.error || 'Health check failed.'}</span>}
+              </span>
+            ))}
+        </div>
+      </Banner>
     </div>
   );
 }
@@ -139,34 +140,30 @@ function TopProjectsWidget({
   siteDomain: string;
 }) {
   return (
-    <div style="margin-top: 24px; padding: 12px; border: 1px solid #ccc">
-      <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px">
-        <strong>Top 10 Projects</strong>
-        <span style="font-size: 0.8rem; color: #666">
-          Last hour, site traffic only (static / ssr / isr)
-        </span>
-      </div>
+    <Card>
+      <Heading level={2}>Top 10 Projects</Heading>
+      <Text type="supporting">Last hour, site traffic only (static / ssr / isr)</Text>
       {projects.length > 0 ? (
-        <table style="margin-top: 10px">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Project</th>
-              <th>Owner</th>
-              <th>Requests</th>
-              <th>Bandwidth</th>
-              <th>Last Seen</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table hasHover>
+          <TableHeader>
+            <TableRow>
+              <TableHeaderCell>#</TableHeaderCell>
+              <TableHeaderCell>Project</TableHeaderCell>
+              <TableHeaderCell>Owner</TableHeaderCell>
+              <TableHeaderCell>Requests</TableHeaderCell>
+              <TableHeaderCell>Bandwidth</TableHeaderCell>
+              <TableHeaderCell>Last Seen</TableHeaderCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {projects.map((project, index) => (
-              <tr key={project.id}>
-                <td>{index + 1}</td>
-                <td>
+              <TableRow key={project.id}>
+                <TableCell>{index + 1}</TableCell>
+                <TableCell>
                   <div>
                     <a href={`/admin/projects/${project.id}`}>{project.slug}</a>
                   </div>
-                  <div style="font-size: 0.75rem; color: #666">
+                  <div>
                     <a
                       href={project.url ?? `https://${project.slug}.${siteDomain}`}
                       target="_blank"
@@ -176,25 +173,25 @@ function TopProjectsWidget({
                     </a>{' '}
                     · {project.type}
                   </div>
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
                   {project.owner_login ? (
                     <a href={`/admin/users/${project.user_id}`}>{project.owner_login}</a>
                   ) : (
                     '-'
                   )}
-                </td>
-                <td>{formatNumber(project.requests)}</td>
-                <td>{formatBytes(project.bandwidthBytes)}</td>
-                <td>{formatAbsoluteDateTime(project.lastSeen)}</td>
-              </tr>
+                </TableCell>
+                <TableCell>{formatNumber(project.requests)}</TableCell>
+                <TableCell>{formatBytes(project.bandwidthBytes)}</TableCell>
+                <TableCell>{formatAbsoluteDateTime(project.lastSeen)}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       ) : (
-        <p style="margin-top: 10px; color: #666">No recent project traffic in the last hour.</p>
+        <Text type="supporting">No recent project traffic in the last hour.</Text>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -209,37 +206,34 @@ export function DashboardPage({
 }: DashboardProps) {
   return (
     <Layout platformName={platformName} title="Dashboard" username={username}>
-      <h1>Dashboard</h1>
+      <Heading level={1}>Dashboard</Heading>
       <HealthStatusBanner />
-      <div style="display: flex; gap: 12px">
-        <a
-          href="/admin/users"
-          style="flex: 1; text-align: center; padding: 16px; border: 1px solid #ccc; text-decoration: none; color: inherit"
-        >
-          <div style="font-size: 1.5rem; font-weight: 700">{stats.users}</div>
-          <div>users</div>
+      <div className="void-admin-metrics">
+        <a href="/admin/users">
+          <Card>
+            <Heading level={2}>{formatNumber(stats.users)}</Heading>
+            <Text>Users</Text>
+          </Card>
         </a>
-        <a
-          href="/admin/projects"
-          style="flex: 1; text-align: center; padding: 16px; border: 1px solid #ccc; text-decoration: none; color: inherit"
-        >
-          <div style="font-size: 1.5rem; font-weight: 700">{stats.projects}</div>
-          <div>projects</div>
+        <a href="/admin/projects">
+          <Card>
+            <Heading level={2}>{formatNumber(stats.projects)}</Heading>
+            <Text>Projects</Text>
+          </Card>
         </a>
-        <a
-          href="/admin/deployments"
-          style="flex: 1; text-align: center; padding: 16px; border: 1px solid #ccc; text-decoration: none; color: inherit"
-        >
-          <div style="font-size: 1.5rem; font-weight: 700">{stats.deployments}</div>
-          <div>deployments</div>
+        <a href="/admin/deployments">
+          <Card>
+            <Heading level={2}>{formatNumber(stats.deployments)}</Heading>
+            <Text>Deployments</Text>
+          </Card>
         </a>
       </div>
       <TopProjectsWidget projects={topProjects} siteDomain={siteDomain} />
 
-      <h2>Latest Projects</h2>
+      <Heading level={2}>Latest Projects</Heading>
       <ProjectsTable projects={projects} siteDomain={siteDomain} />
 
-      <h2>Latest Deployments</h2>
+      <Heading level={2}>Latest Deployments</Heading>
       <DeploymentTable deployments={deployments} showProject />
     </Layout>
   );

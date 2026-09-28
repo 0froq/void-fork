@@ -1,4 +1,13 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+} from '@astryxdesign/core/Table';
+import { Heading } from '@astryxdesign/core/Text';
 import type { CliVersionDeploymentStats } from '../../../db.ts';
 import { formatDateTime, formatNumber } from './format.ts';
 import { Layout } from './Layout.tsx';
@@ -14,36 +23,36 @@ function CliVersionTable({
 }) {
   return (
     <>
-      <h2>{title}</h2>
+      <Heading level={2}>{title}</Heading>
       {rows.length === 0 ? (
         <p>
           <em>No deployments found.</em>
         </p>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Version</th>
-              <th>Deploys</th>
-              <th>Projects</th>
-              <th>Users</th>
-              <th>First Seen</th>
-              <th>Last Seen</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table hasHover>
+          <TableHeader>
+            <TableRow>
+              <TableHeaderCell>Version</TableHeaderCell>
+              <TableHeaderCell>Deploys</TableHeaderCell>
+              <TableHeaderCell>Projects</TableHeaderCell>
+              <TableHeaderCell>Users</TableHeaderCell>
+              <TableHeaderCell>First Seen</TableHeaderCell>
+              <TableHeaderCell>Last Seen</TableHeaderCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {rows.map((row) => (
-              <tr key={row.cli_version ?? 'unknown'}>
-                <td>{row.cli_version ?? 'unknown'}</td>
-                <td>{formatNumber(row.deployments)}</td>
-                <td>{formatNumber(row.projects)}</td>
-                <td>{formatNumber(row.users)}</td>
-                <td>{formatDateTime(row.first_seen, tz)}</td>
-                <td>{formatDateTime(row.last_seen, tz)}</td>
-              </tr>
+              <TableRow key={row.cli_version ?? 'unknown'}>
+                <TableCell>{row.cli_version ?? 'unknown'}</TableCell>
+                <TableCell>{formatNumber(row.deployments)}</TableCell>
+                <TableCell>{formatNumber(row.projects)}</TableCell>
+                <TableCell>{formatNumber(row.users)}</TableCell>
+                <TableCell>{formatDateTime(row.first_seen, tz)}</TableCell>
+                <TableCell>{formatDateTime(row.last_seen, tz)}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
     </>
   );
@@ -64,7 +73,7 @@ export function CliVersionsPage({
 }) {
   return (
     <Layout platformName={platformName} title="CLI Versions" username={username}>
-      <h1>CLI Versions</h1>
+      <Heading level={1}>CLI Versions</Heading>
       <CliVersionTable rows={last30Days} title="Last 30 Days" tz={tz} />
       <CliVersionTable rows={allTime} title="All Time" tz={tz} />
     </Layout>

@@ -1,4 +1,12 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+} from '@astryxdesign/core/Table';
 import type { Project } from '../../../types.ts';
 import { formatAbsoluteDate, formatAbsoluteDateTime } from './format.ts';
 
@@ -19,24 +27,24 @@ export function ProjectsTable({
 }) {
   return (
     <>
-      <table>
-        <thead>
-          <tr>
-            <th>Slug</th>
-            <th>URL</th>
-            <th>Owner</th>
-            <th>Type</th>
-            <th>Created</th>
-            <th>Last Deploy</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table hasHover>
+        <TableHeader>
+          <TableRow>
+            <TableHeaderCell>Slug</TableHeaderCell>
+            <TableHeaderCell>URL</TableHeaderCell>
+            <TableHeaderCell>Owner</TableHeaderCell>
+            <TableHeaderCell>Type</TableHeaderCell>
+            <TableHeaderCell>Created</TableHeaderCell>
+            <TableHeaderCell>Last Deploy</TableHeaderCell>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {projects.map((p) => (
-            <tr key={p.id}>
-              <td>
+            <TableRow key={p.id}>
+              <TableCell>
                 <a href={`/admin/projects/${p.id}`}>{p.slug}</a>
-              </td>
-              <td>
+              </TableCell>
+              <TableCell>
                 <a
                   href={p.url ?? `https://${p.slug}.${siteDomain}`}
                   target="_blank"
@@ -44,13 +52,13 @@ export function ProjectsTable({
                 >
                   {p.url ?? `${p.slug}.${siteDomain}`}
                 </a>
-              </td>
-              <td>
+              </TableCell>
+              <TableCell>
                 {p.owner_login ? <a href={`/admin/users/${p.user_id}`}>{p.owner_login}</a> : '-'}
-              </td>
-              <td>{p.type}</td>
-              <td>{formatAbsoluteDate(p.created_at)}</td>
-              <td>
+              </TableCell>
+              <TableCell>{p.type}</TableCell>
+              <TableCell>{formatAbsoluteDate(p.created_at)}</TableCell>
+              <TableCell>
                 {p.last_deploy ? (
                   <>
                     <span
@@ -67,11 +75,11 @@ export function ProjectsTable({
                 ) : (
                   '-'
                 )}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
       {projects.length === 0 && (
         <p>
           <em>No projects found.</em>

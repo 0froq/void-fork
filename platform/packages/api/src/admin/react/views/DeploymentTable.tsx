@@ -1,4 +1,12 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+} from '@astryxdesign/core/Table';
 import type { Deployment } from '../../../types.ts';
 import { formatDateTime } from './format.ts';
 
@@ -63,42 +71,44 @@ export function DeploymentTable({
     );
   }
   return (
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          {showProject && <th>Project</th>}
-          <th>Status</th>
-          <th>Source</th>
-          <th>CLI</th>
-          <th>Commit</th>
-          <th>Error</th>
-          <th>Created</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table hasHover>
+      <TableHeader>
+        <TableRow>
+          <TableHeaderCell>ID</TableHeaderCell>
+          {showProject && <TableHeaderCell>Project</TableHeaderCell>}
+          <TableHeaderCell>Status</TableHeaderCell>
+          <TableHeaderCell>Source</TableHeaderCell>
+          <TableHeaderCell>CLI</TableHeaderCell>
+          <TableHeaderCell>Commit</TableHeaderCell>
+          <TableHeaderCell>Error</TableHeaderCell>
+          <TableHeaderCell>Created</TableHeaderCell>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {deployments.map((d) => {
           const activeId = activeDeploymentId ?? d.active_deployment_id;
           const status = displayStatus(d, activeId);
           return (
-            <tr key={d.id}>
-              <td>
+            <TableRow key={d.id}>
+              <TableCell>
                 <a href={`/admin/deployments/${d.id}`}>{d.id}</a>
-              </td>
+              </TableCell>
               {showProject && (
-                <td>
+                <TableCell>
                   {d.project_slug ? (
                     <a href={`/admin/projects/${d.project_id}`}>{d.project_slug}</a>
                   ) : (
                     '-'
                   )}
-                </td>
+                </TableCell>
               )}
-              <td style={statusColor(status)}>{status}</td>
-              <td>{d.source ?? '-'}</td>
-              <td>{d.cli_version ?? '-'}</td>
-              <td>{d.commit ? d.commit.slice(0, 7) : '-'}</td>
-              <td>
+              <TableCell>
+                <span style={statusColor(status)}>{status}</span>
+              </TableCell>
+              <TableCell>{d.source ?? '-'}</TableCell>
+              <TableCell>{d.cli_version ?? '-'}</TableCell>
+              <TableCell>{d.commit ? d.commit.slice(0, 7) : '-'}</TableCell>
+              <TableCell>
                 {d.error_message ? (
                   <>
                     <span style="color: red; max-width: 400px; display: inline-block; word-break: break-word">
@@ -117,12 +127,12 @@ export function DeploymentTable({
                 ) : (
                   '-'
                 )}
-              </td>
-              <td>{formatDateTime(d.created_at, tz)}</td>
-            </tr>
+              </TableCell>
+              <TableCell>{formatDateTime(d.created_at, tz)}</TableCell>
+            </TableRow>
           );
         })}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }

@@ -1,14 +1,25 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import { Button } from '@astryxdesign/core/Button';
+import { Card } from '@astryxdesign/core/Card';
+import { Heading, Text } from '@astryxdesign/core/Text';
+
 export function AdminLoginPage({ providers }: { providers: Array<{ id: string; label: string }> }) {
   return (
-    <div style="max-width: 800px; margin: 0 auto; padding: 20px">
-      <h1>Void Admin</h1>
-      <p>Sign in with your admin account</p>
-      {providers.map(({ id, label }) => (
-        <p key={id}>
-          <a href={`/admin/login/${encodeURIComponent(id)}`}>Sign in with {label}</a>
-        </p>
-      ))}
-    </div>
+    <main className="void-admin-auth">
+      <Card>
+        <Heading level={1}>Void Admin</Heading>
+        <Text>Sign in with your admin account</Text>
+        <div className="void-admin-auth-actions">
+          {providers.map(({ id, label }) => (
+            <Button
+              key={id}
+              as="a"
+              href={`/admin/login/${encodeURIComponent(id)}`}
+              label={`Sign in with ${label}`}
+            />
+          ))}
+        </div>
+      </Card>
+    </main>
   );
 }

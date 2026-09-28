@@ -1,9 +1,10 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
-import { useEffect, useState, type ChangeEvent } from 'react';
+import { useEffect, useState } from 'react';
 import type { Deployment } from '../../../types.ts';
 import { DeploymentTable } from './DeploymentTable.tsx';
 import { Layout } from './Layout.tsx';
 import { Pagination } from './Pagination.tsx';
+import { SearchForm } from './SearchForm.tsx';
 
 export function DeploymentsListPage({
   deployments,
@@ -38,23 +39,13 @@ export function DeploymentsListPage({
   return (
     <Layout platformName={platformName} title="Deployments" username={username}>
       <h1>Deployments</h1>
-      <form method="get" action="/admin/deployments" style="margin-bottom: 10px">
-        <input
-          type="text"
-          name="search"
-          placeholder="Search deployments..."
-          value={filter}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => setFilter(event.target.value)}
-          id="search-input"
-        />{' '}
-        <button type="submit">Search</button>
-        {search && (
-          <>
-            {' '}
-            | <a href="/admin/deployments">Clear</a>
-          </>
-        )}
-      </form>
+      <SearchForm
+        action="/admin/deployments"
+        label="Search deployments"
+        value={filter}
+        onChange={setFilter}
+        showClear={Boolean(search)}
+      />
       <DeploymentTable deployments={visibleDeployments} showProject tz={tz} />
       {page != null && totalPages != null && (
         <Pagination page={page} totalPages={totalPages} baseUrl="/admin/deployments" />

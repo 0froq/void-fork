@@ -1,9 +1,10 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import { Banner } from '@astryxdesign/core/Banner';
+
 export function LoginErrorPage({ message }: { message: string }) {
   return (
-    <>
-      <h1>Login failed</h1>
-      <p>{message}</p>
-    </>
+    <main className="void-admin-auth">
+      <Banner status="error" title="Login failed" description={message} />
+    </main>
   );
 }

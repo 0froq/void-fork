@@ -1,4 +1,12 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+} from '@astryxdesign/core/Table';
 import { ACTIVE_BUILD_STATUSES } from '../../../build-status.ts';
 import type { Build } from '../../../types.ts';
 import { formatDateTime } from './format.ts';
@@ -64,38 +72,42 @@ export function BuildTable({ builds, tz }: { builds: ReadonlyArray<Build>; tz?: 
     );
   }
   return (
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Status</th>
-          <th>Executor</th>
-          <th>Instance</th>
-          <th>Commit</th>
-          <th>Branch</th>
-          <th>Started</th>
-          <th>Duration</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table hasHover>
+      <TableHeader>
+        <TableRow>
+          <TableHeaderCell>ID</TableHeaderCell>
+          <TableHeaderCell>Status</TableHeaderCell>
+          <TableHeaderCell>Executor</TableHeaderCell>
+          <TableHeaderCell>Instance</TableHeaderCell>
+          <TableHeaderCell>Commit</TableHeaderCell>
+          <TableHeaderCell>Branch</TableHeaderCell>
+          <TableHeaderCell>Started</TableHeaderCell>
+          <TableHeaderCell>Duration</TableHeaderCell>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {builds.map((b) => {
           const active = isActive(b.status);
           return (
-            <tr key={b.id} class={active ? 'build-active' : undefined}>
-              <td>
+            <TableRow key={b.id} className={active ? 'build-active' : undefined}>
+              <TableCell>
                 <a href={`/admin/builds/${b.id}`}>{b.id}</a>
-              </td>
-              <td style={statusColor(b.status)}>{STATUS_SYMBOL[b.status] ?? b.status}</td>
-              <td>{b.executor}</td>
-              <td>{b.instance_type ?? '-'}</td>
-              <td>{b.commit_sha ? b.commit_sha.slice(0, 7) : '-'}</td>
-              <td>{b.branch ?? '-'}</td>
-              <td>{b.started_at ? formatDateTime(b.started_at, tz) : '-'}</td>
-              <td suppressHydrationWarning>{duration(b)}</td>
-            </tr>
+              </TableCell>
+              <TableCell>
+                <span style={statusColor(b.status)}>{STATUS_SYMBOL[b.status] ?? b.status}</span>
+              </TableCell>
+              <TableCell>{b.executor}</TableCell>
+              <TableCell>{b.instance_type ?? '-'}</TableCell>
+              <TableCell>{b.commit_sha ? b.commit_sha.slice(0, 7) : '-'}</TableCell>
+              <TableCell>{b.branch ?? '-'}</TableCell>
+              <TableCell>{b.started_at ? formatDateTime(b.started_at, tz) : '-'}</TableCell>
+              <TableCell>
+                <span suppressHydrationWarning>{duration(b)}</span>
+              </TableCell>
+            </TableRow>
           );
         })}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }

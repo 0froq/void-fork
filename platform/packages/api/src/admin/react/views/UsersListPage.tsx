@@ -1,8 +1,18 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+} from '@astryxdesign/core/Table';
+import { useEffect, useState } from 'react';
 import type { User } from '../../../types.ts';
 import { formatAbsoluteDate } from './format.ts';
 import { Layout } from './Layout.tsx';
 import { Pagination } from './Pagination.tsx';
+import { SearchForm } from './SearchForm.tsx';
 
 export function UsersListPage({
   users,
@@ -19,45 +29,44 @@ export function UsersListPage({
   platformName: string;
   username?: string;
 }) {
+  const [filter, setFilter] = useState(search ?? '');
+  useEffect(() => setFilter(search ?? ''), [search]);
   return (
     <Layout platformName={platformName} title="Users" username={username}>
       <h1>Users</h1>
-      <form method="get" action="/admin/users" style="margin-bottom: 10px">
-        <input type="text" name="search" placeholder="Search users..." value={search ?? ''} />{' '}
-        <button type="submit">Search</button>
-        {search && (
-          <>
-            {' '}
-            | <a href="/admin/users">Clear</a>
-          </>
-        )}
-      </form>
-      <table>
-        <thead>
-          <tr>
-            <th>Login</th>
-            <th>Provider</th>
-            <th>Email</th>
-            <th>Plan</th>
-            <th>Role</th>
-            <th>Status</th>
-            <th>Created</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
+      <SearchForm
+        action="/admin/users"
+        label="Search users"
+        value={filter}
+        onChange={setFilter}
+        showClear={Boolean(search)}
+      />
+      <Table hasHover>
+        <TableHeader>
+          <TableRow>
+            <TableHeaderCell>Login</TableHeaderCell>
+            <TableHeaderCell>Provider</TableHeaderCell>
+            <TableHeaderCell>Email</TableHeaderCell>
+            <TableHeaderCell>Plan</TableHeaderCell>
+            <TableHeaderCell>Role</TableHeaderCell>
+            <TableHeaderCell>Status</TableHeaderCell>
+            <TableHeaderCell>Created</TableHeaderCell>
+            <TableHeaderCell>Actions</TableHeaderCell>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {users.map((user) => (
-            <tr key={user.id}>
-              <td>
+            <TableRow key={user.id}>
+              <TableCell>
                 <a href={`/admin/users/${user.id}`}>{user.login}</a>
-              </td>
-              <td>{user.provider}</td>
-              <td>{user.email ?? '-'}</td>
-              <td>{user.plan}</td>
-              <td>{user.role}</td>
-              <td>{user.suspended_reason ? 'suspended' : 'active'}</td>
-              <td>{formatAbsoluteDate(user.created_at)}</td>
-              <td>
+              </TableCell>
+              <TableCell>{user.provider}</TableCell>
+              <TableCell>{user.email ?? '-'}</TableCell>
+              <TableCell>{user.plan}</TableCell>
+              <TableCell>{user.role}</TableCell>
+              <TableCell>{user.suspended_reason ? 'suspended' : 'active'}</TableCell>
+              <TableCell>{formatAbsoluteDate(user.created_at)}</TableCell>
+              <TableCell>
                 <form
                   method="post"
                   action={`/admin/users/${user.id}/delete`}
@@ -68,11 +77,11 @@ export function UsersListPage({
                     delete
                   </button>
                 </form>
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
       {users.length === 0 && (
         <p>
           <em>No users found.</em>

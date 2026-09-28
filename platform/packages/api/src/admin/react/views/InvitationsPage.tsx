@@ -1,4 +1,15 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import { Badge } from '@astryxdesign/core/Badge';
+import { Button } from '@astryxdesign/core/Button';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+} from '@astryxdesign/core/Table';
+import { Heading } from '@astryxdesign/core/Text';
 import type { Invitation } from '../../../types.ts';
 import { formatAbsoluteDate } from './format.ts';
 import { Layout } from './Layout.tsx';
@@ -10,12 +21,12 @@ type InvitationRow = Invitation & {
 };
 
 function StatusBadge({ status }: { status: Invitation['status'] }) {
-  const colors: Record<string, string> = {
-    pending: 'orange',
-    accepted: 'green',
-    revoked: 'red',
-  };
-  return <strong style={`color: ${colors[status] ?? 'inherit'}`}>{status}</strong>;
+  return (
+    <Badge
+      label={status}
+      variant={status === 'pending' ? 'warning' : status === 'revoked' ? 'error' : 'neutral'}
+    />
+  );
 }
 
 export function InvitationsPage({
@@ -33,7 +44,7 @@ export function InvitationsPage({
 }) {
   return (
     <Layout platformName={platformName} title="Invitations" username={username}>
-      <h1>Invitations</h1>
+      <Heading level={1}>Invitations</Heading>
 
       <form
         method="post"
@@ -47,50 +58,48 @@ export function InvitationsPage({
           rows={3}
           style="width: 360px"
         />
-        <button type="submit">Send Invites</button>
+        <Button type="submit" label="Send Invites" />
       </form>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Email</th>
-            <th>Status</th>
-            <th>Invited By</th>
-            <th>Sent</th>
-            <th>Accepted At</th>
-            <th>Revoked</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table hasHover>
+        <TableHeader>
+          <TableRow>
+            <TableHeaderCell>Email</TableHeaderCell>
+            <TableHeaderCell>Status</TableHeaderCell>
+            <TableHeaderCell>Invited By</TableHeaderCell>
+            <TableHeaderCell>Sent</TableHeaderCell>
+            <TableHeaderCell>Accepted At</TableHeaderCell>
+            <TableHeaderCell>Revoked</TableHeaderCell>
+            <TableHeaderCell>Actions</TableHeaderCell>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {invitations.map((inv) => (
-            <tr key={inv.id}>
-              <td>{inv.email}</td>
-              <td>
+            <TableRow key={inv.id}>
+              <TableCell>{inv.email}</TableCell>
+              <TableCell>
                 <StatusBadge status={inv.status} />
-              </td>
-              <td>{inv.invited_by_login ?? inv.invited_by}</td>
-              <td>{inv.created_at ? formatAbsoluteDate(inv.created_at) : '-'}</td>
-              <td>{inv.accepted_at ? formatAbsoluteDate(inv.accepted_at) : '-'}</td>
-              <td>
+              </TableCell>
+              <TableCell>{inv.invited_by_login ?? inv.invited_by}</TableCell>
+              <TableCell>{inv.created_at ? formatAbsoluteDate(inv.created_at) : '-'}</TableCell>
+              <TableCell>{inv.accepted_at ? formatAbsoluteDate(inv.accepted_at) : '-'}</TableCell>
+              <TableCell>
                 {inv.revoked_at
                   ? `${formatAbsoluteDate(inv.revoked_at)} by ${inv.revoked_by_login ?? inv.revoked_by ?? '?'}`
                   : '-'}
-              </td>
-              <td>
+              </TableCell>
+              <TableCell>
                 {inv.status === 'pending' && (
                   <form method="post" action="/admin/invitations/revoke" style="display:inline">
                     <input type="hidden" name="id" value={inv.id} />
-                    <button type="submit" class="danger-sm">
-                      revoke
-                    </button>
+                    <Button type="submit" label="Revoke" variant="destructive" size="sm" />
                   </form>
                 )}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
 
       {invitations.length === 0 && (
         <p>

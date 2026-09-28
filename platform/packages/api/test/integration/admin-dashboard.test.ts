@@ -121,6 +121,8 @@ describe('auth middleware', () => {
     expect(html).toContain('id="__VOID_PAGE_DATA__"');
     expect(html).toContain('<div id="app">');
     expect(html).toContain('src="/admin/client.js"');
+    expect(html).toContain('href="/admin/style.css"');
+    expect(html).toContain('class="astryx-app-shell');
     expect(htmlResponse.headers.get('Cache-Control')).toBe('private, no-store');
 
     const navigation = await req('/admin/users', admin.adminJwt, {
@@ -404,7 +406,7 @@ describe('GET /admin/users', () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('findable');
-    expect(html).not.toContain('hidden');
+    expect(visibleMarkup(html)).not.toContain('>hidden<');
   });
 });
 
