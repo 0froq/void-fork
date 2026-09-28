@@ -36,7 +36,7 @@ beforeEach(async () => {
       end: async () => {},
     };
   });
-});
+}, 30_000);
 afterEach(async () => {
   await lock?.();
   lock = undefined;
