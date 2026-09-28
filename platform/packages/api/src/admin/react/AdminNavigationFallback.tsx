@@ -1,7 +1,7 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 
 import { Skeleton } from '@astryxdesign/core/Skeleton';
-import { Heading, Text } from '@astryxdesign/core/Text';
+import { Heading } from '@astryxdesign/core/Text';
 import { useNavigation } from '@void/react';
 import type { PageObject } from 'void/pages-protocol';
 import { AdminProviders } from './AdminProviders.tsx';
@@ -42,7 +42,7 @@ export function AdminNavigationFallback({ initialPageData }: { initialPageData: 
       <Layout title={title} platformName={platformName} username={username}>
         <div className="void-admin-loading" role="status" aria-live="polite">
           <Heading level={1}>{title}</Heading>
-          <Text type="supporting">Loading {title.toLowerCase()}…</Text>
+          <span className="void-admin-sr-only">Loading {title.toLowerCase()}…</span>
           <div className="void-admin-loading-lines" aria-hidden="true">
             <Skeleton width="32%" height={24} />
             <Skeleton width="100%" height={48} index={1} />
