@@ -187,35 +187,45 @@ function TopProjectsWidget({
   const [projects] = useListView({ items: { node: TopProjectView } }, topProjects);
   return (
     <Card>
+      <div className="void-admin-top-projects">
+        <TopProjectsHeader />
+        {projects.length > 0 ? (
+          <Table className="void-admin-top-projects-table" hasHover>
+            <TableHeader>
+              <TableRow>
+                <TableHeaderCell>#</TableHeaderCell>
+                <TableHeaderCell>Project</TableHeaderCell>
+                <TableHeaderCell>Owner</TableHeaderCell>
+                <TableHeaderCell>Requests</TableHeaderCell>
+                <TableHeaderCell>Bandwidth</TableHeaderCell>
+                <TableHeaderCell>Last Seen</TableHeaderCell>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {projects.map(({ node }, index) => (
+                <TopProjectTableRow
+                  key={node.id}
+                  projectRef={node}
+                  index={index}
+                  siteDomain={siteDomain}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <Text type="supporting">No recent project traffic in the last hour.</Text>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function TopProjectsHeader() {
+  return (
+    <div className="void-admin-top-projects-header">
       <Heading level={2}>Top 10 Projects</Heading>
       <Text type="supporting">Last hour, site traffic only (static / ssr / isr)</Text>
-      {projects.length > 0 ? (
-        <Table className="void-admin-top-projects-table" hasHover>
-          <TableHeader>
-            <TableRow>
-              <TableHeaderCell>#</TableHeaderCell>
-              <TableHeaderCell>Project</TableHeaderCell>
-              <TableHeaderCell>Owner</TableHeaderCell>
-              <TableHeaderCell>Requests</TableHeaderCell>
-              <TableHeaderCell>Bandwidth</TableHeaderCell>
-              <TableHeaderCell>Last Seen</TableHeaderCell>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {projects.map(({ node }, index) => (
-              <TopProjectTableRow
-                key={node.id}
-                projectRef={node}
-                index={index}
-                siteDomain={siteDomain}
-              />
-            ))}
-          </TableBody>
-        </Table>
-      ) : (
-        <Text type="supporting">No recent project traffic in the last hour.</Text>
-      )}
-    </Card>
+    </div>
   );
 }
 
@@ -273,10 +283,11 @@ function DeferredTopProjects({
   const mounted = useSyncExternalStore(subscribeToClientRender, isClientRender, isServerRender);
   const fallback = (
     <Card>
-      <Heading level={2}>Top 10 Projects</Heading>
-      <Text type="supporting">Last hour, site traffic only (static / ssr / isr)</Text>
-      <Skeleton width="100%" height={48} />
-      <Skeleton width="100%" height={48} index={1} />
+      <div className="void-admin-top-projects">
+        <TopProjectsHeader />
+        <Skeleton width="100%" height={48} />
+        <Skeleton width="100%" height={48} index={1} />
+      </div>
     </Card>
   );
   if (!mounted) {
