@@ -15,8 +15,8 @@ import { useDetailTitle, type AdminPageProps } from '../page-utils.ts';
 import { BuildTable } from './BuildTable.tsx';
 import { DeploymentTable } from './DeploymentTable.tsx';
 import { formatDateTime } from './format.ts';
-import { FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
+import { ProjectOwnerTransferSection } from './ProjectOwnerTransferSection.tsx';
 import { ProjectTeamSection } from './ProjectTeamSection.tsx';
 export function ProjectDetailPage({ path, platformName, username }: AdminPageProps) {
   const { projectDetail: ref } = useRequest(projectDetailRequest(path), {
@@ -164,27 +164,7 @@ export function ProjectDetailPage({ path, platformName, username }: AdminPagePro
         tz={tz}
       />
 
-      <section id="owner-transfer" className="void-admin-owner-transfer">
-        <h2>Transfer Ownership</h2>
-        <p>
-          Transfer this project to an existing Void Platform user. You will review the ownership,
-          plan, suspension, active-work, routing, and usage-counter changes before applying them.
-        </p>
-        <form
-          className="void-admin-owner-transfer-form"
-          method="post"
-          action={`/admin/projects/${project.id}/owner/preview`}
-        >
-          <FormTextInput
-            label="New owner user ID"
-            name="userId"
-            required
-            maxLength={512}
-            placeholder="user_..."
-          />
-          <Button type="submit" label="Preview Transfer" />
-        </form>
-      </section>
+      <ProjectOwnerTransferSection projectId={project.id} />
 
       <h2>Danger Zone</h2>
       <form

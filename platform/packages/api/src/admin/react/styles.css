@@ -50,6 +50,7 @@ body {
 .void-admin-owner-transfer {
   display: grid;
   gap: var(--spacing-4);
+  margin-block-start: var(--spacing-8);
 }
 .void-admin-owner-transfer > * {
   margin: 0;
@@ -83,13 +84,13 @@ body {
 }
 .void-admin-team-actions,
 .void-admin-team-actions form,
-.void-admin-team-invite {
+.void-admin-team-add {
   display: flex;
   flex-wrap: wrap;
   align-items: end;
   gap: var(--spacing-3);
 }
-.void-admin-team-invite {
+.void-admin-team-add {
   justify-content: start;
 }
 

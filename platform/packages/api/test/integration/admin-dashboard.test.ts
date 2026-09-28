@@ -1285,15 +1285,17 @@ describe('GET /admin/projects/:id', () => {
     expect(html).toContain('Transfer Ownership');
     expect(html).toContain(`/admin/projects/${project.id}/owner/preview`);
     expect(visibleMarkup(html)).toContain('Team members (1)');
+    expect(visibleMarkup(html)).toContain('Add team member');
+    expect(html).toContain(`/admin/projects/${project.id}/team/add`);
+    expect(html).toContain('name="userId"');
+    expect(html).toContain('Search by login, email, or ID');
     expect(html).toContain('Transfer ownership to change the owner');
   });
 
-  test('admin can invite, change a member role, and remove a member without changing the owner', async () => {
+  test('admin can add, change a member role, and remove a member without changing the owner', async () => {
     const admin = await createTestUser(env.db, 'team-admin', 'github', undefined, 'free', 'admin');
     const owner = await createTestUser(env.db, 'team-owner');
     const teammate = await createTestUser(env.db, 'team-member');
-    const email = 'team-member@example.com';
-    await env.db.update(users).set({ email }).where(eq(users.id, teammate.id));
     const project = await createTestProject(env.db, owner.id, 'team-admin-project');
     const form = (body: Record<string, string>): RequestInit => ({
       method: 'POST',
@@ -1301,28 +1303,46 @@ describe('GET /admin/projects/:id', () => {
       body: new URLSearchParams(body),
     });
 
-    const invite = await req(
-      `/admin/projects/${project.id}/team/invite`,
+    const add = await req(
+      `/admin/projects/${project.id}/team/add`,
       admin.adminJwt,
-      form({ email, role: 'reader' }),
+      form({ userId: teammate.id, role: 'reader' }),
     );
-    expect(invite.status).toBe(302);
-    const [invitation] = await env.db.select().from(projectInvitations);
-    expect(invitation).toMatchObject({
+    expect(add.status).toBe(302);
+    expect(await env.db.select().from(projectInvitations)).toEqual([]);
+    expect((await env.db.select().from(projectMembers))[0]).toMatchObject({
       project_id: project.id,
-      target_user_id: teammate.id,
-      invited_by_user_id: admin.id,
+      user_id: teammate.id,
+      added_by_user_id: admin.id,
       role: 'reader',
     });
-    expect(await (await req(`/admin/projects/${project.id}`, admin.adminJwt)).text()).toContain(
-      invitation!.id,
-    );
-
-    await respondToProjectInvitation(env.db, {
-      invitationId: invitation!.id,
-      actorUserId: teammate.id,
-      response: 'accept',
-    });
+    expect(
+      (
+        await req(
+          `/admin/projects/${project.id}/team/add`,
+          admin.adminJwt,
+          form({ userId: teammate.id, role: 'admin' }),
+        )
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await req(
+          `/admin/projects/${project.id}/team/add`,
+          admin.adminJwt,
+          form({ userId: owner.id, role: 'reader' }),
+        )
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await req(
+          `/admin/projects/${project.id}/team/add`,
+          admin.adminJwt,
+          form({ userId: 'user_missing', role: 'reader' }),
+        )
+      ).status,
+    ).toBe(404);
     const detail = await (await req(`/admin/projects/${project.id}`, admin.adminJwt)).text();
     expect(visibleMarkup(detail)).toContain('Team members (2)');
     expect(detail).toContain(`/admin/projects/${project.id}/team/${teammate.id}/role`);
@@ -1363,17 +1383,63 @@ describe('GET /admin/projects/:id', () => {
       (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0]?.user_id,
     ).toBe(owner.id);
     const adminAccessEvents = (await env.db.select().from(projectAccessEvents)).filter((event) =>
-      ['invited', 'role_changed', 'member_removed'].includes(event.action),
+      ['member_added', 'role_changed', 'member_removed'].includes(event.action),
     );
     expect(adminAccessEvents).toHaveLength(3);
     expect(adminAccessEvents.every((event) => event.actor_user_id === admin.id)).toBe(true);
     expect((await env.db.select().from(operatorEvents)).map((event) => event.action)).toEqual(
       expect.arrayContaining([
-        `projects/${project.id}/team/invite`,
+        `projects/${project.id}/team/add`,
         `projects/${project.id}/team/${teammate.id}/role`,
         `projects/${project.id}/team/${teammate.id}/remove`,
       ]),
     );
+  });
+
+  test('directly adding a user revokes their pending invitation', async () => {
+    const admin = await createTestUser(env.db, 'add-admin', 'github', undefined, 'free', 'admin');
+    const owner = await createTestUser(env.db, 'add-owner');
+    const teammate = await createTestUser(env.db, 'add-member');
+    const email = 'add-member@example.com';
+    await env.db.update(users).set({ email }).where(eq(users.id, teammate.id));
+    const project = await createTestProject(env.db, owner.id, 'add-team-project');
+    const form = (body: Record<string, string>): RequestInit => ({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(body),
+    });
+    const invite = await req(
+      `/admin/projects/${project.id}/team/invite`,
+      admin.adminJwt,
+      form({ email, role: 'reader' }),
+    );
+    expect(invite.status).toBe(302);
+    const [invitation] = await env.db.select().from(projectInvitations);
+
+    const add = await req(
+      `/admin/projects/${project.id}/team/add`,
+      admin.adminJwt,
+      form({ userId: teammate.id, role: 'collaborator' }),
+    );
+    expect(add.status).toBe(302);
+    expect((await env.db.select().from(projectInvitations))[0]).toMatchObject({
+      status: 'revoked',
+      revoked_by_user_id: admin.id,
+    });
+    expect((await env.db.select().from(projectMembers))[0]).toMatchObject({
+      user_id: teammate.id,
+      role: 'collaborator',
+    });
+    expect((await env.db.select().from(projectAccessEvents)).map((event) => event.action)).toEqual(
+      expect.arrayContaining(['invited', 'invitation_revoked', 'member_added']),
+    );
+    await expect(
+      respondToProjectInvitation(env.db, {
+        invitationId: invitation!.id,
+        actorUserId: teammate.id,
+        response: 'accept',
+      }),
+    ).rejects.toMatchObject({ reason: 'invitation-not-pending' });
   });
 
   test('admin can revoke a pending team invitation', async () => {

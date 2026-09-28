@@ -9,16 +9,9 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@astryxdesign/core/Table';
-import {
-  Typeahead,
-  TypeaheadItem,
-  type SearchSource,
-  type SearchableItem,
-} from '@astryxdesign/core/Typeahead';
 import { useMemo, useState } from 'react';
-import { useFateClient } from 'react-fate';
-import type { ProjectMemberRole, User } from '../../../types.ts';
-import { UsersPageView, usersPageRequest } from '../../fate/views.ts';
+import type { ProjectMemberRole } from '../../../types.ts';
+import { AdminUserTypeahead, type AdminUserSuggestion } from './AdminUserTypeahead.tsx';
 import { formatDateTime } from './format.ts';
 import { FormSelector } from './FormControls.tsx';
 
@@ -34,8 +27,6 @@ type PendingInvitation = Readonly<{
   role: ProjectMemberRole;
   expiresAt: string;
 }>;
-type UserSuggestion = SearchableItem<{ email: string }>;
-
 const roleOptions = [
   { value: 'reader', label: 'Reader' },
   { value: 'collaborator', label: 'Collaborator' },
@@ -55,50 +46,16 @@ export function ProjectTeamSection({
   invitations: ReadonlyArray<PendingInvitation>;
   tz?: string;
 }) {
-  const fate = useFateClient();
-  const [selected, setSelected] = useState<UserSuggestion | null>(null);
+  const [selected, setSelected] = useState<AdminUserSuggestion | null>(null);
   const excluded = useMemo(
-    () =>
-      new Set([
-        owner?.id,
-        ...members.map(({ user }) => user.id),
-        ...invitations.map((i) => i.targetUserId),
-      ]),
-    [owner?.id, members, invitations],
-  );
-  const source = useMemo<SearchSource<UserSuggestion>>(
-    () => ({
-      bootstrap: () => [],
-      search: async (query: string) => {
-        const { usersPage: ref } = await fate.request(
-          usersPageRequest(`/admin/users?search=${encodeURIComponent(query)}`),
-          { mode: 'network-only' },
-        );
-        if (!ref) {
-          return [];
-        }
-        const { data } = (await fate.readView(UsersPageView, ref)) as unknown as {
-          data: { users: Array<User> };
-        };
-        return data.users
-          .filter((user) => user.email && !excluded.has(user.id))
-          .map((user) => ({
-            id: user.id,
-            label: user.login,
-            auxiliaryData: { email: user.email! },
-          }));
-      },
-    }),
-    [fate, excluded],
+    () => new Set([...(owner ? [owner.id] : []), ...members.map(({ user }) => user.id)]),
+    [owner, members],
   );
 
   return (
     <section id="team" className="void-admin-project-team">
       <h2>Team members ({members.length + 1})</h2>
-      <p>
-        Invite registered users to collaborate on this project. They get access after accepting an
-        invitation.
-      </p>
+      <p>Add an existing platform user to this project with the selected role.</p>
       <div className="void-admin-team-table-scroll">
         <Table>
           <TableHeader>
@@ -162,27 +119,19 @@ export function ProjectTeamSection({
         </Table>
       </div>
 
-      <h3>Invite team member</h3>
+      <h3>Add team member</h3>
       <form
-        className="void-admin-team-invite"
+        className="void-admin-team-add"
         method="post"
-        action={`/admin/projects/${projectId}/team/invite`}
+        action={`/admin/projects/${projectId}/team/add`}
       >
-        <Typeahead
+        <AdminUserTypeahead
           label="Search registered users"
-          placeholder="Search by login or email"
-          searchSource={source}
-          value={selected}
+          selected={selected}
           onChange={setSelected}
-          onChangeQuery={() => setSelected(null)}
-          renderItem={(item: UserSuggestion) => (
-            <TypeaheadItem item={item} description={item.auxiliaryData?.email} />
-          )}
-          minQueryLength={2}
-          width="min(100%, 320px)"
-          emptySearchResultsText="No eligible users found."
+          excludedUserIds={excluded}
         />
-        <input type="hidden" name="email" value={selected?.auxiliaryData?.email ?? ''} />
+        <input type="hidden" name="userId" value={selected?.id ?? ''} />
         <FormSelector
           label="Project role"
           name="role"
@@ -190,7 +139,7 @@ export function ProjectTeamSection({
           initialValue="reader"
           width={180}
         />
-        <Button type="submit" label="Invite" isDisabled={!selected} />
+        <Button type="submit" label="Add member" isDisabled={!selected} />
       </form>
 
       {invitations.length > 0 && (
