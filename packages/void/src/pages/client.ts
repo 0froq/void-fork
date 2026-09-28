@@ -97,6 +97,7 @@ export type VoidRouterConfig = {
   viewTransitions: boolean;
   prefetchHoverDelay: number;
   prefetchDefaultCacheFor: CacheForResult;
+  cacheVisitedPageData?: boolean;
   onRouteChange?(url: string): void;
   onNavigationChange?(navigation: NavigationState): void;
 };

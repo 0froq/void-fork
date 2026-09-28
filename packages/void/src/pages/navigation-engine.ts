@@ -60,6 +60,8 @@ export type PageNavigationEngineConfig = {
   viewTransitions: boolean;
   prefetchHoverDelay: number;
   prefetchDefaultCacheFor: CacheForResult;
+  /** Reuse successful GET page shells on later visits, refreshing stale shells in the background. */
+  cacheVisitedPageData?: boolean;
 };
 
 export type PageNavigationResult = {
@@ -231,6 +233,7 @@ export async function createPageNavigationEngine(
     staticPageDataFastPath: STATIC_PAGE_DATA_FAST_PATH = STATIC_PAGE_DATA_ENABLED,
     prefetchHoverDelay: PREFETCH_HOVER_DELAY,
     prefetchDefaultCacheFor: PREFETCH_DEFAULT_CACHE_FOR,
+    cacheVisitedPageData: CACHE_VISITED_PAGE_DATA = false,
   } = config;
 
   const _prefetchCache = new PrefetchCache();
@@ -803,6 +806,22 @@ export async function createPageNavigationEngine(
       } else {
         pageData = (await response!.json()) as PageData;
         deferredRegistry.setupPending(pageData);
+      }
+
+      if (
+        CACHE_VISITED_PAGE_DATA &&
+        method === 'GET' &&
+        response?.ok &&
+        response.headers.get('X-VoidPages') &&
+        pageData?.component === matchRoute(fetchUrl) &&
+        !pageData.deferredKeys
+      ) {
+        _prefetchCache.set(
+          fetchUrl,
+          method,
+          Promise.resolve(clonePageData(pageData)),
+          PREFETCH_DEFAULT_CACHE_FOR,
+        );
       }
     }
 

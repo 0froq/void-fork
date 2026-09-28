@@ -53,6 +53,7 @@ export type ReactPagesConfig = Readonly<{
   viewTransitions: boolean;
   prefetchHoverDelay: number;
   prefetchDefaultCacheFor: CacheForResult;
+  cacheVisitedPageData?: boolean;
   /** Show this fallback immediately for client visits while the destination page loads. */
   navigationFallback?: ComponentType<{ initialPageData: PageObject }>;
 }>;
@@ -637,6 +638,7 @@ export async function startReactPages(config: ReactPagesConfig): Promise<ReactPa
     viewTransitions: config.viewTransitions,
     prefetchHoverDelay: config.prefetchHoverDelay,
     prefetchDefaultCacheFor: config.prefetchDefaultCacheFor,
+    cacheVisitedPageData: config.cacheVisitedPageData,
   });
   const router = createRouter(engine);
   setActionRouter(router);

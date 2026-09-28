@@ -234,6 +234,65 @@ describe('createVoidRouter prefetch', () => {
     await expect(router.prefetch('/users')).resolves.toMatchObject({ props: { v: 2 } });
   });
 
+  it('reuses visited GET page shells while their refresh is pending when opted in', async () => {
+    stubClientGlobals();
+    let requests = 0;
+    let finishRefresh: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(() => {
+      requests += 1;
+      if (requests === 3) {
+        return new Promise<Response>((resolve) => {
+          finishRefresh = resolve;
+        });
+      }
+      return Promise.resolve(
+        Response.json(
+          { component: requests === 2 ? 'other' : 'users', props: { version: requests } },
+          { headers: { 'X-VoidPages': 'true' } },
+        ),
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const applyUpdate = vi.fn();
+    const { router } = await createVoidRouter({
+      adapter: {
+        applyUpdate,
+        createDeferred: () => ({}),
+        isLoading: () => false,
+        resolveDeferred: (_ref, value) => value,
+        rejectDeferred: (_ref, error) => error,
+      },
+      components: {
+        home: async () => ({ default: {} }),
+        users: async () => ({ default: {} }),
+        other: async () => ({ default: {} }),
+      },
+      layoutTree: {},
+      routeMeta: {},
+      matchRoute: (url) => (url === '/users' ? 'users' : 'other'),
+      viewTransitions: false,
+      prefetchHoverDelay: 75,
+      prefetchDefaultCacheFor: { stale: 0, expires: 5 * 60_000 },
+      cacheVisitedPageData: true,
+    });
+
+    await router.visit('/users');
+    await router.visit('/other');
+    const revisit = await router.visit('/users');
+    expect(revisit).toMatchObject({ props: { version: 1 } });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(applyUpdate.mock.lastCall?.[0]).toMatchObject({ props: { version: 1 } });
+
+    expect(finishRefresh).toBeTypeOf('function');
+    finishRefresh!(
+      Response.json(
+        { component: 'users', props: { version: 3 } },
+        { headers: { 'X-VoidPages': 'true' } },
+      ),
+    );
+    await expect(router.prefetch('/users')).resolves.toMatchObject({ props: { version: 3 } });
+  });
+
   it('does not resolve disposed initial deferred props into a later page', async () => {
     stubClientGlobals();
     const initialPayload = {
