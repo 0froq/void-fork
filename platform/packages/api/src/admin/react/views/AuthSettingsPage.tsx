@@ -1,28 +1,25 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 
+import { Badge } from '@astryxdesign/core/Badge';
 import { Button } from '@astryxdesign/core/Button';
+import { Card } from '@astryxdesign/core/Card';
 import { Collapsible } from '@astryxdesign/core/Collapsible';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableHeaderCell,
-  TableRow,
-} from '@astryxdesign/core/Table';
+import { Heading } from '@astryxdesign/core/Text';
 import type { PlatformLoginConfiguration } from '@void/platform';
 import { useRequest, useView } from 'react-fate';
 import { AuthSettingsView, authSettingsRequest } from '../../fate/views.ts';
 import { type AdminPageProps } from '../page-utils.ts';
 import { FormCheckbox, FormSelector } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
+
 const HOME = '/admin/config/auth';
 const LOGIN_KINDS = [
-  'github',
-  'google',
-  'oidc',
-  'cloudflare-access',
-] as const satisfies ReadonlyArray<PlatformLoginConfiguration['kind']>;
+  { kind: 'github', label: 'GitHub' },
+  { kind: 'google', label: 'Google' },
+  { kind: 'oidc', label: 'Generic OIDC' },
+  { kind: 'cloudflare-access', label: 'Cloudflare Access' },
+] as const satisfies ReadonlyArray<{ kind: PlatformLoginConfiguration['kind']; label: string }>;
+
 export function AuthSettingsPage({ path, platformName, username }: AdminPageProps) {
   const { authSettings: ref } = useRequest(authSettingsRequest(path), {
     mode: 'stale-while-revalidate',
@@ -34,183 +31,273 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
   const { data, tested, admission } = pageData;
   return (
     <Layout platformName={platformName} title="Authentication settings" username={username}>
-      <h1>Authentication settings</h1>
-      <p>
-        Platform protection:{' '}
-        <strong>
-          {data.protection ? 'Cloudflare Access enabled' : 'Cloudflare Access not enabled'}
-        </strong>
-        .
-      </p>
-      <p>Access protection and login methods are configured independently.</p>
-      <Collapsible trigger="Change platform protection">
-        <p>
-          Use the installing CLI to create or connect a Cloudflare Access application, verify every
-          platform origin, and sign in through the company policy. The CLI needs the installation's
-          recovery credentials and separate Cloudflare Access setup permission.
-        </p>
-        <pre>void platform config auth protection enable --installation &lt;id&gt;</pre>
-        <p>To remove protection, first change any signup policy that relies on Access, then run:</p>
-        <pre>void platform config auth protection disable --installation &lt;id&gt;</pre>
-        <p>
-          Changes revoke existing human sessions. Access applications remain available for
-          deliberate cleanup. Login methods and deployed applications keep their own settings.
-        </p>
-      </Collapsible>
-      {!data.initialized ? (
-        <form method="post" action={`${HOME}/initialize`}>
-          <p>
-            Initialize authentication settings to manage your existing login methods here. Their
-            configuration is preserved; you will sign in again.
-          </p>
-          <Button type="submit" label="Initialize settings" />
-        </form>
-      ) : (
-        <>
-          {tested && (
-            <section style="margin: 24px 0; padding: 16px; border: 1px solid #aaa">
-              <h3>Login verified</h3>
-              <p>
-                Account: <strong>{tested.login || tested.subject}</strong>
-              </p>
-              <p>Provider: {tested.issuer}</p>
-              <p>Identity: {tested.subject}</p>
-              <p>
-                Review this identity before linking it to your administrator account or enabling the
-                tested configuration.
-              </p>
-              {(['link', 'enable'] as const).map((action) => (
-                <form
-                  key={action}
-                  method="post"
-                  action={`${HOME}/connections/${encodeURIComponent(tested.connection_id)}/${action}`}
-                  style="display: inline-block; margin-right: 12px"
-                >
-                  <input type="hidden" name="revision" value={tested.revision} />
-                  <input type="hidden" name="testId" value={tested.id} />
-                  <Button
-                    type="submit"
-                    label={action === 'link' ? 'Link to my account' : 'Enable tested configuration'}
-                  />
-                </form>
-              ))}
-            </section>
-          )}
-          <h2>Login methods</h2>
-          <Table hasHover>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell>Method</TableHeaderCell>
-                <TableHeaderCell>Status</TableHeaderCell>
-                <TableHeaderCell>Actions</TableHeaderCell>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.methods.map((method) => (
-                <TableRow key={method.id}>
-                  <TableCell>{method.label}</TableCell>
-                  <TableCell>
-                    {method.enabled ? 'Enabled' : 'Disabled'}
-                    {'activeRevision' in method && method.activeRevision !== method.revision
-                      ? ' · Pending configuration'
-                      : ''}
-                  </TableCell>
-                  <TableCell>
-                    <a href={`${HOME}/connections/${encodeURIComponent(method.id)}`}>Edit</a>{' '}
-                    <form
-                      method="post"
-                      action={`${HOME}/connections/${encodeURIComponent(method.id)}/test`}
-                      style="display: inline"
-                    >
-                      <Button type="submit" label="Test login" size="sm" />
-                    </form>{' '}
-                    {method.enabled && 'revision' in method && (
+      <div className="void-admin-auth-settings">
+        <header className="void-admin-auth-intro">
+          <Heading level={1}>Authentication</Heading>
+          <p>Manage how people reach the platform and who can create an account.</p>
+        </header>
+
+        <section aria-labelledby="platform-protection-heading">
+          <Card>
+            <div className="void-admin-auth-section-header">
+              <div>
+                <Heading level={2} id="platform-protection-heading">
+                  Platform protection:
+                </Heading>
+                <p>Control access to the platform before visitors reach a login page.</p>
+              </div>
+              <Badge
+                label={
+                  data.protection ? 'Cloudflare Access enabled' : 'Cloudflare Access not enabled'
+                }
+                variant={data.protection ? 'success' : 'neutral'}
+              />
+            </div>
+            <div className="void-admin-auth-protection-details">
+              <Collapsible trigger="Change platform protection">
+                <p>
+                  Use the installing CLI to create or connect a Cloudflare Access application,
+                  verify every platform origin, and sign in through the company policy. The CLI
+                  needs the installation's recovery credentials and separate Cloudflare Access setup
+                  permission.
+                </p>
+                <pre>void platform config auth protection enable --installation &lt;id&gt;</pre>
+                <p>To remove protection, first change any signup policy that relies on Access:</p>
+                <pre>void platform config auth protection disable --installation &lt;id&gt;</pre>
+                <p>
+                  Changes revoke existing human sessions. Access applications remain available for
+                  deliberate cleanup. Login methods and deployed applications keep their own
+                  settings.
+                </p>
+              </Collapsible>
+            </div>
+          </Card>
+        </section>
+
+        {!data.initialized ? (
+          <Card>
+            <Heading level={2}>Set up authentication settings</Heading>
+            <p>
+              Initialize settings to manage your existing login methods here. Their configuration is
+              preserved; you will sign in again.
+            </p>
+            <form method="post" action={`${HOME}/initialize`}>
+              <Button type="submit" label="Initialize settings" />
+            </form>
+          </Card>
+        ) : (
+          <>
+            {tested && (
+              <section aria-labelledby="verified-login-heading">
+                <Card>
+                  <div className="void-admin-auth-section-header">
+                    <div>
+                      <Heading level={2} id="verified-login-heading">
+                        Login verified
+                      </Heading>
+                      <p>Review this identity before linking or enabling the tested method.</p>
+                    </div>
+                    <Badge label="Ready to review" variant="success" />
+                  </div>
+                  <dl className="void-admin-auth-identity">
+                    <div>
+                      <dt>Account</dt>
+                      <dd>{tested.login || tested.subject}</dd>
+                    </div>
+                    <div>
+                      <dt>Provider</dt>
+                      <dd>{tested.issuer}</dd>
+                    </div>
+                    <div>
+                      <dt>Identity</dt>
+                      <dd>{tested.subject}</dd>
+                    </div>
+                  </dl>
+                  <div className="void-admin-auth-actions">
+                    {(['link', 'enable'] as const).map((action) => (
                       <form
+                        key={action}
                         method="post"
-                        action={`${HOME}/connections/${encodeURIComponent(method.id)}/disable`}
-                        style="display: inline"
+                        action={`${HOME}/connections/${encodeURIComponent(tested.connection_id)}/${action}`}
                       >
-                        <input type="hidden" name="revision" value={method.revision} />
+                        <input type="hidden" name="revision" value={tested.revision} />
+                        <input type="hidden" name="testId" value={tested.id} />
                         <Button
                           type="submit"
-                          label="Disable and revoke sessions"
-                          variant="destructive"
-                          size="sm"
+                          label={
+                            action === 'link' ? 'Link to my account' : 'Enable tested configuration'
+                          }
+                          variant={action === 'link' ? 'secondary' : 'primary'}
                         />
                       </form>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          <p style="margin-top: 16px">
-            Add:{' '}
-            {LOGIN_KINDS.map((kind) => (
-              <span key={kind}>
-                <a href={`${HOME}/new?kind=${kind}`}>
-                  {kind === 'cloudflare-access'
-                    ? 'Cloudflare Access'
-                    : kind === 'oidc'
-                      ? 'Generic OIDC'
-                      : kind === 'github'
-                        ? 'GitHub'
-                        : 'Google'}
-                </a>
-                {' · '}
-              </span>
-            ))}
-          </p>
-          <h2>Who can join?</h2>
-          <form
-            method="post"
-            action={`${HOME}/admission`}
-            style="display: grid; gap: 12px; max-width: 700px"
-          >
-            <input type="hidden" name="revision" value={'revision' in data ? data.revision : 0} />
-            <FormSelector
-              label="Signup policy"
-              name="mode"
-              initialValue={admission?.mode ?? 'restricted'}
-              options={[
-                { value: 'restricted', label: 'Invited or allowlisted users' },
-                { value: 'company', label: 'Company-approved users — automatic accounts' },
-                { value: 'public', label: 'Public signup — all enabled logins' },
-              ]}
-            />
-            <p>
-              For company-approved signup, select the methods whose company policies qualify a new
-              user:
-            </p>
-            {data.methods
-              .filter((method) => method.enabled && method.kind !== 'github')
-              .map((method) => (
-                <FormCheckbox
-                  key={method.id}
-                  label={method.label}
-                  name="connections"
-                  submitValue={method.id}
-                  initialValue={
-                    admission?.mode === 'company' && admission.connections.includes(method.id)
-                  }
-                />
-              ))}
-            {data.protection && (
-              <FormCheckbox
-                label="Anyone who passes Cloudflare Access protection"
-                name="access"
-                submitValue="true"
-                initialValue={admission?.mode === 'company' && admission.access}
-              />
+                    ))}
+                  </div>
+                </Card>
+              </section>
             )}
-            <p>
-              Automatically created accounts are ordinary users. Changing signup policy does not
-              remove Access protection.
-            </p>
-            <Button type="submit" label="Save signup policy" />
-          </form>
-        </>
-      )}
+
+            <section aria-labelledby="login-methods-heading">
+              <Card>
+                <div className="void-admin-auth-section-header">
+                  <div>
+                    <Heading level={2} id="login-methods-heading">
+                      Login methods
+                    </Heading>
+                    <p>Choose the identity providers people can use to sign in.</p>
+                  </div>
+                  <Badge
+                    label={`${data.methods.filter((method) => method.enabled).length} active`}
+                    variant="neutral"
+                  />
+                </div>
+                {data.methods.length ? (
+                  <div className="void-admin-auth-method-list">
+                    {data.methods.map((method) => (
+                      <div className="void-admin-auth-method" key={method.id}>
+                        <div className="void-admin-auth-method-info">
+                          <div className="void-admin-auth-method-title">
+                            <strong>{method.label}</strong>
+                            <Badge
+                              label={method.enabled ? 'Enabled' : 'Disabled'}
+                              variant={method.enabled ? 'success' : 'neutral'}
+                            />
+                            {'activeRevision' in method &&
+                              method.activeRevision !== method.revision && (
+                                <Badge label="Pending configuration" variant="warning" />
+                              )}
+                          </div>
+                          <span className="void-admin-auth-method-type">
+                            {LOGIN_KINDS.find(({ kind }) => kind === method.kind)?.label ??
+                              method.kind}
+                          </span>
+                        </div>
+                        <div className="void-admin-auth-actions">
+                          <Button
+                            as="a"
+                            href={`${HOME}/connections/${encodeURIComponent(method.id)}`}
+                            label="Edit"
+                            variant="secondary"
+                            size="sm"
+                          />
+                          <form
+                            method="post"
+                            action={`${HOME}/connections/${encodeURIComponent(method.id)}/test`}
+                          >
+                            <Button
+                              type="submit"
+                              label="Test login"
+                              variant="secondary"
+                              size="sm"
+                            />
+                          </form>
+                          {method.enabled && 'revision' in method && (
+                            <form
+                              method="post"
+                              action={`${HOME}/connections/${encodeURIComponent(method.id)}/disable`}
+                            >
+                              <input type="hidden" name="revision" value={method.revision} />
+                              <Button
+                                type="submit"
+                                label="Disable and revoke sessions"
+                                variant="destructive"
+                                size="sm"
+                              />
+                            </form>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="void-admin-auth-empty">No login methods configured yet.</p>
+                )}
+                <div className="void-admin-auth-add-methods">
+                  <h3>Add a login method</h3>
+                  <div className="void-admin-auth-actions">
+                    {LOGIN_KINDS.map(({ kind, label }) => (
+                      <Button
+                        key={kind}
+                        as="a"
+                        href={`${HOME}/new?kind=${kind}`}
+                        label={label}
+                        variant="secondary"
+                        size="sm"
+                      />
+                    ))}
+                  </div>
+                </div>
+              </Card>
+            </section>
+
+            <section aria-labelledby="signup-heading">
+              <Card>
+                <div className="void-admin-auth-section-header">
+                  <div>
+                    <Heading level={2} id="signup-heading">
+                      Who can join?
+                    </Heading>
+                    <p>Set the rules for creating new user accounts.</p>
+                  </div>
+                </div>
+                <form method="post" action={`${HOME}/admission`} className="void-admin-auth-policy">
+                  <input
+                    type="hidden"
+                    name="revision"
+                    value={'revision' in data ? data.revision : 0}
+                  />
+                  <FormSelector
+                    label="Signup policy"
+                    name="mode"
+                    initialValue={admission?.mode ?? 'restricted'}
+                    options={[
+                      { value: 'restricted', label: 'Invited or allowlisted users' },
+                      { value: 'company', label: 'Company-approved users — automatic accounts' },
+                      { value: 'public', label: 'Public signup — all enabled logins' },
+                    ]}
+                  />
+                  <div className="void-admin-auth-company-policy">
+                    <h3>Company-approved methods</h3>
+                    <p>
+                      Select which company policies qualify a new user when that policy is chosen.
+                    </p>
+                    <div className="void-admin-auth-checkboxes">
+                      {data.methods
+                        .filter((method) => method.enabled && method.kind !== 'github')
+                        .map((method) => (
+                          <FormCheckbox
+                            key={method.id}
+                            label={method.label}
+                            name="connections"
+                            submitValue={method.id}
+                            initialValue={
+                              admission?.mode === 'company' &&
+                              admission.connections.includes(method.id)
+                            }
+                          />
+                        ))}
+                      {data.protection && (
+                        <FormCheckbox
+                          label="Anyone who passes Cloudflare Access protection"
+                          name="access"
+                          submitValue="true"
+                          initialValue={admission?.mode === 'company' && admission.access}
+                        />
+                      )}
+                    </div>
+                  </div>
+                  <p className="void-admin-auth-note">
+                    Automatically created accounts are ordinary users. Changing signup policy does
+                    not remove Access protection.
+                  </p>
+                  <div>
+                    <Button type="submit" label="Save signup policy" />
+                  </div>
+                </form>
+              </Card>
+            </section>
+          </>
+        )}
+      </div>
     </Layout>
   );
 }
