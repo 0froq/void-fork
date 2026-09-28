@@ -97,6 +97,15 @@ function fateQuery(name: string, path: string, select: Array<string>): RequestIn
 }
 
 describe('auth middleware', () => {
+  test.each([
+    ['/admin', '/admin/'],
+    ['/admin?source=bookmark', '/admin/?source=bookmark'],
+  ])('redirects %s to %s', async (path, destination) => {
+    const response = await req(path);
+    expect(response.status).toBe(308);
+    expect(response.headers.get('Location')).toBe(destination);
+  });
+
   test('protects the admin Fate endpoint with admin auth and same-origin CSRF', async () => {
     const regular = await createTestUser(env.db, 'fate-regular');
     const admin = await createTestUser(env.db, 'fate-admin', 'github', undefined, 'free', 'admin');

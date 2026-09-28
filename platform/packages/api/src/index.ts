@@ -486,6 +486,7 @@ app.route('/operator/v1', operatorApi);
 
 // Admin dashboard (HTML, cookie-based auth)
 app.route('/admin', adminLogin);
+app.get('/admin', (context) => context.redirect(`/admin/${new URL(context.req.url).search}`, 308));
 app.use('/admin/*', adminAuthMiddleware);
 app.use('/admin/*', adminCsrfMiddleware);
 app.post('/admin/fate', adminFateHandler);
