@@ -47,6 +47,22 @@ body {
   width: 100%;
 }
 
+.void-admin-owner-transfer {
+  display: grid;
+  gap: var(--spacing-4);
+}
+.void-admin-owner-transfer > * {
+  margin: 0;
+}
+.void-admin-owner-transfer-form {
+  display: grid;
+  gap: var(--spacing-4);
+  width: min(100%, 320px);
+}
+.void-admin-owner-transfer-form button {
+  justify-self: start;
+}
+
 .void-admin-metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));

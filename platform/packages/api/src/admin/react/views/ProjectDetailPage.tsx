@@ -144,21 +144,27 @@ export function ProjectDetailPage({ path, platformName, username }: AdminPagePro
       <h2>Builds ({builds.length})</h2>
       <BuildTable builds={builds} tz={tz} />
 
-      <h2>Transfer Ownership</h2>
-      <p>
-        Transfer this project to an existing Void Platform user. You will review the ownership,
-        plan, suspension, active-work, routing, and usage-counter changes before applying them.
-      </p>
-      <form method="post" action={`/admin/projects/${project.id}/owner/preview`}>
-        <FormTextInput
-          label="New owner user ID"
-          name="userId"
-          required
-          maxLength={512}
-          placeholder="user_..."
-        />
-        <Button type="submit" label="Preview Transfer" />
-      </form>
+      <section className="void-admin-owner-transfer">
+        <h2>Transfer Ownership</h2>
+        <p>
+          Transfer this project to an existing Void Platform user. You will review the ownership,
+          plan, suspension, active-work, routing, and usage-counter changes before applying them.
+        </p>
+        <form
+          className="void-admin-owner-transfer-form"
+          method="post"
+          action={`/admin/projects/${project.id}/owner/preview`}
+        >
+          <FormTextInput
+            label="New owner user ID"
+            name="userId"
+            required
+            maxLength={512}
+            placeholder="user_..."
+          />
+          <Button type="submit" label="Preview Transfer" />
+        </form>
+      </section>
 
       <h2>Danger Zone</h2>
       <form
