@@ -9,6 +9,7 @@ import {
   test,
   vi,
 } from 'vite-plus/test';
+import { getPlatformCapabilities } from '../../src/capabilities.ts';
 import { getEmailDestinationsByProjectId } from '../../src/db.ts';
 import type { Db } from '../../src/db.ts';
 import { emailMonthlyUsage, emailProjectControls } from '../../src/email/admission-schema.ts';
@@ -184,6 +185,62 @@ async function seedAdminAndProject(): Promise<{
   const project = await createTestProject(env.db, owner.id);
   return { adminJwt: admin.adminJwt, projectId: project.id, slug: project.slug };
 }
+
+function withoutEmail(): TestEnv {
+  return {
+    ...env,
+    PLATFORM_CAPABILITIES: JSON.stringify({ ...getPlatformCapabilities(env), email: false }),
+  };
+}
+
+describe('email disabled on this platform', () => {
+  test('renders the disabled state inside the admin layout for document and page-object visits', async () => {
+    const { adminJwt, projectId } = await seedAdminAndProject();
+    const bindings = withoutEmail();
+    const headers = { Cookie: `admin_token=${adminJwt}` };
+
+    const document = await app.fetch(
+      new Request('http://localhost/admin/email', { headers }),
+      bindings,
+    );
+    expect(document.status).toBe(200);
+    const html = await document.text();
+    expect(html).toContain('void-admin-content');
+    expect(html).toContain('Authentication');
+    expect(html).toContain('Email is not enabled on this platform.');
+
+    for (const path of ['/admin/email', `/admin/email/${projectId}`]) {
+      const page = await app.fetch(
+        new Request(`http://localhost${path}`, {
+          headers: { ...headers, 'X-VoidPages': 'true' },
+        }),
+        bindings,
+      );
+      expect(page.status).toBe(200);
+      expect(await page.json()).toMatchObject({
+        component: 'email',
+        props: { emailEnabled: false, platformName: expect.any(String) },
+      });
+    }
+  });
+
+  test('still rejects email mutations', async () => {
+    const { adminJwt } = await seedAdminAndProject();
+    const response = await app.fetch(
+      new Request('http://localhost/admin/email/policy', {
+        method: 'POST',
+        headers: {
+          Cookie: `admin_token=${adminJwt}`,
+          Origin: 'http://localhost',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'mode=any',
+      }),
+      withoutEmail(),
+    );
+    expect(response.status).toBe(501);
+  });
+});
 
 describe('admin write guard (cross-origin)', () => {
   test('rejects a write with no Origin and no Referer', async () => {

@@ -12,7 +12,24 @@ import { Layout } from './Layout.tsx';
 
 const META = 'font-size: 0.8rem; color: #666';
 
-export function EmailSettingsPage({ path, platformName, username }: AdminPageProps) {
+export function EmailSettingsPage({
+  path,
+  platformName,
+  username,
+  emailEnabled,
+}: AdminPageProps & { emailEnabled?: boolean }) {
+  if (emailEnabled === false) {
+    return (
+      <Layout platformName={platformName} title="Email" username={username}>
+        <h1>Email</h1>
+        <p>Email is not enabled on this platform.</p>
+      </Layout>
+    );
+  }
+  return <EnabledEmailSettingsPage path={path} platformName={platformName} username={username} />;
+}
+
+function EnabledEmailSettingsPage({ path, platformName, username }: AdminPageProps) {
   const { emailSettings: ref } = useRequest(emailSettingsRequest(path), {
     mode: 'stale-while-revalidate',
   });

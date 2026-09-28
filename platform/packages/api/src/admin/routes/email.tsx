@@ -41,6 +41,14 @@ app.onError(renderOperationError);
 // settings or domains changed from the browser either.
 app.use('*', async (context, next) => {
   if (!getPlatformCapabilities(context.env).email) {
+    if (context.req.method === 'GET') {
+      return renderAdminPage(context, 'email', 'Email', {
+        path: new URL(context.req.url).pathname,
+        platformName: getPlatformDisplayName(context.env, context.req.url),
+        username: context.get('user').login,
+        emailEnabled: false,
+      });
+    }
     return context.html('<h1>Email is not enabled on this platform</h1>', 501);
   }
   await next();
