@@ -8,7 +8,7 @@ import {
   TableRow,
 } from '@astryxdesign/core/Table';
 import type { Project } from '../../../types.ts';
-import { formatAbsoluteDate, formatAbsoluteDateTime } from './format.ts';
+import { formatDateTime } from './format.ts';
 import { ProjectUrlLink } from './ProjectUrlLink.tsx';
 
 export type ProjectRow = Project & {
@@ -22,9 +22,11 @@ export type ProjectRow = Project & {
 export function ProjectsTable({
   projects,
   siteDomain,
+  tz,
 }: {
   projects: ReadonlyArray<ProjectRow>;
   siteDomain: string;
+  tz?: string;
 }) {
   return (
     <>
@@ -52,7 +54,7 @@ export function ProjectsTable({
                 {p.owner_login ? <a href={`/admin/users/${p.user_id}`}>{p.owner_login}</a> : '-'}
               </TableCell>
               <TableCell>{p.type}</TableCell>
-              <TableCell>{formatAbsoluteDate(p.created_at)}</TableCell>
+              <TableCell>{formatDateTime(p.created_at, tz)}</TableCell>
               <TableCell>
                 {p.last_deploy ? (
                   <>
@@ -61,10 +63,10 @@ export function ProjectsTable({
                     />
                     {p.last_deploy_id ? (
                       <a href={`/admin/deployments/${p.last_deploy_id}`}>
-                        {formatAbsoluteDateTime(p.last_deploy)}
+                        {formatDateTime(p.last_deploy, tz)}
                       </a>
                     ) : (
-                      formatAbsoluteDateTime(p.last_deploy)
+                      formatDateTime(p.last_deploy, tz)
                     )}
                   </>
                 ) : (

@@ -17,7 +17,7 @@ export function ProjectsListPage({ path, platformName, username }: AdminPageProp
   if (!pageData) {
     throw new Error('Projects page data is unavailable.');
   }
-  const { projects, search, page, totalPages, siteDomain } = pageData;
+  const { projects, search, page, totalPages, siteDomain, tz } = pageData;
   const [filter, setFilter] = useState(search ?? '');
   useEffect(() => setFilter(search ?? ''), [search]);
   const visibleProjects = projects.filter((project) =>
@@ -37,7 +37,7 @@ export function ProjectsListPage({ path, platformName, username }: AdminPageProp
         initialValue={search}
         showClear={Boolean(search)}
       />
-      <ProjectsTable projects={visibleProjects} siteDomain={siteDomain} />
+      <ProjectsTable projects={visibleProjects} siteDomain={siteDomain} tz={tz} />
       {page != null && totalPages != null && (
         <Pagination page={page} totalPages={totalPages} baseUrl="/admin/projects" />
       )}

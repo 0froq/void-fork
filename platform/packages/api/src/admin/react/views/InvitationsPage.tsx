@@ -15,7 +15,7 @@ import { useRequest, useView } from 'react-fate';
 import type { Invitation } from '../../../types.ts';
 import { InvitationsView, invitationsRequest } from '../../fate/views.ts';
 import { type AdminPageProps } from '../page-utils.ts';
-import { formatAbsoluteDate } from './format.ts';
+import { formatDateTime } from './format.ts';
 import { FormTextArea } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 import { Pagination } from './Pagination.tsx';
@@ -37,7 +37,7 @@ export function InvitationsPage({ path, platformName, username }: AdminPageProps
   if (!pageData) {
     throw new Error('Invitations are unavailable.');
   }
-  const { invitations, page, totalPages } = pageData;
+  const { invitations, page, totalPages, tz } = pageData;
   return (
     <Layout platformName={platformName} title="Invitations" username={username}>
       <Heading level={1}>Invitations</Heading>
@@ -78,12 +78,17 @@ export function InvitationsPage({ path, platformName, username }: AdminPageProps
                 <StatusBadge status={inv.status} />
               </TableCell>
               <TableCell>{inv.invited_by_login ?? inv.invited_by}</TableCell>
-              <TableCell>{inv.created_at ? formatAbsoluteDate(inv.created_at) : '-'}</TableCell>
-              <TableCell>{inv.accepted_at ? formatAbsoluteDate(inv.accepted_at) : '-'}</TableCell>
+              <TableCell>{inv.created_at ? formatDateTime(inv.created_at, tz) : '-'}</TableCell>
+              <TableCell>{inv.accepted_at ? formatDateTime(inv.accepted_at, tz) : '-'}</TableCell>
               <TableCell>
-                {inv.revoked_at
-                  ? `${formatAbsoluteDate(inv.revoked_at)} by ${inv.revoked_by_login ?? inv.revoked_by ?? '?'}`
-                  : '-'}
+                {inv.revoked_at ? (
+                  <>
+                    {formatDateTime(inv.revoked_at, tz)} by{' '}
+                    {inv.revoked_by_login ?? inv.revoked_by ?? '?'}
+                  </>
+                ) : (
+                  '-'
+                )}
               </TableCell>
               <TableCell>
                 {inv.status === 'pending' && (

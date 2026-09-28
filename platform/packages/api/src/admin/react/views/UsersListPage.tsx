@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react';
 import { useRequest, useView } from 'react-fate';
 import { UsersPageView, usersPageRequest } from '../../fate/views.ts';
 import { type AdminPageProps } from '../page-utils.ts';
-import { formatAbsoluteDate } from './format.ts';
+import { formatDateTime } from './format.ts';
 import { Layout } from './Layout.tsx';
 import { Pagination } from './Pagination.tsx';
 import { SearchForm } from './SearchForm.tsx';
@@ -24,7 +24,7 @@ export function UsersListPage({ path, platformName, username }: AdminPageProps) 
   if (!pageData) {
     throw new Error('Users page data is unavailable.');
   }
-  const { users, search, page, totalPages } = pageData;
+  const { users, search, page, totalPages, tz } = pageData;
   const [filter, setFilter] = useState(search ?? '');
   useEffect(() => setFilter(search ?? ''), [search]);
   const visibleUsers = users.filter((user) =>
@@ -68,7 +68,7 @@ export function UsersListPage({ path, platformName, username }: AdminPageProps) 
               <TableCell>{user.plan}</TableCell>
               <TableCell>{user.role}</TableCell>
               <TableCell>{user.suspended_reason ? 'suspended' : 'active'}</TableCell>
-              <TableCell>{formatAbsoluteDate(user.created_at)}</TableCell>
+              <TableCell>{formatDateTime(user.created_at, tz)}</TableCell>
               <TableCell>
                 <form
                   method="post"

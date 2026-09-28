@@ -53,6 +53,7 @@ type DashboardRecord = Awaited<ReturnType<typeof systemOverviewBase>> & {
   userCount: number;
   projectCount: number;
   deploymentCount: number;
+  tz: string | undefined;
   topProjects?: Array<TopProjectRecord>;
 };
 type HealthRecord = Awaited<ReturnType<typeof systemHealth>> & { id: string };
@@ -83,6 +84,7 @@ export const dashboardDataView = dataView<DashboardRecord>('AdminDashboard')({
   projects: true,
   deployments: true,
   siteDomain: true,
+  tz: true,
   topProjects: list(topProjectDataView),
 });
 
@@ -138,6 +140,7 @@ registry.set(dashboardSource, {
       .filter((id) => id === 'overview')
       .map((id) => ({
         id,
+        tz: (ctx.req.raw.cf?.timezone as string | undefined) ?? undefined,
         ...(base
           ? {
               ...base,

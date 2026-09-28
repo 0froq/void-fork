@@ -68,21 +68,23 @@ function pageNumber(url: URL) {
 export async function loadUsersPage(context: AdminContext, path: string) {
   const url = pageLocation(path, '/admin/users');
   const search = url.searchParams.get('search') ?? undefined;
+  const tz = (context.req.raw.cf?.timezone as string | undefined) ?? undefined;
   if (search) {
-    return { id: path, users: await searchUsers(context.get('db'), search), search };
+    return { id: path, users: await searchUsers(context.get('db'), search), search, tz };
   }
   const page = pageNumber(url);
   const [users, total] = await Promise.all([
     getAllUsers(context.get('db'), PAGE_SIZE, (page - 1) * PAGE_SIZE),
     countUsers(context.get('db')),
   ]);
-  return { id: path, users, page, totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)) };
+  return { id: path, users, page, totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)), tz };
 }
 
 export async function loadProjectsPage(context: AdminContext, path: string) {
   const url = pageLocation(path, '/admin/projects');
   const search = url.searchParams.get('search') ?? undefined;
   const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
+  const tz = (context.req.raw.cf?.timezone as string | undefined) ?? undefined;
   if (search) {
     const projects = await searchProjects(context.get('db'), search);
     return {
@@ -90,6 +92,7 @@ export async function loadProjectsPage(context: AdminContext, path: string) {
       projects: projects.map((project) => projectWithUrl(project, context.env)),
       search,
       siteDomain,
+      tz,
     };
   }
   const page = pageNumber(url);
@@ -103,6 +106,7 @@ export async function loadProjectsPage(context: AdminContext, path: string) {
     page,
     totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)),
     siteDomain,
+    tz,
   };
 }
 
@@ -135,7 +139,11 @@ export async function loadDeploymentsPage(context: AdminContext, path: string) {
 export async function loadUserDetailPage(context: AdminContext, path: string) {
   const { id } = detailLocation(path, '/admin/users/');
   const { getOperatorUser } = await import('../../operator/tenant-service.ts');
-  return { id: path, ...(await getOperatorUser(context, id)) };
+  return {
+    id: path,
+    ...(await getOperatorUser(context, id)),
+    tz: (context.req.raw.cf?.timezone as string | undefined) ?? undefined,
+  };
 }
 
 export async function loadProjectDetailPage(context: AdminContext, path: string) {
@@ -271,6 +279,7 @@ export async function loadSignupPage(context: AdminContext, path: string) {
     connectCommand: platformConnectCommand(apiUrl),
     inviteUrl: `${apiUrl}/invite`,
     result: url.searchParams.get('result') === 'invited' ? 'invited' : null,
+    tz: (context.req.raw.cf?.timezone as string | undefined) ?? undefined,
   };
 }
 
@@ -283,7 +292,13 @@ export async function loadInvitationsPage(context: AdminContext, path: string) {
     limit: 50,
     offset: (page - 1) * 50,
   });
-  return { id: path, invitations: result.invitations, page, totalPages: result.totalPages };
+  return {
+    id: path,
+    invitations: result.invitations,
+    page,
+    totalPages: result.totalPages,
+    tz: (context.req.raw.cf?.timezone as string | undefined) ?? undefined,
+  };
 }
 
 export async function loadAuthSettingsPage(context: AdminContext, path: string) {

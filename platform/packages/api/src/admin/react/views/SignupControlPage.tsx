@@ -16,7 +16,7 @@ import { useState, type FocusEvent } from 'react';
 import { useRequest, useView } from 'react-fate';
 import { SignupView, signupRequest } from '../../fate/views.ts';
 import { type AdminPageProps } from '../page-utils.ts';
-import { formatAbsoluteDate } from './format.ts';
+import { formatDateTime } from './format.ts';
 import { FormCheckbox, FormSelector, FormTextArea, FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 import { Pagination } from './Pagination.tsx';
@@ -96,6 +96,7 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
     connectCommand,
     inviteUrl,
     result,
+    tz,
   } = pageData;
   const mode = admission?.mode ?? (enabled ? 'restricted' : 'public');
   const companyMethods = methods.filter((method) => method.enabled && method.kind !== 'github');
@@ -456,15 +457,20 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                       </TableCell>
                       <TableCell>{invitation.invited_by_login ?? invitation.invited_by}</TableCell>
                       <TableCell>
-                        {invitation.created_at ? formatAbsoluteDate(invitation.created_at) : '—'}
+                        {invitation.created_at ? formatDateTime(invitation.created_at, tz) : '—'}
                       </TableCell>
                       <TableCell>
-                        {invitation.accepted_at ? formatAbsoluteDate(invitation.accepted_at) : '—'}
+                        {invitation.accepted_at ? formatDateTime(invitation.accepted_at, tz) : '—'}
                       </TableCell>
                       <TableCell>
-                        {invitation.revoked_at
-                          ? `${formatAbsoluteDate(invitation.revoked_at)} by ${invitation.revoked_by_login ?? invitation.revoked_by ?? '?'}`
-                          : '—'}
+                        {invitation.revoked_at ? (
+                          <>
+                            {formatDateTime(invitation.revoked_at, tz)} by{' '}
+                            {invitation.revoked_by_login ?? invitation.revoked_by ?? '?'}
+                          </>
+                        ) : (
+                          '—'
+                        )}
                       </TableCell>
                       <TableCell>
                         {invitation.status === 'pending' && (

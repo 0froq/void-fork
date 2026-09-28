@@ -1163,6 +1163,29 @@ describe('POST /admin/users/:id/delete', () => {
 });
 
 describe('GET /admin/projects', () => {
+  test('uses the same timestamp format as deployments and project detail', async () => {
+    const admin = await createTestUser(env.db, 'date-admin', 'github', undefined, 'free', 'admin');
+    const project = await createTestProject(env.db, admin.id, 'dated-project');
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const createdAt = '2026-01-02 03:04:00';
+    await env.db.update(projects).set({ created_at: createdAt }).where(eq(projects.id, project.id));
+    await env.db
+      .update(deployments)
+      .set({ created_at: createdAt })
+      .where(eq(deployments.id, deployment.id));
+
+    const [projectsResponse, projectResponse, deploymentsResponse] = await Promise.all([
+      req('/admin/projects', admin.adminJwt),
+      req(`/admin/projects/${project.id}`, admin.adminJwt),
+      req('/admin/deployments', admin.adminJwt),
+    ]);
+    const displayedTime = 'Jan 2, 2026, 3:04 AM';
+    for (const response of [projectsResponse, projectResponse, deploymentsResponse]) {
+      expect(response.status).toBe(200);
+      expect(visibleMarkup(await response.text())).toContain(displayedTime);
+    }
+  });
+
   test('renders projects list', async () => {
     const admin = await createTestUser(env.db, 'admin7', 'github', undefined, 'free', 'admin');
     const user = await createTestUser(env.db, 'projowner');

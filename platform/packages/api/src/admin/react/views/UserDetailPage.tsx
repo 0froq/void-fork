@@ -14,7 +14,13 @@ import type { PlanId } from '../../../tiers.ts';
 import { PLAN_LIMITS, getPlanLimits } from '../../../tiers.ts';
 import { UserDetailView, userDetailRequest } from '../../fate/views.ts';
 import { useDetailTitle, type AdminPageProps } from '../page-utils.ts';
-import { formatLimit, formatNumber, formatBytes, formatAbsoluteDate } from './format.ts';
+import {
+  formatLimit,
+  formatNumber,
+  formatBytes,
+  formatAbsoluteDate,
+  formatDateTime,
+} from './format.ts';
 import { FormSelector, FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 
@@ -26,7 +32,7 @@ export function UserDetailPage({ path, platformName, username }: AdminPageProps)
   if (!pageData) {
     throw new Error('User data is unavailable.');
   }
-  const { user, projects, deploysToday, usage } = pageData;
+  const { user, projects, deploysToday, usage, tz } = pageData;
   useDetailTitle(pageData.user.login, platformName);
   const plans = Object.keys(PLAN_LIMITS) as ReadonlyArray<PlanId>;
   const limits = getPlanLimits(user.plan);
@@ -61,7 +67,7 @@ export function UserDetailPage({ path, platformName, username }: AdminPageProps)
           </TableRow>
           <TableRow>
             <TableHeaderCell>Created</TableHeaderCell>
-            <TableCell>{user.created_at}</TableCell>
+            <TableCell>{formatDateTime(user.created_at, tz)}</TableCell>
           </TableRow>
         </TableBody>
       </Table>
@@ -193,7 +199,7 @@ export function UserDetailPage({ path, platformName, username }: AdminPageProps)
                   <a href={`/admin/projects/${p.id}`}>{p.slug}</a>
                 </TableCell>
                 <TableCell>{p.type}</TableCell>
-                <TableCell>{formatAbsoluteDate(p.created_at)}</TableCell>
+                <TableCell>{formatDateTime(p.created_at, tz)}</TableCell>
               </TableRow>
             ))}
           </TableBody>

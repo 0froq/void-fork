@@ -35,7 +35,7 @@ import {
   healthRequest,
 } from '../../fate/views.ts';
 import { DeploymentTable } from './DeploymentTable.tsx';
-import { formatAbsoluteDateTime } from './format.ts';
+import { formatDateTime } from './format.ts';
 import { Layout } from './Layout.tsx';
 import { ProjectsTable } from './ProjectsTable.tsx';
 import { ProjectUrlLink } from './ProjectUrlLink.tsx';
@@ -180,9 +180,11 @@ function HealthStatusBanner({ checkNames }: { checkNames: ReadonlyArray<string> 
 function TopProjectsWidget({
   topProjects,
   siteDomain,
+  tz,
 }: {
   topProjects: Deferred<{ items: ReadonlyArray<{ node: ViewRef<'AdminTopProject'> }> }>;
   siteDomain: string;
+  tz?: string;
 }) {
   const [projects] = useListView({ items: { node: TopProjectView } }, topProjects);
   return (
@@ -208,6 +210,7 @@ function TopProjectsWidget({
                   projectRef={node}
                   index={index}
                   siteDomain={siteDomain}
+                  tz={tz}
                 />
               ))}
             </TableBody>
@@ -233,10 +236,12 @@ function TopProjectTableRow({
   projectRef,
   index,
   siteDomain,
+  tz,
 }: {
   projectRef: ViewRef<'AdminTopProject'>;
   index: number;
   siteDomain: string;
+  tz?: string;
 }) {
   const project = useView(TopProjectView, projectRef);
   return (
@@ -268,7 +273,7 @@ function TopProjectTableRow({
       </TableCell>
       <TableCell>{formatNumber(project.requests)}</TableCell>
       <TableCell>{formatBytes(project.bandwidthBytes)}</TableCell>
-      <TableCell>{formatAbsoluteDateTime(project.lastSeen)}</TableCell>
+      <TableCell>{formatDateTime(project.lastSeen, tz)}</TableCell>
     </TableRow>
   );
 }
@@ -276,9 +281,11 @@ function TopProjectTableRow({
 function DeferredTopProjects({
   topProjects,
   siteDomain,
+  tz,
 }: {
   topProjects: Deferred<{ items: ReadonlyArray<{ node: ViewRef<'AdminTopProject'> }> }>;
   siteDomain: string;
+  tz?: string;
 }) {
   const mounted = useSyncExternalStore(subscribeToClientRender, isClientRender, isServerRender);
   const fallback = (
@@ -295,7 +302,7 @@ function DeferredTopProjects({
   }
   return (
     <AdminSuspense fallback={fallback}>
-      <TopProjectsWidget topProjects={topProjects} siteDomain={siteDomain} />
+      <TopProjectsWidget topProjects={topProjects} siteDomain={siteDomain} tz={tz} />
     </AdminSuspense>
   );
 }
@@ -344,13 +351,21 @@ export function DashboardPage({ platformName, username, healthCheckNames }: Dash
           </Card>
         </a>
       </div>
-      <DeferredTopProjects topProjects={dashboard.topProjects} siteDomain={dashboard.siteDomain} />
+      <DeferredTopProjects
+        topProjects={dashboard.topProjects}
+        siteDomain={dashboard.siteDomain}
+        tz={dashboard.tz}
+      />
 
       <Heading level={2}>Latest Projects</Heading>
-      <ProjectsTable projects={dashboard.projects} siteDomain={dashboard.siteDomain} />
+      <ProjectsTable
+        projects={dashboard.projects}
+        siteDomain={dashboard.siteDomain}
+        tz={dashboard.tz}
+      />
 
       <Heading level={2}>Latest Deployments</Heading>
-      <DeploymentTable deployments={dashboard.deployments} showProject />
+      <DeploymentTable deployments={dashboard.deployments} showProject tz={dashboard.tz} />
     </Layout>
   );
 }

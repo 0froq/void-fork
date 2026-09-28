@@ -43,6 +43,7 @@ export const DashboardView = view<AdminDashboard>()({
   projects: true,
   deployments: true,
   siteDomain: true,
+  tz: true,
   topProjects: defer({ items: { node: TopProjectView } }),
 });
 
@@ -71,6 +72,7 @@ export const UsersPageView = view<AdminUsersPage>()({
   search: true,
   page: true,
   totalPages: true,
+  tz: true,
 });
 export const ProjectsPageView = view<AdminProjectsPage>()({
   id: true,
@@ -79,6 +81,7 @@ export const ProjectsPageView = view<AdminProjectsPage>()({
   page: true,
   totalPages: true,
   siteDomain: true,
+  tz: true,
 });
 export const DeploymentsPageView = view<AdminDeploymentsPage>()({
   id: true,
@@ -108,6 +111,7 @@ export const UserDetailView = view<AdminUserDetail>()({
   projects: true,
   deploysToday: true,
   usage: true as never,
+  tz: true,
 });
 export const ProjectDetailView = view<AdminProjectDetail>()({
   id: true,
@@ -176,12 +180,14 @@ export const SignupView = view<AdminSignup>()({
   connectCommand: true,
   inviteUrl: true,
   result: true,
+  tz: true,
 });
 export const InvitationsView = view<AdminInvitations>()({
   id: true,
   invitations: true,
   page: true,
   totalPages: true,
+  tz: true,
 });
 
 export const cliVersionsRequest = (path: string) =>

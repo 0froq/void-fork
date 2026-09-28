@@ -50,6 +50,7 @@ export const usersPageDataView = dataView<UsersPageRecord>('AdminUsersPage')({
   search: true,
   page: true,
   totalPages: true,
+  tz: true,
 });
 export const projectsPageDataView = dataView<ProjectsPageRecord>('AdminProjectsPage')({
   id: true,
@@ -58,6 +59,7 @@ export const projectsPageDataView = dataView<ProjectsPageRecord>('AdminProjectsP
   page: true,
   totalPages: true,
   siteDomain: true,
+  tz: true,
 });
 export const deploymentsPageDataView = dataView<DeploymentsPageRecord>('AdminDeploymentsPage')({
   id: true,
@@ -73,6 +75,7 @@ export const userDetailDataView = dataView<UserDetailRecord>('AdminUserDetail')(
   projects: true,
   deploysToday: true,
   usage: true,
+  tz: true,
 });
 export const projectDetailDataView = dataView<ProjectDetailRecord>('AdminProjectDetail')({
   id: true,
@@ -123,12 +126,14 @@ export const signupDataView = dataView<SignupRecord>('AdminSignup')({
   connectCommand: true,
   inviteUrl: true,
   result: true,
+  tz: true,
 });
 export const invitationsDataView = dataView<InvitationsRecord>('AdminInvitations')({
   id: true,
   invitations: true,
   page: true,
   totalPages: true,
+  tz: true,
 });
 export const authSettingsDataView = dataView<AuthSettingsRecord>('AdminAuthSettings')({
   id: true,

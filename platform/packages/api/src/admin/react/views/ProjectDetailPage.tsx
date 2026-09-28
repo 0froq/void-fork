@@ -14,6 +14,7 @@ import { ProjectDetailView, projectDetailRequest } from '../../fate/views.ts';
 import { useDetailTitle, type AdminPageProps } from '../page-utils.ts';
 import { BuildTable } from './BuildTable.tsx';
 import { DeploymentTable } from './DeploymentTable.tsx';
+import { formatDateTime } from './format.ts';
 import { FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 export function ProjectDetailPage({ path, platformName, username }: AdminPageProps) {
@@ -84,7 +85,7 @@ export function ProjectDetailPage({ path, platformName, username }: AdminPagePro
           </TableRow>
           <TableRow>
             <TableHeaderCell>Created</TableHeaderCell>
-            <TableCell>{project.created_at}</TableCell>
+            <TableCell>{formatDateTime(project.created_at, tz)}</TableCell>
           </TableRow>
         </TableBody>
       </Table>

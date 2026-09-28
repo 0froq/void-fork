@@ -6,11 +6,12 @@ function parseUtcDate(iso: string): Date {
 }
 
 export function formatAbsoluteDate(iso: string): string {
-  return parseUtcDate(iso).toLocaleDateString('en-US', { timeZone: 'UTC' });
-}
-
-export function formatAbsoluteDateTime(iso: string): string {
-  return parseUtcDate(iso).toLocaleString('en-US', { timeZone: 'UTC' });
+  return parseUtcDate(iso).toLocaleDateString('en-US', {
+    timeZone: 'UTC',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
 export function formatDateTime(iso: string, tz?: string) {
