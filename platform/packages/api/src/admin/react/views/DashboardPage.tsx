@@ -234,16 +234,18 @@ function TopProjectTableRow({
       <TableCell>{index + 1}</TableCell>
       <TableCell>
         <div className="void-admin-top-project">
-          <a
-            className="void-admin-top-project-name"
-            href={`/admin/projects/${project.id}`}
-            title={project.slug}
-          >
-            {project.slug}
-          </a>
+          <div className="void-admin-top-project-heading">
+            <a
+              className="void-admin-top-project-name"
+              href={`/admin/projects/${project.id}`}
+              title={project.slug}
+            >
+              {project.slug}
+            </a>
+            <span className="void-admin-top-project-type">{project.type}</span>
+          </div>
           <div className="void-admin-top-project-meta">
             <ProjectUrlLink url={project.url ?? `https://${project.slug}.${siteDomain}`} />
-            <span className="void-admin-top-project-type">{project.type}</span>
           </div>
         </div>
       </TableCell>

@@ -395,24 +395,25 @@ body {
 .void-admin-top-project {
   min-width: 0;
 }
+.void-admin-top-project-heading {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  gap: var(--spacing-2);
+}
 .void-admin-top-project-name {
-  display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .void-admin-top-project-meta {
-  display: flex;
-  align-items: baseline;
   min-width: 0;
-  gap: var(--spacing-2);
   color: var(--color-text-secondary);
-}
-.void-admin-top-project-meta .void-admin-url {
-  flex: 0 1 auto;
 }
 .void-admin-top-project-type {
   flex: 0 0 auto;
+  color: var(--color-text-secondary);
 }
 .void-admin-loading-lines {
   display: grid;
