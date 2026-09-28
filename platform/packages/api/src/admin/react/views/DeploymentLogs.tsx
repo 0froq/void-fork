@@ -1,5 +1,6 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
+import { SearchTypeahead } from './SearchTypeahead.tsx';
 
 type LogEntry = {
   timestamp: number;
@@ -220,13 +221,16 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
             ))}
           </select>
         </label>
-        <input
-          type="text"
-          id="log-filter-text"
-          placeholder="Filter..."
-          style="font-size: 0.85rem; padding: 2px 6px"
-          value={filter}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => setFilter(event.target.value)}
+        <SearchTypeahead
+          label="Filter logs"
+          onChange={setFilter}
+          suggestions={(entries ?? []).flatMap((entry) => [
+            entry.outcome,
+            entry.method,
+            entry.url,
+            entry.status,
+          ])}
+          width={240}
         />
         <button
           type="button"

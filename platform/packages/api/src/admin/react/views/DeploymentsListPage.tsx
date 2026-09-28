@@ -44,6 +44,14 @@ export function DeploymentsListPage({
         label="Search deployments"
         value={filter}
         onChange={setFilter}
+        suggestions={deployments.flatMap((deployment) => [
+          deployment.id,
+          deployment.project_slug,
+          deployment.status,
+          deployment.source,
+          deployment.commit,
+        ])}
+        initialValue={search}
         showClear={Boolean(search)}
       />
       <DeploymentTable deployments={visibleDeployments} showProject tz={tz} />

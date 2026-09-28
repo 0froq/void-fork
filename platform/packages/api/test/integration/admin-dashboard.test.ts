@@ -406,6 +406,8 @@ describe('GET /admin/users', () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('findable');
+    expect(html).toContain('name="search" value="findable"');
+    expect(html).toContain('role="combobox"');
     expect(visibleMarkup(html)).not.toContain('>hidden<');
   });
 });
@@ -1058,6 +1060,8 @@ describe('GET /admin/projects', () => {
     const res = await req('/admin/projects?search=latest-owner', admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
+    expect(html).toContain('name="search" value="latest-owner"');
+    expect(html).toContain('role="combobox"');
     const alphaRow = tableRowContaining(html, `/admin/projects/${alpha.id}`);
     const betaRow = tableRowContaining(html, `/admin/projects/${beta.id}`);
 
@@ -1148,6 +1152,8 @@ describe('GET /admin/deployments', () => {
     const res = await req('/admin/deployments?search=0.8.9', admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
+    expect(html).toContain('name="search" value="0.8.9"');
+    expect(html).toContain('role="combobox"');
     expect(html).toContain('search-cli-version');
     expect(html).toContain('0.8.9');
   });
@@ -1797,7 +1803,8 @@ describe('GET /admin/deployments/:id (logs section)', () => {
     const res = await req(`/admin/deployments/${deployment.id}`, admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain('id="log-filter-text"');
+    expect(html).toContain('role="combobox"');
+    expect(html).toContain('placeholder="Filter logs"');
     expect(html).toContain('"component":"deploymentDetail"');
     expect(html).toContain('src="/admin/client.js"');
   });

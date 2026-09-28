@@ -31,6 +31,11 @@ export function UsersListPage({
 }) {
   const [filter, setFilter] = useState(search ?? '');
   useEffect(() => setFilter(search ?? ''), [search]);
+  const visibleUsers = users.filter((user) =>
+    [user.login, user.email, user.id].some((value) =>
+      value?.toLowerCase().includes(filter.toLowerCase()),
+    ),
+  );
   return (
     <Layout platformName={platformName} title="Users" username={username}>
       <h1>Users</h1>
@@ -39,6 +44,8 @@ export function UsersListPage({
         label="Search users"
         value={filter}
         onChange={setFilter}
+        suggestions={users.flatMap((user) => [user.login, user.email, user.id])}
+        initialValue={search}
         showClear={Boolean(search)}
       />
       <Table hasHover>
@@ -55,7 +62,7 @@ export function UsersListPage({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {users.map((user) => (
+          {visibleUsers.map((user) => (
             <TableRow key={user.id}>
               <TableCell>
                 <a href={`/admin/users/${user.id}`}>{user.login}</a>
@@ -82,7 +89,7 @@ export function UsersListPage({
           ))}
         </TableBody>
       </Table>
-      {users.length === 0 && (
+      {visibleUsers.length === 0 && (
         <p>
           <em>No users found.</em>
         </p>

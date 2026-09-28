@@ -38,6 +38,8 @@ export function ProjectsListPage({
         label="Search projects"
         value={filter}
         onChange={setFilter}
+        suggestions={projects.flatMap((project) => [project.slug, project.owner_login])}
+        initialValue={search}
         showClear={Boolean(search)}
       />
       <ProjectsTable projects={visibleProjects} siteDomain={siteDomain} />
