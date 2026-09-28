@@ -1,6 +1,7 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import { Banner } from '@astryxdesign/core/Banner';
 import { Card } from '@astryxdesign/core/Card';
+import { Skeleton } from '@astryxdesign/core/Skeleton';
 import {
   Table,
   TableBody,
@@ -10,12 +11,25 @@ import {
   TableRow,
 } from '@astryxdesign/core/Table';
 import { Heading, Text } from '@astryxdesign/core/Text';
-import { useEffect, useState } from 'react';
-import type { Deployment } from '../../../types.ts';
+import { Suspense, useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import {
+  useFateClient,
+  useListView,
+  useRequest,
+  useView,
+  type Deferred,
+  type ViewRef,
+} from 'react-fate';
+import {
+  DashboardView,
+  dashboardRequest,
+  TopProjectView,
+  HealthView,
+  healthRequest,
+} from '../../fate/views.ts';
 import { DeploymentTable } from './DeploymentTable.tsx';
 import { formatAbsoluteDateTime } from './format.ts';
 import { Layout } from './Layout.tsx';
-import type { ProjectRow } from './ProjectsTable.tsx';
 import { ProjectsTable } from './ProjectsTable.tsx';
 
 export type TopProjectRow = Readonly<{
@@ -30,16 +44,12 @@ export type TopProjectRow = Readonly<{
   lastSeen: string;
 }>;
 
+const AdminSuspense = Suspense as unknown as (props: {
+  children: ReactNode;
+  fallback: ReactNode;
+}) => ReactElement;
+
 type DashboardProps = Readonly<{
-  stats: {
-    users: number;
-    projects: number;
-    deployments: number;
-  };
-  projects: ReadonlyArray<ProjectRow>;
-  deployments: ReadonlyArray<Deployment & { project_slug: string | null }>;
-  topProjects: ReadonlyArray<TopProjectRow>;
-  siteDomain: string;
   platformName: string;
   username?: string;
 }>;
@@ -63,32 +73,25 @@ function formatBytes(bytes: number) {
 }
 
 function HealthStatusBanner() {
-  type Health = {
-    allOk: boolean;
-    checks: Array<{ name: string; ok: boolean; latencyMs: number; error?: string }>;
-  };
-  const [health, setHealth] = useState<Health | 'loading' | 'unavailable'>('loading');
+  const client = useFateClient();
+  const [healthRef, setHealthRef] = useState<ViewRef<'AdminHealth'> | null>(null);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
+  const health = useView(HealthView, healthRef);
   useEffect(() => {
     let active = true;
     const poll = async () => {
       try {
-        const response = await fetch('/admin/health', {
-          credentials: 'same-origin',
-          redirect: 'error',
-        });
-        if (!response.ok) {
-          throw new Error('Health request failed');
-        }
-        const data = (await response.json()) as Health;
-        if (!Array.isArray(data.checks)) {
-          throw new Error('Invalid health response');
+        const { health: ref } = await client.request(healthRequest, { mode: 'network-only' });
+        if (!ref) {
+          throw new Error('Health data is unavailable.');
         }
         if (active) {
-          setHealth(data);
+          setHealthRef(ref);
+          setStatus('ready');
         }
       } catch {
         if (active) {
-          setHealth('unavailable');
+          setStatus('unavailable');
         }
       }
     };
@@ -98,28 +101,35 @@ function HealthStatusBanner() {
       active = false;
       clearInterval(interval);
     };
-  }, []);
-  const failed = typeof health === 'object' ? health.checks.filter((check) => !check.ok).length : 0;
+  }, [client]);
+  const failed = health?.checks.filter((check) => !check.ok).length ?? 0;
   const summary =
-    health === 'loading'
+    status === 'loading'
       ? 'Loading...'
-      : health === 'unavailable'
+      : status === 'unavailable' || !health
         ? 'Unable to check system status'
         : health.allOk
           ? 'All health checks passed'
           : `${failed} health check${failed === 1 ? '' : 's'} failed`;
-  const error = health === 'unavailable' || (typeof health === 'object' && !health.allOk);
   return (
     <div id="health-status">
       <Banner
-        status={error ? 'error' : health === 'loading' ? 'info' : 'success'}
+        status={
+          status === 'unavailable'
+            ? 'error'
+            : status === 'loading'
+              ? 'info'
+              : health?.allOk
+                ? 'success'
+                : 'error'
+        }
         title="System Status"
         description={<span id="health-summary">{summary}</span>}
         collapsible={false}
       >
         <div id="health-checks" className="void-admin-health-checks">
-          {typeof health === 'object' &&
-            health.checks.map((check) => (
+          {status === 'ready' &&
+            health?.checks.map((check) => (
               <span key={check.name}>
                 <span aria-hidden="true">{check.ok ? '✓' : '✗'}</span> {check.name}
                 {check.latencyMs > 0 ? ` (${check.latencyMs}ms)` : ''}
@@ -133,12 +143,13 @@ function HealthStatusBanner() {
 }
 
 function TopProjectsWidget({
-  projects,
+  topProjects,
   siteDomain,
 }: {
-  projects: ReadonlyArray<TopProjectRow>;
+  topProjects: Deferred<{ items: ReadonlyArray<{ node: ViewRef<'AdminTopProject'> }> }>;
   siteDomain: string;
 }) {
+  const [projects] = useListView({ items: { node: TopProjectView } }, topProjects);
   return (
     <Card>
       <Heading level={2}>Top 10 Projects</Heading>
@@ -156,37 +167,13 @@ function TopProjectsWidget({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {projects.map((project, index) => (
-              <TableRow key={project.id}>
-                <TableCell>{index + 1}</TableCell>
-                <TableCell>
-                  <div>
-                    <a href={`/admin/projects/${project.id}`}>{project.slug}</a>
-                  </div>
-                  <div>
-                    <a
-                      className="void-admin-url"
-                      href={project.url ?? `https://${project.slug}.${siteDomain}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={project.url ?? `${project.slug}.${siteDomain}`}
-                    >
-                      {project.url ?? `${project.slug}.${siteDomain}`}
-                    </a>{' '}
-                    · {project.type}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  {project.owner_login ? (
-                    <a href={`/admin/users/${project.user_id}`}>{project.owner_login}</a>
-                  ) : (
-                    '-'
-                  )}
-                </TableCell>
-                <TableCell>{formatNumber(project.requests)}</TableCell>
-                <TableCell>{formatBytes(project.bandwidthBytes)}</TableCell>
-                <TableCell>{formatAbsoluteDateTime(project.lastSeen)}</TableCell>
-              </TableRow>
+            {projects.map(({ node }, index) => (
+              <TopProjectTableRow
+                key={node.id}
+                projectRef={node}
+                index={index}
+                siteDomain={siteDomain}
+              />
             ))}
           </TableBody>
         </Table>
@@ -197,15 +184,83 @@ function TopProjectsWidget({
   );
 }
 
-export function DashboardPage({
-  stats,
-  projects,
-  deployments,
+function TopProjectTableRow({
+  projectRef,
+  index,
+  siteDomain,
+}: {
+  projectRef: ViewRef<'AdminTopProject'>;
+  index: number;
+  siteDomain: string;
+}) {
+  const project = useView(TopProjectView, projectRef);
+  return (
+    <TableRow>
+      <TableCell>{index + 1}</TableCell>
+      <TableCell>
+        <div>
+          <a href={`/admin/projects/${project.id}`}>{project.slug}</a>
+        </div>
+        <div>
+          <a
+            className="void-admin-url"
+            href={project.url ?? `https://${project.slug}.${siteDomain}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={project.url ?? `${project.slug}.${siteDomain}`}
+          >
+            {project.url ?? `${project.slug}.${siteDomain}`}
+          </a>{' '}
+          · {project.type}
+        </div>
+      </TableCell>
+      <TableCell>
+        {project.owner_login ? (
+          <a href={`/admin/users/${project.user_id}`}>{project.owner_login}</a>
+        ) : (
+          '-'
+        )}
+      </TableCell>
+      <TableCell>{formatNumber(project.requests)}</TableCell>
+      <TableCell>{formatBytes(project.bandwidthBytes)}</TableCell>
+      <TableCell>{formatAbsoluteDateTime(project.lastSeen)}</TableCell>
+    </TableRow>
+  );
+}
+
+function DeferredTopProjects({
   topProjects,
   siteDomain,
-  platformName,
-  username,
-}: DashboardProps) {
+}: {
+  topProjects: Deferred<{ items: ReadonlyArray<{ node: ViewRef<'AdminTopProject'> }> }>;
+  siteDomain: string;
+}) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const fallback = (
+    <Card>
+      <Heading level={2}>Top 10 Projects</Heading>
+      <Text type="supporting">Last hour, site traffic only (static / ssr / isr)</Text>
+      <Skeleton width="100%" height={48} />
+      <Skeleton width="100%" height={48} index={1} />
+    </Card>
+  );
+  if (!mounted) {
+    return fallback;
+  }
+  return (
+    <AdminSuspense fallback={fallback}>
+      <TopProjectsWidget topProjects={topProjects} siteDomain={siteDomain} />
+    </AdminSuspense>
+  );
+}
+
+export function DashboardPage({ platformName, username }: DashboardProps) {
+  const { dashboard: dashboardRef } = useRequest(dashboardRequest);
+  const dashboard = useView(DashboardView, dashboardRef);
+  if (!dashboard) {
+    throw new Error('Dashboard data is unavailable.');
+  }
   return (
     <Layout platformName={platformName} title="Dashboard" username={username}>
       <Heading level={1}>Dashboard</Heading>
@@ -213,30 +268,30 @@ export function DashboardPage({
       <div className="void-admin-metrics">
         <a href="/admin/users">
           <Card>
-            <Heading level={2}>{formatNumber(stats.users)}</Heading>
+            <Heading level={2}>{formatNumber(dashboard.userCount)}</Heading>
             <Text>Users</Text>
           </Card>
         </a>
         <a href="/admin/projects">
           <Card>
-            <Heading level={2}>{formatNumber(stats.projects)}</Heading>
+            <Heading level={2}>{formatNumber(dashboard.projectCount)}</Heading>
             <Text>Projects</Text>
           </Card>
         </a>
         <a href="/admin/deployments">
           <Card>
-            <Heading level={2}>{formatNumber(stats.deployments)}</Heading>
+            <Heading level={2}>{formatNumber(dashboard.deploymentCount)}</Heading>
             <Text>Deployments</Text>
           </Card>
         </a>
       </div>
-      <TopProjectsWidget projects={topProjects} siteDomain={siteDomain} />
+      <DeferredTopProjects topProjects={dashboard.topProjects} siteDomain={dashboard.siteDomain} />
 
       <Heading level={2}>Latest Projects</Heading>
-      <ProjectsTable projects={projects} siteDomain={siteDomain} />
+      <ProjectsTable projects={dashboard.projects} siteDomain={dashboard.siteDomain} />
 
       <Heading level={2}>Latest Deployments</Heading>
-      <DeploymentTable deployments={deployments} showProject />
+      <DeploymentTable deployments={dashboard.deployments} showProject />
     </Layout>
   );
 }

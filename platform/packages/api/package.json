@@ -26,6 +26,7 @@
     "@astryxdesign/theme-neutral": "catalog:",
     "@cloudflare/containers": "0.3.7",
     "@cloudflare/sandbox": "0.12.9",
+    "@nkzw/fate": "1.6.1",
     "@stylexjs/stylex": "catalog:",
     "@void/deploy-core": "workspace:*",
     "@void/isr": "workspace:*",
@@ -35,6 +36,8 @@
     "blake3-jit": "^1.1.0",
     "cron-parser": "5.10.0",
     "drizzle-orm": "^0.45.2",
+    "graphql": "16.14.2",
+    "graphql-sse": "2.6.1",
     "hono": "catalog:platform",
     "jose": "6.2.12",
     "mime": "^4.1.0",
@@ -42,6 +45,7 @@
     "pg": "8.23.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "react-fate": "1.6.1",
     "void": "workspace:*"
   },
   "devDependencies": {

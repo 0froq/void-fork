@@ -67,6 +67,64 @@ async function admin(): Promise<string> {
 }
 
 describe('GET /admin/builds/:id/logs', () => {
+  test('Fate exposes build logs and status through the admin-only endpoint', async () => {
+    const cookie = await admin();
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+    const build = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'container',
+    });
+    const base = spyNamespace({
+      lines: [{ seq: 1, line: 'ready', stream: 'stdout', ts: 1 }],
+      lastSeq: 1,
+    });
+    env.BUILD_MANAGER = base.ns;
+    const response = await app.fetch(
+      new Request('http://localhost/admin/fate', {
+        method: 'POST',
+        headers: {
+          Origin: 'http://localhost',
+          Cookie: `admin_token=${cookie}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          version: 1,
+          operations: [
+            {
+              id: 'logs',
+              kind: 'query',
+              name: 'buildLogs',
+              args: { id: build.id, since: 0 },
+              select: ['id', 'lines', 'lastSeq'],
+            },
+            {
+              id: 'status',
+              kind: 'query',
+              name: 'buildStatus',
+              args: { id: build.id },
+              select: ['id', 'status', 'terminal'],
+            },
+          ],
+        }),
+      }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    const result = (await response.json()) as {
+      results: Array<{
+        ok: boolean;
+        data?: { lines?: Array<{ line: string }>; lastSeq?: number; terminal?: boolean };
+      }>;
+    };
+    expect(result.results[0]?.ok).toBe(true);
+    expect(result.results[0]?.data?.lines?.[0]?.line).toBe('ready');
+    expect(result.results[0]?.data?.lastSeq).toBe(1);
+    expect(result.results[1]?.data?.terminal).toBe(false);
+    expect(base.calls).toHaveLength(1);
+  });
+
   test('container build routes the DO via instance_type — free/null hits BUILD_MANAGER', async () => {
     const cookie = await admin();
     const user = await createTestUser(env.db);

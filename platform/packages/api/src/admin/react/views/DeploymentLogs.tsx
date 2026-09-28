@@ -2,6 +2,8 @@
 import { Button } from '@astryxdesign/core/Button';
 import { Selector } from '@astryxdesign/core/Selector';
 import { useCallback, useEffect, useState } from 'react';
+import { useFateClient } from 'react-fate';
+import { DeploymentLogsView, deploymentLogsRequest } from '../../fate/views.ts';
 import { CopyButton } from './CopyButton.tsx';
 import { SearchTypeahead } from './SearchTypeahead.tsx';
 
@@ -91,6 +93,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
 }
 
 export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
+  const fate = useFateClient();
   const [since, setSince] = useState('1h');
   const [count, setCount] = useState(100);
   const [filter, setFilter] = useState('');
@@ -102,18 +105,21 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
     setEntries(null);
     setError(null);
     try {
-      const response = await fetch(
-        `/admin/deployments/${deploymentId}/logs?since=${since}&limit=${count}`,
+      const { deploymentLogs: ref } = await fate.request(
+        deploymentLogsRequest(deploymentId, since, count),
+        { mode: 'network-only' },
       );
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      if (!ref) {
+        throw new Error('Deployment logs are unavailable.');
       }
-      const result = (await response.json()) as { data?: Array<LogEntry> };
-      setEntries(result.data ?? []);
+      const { data } = (await fate.readView(DeploymentLogsView, ref)) as unknown as {
+        data: { data: Array<LogEntry> };
+      };
+      setEntries(data.data);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [deploymentId, since, count]);
+  }, [deploymentId, since, count, fate]);
 
   useEffect(() => {
     void loadLogs();
@@ -127,15 +133,20 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
     const seen = new Set<string>();
     const poll = async () => {
       try {
-        const response = await fetch(`/admin/deployments/${deploymentId}/logs?since=1m&limit=50`);
-        if (!response.ok) {
+        const { deploymentLogs: ref } = await fate.request(
+          deploymentLogsRequest(deploymentId, '1m', 50),
+          { mode: 'network-only' },
+        );
+        if (!ref) {
           return;
         }
-        const result = (await response.json()) as { data?: Array<LogEntry> };
+        const { data } = (await fate.readView(DeploymentLogsView, ref)) as unknown as {
+          data: { data: Array<LogEntry> };
+        };
         if (!active) {
           return;
         }
-        const fresh = (result.data ?? []).filter((entry) => {
+        const fresh = data.data.filter((entry) => {
           const key = `${entry.timestamp}:${entry.url}:${entry.status}`;
           if (seen.has(key)) {
             return false;
@@ -156,7 +167,7 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
       active = false;
       clearInterval(timer);
     };
-  }, [deploymentId, tailing]);
+  }, [deploymentId, tailing, fate]);
 
   const query = filter.toLowerCase().trim();
   const visible = (entries ?? []).filter(

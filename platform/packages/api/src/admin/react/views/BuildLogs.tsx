@@ -1,14 +1,21 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+
 import { useEffect, useRef, useState } from 'react';
+import { useFateClient } from 'react-fate';
 import { isTerminalBuildStatus } from '../../../build-status.ts';
 import type { Build } from '../../../types.ts';
+import {
+  BuildLogsView,
+  BuildStatusView,
+  buildLogsRequest,
+  buildStatusRequest,
+} from '../../fate/views.ts';
 
 export { isTerminalBuildStatus };
 
 type LogLine = { seq: number; line: string; stream: string };
-type LogResponse = { lines: Array<LogLine>; lastSeq: number };
-
 export function BuildLogs({ build }: { build: Build }) {
+  const fate = useFateClient();
   const [lines, setLines] = useState<Array<LogLine> | null>(null);
   const pre = useRef<HTMLPreElement>(null);
 
@@ -25,11 +32,15 @@ export function BuildLogs({ build }: { build: Build }) {
       }
       polling = true;
       try {
-        const response = await fetch(`/admin/builds/${build.id}/logs?since=${cursor}`);
-        if (!response.ok) {
+        const { buildLogs: ref } = await fate.request(buildLogsRequest(build.id, cursor), {
+          mode: 'network-only',
+        });
+        if (!ref) {
           return;
         }
-        const data = (await response.json()) as LogResponse;
+        const { data } = (await fate.readView(BuildLogsView, ref)) as unknown as {
+          data: { lines: Array<LogLine>; lastSeq: number };
+        };
         if (!active) {
           return;
         }
@@ -45,8 +56,15 @@ export function BuildLogs({ build }: { build: Build }) {
     const poll = async () => {
       await pollLogs();
       try {
-        const response = await fetch(`/admin/builds/${build.id}?status=1`);
-        if (response.ok && ((await response.json()) as { terminal?: boolean }).terminal) {
+        const { buildStatus: ref } = await fate.request(buildStatusRequest(build.id), {
+          mode: 'network-only',
+        });
+        const status = ref
+          ? ((await fate.readView(BuildStatusView, ref)) as unknown as {
+              data: { terminal: boolean };
+            })
+          : null;
+        if (status?.data.terminal) {
           clearInterval(timer);
           await pollLogs();
         }
@@ -63,7 +81,7 @@ export function BuildLogs({ build }: { build: Build }) {
       active = false;
       clearInterval(timer);
     };
-  }, [build.id, build.status]);
+  }, [build.id, build.status, fate]);
 
   useEffect(() => {
     const element = pre.current;

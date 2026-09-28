@@ -1,9 +1,3 @@
-import {
-  PLATFORM_LOGIN_KINDS,
-  parsePlatformLoginConfiguration,
-  type PlatformLoginConfiguration,
-} from '@void/platform';
-import { and, eq, gt } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { deleteCookie } from 'hono/cookie';
 import { requireUncachedAuthenticationDatabase } from '../../auth/bootstrap.ts';
@@ -19,11 +13,10 @@ import {
   changeAuthenticationConnection,
   configureAuthenticationAdmission,
   configureAuthenticationConnection,
-  getAuthenticationConfiguration,
 } from '../../operator/auth-config.ts';
 import { OperatorError } from '../../operator/common.ts';
 import { getPlatformDisplayName } from '../../platform-identity.ts';
-import { platformLoginTests } from '../../schema.ts';
+import { renderFateListPage } from '../fate/render.ts';
 import { renderAdminPage } from '../react/server.ts';
 
 const app = new Hono<ApiEnv>();
@@ -50,67 +43,9 @@ app.onError((error, context) => {
   throw error;
 });
 
-app.get('/', async (context) => {
-  const data = await getAuthenticationConfiguration(context);
-  const testId = context.req.query('test');
-  const [tested] = testId
-    ? await context
-        .get('db')
-        .select()
-        .from(platformLoginTests)
-        .where(
-          and(
-            eq(platformLoginTests.id, testId),
-            eq(platformLoginTests.user_id, context.get('user').id),
-            gt(platformLoginTests.expires_at, new Date().toISOString()),
-          ),
-        )
-    : [];
-  const admission = 'admission' in data ? data.admission : undefined;
-  return renderAdminPage(context, 'authSettings', 'Authentication settings', {
-    data,
-    tested,
-    admission,
-    platformName: getPlatformDisplayName(context.env, context.req.url),
-    username: context.get('user').login,
-  });
-});
-
-app.get('/new', async (context) => {
-  const kind = context.req.query('kind') as PlatformLoginConfiguration['kind'];
-  if (!PLATFORM_LOGIN_KINDS.includes(kind)) {
-    throw new OperatorError(400, 'Select a supported login method.');
-  }
-  const id = kind === 'oidc' ? 'company' : kind === 'cloudflare-access' ? 'access' : kind;
-  return renderAdminPage(context, 'authNew', 'Add login method', {
-    kind,
-    id,
-    callbackUrl: context.env.AUTH_REDIRECT_URI ?? new URL('/auth/callback', context.req.url).href,
-    platformName: getPlatformDisplayName(context.env, context.req.url),
-    username: context.get('user').login,
-  });
-});
-app.get('/connections/:id', async (context) => {
-  const data = await getAuthenticationConfiguration(context);
-  const method = data.methods.find((method) => method.id === context.req.param('id'));
-  if (
-    !method ||
-    !('configuration' in method) ||
-    !method.configuration ||
-    !('revision' in method) ||
-    typeof method.revision !== 'number'
-  ) {
-    throw new OperatorError(404, 'Login method not found.');
-  }
-  return renderAdminPage(context, 'authEdit', 'Edit login method', {
-    configuration: parsePlatformLoginConfiguration(method.configuration),
-    label: method.label,
-    revision: method.revision,
-    callbackUrl: context.env.AUTH_REDIRECT_URI ?? new URL('/auth/callback', context.req.url).href,
-    platformName: getPlatformDisplayName(context.env, context.req.url),
-    username: context.get('user').login,
-  });
-});
+app.get('/', (context) => renderFateListPage(context, 'authSettings'));
+app.get('/new', (context) => renderFateListPage(context, 'authNew'));
+app.get('/connections/:id', (context) => renderFateListPage(context, 'authEdit'));
 app.post('/initialize', async (context) =>
   executeAuditedMutation(context, operatorAuditIntent('config/auth/initialize'), async () => {
     requireUncachedAuthenticationDatabase(context.env);

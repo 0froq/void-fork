@@ -7,6 +7,7 @@ import {
 } from '@void/platform';
 import { eq, lt, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
+import { adminFateHandler } from './admin/fate/server.ts';
 import { adminAuthMiddleware } from './admin/middleware/auth.ts';
 import { adminCsrfMiddleware } from './admin/middleware/csrf.ts';
 import adminAuthConfig from './admin/routes/auth-config.tsx';
@@ -487,6 +488,7 @@ app.route('/operator/v1', operatorApi);
 app.route('/admin', adminLogin);
 app.use('/admin/*', adminAuthMiddleware);
 app.use('/admin/*', adminCsrfMiddleware);
+app.post('/admin/fate', adminFateHandler);
 app.get('/admin/', adminAuthMiddleware, dashboardHandler);
 app.route('/admin/users', adminUsers);
 app.route('/admin/projects', adminProjects);

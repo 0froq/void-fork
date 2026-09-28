@@ -1,0 +1,299 @@
+import {
+  PLATFORM_LOGIN_KINDS,
+  parsePlatformLoginConfiguration,
+  type PlatformLoginConfiguration,
+} from '@void/platform';
+import { and, eq, gt } from 'drizzle-orm';
+import type { Context } from 'hono';
+import { getPlatformCapabilities } from '../../capabilities.ts';
+import { SITE_DOMAIN } from '../../constants.ts';
+import {
+  countDeployments,
+  countProjects,
+  countUsers,
+  getAllDeploymentsWithProject,
+  getAllProjectsWithOwner,
+  getAllUsers,
+  getBuild,
+  getDeployment,
+  getProject,
+  searchDeployments,
+  searchProjects,
+  searchUsers,
+} from '../../db.ts';
+import type { ApiEnv } from '../../env.ts';
+import { OperatorError } from '../../operator/common.ts';
+import { cliVersionStats } from '../../operator/system-operations.ts';
+import { projectWithUrl } from '../../project-url.ts';
+import { projectUrl } from '../../project-url.ts';
+import { platformLoginTests } from '../../schema.ts';
+import type { DeployManifest } from '../../types.ts';
+
+type AdminContext = Context<ApiEnv>;
+const PAGE_SIZE = 20;
+
+function pageLocation(path: string, pathname: string): URL {
+  const url = new URL(path, 'https://admin.invalid');
+  if (
+    !path.startsWith('/admin/') ||
+    url.origin !== 'https://admin.invalid' ||
+    url.pathname !== pathname
+  ) {
+    throw new OperatorError(400, 'Invalid admin page request.');
+  }
+  return url;
+}
+
+function detailLocation(path: string, prefix: string): { id: string; url: URL } {
+  const url = new URL(path, 'https://admin.invalid');
+  if (
+    !path.startsWith(prefix) ||
+    !url.pathname.startsWith(prefix) ||
+    url.origin !== 'https://admin.invalid'
+  ) {
+    throw new OperatorError(400, 'Invalid admin page request.');
+  }
+  const encodedId = url.pathname.slice(prefix.length);
+  if (!encodedId || encodedId.includes('/')) {
+    throw new OperatorError(400, 'Invalid admin page request.');
+  }
+  return { id: decodeURIComponent(encodedId), url };
+}
+
+function pageNumber(url: URL) {
+  return Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10) || 1);
+}
+
+export async function loadUsersPage(context: AdminContext, path: string) {
+  const url = pageLocation(path, '/admin/users');
+  const search = url.searchParams.get('search') ?? undefined;
+  if (search) {
+    return { id: path, users: await searchUsers(context.get('db'), search), search };
+  }
+  const page = pageNumber(url);
+  const [users, total] = await Promise.all([
+    getAllUsers(context.get('db'), PAGE_SIZE, (page - 1) * PAGE_SIZE),
+    countUsers(context.get('db')),
+  ]);
+  return { id: path, users, page, totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)) };
+}
+
+export async function loadProjectsPage(context: AdminContext, path: string) {
+  const url = pageLocation(path, '/admin/projects');
+  const search = url.searchParams.get('search') ?? undefined;
+  const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
+  if (search) {
+    const projects = await searchProjects(context.get('db'), search);
+    return {
+      id: path,
+      projects: projects.map((project) => projectWithUrl(project, context.env)),
+      search,
+      siteDomain,
+    };
+  }
+  const page = pageNumber(url);
+  const [projects, total] = await Promise.all([
+    getAllProjectsWithOwner(context.get('db'), PAGE_SIZE, (page - 1) * PAGE_SIZE),
+    countProjects(context.get('db')),
+  ]);
+  return {
+    id: path,
+    projects: projects.map((project) => projectWithUrl(project, context.env)),
+    page,
+    totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)),
+    siteDomain,
+  };
+}
+
+export async function loadDeploymentsPage(context: AdminContext, path: string) {
+  const url = pageLocation(path, '/admin/deployments');
+  const search = url.searchParams.get('search') ?? undefined;
+  const tz = (context.req.raw.cf?.timezone as string | undefined) ?? undefined;
+  if (search) {
+    return {
+      id: path,
+      deployments: await searchDeployments(context.get('db'), search),
+      search,
+      tz,
+    };
+  }
+  const page = pageNumber(url);
+  const [deployments, total] = await Promise.all([
+    getAllDeploymentsWithProject(context.get('db'), PAGE_SIZE, (page - 1) * PAGE_SIZE),
+    countDeployments(context.get('db')),
+  ]);
+  return {
+    id: path,
+    deployments,
+    page,
+    totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)),
+    tz,
+  };
+}
+
+export async function loadUserDetailPage(context: AdminContext, path: string) {
+  const { id } = detailLocation(path, '/admin/users/');
+  const { getOperatorUser } = await import('../../operator/tenant-service.ts');
+  return { id: path, ...(await getOperatorUser(context, id)) };
+}
+
+export async function loadProjectDetailPage(context: AdminContext, path: string) {
+  const { id } = detailLocation(path, '/admin/projects/');
+  const { getOperatorProject } = await import('../../operator/tenant-service.ts');
+  const detail = await getOperatorProject(context.get('db'), id);
+  return {
+    id: path,
+    ...detail,
+    cfAccountId: context.env.CF_ACCOUNT_ID,
+    deployUrl: projectUrl(detail.project, context.env),
+    tz: (context.req.raw.cf?.timezone as string | undefined) ?? undefined,
+  };
+}
+
+export async function loadDeploymentDetailPage(context: AdminContext, path: string) {
+  const { id } = detailLocation(path, '/admin/deployments/');
+  const deployment = await getDeployment(context.get('db'), id);
+  if (!deployment) {
+    throw new OperatorError(404, 'Deployment not found');
+  }
+  const project = await getProject(context.get('db'), deployment.project_id);
+  let manifest: DeployManifest | null = null;
+  try {
+    if (deployment.manifest) {
+      manifest = JSON.parse(deployment.manifest) as DeployManifest;
+    }
+  } catch {
+    // Preserve the detail page when an old deployment has malformed manifest JSON.
+  }
+  return {
+    id: path,
+    deployment,
+    project,
+    manifest,
+    canCancel: ['pending', 'uploading', 'migrating', 'prerendering'].includes(deployment.status),
+    tz: (context.req.raw.cf?.timezone as string | undefined) ?? undefined,
+  };
+}
+
+export async function loadBuildDetailPage(context: AdminContext, path: string) {
+  const { id, url } = detailLocation(path, '/admin/builds/');
+  if (url.searchParams.has('status')) {
+    throw new OperatorError(400, 'Build status is a separate endpoint.');
+  }
+  const build = await getBuild(context.get('db'), id);
+  if (!build) {
+    throw new OperatorError(404, 'Build not found');
+  }
+  return {
+    id: path,
+    build,
+    tz: (context.req.raw.cf?.timezone as string | undefined) ?? undefined,
+  };
+}
+
+export async function loadCliVersionsPage(context: AdminContext, path: string) {
+  pageLocation(path, '/admin/cli-versions');
+  return {
+    id: path,
+    ...(await cliVersionStats(context.get('db'))),
+    tz: (context.req.raw.cf?.timezone as string | undefined) ?? undefined,
+  };
+}
+
+export async function loadSignupPage(context: AdminContext, path: string) {
+  pageLocation(path, '/admin/signup-control');
+  const { getOperatorSignup } = await import('../../operator/access-service.ts');
+  return { id: path, ...(await getOperatorSignup(context)) };
+}
+
+export async function loadInvitationsPage(context: AdminContext, path: string) {
+  const url = pageLocation(path, '/admin/invitations');
+  const page = pageNumber(url);
+  const { listOperatorInvitations } = await import('../../operator/access-service.ts');
+  const result = await listOperatorInvitations(context.get('db'), {
+    page,
+    limit: 50,
+    offset: (page - 1) * 50,
+  });
+  return { id: path, invitations: result.invitations, page, totalPages: result.totalPages };
+}
+
+export async function loadAuthSettingsPage(context: AdminContext, path: string) {
+  const url = pageLocation(path, '/admin/config/auth');
+  const { getAuthenticationConfiguration } = await import('../../operator/auth-config.ts');
+  const data = await getAuthenticationConfiguration(context);
+  const testId = url.searchParams.get('test');
+  const [tested] = testId
+    ? await context
+        .get('db')
+        .select()
+        .from(platformLoginTests)
+        .where(
+          and(
+            eq(platformLoginTests.id, testId),
+            eq(platformLoginTests.user_id, context.get('user').id),
+            gt(platformLoginTests.expires_at, new Date().toISOString()),
+          ),
+        )
+    : [];
+  const admission = 'admission' in data ? data.admission : undefined;
+  return { id: path, data, tested, admission };
+}
+
+export async function loadAuthNewPage(context: AdminContext, path: string) {
+  const url = pageLocation(path, '/admin/config/auth/new');
+  const kind = url.searchParams.get('kind') as PlatformLoginConfiguration['kind'];
+  if (!PLATFORM_LOGIN_KINDS.includes(kind)) {
+    throw new OperatorError(400, 'Select a supported login method.');
+  }
+  const connectionId = kind === 'oidc' ? 'company' : kind === 'cloudflare-access' ? 'access' : kind;
+  return {
+    id: path,
+    kind,
+    connectionId,
+    callbackUrl: context.env.AUTH_REDIRECT_URI ?? new URL('/auth/callback', context.req.url).href,
+  };
+}
+
+export async function loadAuthEditPage(context: AdminContext, path: string) {
+  const { id } = detailLocation(path, '/admin/config/auth/connections/');
+  const { getAuthenticationConfiguration } = await import('../../operator/auth-config.ts');
+  const data = await getAuthenticationConfiguration(context);
+  const method = data.methods.find((method) => method.id === id);
+  if (
+    !method ||
+    !('configuration' in method) ||
+    !method.configuration ||
+    !('revision' in method) ||
+    typeof method.revision !== 'number'
+  ) {
+    throw new OperatorError(404, 'Login method not found.');
+  }
+  return {
+    id: path,
+    configuration: parsePlatformLoginConfiguration(method.configuration),
+    label: method.label,
+    revision: method.revision,
+    callbackUrl: context.env.AUTH_REDIRECT_URI ?? new URL('/auth/callback', context.req.url).href,
+  };
+}
+
+function requireEmail(context: AdminContext) {
+  if (!getPlatformCapabilities(context.env).email) {
+    throw new OperatorError(501, 'Email is not enabled on this platform');
+  }
+}
+
+export async function loadEmailSettingsPage(context: AdminContext, path: string) {
+  pageLocation(path, '/admin/email');
+  requireEmail(context);
+  const { loadEmailSettingsData } = await import('../routes/email.tsx');
+  return { id: path, ...(await loadEmailSettingsData(context)) };
+}
+
+export async function loadEmailProjectPage(context: AdminContext, path: string) {
+  const { id } = detailLocation(path, '/admin/email/');
+  requireEmail(context);
+  const { loadEmailProjectData } = await import('../routes/email.tsx');
+  return { id: path, ...(await loadEmailProjectData(context, id)) };
+}

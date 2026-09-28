@@ -96,7 +96,7 @@ function mockHealthResult(installed: boolean): HealthResult {
 const TOP_PROJECT_LIMIT = 10;
 const TOP_PROJECT_WINDOW_MS = 60 * 60 * 1000;
 
-async function getTopProjectsLastHour(db: Db, env: ApiEnv['Bindings']) {
+export async function getTopProjectsLastHour(db: Db, env: ApiEnv['Bindings']) {
   if (isDevBypass(env)) {
     return [];
   }
@@ -201,17 +201,23 @@ export async function systemHealth(
 }
 
 export async function systemOverview(db: Db, env: ApiEnv['Bindings']) {
-  const [stats, projects, deployments, topProjects] = await Promise.all([
+  const [base, topProjects] = await Promise.all([
+    systemOverviewBase(db, env),
+    getTopProjectsLastHour(db, env),
+  ]);
+  return { ...base, topProjects };
+}
+
+export async function systemOverviewBase(db: Db, env: ApiEnv['Bindings']) {
+  const [stats, projects, deployments] = await Promise.all([
     getSystemStats(db),
     getAllProjectsWithOwner(db, 5, 0),
     getAllDeploymentsWithProject(db, 5, 0),
-    getTopProjectsLastHour(db, env),
   ]);
   return {
     stats,
     projects,
     deployments,
-    topProjects,
     siteDomain: env.SITE_DOMAIN ?? SITE_DOMAIN,
     capabilities: getPlatformCapabilities(env),
     installationId: env.PLATFORM_INSTALLATION_ID ?? null,

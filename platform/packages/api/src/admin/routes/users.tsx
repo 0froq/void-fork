@@ -1,59 +1,23 @@
 import { Hono } from 'hono';
-import { getAllUsers, countUsers, searchUsers } from '../../db.ts';
 import type { ApiEnv } from '../../env.ts';
 import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
 import {
   changeOperatorUserPlan,
   deleteOperatorUser,
-  getOperatorUser,
   restoreOperatorUser,
   suspendOperatorUser,
 } from '../../operator/tenant-service.ts';
-import { getPlatformDisplayName } from '../../platform-identity.ts';
+import { renderFateDetailPage, renderFateListPage } from '../fate/render.ts';
 import { renderOperationError } from '../operation-error.tsx';
-import { renderAdminPage } from '../react/server.ts';
 
-const PAGE_SIZE = 20;
 const app = new Hono<ApiEnv>();
 app.onError(renderOperationError);
 
 // GET /users
-app.get('/', async (context) => {
-  const search = context.req.query('search');
-  if (search) {
-    const users = await searchUsers(context.get('db'), search);
-    return renderAdminPage(context, 'users', 'Users', {
-      platformName: getPlatformDisplayName(context.env, context.req.url),
-      users,
-      search,
-      username: context.get('user').login,
-    });
-  }
-  const page = Math.max(1, parseInt(context.req.query('page') ?? '1', 10) || 1);
-  const offset = (page - 1) * PAGE_SIZE;
-  const [users, total] = await Promise.all([
-    getAllUsers(context.get('db'), PAGE_SIZE, offset),
-    countUsers(context.get('db')),
-  ]);
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  return renderAdminPage(context, 'users', 'Users', {
-    platformName: getPlatformDisplayName(context.env, context.req.url),
-    users,
-    page,
-    totalPages,
-    username: context.get('user').login,
-  });
-});
+app.get('/', (context) => renderFateListPage(context, 'users'));
 
 // GET /users/:id
-app.get('/:id', async (context) => {
-  const detail = await getOperatorUser(context, context.req.param('id'));
-  return renderAdminPage(context, 'userDetail', detail.user.login, {
-    platformName: getPlatformDisplayName(context.env, context.req.url),
-    ...detail,
-    username: context.get('user').login,
-  });
-});
+app.get('/:id', (context) => renderFateDetailPage(context, 'userDetail'));
 
 app.post('/:id/plan', async (context) => {
   const body = await context.req.parseBody();

@@ -4,8 +4,7 @@ import { getBuild } from '../../db.ts';
 import type { ApiEnv } from '../../env.ts';
 import { buildLogs } from '../../operator/build-operations.ts';
 import { OperatorError } from '../../operator/common.ts';
-import { getPlatformDisplayName } from '../../platform-identity.ts';
-import { renderAdminPage } from '../react/server.ts';
+import { renderFateDetailPage } from '../fate/render.ts';
 
 const app = new Hono<ApiEnv>();
 
@@ -44,26 +43,14 @@ app.get('/:id/logs', async (context) => {
 // log-panel poller to decide when to stop polling — it does NOT touch the DO
 // or the Task-3 logs endpoint.
 app.get('/:id', async (context) => {
+  if (context.req.query('status') === undefined) {
+    return renderFateDetailPage(context, 'buildDetail');
+  }
   const build = await getBuild(context.get('db'), context.req.param('id'));
   if (!build) {
-    if (context.req.query('status') !== undefined) {
-      return context.json({ error: 'build not found' }, 404);
-    }
-    return context.html('<h1>Build not found</h1>', 404);
+    return context.json({ error: 'build not found' }, 404);
   }
-
-  if (context.req.query('status') !== undefined) {
-    return context.json({ status: build.status, terminal: isTerminalBuildStatus(build.status) });
-  }
-
-  const tz = (context.req.raw.cf?.timezone as string | undefined) ?? undefined;
-
-  return renderAdminPage(context, 'buildDetail', `Build ${build.id}`, {
-    build,
-    tz,
-    platformName: getPlatformDisplayName(context.env, context.req.url),
-    username: context.get('user').login,
-  });
+  return context.json({ status: build.status, terminal: isTerminalBuildStatus(build.status) });
 });
 
 export default app;

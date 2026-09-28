@@ -9,7 +9,7 @@ It owns platform auth, projects, deployments, domains, secrets, provisioning, ro
 - **Platform DB**: PostgreSQL via `HYPERDRIVE.connectionString`
 - **Public API**: CLI and dashboard-facing JSON routes
 - **Internal API**: resource resolution and revalidation used by other platform workers
-- **Admin UI**: server-rendered HTML under `/admin/*`
+- **Admin UI**: React pages under `/admin/*`, server-rendered for first load and backed by a private Fate endpoint
 - **Self-hosted owner setup**: dashboard OAuth and normal signup share the first-user transaction and configured GitHub identity check. Dashboard login can create the first owner without a CLI login; it never promotes existing users. Void Cloud keeps its existing admin-only login behavior.
 - **Background work**:
   - `scheduled()` for periodic usage enforcement and rollover checks
@@ -62,8 +62,9 @@ src/
     domains.ts
     usage.ts
   admin/
-    routes/                   # Admin pages: users/projects/deployments/platform/signup-control, plus builds.tsx (build detail page + /logs poll endpoint) and email.tsx (per-project email control plane)
-    views/                    # Hono JSX view layer (incl. build-table.tsx, build-logs.tsx)
+    fate/                     # Admin-only Fate schema, data loaders, typed client, and SSR snapshots
+    react/                    # React page components and Void page-router entry
+    routes/                   # Admin page shells, audited form actions, and log polling
     middleware/auth.ts        # Admin cookie auth + same-origin guard on every write
 container/
   Dockerfile                  # node:26-slim + pinned corepack + bun build image
@@ -323,6 +324,20 @@ still releases container capacity when Postgres is unavailable.
 ## Admin UI
 
 The admin surface is built into this worker under `/admin/*`.
+The browser uses `POST /admin/fate` for administrator page data. It runs under the
+existing admin-cookie and same-origin middleware, while the CLI/operator API
+stays on `/operator/v1`. First loads hydrate a request-scoped Fate snapshot into
+the React adapter. Page-object navigations send a small shell and read from the
+session-scoped Fate cache, refreshing cached pages in the background. The
+dashboard defers the Analytics Engine top-projects view so it does not delay
+the initial page. Existing audited form actions remain HTML POST endpoints and
+reload the page after writes, which also creates a fresh cache instance.
+
+The Fate schema and loaders live in `src/admin/fate/`. The generated client is
+`src/admin/fate/client.generated.ts`; rebuild it through
+`scripts/build-admin-client.mjs` when changing Fate roots or types. Keep page
+loaders restricted to their matching `/admin/*` paths, and never add admin
+queries to the CLI API.
 
 Notable sections:
 
@@ -332,7 +347,7 @@ Notable sections:
 - per-project Builds section (ongoing build highlighted) plus a build detail page with a client-side polling live-log tail for container builds (mirrors the deployment live-tail; not a WebSocket), or a GitHub Actions link for `github_actions` builds. The tail polls `GET /admin/builds/:id/logs?since=N`, which fronts the `BuildManager`/`BuildManagerLarge` DO's read-only `GET /logs?since=N` (DO chosen by `instance_type` via `buildManagerNamespace`).
 - per-project email page (linked from the project detail view): usage, caps, inbound/outbound suspension, destinations
 - signup restrictions and allowlists
-- platform worker version history and orchestrated rollback
+- CLI version deployment history
 
 Admin writes are same-origin guarded: `admin/middleware/auth.ts` rejects any non-`GET` request whose `Origin`/`Referer` host does not match the request host, before the cookie is even read.
 

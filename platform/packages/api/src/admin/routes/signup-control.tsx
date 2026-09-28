@@ -9,22 +9,14 @@ import {
 } from '../../operator/access-service.ts';
 import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
 import { OperatorError } from '../../operator/common.ts';
-import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { getAllowlist } from '../../signup-allowlist.ts';
+import { renderFateListPage } from '../fate/render.ts';
 import { renderOperationError } from '../operation-error.tsx';
-import { renderAdminPage } from '../react/server.ts';
 
 const app = new Hono<ApiEnv>();
 app.onError(renderOperationError);
 
-app.get('/', async (context) => {
-  const signup = await getOperatorSignup(context);
-  return renderAdminPage(context, 'signupControl', 'Signup Control', {
-    platformName: getPlatformDisplayName(context.env, context.req.url),
-    ...signup,
-    username: context.get('user').login,
-  });
-});
+app.get('/', (context) => renderFateListPage(context, 'signupControl'));
 
 app.post('/toggle', async (context) => {
   const current = (await getOperatorSignup(context)).enabled;

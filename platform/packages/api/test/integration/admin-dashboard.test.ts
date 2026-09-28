@@ -85,7 +85,68 @@ function tableRowContaining(html: string, needle: string): string {
   return html.slice(rowStart, rowEnd);
 }
 
+function fateQuery(name: string, path: string, select: Array<string>): RequestInit {
+  return {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      version: 1,
+      operations: [{ id: 'page', kind: 'query', name, args: { path }, select }],
+    }),
+  };
+}
+
 describe('auth middleware', () => {
+  test('protects the admin Fate endpoint with admin auth and same-origin CSRF', async () => {
+    const regular = await createTestUser(env.db, 'fate-regular');
+    const admin = await createTestUser(env.db, 'fate-admin', 'github', undefined, 'free', 'admin');
+    const query = fateQuery('usersPage', '/admin/users', ['id', 'users']);
+
+    expect((await req('/admin/fate', undefined, query)).status).toBe(302);
+    expect((await req('/admin/fate', regular.adminJwt, query)).status).toBe(403);
+    expect(
+      (
+        await req('/admin/fate', admin.adminJwt, {
+          ...query,
+          headers: { 'content-type': 'application/json', Origin: 'https://evil.example' },
+        })
+      ).status,
+    ).toBe(403);
+    expect((await req('/admin/fate', admin.adminJwt, query)).status).toBe(200);
+  });
+
+  test('exposes typed admin page data through Fate without widening accepted routes', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'fate-page-admin',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    await createTestUser(env.db, 'fate-page-member');
+    const page = await req(
+      '/admin/fate',
+      admin.adminJwt,
+      fateQuery('usersPage', '/admin/users?search=fate-page-member', ['id', 'users', 'search']),
+    );
+    expect(page.status).toBe(200);
+    const body = (await page.json()) as {
+      results: Array<{ ok: boolean; data?: { users?: Array<{ login: string }> } }>;
+    };
+    expect(body.results[0]?.ok).toBe(true);
+    expect(body.results[0]?.data?.users?.map((user) => user.login)).toEqual(['fate-page-member']);
+
+    const invalid = await req(
+      '/admin/fate',
+      admin.adminJwt,
+      fateQuery('usersPage', '/operator/v1/users', ['id', 'users']),
+    );
+    const invalidBody = (await invalid.json()) as {
+      results: Array<{ ok: boolean; error?: { code: string } }>;
+    };
+    expect(invalidBody.results[0]).toMatchObject({ ok: false, error: { code: 'BAD_REQUEST' } });
+  });
   test('redirects to /admin/login without cookie', async () => {
     const res = await req('/admin/');
     expect(res.status).toBe(302);
@@ -289,6 +350,28 @@ describe('GET /admin/ (dashboard)', () => {
     vi.restoreAllMocks();
   });
 
+  test('does not query Analytics Engine during the initial dashboard render', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'admin-deferred',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    const fetchMock = mockCfApi({
+      analyticsQuery: () => {
+        throw new Error('The deferred top-project query ran during initial rendering.');
+      },
+    });
+    const response = await req('/admin/', admin.adminJwt);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('Top 10 Projects');
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes('/analytics_engine/sql')),
+    ).toBe(false);
+  });
+
   test('stat cards link to views', async () => {
     const admin = await createTestUser(env.db, 'admin1b', 'github', undefined, 'free', 'admin');
     mockCfApi();
@@ -327,16 +410,38 @@ describe('GET /admin/ (dashboard)', () => {
         }),
     });
 
-    const res = await req('/admin/', admin.adminJwt);
-    expect(res.status).toBe(200);
-    const html = await res.text();
-    const betaIndex = html.indexOf('>beta<');
-    const alphaIndex = html.indexOf('>alpha<');
+    const res = await req('/admin/fate', admin.adminJwt, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        version: 1,
+        operations: [
+          {
+            id: 'top-projects',
+            kind: 'byId',
+            type: 'AdminDashboard',
+            ids: ['overview'],
+            select: [
+              'id',
+              'topProjects.id',
+              'topProjects.slug',
+              'topProjects.owner_login',
+              'topProjects.requests',
+              'topProjects.bandwidthBytes',
+            ],
+          },
+        ],
+      }),
+    });
+    const response = await res.text();
+    expect(res.status, response).toBe(200);
+    const betaIndex = response.indexOf('"slug":"beta"');
+    const alphaIndex = response.indexOf('"slug":"alpha"');
     expect(betaIndex).toBeGreaterThan(-1);
     expect(alphaIndex).toBeGreaterThan(-1);
     expect(betaIndex).toBeLessThan(alphaIndex);
-    expect(html).toContain('420');
-    expect(html).toContain('owner-b');
+    expect(response).toContain('420');
+    expect(response).toContain('owner-b');
 
     vi.restoreAllMocks();
   });
@@ -359,8 +464,23 @@ describe('GET /admin/ (dashboard)', () => {
       },
     });
 
-    const res = await req('/admin/', admin.adminJwt);
-    expect(res.status).toBe(200);
+    const res = await req('/admin/fate', admin.adminJwt, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        version: 1,
+        operations: [
+          {
+            id: 'top-projects',
+            kind: 'byId',
+            type: 'AdminDashboard',
+            ids: ['overview'],
+            select: ['id', 'topProjects.id'],
+          },
+        ],
+      }),
+    });
+    expect(res.status, await res.text()).toBe(200);
     expect(fetchMock).toHaveBeenCalled();
 
     vi.restoreAllMocks();
@@ -1757,6 +1877,28 @@ describe('GET /admin/deployments/:id/logs', () => {
       ingestedAt: newlyIngested,
     });
     expect(json.data[0].logs).toHaveLength(1);
+    const fateResponse = await req('/admin/fate', admin.adminJwt, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        version: 1,
+        operations: [
+          {
+            id: 'logs',
+            kind: 'query',
+            name: 'deploymentLogs',
+            args: { id: deployment.id, since: '1m', limit: 50 },
+            select: ['id', 'data'],
+          },
+        ],
+      }),
+    });
+    expect(fateResponse.status).toBe(200);
+    const fateBody = (await fateResponse.json()) as {
+      results: Array<{ ok: boolean; data?: { data?: Array<{ outcome: string }> } }>;
+    };
+    expect(fateBody.results[0]?.ok).toBe(true);
+    expect(fateBody.results[0]?.data?.data?.[0]?.outcome).toBe('exception');
     vi.restoreAllMocks();
   });
 

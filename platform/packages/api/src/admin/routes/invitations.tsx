@@ -1,36 +1,19 @@
 import { Hono } from 'hono';
 import type { ApiEnv } from '../../env.ts';
 import {
-  listOperatorInvitations,
   parseAccessList,
   revokeOperatorInvitation,
   sendOperatorInvitations,
 } from '../../operator/access-service.ts';
 import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
 import { OperatorError } from '../../operator/common.ts';
-import { getPlatformDisplayName } from '../../platform-identity.ts';
+import { renderFateListPage } from '../fate/render.ts';
 import { renderOperationError } from '../operation-error.tsx';
-import { renderAdminPage } from '../react/server.ts';
 
-const PAGE_SIZE = 50;
 const app = new Hono<ApiEnv>();
 app.onError(renderOperationError);
 
-app.get('/', async (context) => {
-  const page = Math.max(1, parseInt(context.req.query('page') ?? '1', 10) || 1);
-  const result = await listOperatorInvitations(context.get('db'), {
-    page,
-    limit: PAGE_SIZE,
-    offset: (page - 1) * PAGE_SIZE,
-  });
-  return renderAdminPage(context, 'invitations', 'Invitations', {
-    platformName: getPlatformDisplayName(context.env, context.req.url),
-    invitations: result.invitations,
-    page,
-    totalPages: result.totalPages,
-    username: context.get('user').login,
-  });
-});
+app.get('/', (context) => renderFateListPage(context, 'invitations'));
 
 app.post('/send', async (context) => {
   const body = await context.req.parseBody();

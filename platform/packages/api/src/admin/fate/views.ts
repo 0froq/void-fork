@@ -1,0 +1,250 @@
+import { defer, view } from 'react-fate';
+import type {
+  AdminDashboard,
+  AdminTopProject,
+  AdminHealth,
+  AdminUsersPage,
+  AdminProjectsPage,
+  AdminDeploymentsPage,
+  AdminUserDetail,
+  AdminProjectDetail,
+  AdminDeploymentDetail,
+  AdminBuildDetail,
+  AdminCliVersions,
+  AdminSignup,
+  AdminInvitations,
+  AdminAuthSettings,
+  AdminAuthNew,
+  AdminAuthEdit,
+  AdminEmailSettings,
+  AdminEmailProject,
+  AdminBuildLogs,
+  AdminBuildStatus,
+  AdminDeploymentLogs,
+} from './server.ts';
+
+export const TopProjectView = view<AdminTopProject>()({
+  id: true,
+  user_id: true,
+  slug: true,
+  type: true,
+  owner_login: true,
+  requests: true,
+  bandwidthBytes: true,
+  lastSeen: true,
+  url: true,
+});
+
+export const DashboardView = view<AdminDashboard>()({
+  id: true,
+  userCount: true,
+  projectCount: true,
+  deploymentCount: true,
+  projects: true,
+  deployments: true,
+  siteDomain: true,
+  topProjects: defer({ items: { node: TopProjectView } }),
+});
+
+export const dashboardRequest = { dashboard: { view: DashboardView } } as const;
+
+export const HealthView = view<AdminHealth>()({
+  id: true,
+  allOk: true,
+  checks: true,
+});
+export const healthRequest = { health: { view: HealthView } } as const;
+
+export const BuildLogsView = view<AdminBuildLogs>()({ id: true, lines: true, lastSeq: true });
+export const BuildStatusView = view<AdminBuildStatus>()({ id: true, status: true, terminal: true });
+export const DeploymentLogsView = view<AdminDeploymentLogs>()({ id: true, data: true });
+export const buildLogsRequest = (id: string, since: number) =>
+  ({ buildLogs: { view: BuildLogsView, args: { id, since } } }) as const;
+export const buildStatusRequest = (id: string) =>
+  ({ buildStatus: { view: BuildStatusView, args: { id } } }) as const;
+export const deploymentLogsRequest = (id: string, since: string, limit: number) =>
+  ({ deploymentLogs: { view: DeploymentLogsView, args: { id, since, limit } } }) as const;
+
+export const UsersPageView = view<AdminUsersPage>()({
+  id: true,
+  users: true,
+  search: true,
+  page: true,
+  totalPages: true,
+});
+export const ProjectsPageView = view<AdminProjectsPage>()({
+  id: true,
+  projects: true,
+  search: true,
+  page: true,
+  totalPages: true,
+  siteDomain: true,
+});
+export const DeploymentsPageView = view<AdminDeploymentsPage>()({
+  id: true,
+  deployments: true,
+  search: true,
+  page: true,
+  totalPages: true,
+  tz: true,
+});
+
+export const usersPageRequest = (path: string) =>
+  ({
+    usersPage: { view: UsersPageView, args: { path } },
+  }) as const;
+export const projectsPageRequest = (path: string) =>
+  ({
+    projectsPage: { view: ProjectsPageView, args: { path } },
+  }) as const;
+export const deploymentsPageRequest = (path: string) =>
+  ({
+    deploymentsPage: { view: DeploymentsPageView, args: { path } },
+  }) as const;
+
+export const UserDetailView = view<AdminUserDetail>()({
+  id: true,
+  user: true as never,
+  projects: true,
+  deploysToday: true,
+  usage: true as never,
+});
+export const ProjectDetailView = view<AdminProjectDetail>()({
+  id: true,
+  project: true as never,
+  deployments: true,
+  resources: true,
+  owner: true as never,
+  domains: true,
+  builds: true,
+  cfAccountId: true,
+  deployUrl: true,
+  tz: true,
+});
+export const DeploymentDetailView = view<AdminDeploymentDetail>()({
+  id: true,
+  deployment: true as never,
+  project: true as never,
+  manifest: true as never,
+  canCancel: true,
+  tz: true,
+});
+export const BuildDetailView = view<AdminBuildDetail>()({
+  id: true,
+  build: true as never,
+  tz: true,
+});
+
+export const userDetailRequest = (path: string) =>
+  ({
+    userDetail: { view: UserDetailView, args: { path } },
+  }) as const;
+export const projectDetailRequest = (path: string) =>
+  ({
+    projectDetail: { view: ProjectDetailView, args: { path } },
+  }) as const;
+export const deploymentDetailRequest = (path: string) =>
+  ({
+    deploymentDetail: { view: DeploymentDetailView, args: { path } },
+  }) as const;
+export const buildDetailRequest = (path: string) =>
+  ({
+    buildDetail: { view: BuildDetailView, args: { path } },
+  }) as const;
+
+export const CliVersionsView = view<AdminCliVersions>()({
+  id: true,
+  allTime: true,
+  last30Days: true,
+  tz: true,
+});
+export const SignupView = view<AdminSignup>()({
+  id: true,
+  enabled: true,
+  entries: true,
+  admission: true as never,
+  connections: true,
+});
+export const InvitationsView = view<AdminInvitations>()({
+  id: true,
+  invitations: true,
+  page: true,
+  totalPages: true,
+});
+
+export const cliVersionsRequest = (path: string) =>
+  ({
+    cliVersions: { view: CliVersionsView, args: { path } },
+  }) as const;
+export const signupRequest = (path: string) =>
+  ({
+    signupControl: { view: SignupView, args: { path } },
+  }) as const;
+export const invitationsRequest = (path: string) =>
+  ({
+    invitations: { view: InvitationsView, args: { path } },
+  }) as const;
+
+export const AuthSettingsView = view<AdminAuthSettings>()({
+  id: true,
+  data: true as never,
+  tested: true as never,
+  admission: true as never,
+});
+export const AuthNewView = view<AdminAuthNew>()({
+  id: true,
+  kind: true,
+  connectionId: true,
+  callbackUrl: true,
+});
+export const AuthEditView = view<AdminAuthEdit>()({
+  id: true,
+  configuration: true as never,
+  label: true,
+  revision: true,
+  callbackUrl: true,
+});
+
+export const authSettingsRequest = (path: string) =>
+  ({
+    authSettings: { view: AuthSettingsView, args: { path } },
+  }) as const;
+export const authNewRequest = (path: string) =>
+  ({
+    authNew: { view: AuthNewView, args: { path } },
+  }) as const;
+export const authEditRequest = (path: string) =>
+  ({
+    authEdit: { view: AuthEditView, args: { path } },
+  }) as const;
+
+export const EmailSettingsView = view<AdminEmailSettings>()({
+  id: true,
+  policy: true as never,
+  management: true as never,
+  senderDomain: true,
+});
+export const EmailProjectView = view<AdminEmailProject>()({
+  id: true,
+  projectId: true,
+  project: true as never,
+  month: true,
+  attempts: true,
+  received: true,
+  monthlyLimit: true,
+  burstLimit: true,
+  isSuspended: true,
+  domains: true,
+  destinations: true,
+  senderDomain: true,
+  tz: true,
+});
+
+export const emailSettingsRequest = (path: string) =>
+  ({
+    emailSettings: { view: EmailSettingsView, args: { path } },
+  }) as const;
+export const emailProjectRequest = (path: string) =>
+  ({
+    emailProject: { view: EmailProjectView, args: { path } },
+  }) as const;

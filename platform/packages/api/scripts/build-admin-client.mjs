@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { fate } from 'react-fate/vite';
 import { build } from 'vite';
 
 const apiRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -9,6 +10,14 @@ await build({
   configFile: false,
   root: apiRoot,
   publicDir: false,
+  plugins: [
+    fate({
+      module: './src/admin/fate/server.ts',
+      transport: 'native',
+      generatedFile: 'src/admin/fate/client.generated.ts',
+      tsconfigFile: false,
+    }),
+  ],
   define: { 'process.env.NODE_ENV': JSON.stringify('production') },
   resolve: {
     alias: {

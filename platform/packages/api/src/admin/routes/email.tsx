@@ -30,6 +30,7 @@ import { OperatorError } from '../../operator/common.ts';
 import { setOperatorEmailPolicy, setOperatorEmailSettings } from '../../operator/email-routes.ts';
 import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { runEmailDestinationCleanup } from '../../provisioning/email-destination-cleanup.ts';
+import { renderFateDetailPage, renderFateListPage } from '../fate/render.ts';
 import { renderOperationError } from '../operation-error.tsx';
 import { renderAdminPage } from '../react/server.ts';
 
@@ -75,8 +76,7 @@ async function incompleteEmailOperationResponse(
   );
 }
 
-// GET /email/ — installation-wide recipient policy and domain management
-app.get('/', async (context) => {
+export async function loadEmailSettingsData(context: Context<ApiEnv>) {
   const db = context.get('db');
   // Refresh the best-effort display mirror before showing the authoritative SQL policy.
   await repairEmailRecipientPolicyMirror(db, context.env.ROUTING);
@@ -84,14 +84,15 @@ app.get('/', async (context) => {
     getEmailRecipientPolicy(db),
     getEmailDomainManagement(db),
   ]);
-  return renderAdminPage(context, 'email', 'Email', {
-    platformName: getPlatformDisplayName(context.env, context.req.url),
+  return {
     policy,
     management,
     senderDomain: context.env.EMAIL_SENDER_DOMAIN,
-    username: context.get('user').login,
-  });
-});
+  };
+}
+
+// GET /email/ — installation-wide recipient policy and domain management
+app.get('/', (context) => renderFateListPage(context, 'email'));
 
 // POST /email/policy — the shared-sender recipient policy
 app.post('/policy', async (context) => {
@@ -122,12 +123,10 @@ app.post('/settings', async (context) => {
   );
 });
 
-// GET /email/:projectId — usage, caps, kill switch, destinations
-app.get('/:projectId', async (context) => {
-  const projectId = context.req.param('projectId');
+export async function loadEmailProjectData(context: Context<ApiEnv>, projectId: string) {
   const project = await getProject(context.get('db'), projectId);
   if (!project) {
-    return context.html('<h1>Project not found</h1>', 404);
+    throw new OperatorError(404, 'Project not found');
   }
 
   const month = monthBucket();
@@ -209,7 +208,7 @@ app.get('/:projectId', async (context) => {
   const senderDomain = context.env.EMAIL_SENDER_DOMAIN;
   const tz = (context.req.raw.cf?.timezone as string | undefined) ?? undefined;
 
-  return renderAdminPage(context, 'emailProject', `Email - ${project.slug}`, {
+  return {
     projectId,
     project,
     month,
@@ -222,10 +221,11 @@ app.get('/:projectId', async (context) => {
     destinations,
     senderDomain,
     tz,
-    platformName: getPlatformDisplayName(context.env, context.req.url),
-    username: context.get('user').login,
-  });
-});
+  };
+}
+
+// GET /email/:projectId — usage, caps, kill switch, destinations
+app.get('/:projectId', (context) => renderFateDetailPage(context, 'emailProject'));
 
 // POST /email/:projectId/domains/add — register a domain for the project as
 // an administrator (design doc 0078, "Administrator-managed domains"). The

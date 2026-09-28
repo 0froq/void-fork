@@ -3,6 +3,7 @@ import type { Context } from 'hono';
 import type { PageObject } from 'void/pages-protocol';
 import type { ApiEnv } from '../../env.ts';
 import { formatPlatformPageTitle } from '../../platform-identity.ts';
+import type { createFateClient } from '../fate/client.generated.ts';
 import { adminComponents, adminLayoutTree, type AdminPageId } from './pages.ts';
 
 export async function renderAdminPage(
@@ -10,14 +11,21 @@ export async function renderAdminPage(
   component: AdminPageId,
   title: string,
   props: Record<string, unknown>,
-  options: { status?: number } = {},
+  options: {
+    status?: number;
+    fateSnapshot?: Parameters<ReturnType<typeof createFateClient>['hydrate']>[0];
+  } = {},
 ): Promise<Response> {
   const platformName = String(props.platformName ?? 'Void');
   const pageObj: PageObject = {
     component,
     props,
     params: {},
-    shared: {},
+    shared: {
+      adminPageUrl: new URL(context.req.url).pathname + new URL(context.req.url).search,
+      adminFateSession: `${context.get('user')?.id ?? 'guest'}:${context.get('humanSession')?.id ?? 'none'}`,
+      ...(options.fateSnapshot ? { adminFateSnapshot: options.fateSnapshot } : {}),
+    },
     url: new URL(context.req.url).pathname + new URL(context.req.url).search,
     errors: null,
     head: {
