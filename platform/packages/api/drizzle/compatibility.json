@@ -33,6 +33,10 @@
     {
       "platformVersion": "0.20.3",
       "schemaDigest": "089431e230970d03afa429c102613598e88371155cb693c076002c5d632bb0b6"
+    },
+    {
+      "platformVersion": "0.20.3",
+      "schemaDigest": "408364e61c4b7d83def4030a1c11e8b9b07fc21dd3bffe6529e1b7d3759979b6"
     }
   ]
 }

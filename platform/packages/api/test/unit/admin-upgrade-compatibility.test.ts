@@ -91,3 +91,32 @@ it('allows rollback to the 0.20.3 schema after adding invitation delivery status
     schemaDigest,
   });
 });
+
+it('allows rollback to the 0.20.3 schema after adding direct member grants', () => {
+  const root = resolve(import.meta.dirname, '../../drizzle');
+  const journal = JSON.parse(readFileSync(resolve(root, 'meta/_journal.json'), 'utf8')) as {
+    entries: Array<{ tag: string; idx: number; when: number }>;
+  };
+  const compatibility = JSON.parse(readFileSync(resolve(root, 'compatibility.json'), 'utf8')) as {
+    lineage: string;
+    rollbackSafeFrom: Array<{ platformVersion: string; schemaDigest: string }>;
+  };
+  const previous = journal.entries.filter((entry) => entry.idx <= 49);
+  expect(previous.at(-1)?.tag).toBe('0049_invitation_delivery_status');
+  const schemaDigest = platformDatabaseSchemaDigest(
+    compatibility.lineage,
+    previous.map((entry) => ({
+      index: entry.idx,
+      tag: entry.tag,
+      timestampMillis: entry.when,
+      sha256: createHash('sha256')
+        .update(readFileSync(resolve(root, `${entry.tag}.sql`)))
+        .digest('hex'),
+    })),
+  );
+  expect(schemaDigest).toBe('408364e61c4b7d83def4030a1c11e8b9b07fc21dd3bffe6529e1b7d3759979b6');
+  expect(compatibility.rollbackSafeFrom).toContainEqual({
+    platformVersion: '0.20.3',
+    schemaDigest,
+  });
+});
