@@ -752,7 +752,7 @@ Typed AI client for Cloudflare AI models and provider-native AI Gateway requests
 ```ts
 import { ai } from 'void/ai';
 
-const result = await ai.run('@cf/meta/llama-3.1-8b-instruct', {
+const result = await ai.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
   messages: [{ role: 'user', content: 'Summarize this release note.' }],
 });
 

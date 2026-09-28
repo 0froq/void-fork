@@ -408,7 +408,7 @@ import { ai } from 'void/ai';
 
 export const POST = defineHandler(async (c) => {
   // Workers AI -- uses the inferred or configured AI binding directly
-  const summary = await ai.run('@cf/meta/llama-3.1-8b-instruct', {
+  const summary = await ai.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
     prompt: 'Summarize the changelog.',
   });
 

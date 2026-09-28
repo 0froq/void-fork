@@ -127,7 +127,7 @@ import { eventHandler } from 'h3';
 import { ai } from 'void/ai';
 
 export default eventHandler(async () => {
-  return ai.run('@cf/meta/llama-3.1-8b-instruct', {
+  return ai.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
     prompt: 'Summarize the latest news',
   });
 });

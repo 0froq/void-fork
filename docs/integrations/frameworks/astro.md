@@ -126,7 +126,7 @@ import type { APIRoute } from 'astro';
 import { ai } from 'void/ai';
 
 export const POST: APIRoute = async () => {
-  const result = await ai.run('@cf/meta/llama-3.1-8b-instruct', {
+  const result = await ai.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
     prompt: 'Summarize the latest news',
   });
   return Response.json(result);
