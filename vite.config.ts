@@ -78,6 +78,7 @@ export default defineConfig({
       '.svelte-kit/**',
       'packages/void/docs/**',
       'packages/void/skills/void/docs/**',
+      'platform/packages/api/src/admin/fate/client.generated.ts',
       'playground/**/.astro/**',
       'playground/**/.nuxt/**',
       'playground/**/.output/**',
