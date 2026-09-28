@@ -14,9 +14,11 @@ const temporaryRoot = mkdtempSync(join(tmpdir(), 'void-platform-runtime-'));
 const wrangler = fileURLToPath(import.meta.resolve('wrangler'));
 const drizzleRoot = join(repositoryRoot, 'platform', 'packages', 'api', 'drizzle');
 const apiRoot = join(repositoryRoot, 'platform', 'packages', 'api');
-const { parsePlatformRuntimeManifest, platformDatabaseSchemaDigest } = await import(
-  pathToFileURL(join(packageRoot, 'dist', 'installer.mjs')).href
-);
+const {
+  PLATFORM_ADMIN_CLIENT_ASSET_PATH,
+  parsePlatformRuntimeManifest,
+  platformDatabaseSchemaDigest,
+} = await import(pathToFileURL(join(packageRoot, 'dist', 'installer.mjs')).href);
 const { PLATFORM_USAGE_PROTOCOL_VERSION } = await import(
   pathToFileURL(join(packageRoot, 'dist', 'index.mjs')).href
 );
@@ -48,7 +50,6 @@ const sourceAliases = {
   'void/pages-client': join(repositoryRoot, 'packages', 'void', 'src', 'pages', 'client.ts'),
   'void/pages-head': join(repositoryRoot, 'packages', 'void', 'src', 'pages', 'head.ts'),
   'void/pages-server': join(repositoryRoot, 'packages', 'void', 'src', 'pages', 'serialize.ts'),
-  'void:admin-client-script': join(apiRoot, 'dist', 'admin-client.txt'),
 };
 
 try {
@@ -68,6 +69,10 @@ try {
   }
   rmSync(runtimeRoot, { force: true, recursive: true });
   mkdirSync(runtimeRoot, { recursive: true });
+  const adminClientAsset = join(runtimeRoot, PLATFORM_ADMIN_CLIENT_ASSET_PATH);
+  mkdirSync(dirname(adminClientAsset), { recursive: true });
+  cpSync(join(apiRoot, 'dist', 'admin-assets', 'admin', 'client.js'), adminClientAsset);
+  const adminClientContents = readFileSync(adminClientAsset);
   const artifacts = {};
   const controller = buildSandboxController(temporaryRoot);
 
@@ -117,6 +122,13 @@ try {
   const sourceRevision = resolvePlatformSourceRevision({ repositoryRoot });
   const manifest = parsePlatformRuntimeManifest({
     artifacts,
+    assets: {
+      adminClient: {
+        path: PLATFORM_ADMIN_CLIENT_ASSET_PATH,
+        sha256: createHash('sha256').update(adminClientContents).digest('hex'),
+        size: adminClientContents.byteLength,
+      },
+    },
     applicationRoutingVersion: 1,
     authenticationProtocolVersion: 1,
     emailProtocolVersion: 1,

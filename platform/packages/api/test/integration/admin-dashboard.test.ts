@@ -130,11 +130,6 @@ describe('auth middleware', () => {
     expect(navigation.headers.get('Vary')).toBe('X-VoidPages');
     expect(navigation.headers.get('Cache-Control')).toBe('private, no-store');
     expect(((await navigation.json()) as { component: string }).component).toBe('users');
-
-    expect((await req('/admin/client.js')).status).toBe(200);
-    const client = await req('/admin/client.js', admin.adminJwt);
-    expect(client.status).toBe(200);
-    expect(client.headers.get('Content-Type')).toContain('text/javascript');
   });
 
   test('does not expose the retired platform operations pages', async () => {

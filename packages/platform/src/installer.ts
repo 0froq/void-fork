@@ -9,6 +9,9 @@ export type PlatformRuntimeArtifact = Readonly<{
   size: number;
 }>;
 
+export const PLATFORM_ADMIN_ASSETS_DIRECTORY = 'api/assets';
+export const PLATFORM_ADMIN_CLIENT_ASSET_PATH: string = `${PLATFORM_ADMIN_ASSETS_DIRECTORY}/admin/client.js`;
+
 export type PlatformRuntimeMigration = Readonly<{
   index: number;
   sha256: string;
@@ -37,6 +40,7 @@ export type PlatformRuntimeManifest = Readonly<{
     Record<'api' | 'dispatch' | 'proxy' | 'tail', PlatformRuntimeArtifact> &
       Partial<Record<'emailGateway', PlatformRuntimeArtifact>>
   >;
+  assets?: Readonly<{ adminClient: PlatformRuntimeArtifact }>;
   emailProtocolVersion?: 1;
   database: PlatformRuntimeDatabaseManifest;
   platformVersion: string;
@@ -107,6 +111,17 @@ export function parsePlatformRuntimeManifest(value: unknown): PlatformRuntimeMan
   const artifacts = Object.fromEntries(
     artifactNames.map((name) => [name, parseArtifact(artifactsValue[name], name)]),
   ) as PlatformRuntimeManifest['artifacts'];
+  let assets: PlatformRuntimeManifest['assets'];
+  if (root.assets !== undefined) {
+    const assetsValue = record(root.assets, 'runtime manifest assets');
+    const adminClient = parseArtifact(assetsValue.adminClient, 'admin client asset');
+    if (adminClient.path !== PLATFORM_ADMIN_CLIENT_ASSET_PATH) {
+      throw new Error(
+        `runtime manifest admin client asset path must be ${PLATFORM_ADMIN_CLIENT_ASSET_PATH}`,
+      );
+    }
+    assets = { adminClient };
+  }
   const databaseValue = record(root.database, 'runtime manifest database');
   if (databaseValue.protocolVersion !== 1) {
     throw new Error('runtime manifest database protocolVersion must be 1');
@@ -176,6 +191,7 @@ export function parsePlatformRuntimeManifest(value: unknown): PlatformRuntimeMan
   }
   return {
     artifacts,
+    ...(assets ? { assets } : {}),
     ...(root.authenticationProtocolVersion === 1
       ? { authenticationProtocolVersion: 1 as const }
       : {}),

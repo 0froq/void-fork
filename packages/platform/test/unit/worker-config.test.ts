@@ -74,6 +74,7 @@ describe('platform usage queue bindings', () => {
         tail: 'tail.mjs',
         dispatch: 'dispatch.mjs',
       },
+      runtimeApiAssetsDirectory: '/runtime/api/assets',
     });
     const expected = {
       EMAIL_SHARED_ACCOUNT_ID: 'account',
@@ -93,6 +94,8 @@ describe('platform usage queue bindings', () => {
     expect(configs.proxy.workers_dev).toBe(false);
     expect(configs.emailGateway.workers_dev).toBe(true);
     expect(configs.api.compatibility_flags).toContain('global_fetch_strictly_public');
+    expect(configs.api.assets).toEqual({ directory: '/runtime/api/assets' });
+    expect(configs.proxy.assets).toBeUndefined();
     expect(configs.api.vars).toHaveProperty(
       'EMAIL_GATEWAY_ORIGIN',
       'https://email-gateway.account.workers.dev',
@@ -168,6 +171,7 @@ describe('platform usage queue bindings', () => {
         ...(publicFetch ? ['global_fetch_strictly_public'] : []),
       ]);
       expect(configs.api.services).toBeUndefined();
+      expect(configs.api.assets).toBeUndefined();
       expect(configs.proxy.compatibility_flags).toEqual(['nodejs_compat']);
       expect(configs.proxy.services).toEqual([
         { binding: 'API', service: deployment.resources.apiWorker },

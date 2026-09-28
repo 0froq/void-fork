@@ -29,6 +29,7 @@ export function createPlatformWorkerConfigs(input: {
   runtimeEntrypoints: Readonly<
     Record<'api' | 'dispatch' | 'proxy' | 'tail' | 'emailGateway', string>
   >;
+  runtimeApiAssetsDirectory?: string;
   trafficState?: 'enabled' | 'sandbox-drain' | 'staging';
 }): PlatformWorkerConfigSet {
   const {
@@ -102,6 +103,9 @@ export function createPlatformWorkerConfigs(input: {
     name: names.apiWorker,
     main: runtimeEntrypoints.api,
     no_bundle: true,
+    ...(input.runtimeApiAssetsDirectory
+      ? { assets: { directory: input.runtimeApiAssetsDirectory } }
+      : {}),
     compatibility_flags: [
       'nodejs_compat',
       ...(fetchWorkersDev ? ['global_fetch_strictly_public'] : []),

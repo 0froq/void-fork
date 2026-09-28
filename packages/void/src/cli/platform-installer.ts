@@ -43,7 +43,11 @@ import {
   type PlatformAccessProtection,
   type PlatformLoginKind,
 } from '@void/platform';
-import { platformDatabaseSchemaDigest, resolvePlatformRuntime } from '@void/platform/installer';
+import {
+  PLATFORM_ADMIN_ASSETS_DIRECTORY,
+  platformDatabaseSchemaDigest,
+  resolvePlatformRuntime,
+} from '@void/platform/installer';
 import type {
   PlatformRuntime,
   PlatformRuntimeDatabaseManifest,
@@ -1602,6 +1606,11 @@ export async function installPlatform(
         zone: zoneId,
       },
       runtimeEntrypoints: entrypoints as Record<PlatformWorkerKey, string>,
+      ...(runtime.assets
+        ? {
+            runtimeApiAssetsDirectory: join(runtimeDirectory, PLATFORM_ADMIN_ASSETS_DIRECTORY),
+          }
+        : {}),
     };
     const requiresStagedCommit = !preserveDisabled && requiresTrafficGuard;
     const enabledConfigs = createPlatformWorkerConfigs({
@@ -5100,16 +5109,19 @@ export function verifyRuntimeArtifacts(
   runtimeDirectory: string,
   manifest: PlatformRuntimeManifest,
 ): void {
-  for (const artifact of Object.values(manifest.artifacts)) {
+  for (const artifact of [
+    ...Object.values(manifest.artifacts),
+    ...(manifest.assets ? [manifest.assets.adminClient] : []),
+  ]) {
     const path = join(runtimeDirectory, artifact.path);
     let contents: Buffer;
     try {
       contents = readFileSync(path);
     } catch (error) {
-      throw new Error(`platform: Runtime Worker artifact is missing: ${errorMessage(error)}`);
+      throw new Error(`platform: Runtime artifact is missing: ${errorMessage(error)}`);
     }
     if (contents.byteLength !== artifact.size || hash(contents) !== artifact.sha256) {
-      throw new Error(`platform: Runtime Worker artifact failed integrity verification: ${path}.`);
+      throw new Error(`platform: Runtime artifact failed integrity verification: ${path}.`);
     }
   }
   verifyPlatformDatabaseArtifacts(runtimeDirectory, manifest.database);

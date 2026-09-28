@@ -424,6 +424,9 @@ describe('platform installer', () => {
           expect(api.secrets).toHaveProperty('PLATFORM_AUTH_SETUP_TOKEN', secrets.authSetupToken);
           expect(api.secrets).not.toHaveProperty('GITHUB_CLIENT_SECRET');
           expect(api.config.vars).toHaveProperty('PLATFORM_AUTH_DATABASE_UNCACHED', 'true');
+          expect(api.config.assets).toEqual({
+            directory: join(getPlatformRuntimeDirectory(), 'api', 'assets'),
+          });
           return { setupPending: true, expiresAt: new Date(Date.now() + 1_800_000).toISOString() };
         },
       });

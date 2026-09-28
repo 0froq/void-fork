@@ -1,21 +1,10 @@
 import { renderReactPage } from '@void/react/pages-server';
 import type { Context } from 'hono';
 import type { PageObject } from 'void/pages-protocol';
-import adminClientScript from 'void:admin-client-script';
 import type { ApiEnv } from '../../env.ts';
 import { formatPlatformPageTitle } from '../../platform-identity.ts';
 import { adminComponents, type AdminPageId } from './pages.ts';
 import { ADMIN_CSS } from './views/Layout.tsx';
-
-export function serveAdminClient(): Response {
-  return new Response(adminClientScript, {
-    headers: {
-      'Content-Type': 'text/javascript; charset=utf-8',
-      'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
-    },
-  });
-}
 
 export async function renderAdminPage(
   context: Context<ApiEnv>,

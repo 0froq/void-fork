@@ -9,7 +9,6 @@ import { eq, lt, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { adminAuthMiddleware } from './admin/middleware/auth.ts';
 import { adminCsrfMiddleware } from './admin/middleware/csrf.ts';
-import { serveAdminClient } from './admin/react/server.ts';
 import adminAuthConfig from './admin/routes/auth-config.tsx';
 import adminBuilds from './admin/routes/builds.tsx';
 import adminDeployments from './admin/routes/deployments.tsx';
@@ -486,7 +485,6 @@ app.route('/operator/v1', operatorApi);
 
 // Admin dashboard (HTML, cookie-based auth)
 app.route('/admin', adminLogin);
-app.get('/admin/client.js', () => serveAdminClient());
 app.use('/admin/*', adminAuthMiddleware);
 app.use('/admin/*', adminCsrfMiddleware);
 app.get('/admin/', adminAuthMiddleware, dashboardHandler);

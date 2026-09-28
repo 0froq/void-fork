@@ -20,16 +20,15 @@ await build({
     dedupe: ['react', 'react-dom'],
   },
   build: {
-    outDir: 'dist',
-    emptyOutDir: false,
+    outDir: 'dist/admin-assets/admin',
+    emptyOutDir: true,
     minify: true,
     sourcemap: false,
     lib: {
       entry: source('platform/packages/api/src/admin/react/client.ts'),
       name: 'VoidAdmin',
       formats: ['iife'],
-      // Wrangler imports .txt as text; this remains JavaScript served to the browser.
-      fileName: () => 'admin-client.txt',
+      fileName: () => 'client.js',
     },
   },
 });

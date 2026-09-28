@@ -54,7 +54,11 @@ describe('platform runtime manifest', () => {
     expect(digest(readFileSync(join(runtimeDirectory, 'drizzle', 'meta', '_journal.json')))).toBe(
       manifest.database.journalSha256,
     );
-    for (const artifact of Object.values(manifest.artifacts)) {
+    expect(manifest.assets?.adminClient.path).toBe('api/assets/admin/client.js');
+    for (const artifact of [
+      ...Object.values(manifest.artifacts),
+      ...Object.values(manifest.assets ?? {}),
+    ]) {
       const contents = readFileSync(join(runtimeDirectory, artifact.path));
       expect(contents.byteLength).toBe(artifact.size);
       expect(digest(contents)).toBe(artifact.sha256);
@@ -85,6 +89,14 @@ describe('platform runtime manifest', () => {
     expect(() =>
       parsePlatformRuntimeManifest({
         ...manifest,
+        assets: {
+          adminClient: { ...manifest.assets?.adminClient, path: 'other/client.js' },
+        },
+      }),
+    ).toThrow('admin client asset path must be');
+    expect(() =>
+      parsePlatformRuntimeManifest({
+        ...manifest,
         database: {
           ...manifest.database,
           rollbackSafeFrom: [
@@ -108,6 +120,8 @@ describe('platform runtime manifest', () => {
     ).toThrow('safetyProtocols.sandboxDrain must be 0, 1, 2, or 3');
     const { usageProtocolVersion: _usageProtocolVersion, ...legacy } = manifest;
     expect(parsePlatformRuntimeManifest(legacy).usageProtocolVersion).toBe(0);
+    const { assets: _assets, ...legacyAssets } = manifest;
+    expect(parsePlatformRuntimeManifest(legacyAssets).assets).toBeUndefined();
     const { safetyProtocols: _safetyProtocols, ...legacySafety } = manifest;
     expect(parsePlatformRuntimeManifest(legacySafety).safetyProtocols).toEqual({ sandboxDrain: 0 });
     const { emailGateway: _gateway, ...fourArtifacts } = manifest.artifacts;
@@ -152,19 +166,30 @@ describe('platform runtime manifest', () => {
     const { Miniflare, convertV4MiniflareOptions } = (await import(
       pathToFileURL(miniflarePath).href
     )) as MiniflareModule;
-    const miniflare = new Miniflare(
-      convertV4MiniflareOptions({
-        bindings: { PLATFORM_TRAFFIC_STATE: 'staging' },
-        compatibilityDate: '2026-02-24',
-        compatibilityFlags: ['nodejs_compat'],
-        modules: true,
-        scriptPath: join(runtimeDirectory, runtime.artifacts.api.path),
-      }),
-    );
+    const miniflareOptions = convertV4MiniflareOptions({
+      bindings: { PLATFORM_TRAFFIC_STATE: 'staging' },
+      compatibilityDate: '2026-02-24',
+      compatibilityFlags: ['nodejs_compat'],
+      modules: true,
+      scriptPath: join(runtimeDirectory, runtime.artifacts.api.path),
+      assets: { directory: join(runtimeDirectory, 'api', 'assets') },
+    });
+    const workers = miniflareOptions.workers as Array<{ config: Record<string, unknown> }>;
+    // The legacy-options converter omits this flag, though Wrangler sets it
+    // when a Worker entrypoint and assets directory are deployed together.
+    workers[0]!.config.assets = {
+      directory: join(runtimeDirectory, 'api', 'assets'),
+      hasUserWorker: true,
+    };
+    const miniflare = new Miniflare(miniflareOptions);
 
     try {
       await miniflare.ready;
       expect((await miniflare.dispatchFetch('http://localhost/health')).status).toBe(503);
+      const client = await miniflare.dispatchFetch('http://localhost/admin/client.js');
+      expect(client.status).toBe(200);
+      expect(client.headers.get('Content-Type')).toContain('text/javascript');
+      expect(digest(Buffer.from(await client.text()))).toBe(runtime.assets?.adminClient.sha256);
     } finally {
       await miniflare.dispose();
     }
@@ -179,6 +204,10 @@ describe('platform runtime manifest', () => {
       const apiPath = join(runtimeDirectory, runtime.manifest.artifacts.api.path);
       writeFileSync(apiPath, `${readFileSync(apiPath, 'utf8')}\n// changed\n`);
 
+      expect(() => loadPlatformRuntime(runtimeDirectory)).toThrow('integrity verification');
+      cpSync(getPlatformRuntimeDirectory(), runtimeDirectory, { recursive: true });
+      const assetPath = join(runtimeDirectory, runtime.manifest.assets!.adminClient.path);
+      writeFileSync(assetPath, `${readFileSync(assetPath, 'utf8')}\n// changed\n`);
       expect(() => loadPlatformRuntime(runtimeDirectory)).toThrow('integrity verification');
     } finally {
       rmSync(temporary, { force: true, recursive: true });
