@@ -280,7 +280,7 @@ describe('GET /admin/email/:projectId', () => {
     expect(html).toContain(slug);
     expect(visibleMarkup(html)).toContain('7 / 200');
     expect(html).toContain('Outbound recipient attempts');
-    expect(html).toContain('Inbound (received)</th><td>3</td>');
+    expect(html).toMatch(/Inbound \(received\)<\/th><td[^>]*>3<\/td>/);
     expect(visibleMarkup(html)).toContain('(default)');
     expect(html).toContain('Suspend email');
     expect(html).toContain('No destinations yet.');
@@ -689,7 +689,7 @@ describe('admin email domain controls', () => {
     expect(add.status).toBe(302);
     const html = await (await get(`/admin/email/${projectId}`, adminJwt)).text();
     expect(html).toContain('mail.example.com');
-    expect(html).toContain('rotate secret');
+    expect(html).toContain('Rotate secret');
     expect(html).not.toContain(env.CF_API_TOKEN);
     expect(await env.db.select().from(emailZoneConnections)).toHaveLength(1);
     const rotate = await post(

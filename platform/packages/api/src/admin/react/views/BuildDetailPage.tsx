@@ -1,4 +1,12 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+} from '@astryxdesign/core/Table';
 import type { Build } from '../../../types.ts';
 import { BuildLogs } from './BuildLogs.tsx';
 import { formatDateTime } from './format.ts';
@@ -19,72 +27,74 @@ export function BuildDetailPage({
     <Layout platformName={platformName} title={`Build ${build.id}`} username={username}>
       <h1>Build {build.id}</h1>
 
-      <table>
-        <tbody>
-          <tr>
-            <th>Status</th>
-            <td>{build.status}</td>
-          </tr>
-          <tr>
-            <th>Project</th>
-            <td>
+      <Table>
+        <TableBody>
+          <TableRow>
+            <TableHeaderCell>Status</TableHeaderCell>
+            <TableCell>{build.status}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Project</TableHeaderCell>
+            <TableCell>
               <a href={`/admin/projects/${build.project_id}`}>{build.project_id}</a>
-            </td>
-          </tr>
-          <tr>
-            <th>Executor</th>
-            <td>{build.executor}</td>
-          </tr>
-          <tr>
-            <th>Instance Type</th>
-            <td>{build.instance_type ?? '-'}</td>
-          </tr>
-          <tr>
-            <th>Commit</th>
-            <td>{build.commit_sha ? build.commit_sha.slice(0, 7) : '-'}</td>
-          </tr>
-          <tr>
-            <th>Branch</th>
-            <td>{build.branch ?? '-'}</td>
-          </tr>
-          <tr>
-            <th>Deployment</th>
-            <td>
+            </TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Executor</TableHeaderCell>
+            <TableCell>{build.executor}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Instance Type</TableHeaderCell>
+            <TableCell>{build.instance_type ?? '-'}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Commit</TableHeaderCell>
+            <TableCell>{build.commit_sha ? build.commit_sha.slice(0, 7) : '-'}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Branch</TableHeaderCell>
+            <TableCell>{build.branch ?? '-'}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Deployment</TableHeaderCell>
+            <TableCell>
               {build.deployment_id ? (
                 <a href={`/admin/deployments/${build.deployment_id}`}>{build.deployment_id}</a>
               ) : (
                 '-'
               )}
-            </td>
-          </tr>
+            </TableCell>
+          </TableRow>
           {build.error ? (
-            <tr>
-              <th>Error</th>
-              <td>
+            <TableRow>
+              <TableHeaderCell>Error</TableHeaderCell>
+              <TableCell>
                 <span style="color: red; max-width: 600px; display: inline-block; word-break: break-word">
                   {build.error}
                 </span>
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ) : null}
-          <tr>
-            <th>Exit Code</th>
-            <td>{build.exit_code ?? '-'}</td>
-          </tr>
-          <tr>
-            <th>Started</th>
-            <td>{build.started_at ? formatDateTime(build.started_at, tz) : '-'}</td>
-          </tr>
-          <tr>
-            <th>Completed</th>
-            <td>{build.completed_at ? formatDateTime(build.completed_at, tz) : '-'}</td>
-          </tr>
-          <tr>
-            <th>Created</th>
-            <td>{formatDateTime(build.created_at, tz)}</td>
-          </tr>
-        </tbody>
-      </table>
+          <TableRow>
+            <TableHeaderCell>Exit Code</TableHeaderCell>
+            <TableCell>{build.exit_code ?? '-'}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Started</TableHeaderCell>
+            <TableCell>{build.started_at ? formatDateTime(build.started_at, tz) : '-'}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Completed</TableHeaderCell>
+            <TableCell>
+              {build.completed_at ? formatDateTime(build.completed_at, tz) : '-'}
+            </TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Created</TableHeaderCell>
+            <TableCell>{formatDateTime(build.created_at, tz)}</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
 
       {build.executor === 'container' ? (
         <BuildLogs build={build} />

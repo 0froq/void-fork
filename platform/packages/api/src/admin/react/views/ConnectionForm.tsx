@@ -1,5 +1,8 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+
+import { Button } from '@astryxdesign/core/Button';
 import type { PlatformLoginConfiguration } from '@void/platform';
+import { FormTextInput } from './FormControls.tsx';
 const HOME = '/admin/config/auth';
 export function ConnectionForm({
   configuration,
@@ -24,63 +27,64 @@ export function ConnectionForm({
       <input type="hidden" name="revision" value={revision ?? ''} />
       <p>Register this callback URL with the provider:</p>
       <pre>{callbackUrl}</pre>
-      <label>
-        Connection ID{' '}
-        <input
-          name="connectionId"
-          value={configuration.id}
-          readonly={
-            revision !== null || configuration.kind === 'github' || configuration.kind === 'google'
-          }
+      <FormTextInput
+        label="Connection ID"
+        name="connectionId"
+        initialValue={configuration.id}
+        isReadOnly={
+          revision !== null || configuration.kind === 'github' || configuration.kind === 'google'
+        }
+        required
+      />
+      <FormTextInput
+        label="Login button label"
+        name="label"
+        initialValue={configuration.label ?? ''}
+        maxLength={100}
+        required
+      />
+      {(configuration.kind === 'oidc' || configuration.kind === 'cloudflare-access') && (
+        <FormTextInput
+          label="Issuer URL"
+          name="issuer"
+          type="url"
+          initialValue={configuration.issuer ?? ''}
           required
         />
-      </label>
-      <label>
-        Login button label{' '}
-        <input name="label" value={configuration.label ?? ''} required maxlength={100} />
-      </label>
-      {(configuration.kind === 'oidc' || configuration.kind === 'cloudflare-access') && (
-        <label>
-          Issuer URL <input name="issuer" type="url" value={configuration.issuer ?? ''} required />
-        </label>
       )}
-      <label>
-        Client ID <input name="clientId" value={configuration.clientId ?? ''} required />
-      </label>
-      <label>
-        Client secret{' '}
-        <input
-          name="clientSecret"
-          type="password"
-          autocomplete="new-password"
-          required={revision === null}
-        />
-      </label>
+      <FormTextInput
+        label="Client ID"
+        name="clientId"
+        initialValue={configuration.clientId ?? ''}
+        required
+      />
+      <FormTextInput
+        label="Client secret"
+        name="clientSecret"
+        type="password"
+        autoComplete="new-password"
+        required={revision === null}
+      />
       {revision !== null && <p>Leave the secret blank to retain its saved value.</p>}
       {configuration.kind === 'google' && (
-        <label>
-          Allowed Workspace domains{' '}
-          <input
-            name="domains"
-            value={configuration.allowedDomains?.join(', ') ?? ''}
-            placeholder="example.com, example.org"
-          />
-          <small>
-            {' '}
-            Leave blank to allow any Google account to authenticate. Signup remains controlled
-            separately.
-          </small>
-        </label>
+        <FormTextInput
+          label="Allowed Workspace domains"
+          name="domains"
+          initialValue={configuration.allowedDomains?.join(', ') ?? ''}
+          placeholder="example.com, example.org"
+          description="Leave blank to allow any Google account to authenticate. Signup remains controlled separately."
+        />
       )}
       {(configuration.kind === 'oidc' || configuration.kind === 'cloudflare-access') && (
-        <label>
-          Allowed groups{' '}
-          <input name="groups" value={configuration.requiredGroups?.join(', ') ?? ''} />
-          <small> Comma-separated; leave blank to use the provider's access policy.</small>
-        </label>
+        <FormTextInput
+          label="Allowed groups"
+          name="groups"
+          initialValue={configuration.requiredGroups?.join(', ') ?? ''}
+          description="Comma-separated; leave blank to use the provider's access policy."
+        />
       )}
       <p>Save a pending configuration, then test it before enabling it.</p>
-      <button type="submit">Save configuration</button>
+      <Button type="submit" label="Save configuration" />
     </form>
   );
 }

@@ -1,6 +1,17 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+
+import { Button } from '@astryxdesign/core/Button';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+} from '@astryxdesign/core/Table';
 import type { PlatformAdmissionPolicy } from '@void/platform';
 import type { AllowlistEntryStatus } from '../../../db.ts';
+import { FormSelector, FormTextArea, FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 
 function BooleanBadge({ value }: { value: boolean }) {
@@ -40,7 +51,11 @@ export function SignupControlPage({
             {enabled ? 'ON (restricted)' : 'OFF (open)'}
           </strong>
         </span>{' '}
-        <button type="submit">{enabled ? 'Disable' : 'Enable'}</button>
+        <Button
+          type="submit"
+          label={enabled ? 'Disable' : 'Enable'}
+          variant={enabled ? 'destructive' : 'secondary'}
+        />
       </form>
 
       {/* Add entry form */}
@@ -49,19 +64,26 @@ export function SignupControlPage({
         action="/admin/signup-control/add"
         style="margin-bottom: 20px; display: flex; gap: 8px; align-items: flex-start"
       >
-        <select name="type">
-          <option value="github">GitHub username</option>
-          <option value="email">Email / pattern</option>
-        </select>
-        <textarea
+        <FormSelector
+          label="Grant type"
+          name="type"
+          initialValue="github"
+          options={[
+            { value: 'github', label: 'GitHub username' },
+            { value: 'email', label: 'Email / pattern' },
+          ]}
+          width={210}
+        />
+        <FormTextArea
+          label="Pattern"
           name="pattern"
           placeholder="username, teammate@example.com, *@domain.com"
           required
           rows={3}
-          style="width: 360px"
+          width={360}
         />
-        <input type="text" name="note" placeholder="Note (optional)" style="width: 150px" />
-        <button type="submit">Add</button>
+        <FormTextInput label="Note" name="note" placeholder="Optional" width={180} />
+        <Button type="submit" label="Add" />
       </form>
 
       {connections.length > 0 && (
@@ -71,23 +93,27 @@ export function SignupControlPage({
           style="margin-bottom: 20px; display: flex; gap: 8px; align-items: flex-start"
         >
           <input type="hidden" name="type" value="identity" />
-          <select name="connectionId" aria-label="Login connection">
-            {connections.map((connection) => (
-              <option value={connection.id} key={connection.id}>
-                {connection.label} ({connection.id})
-              </option>
-            ))}
-          </select>
-          <input
-            type="text"
+          <FormSelector
+            label="Login connection"
+            name="connectionId"
+            initialValue={connections[0]?.id ?? ''}
+            options={connections.map((connection) => ({
+              value: connection.id,
+              label: `${connection.label} (${connection.id})`,
+            }))}
+            width={250}
+            hasSearch
+          />
+          <FormTextInput
+            label="Provider subject"
             name="subject"
             placeholder="Exact provider subject"
             required
-            maxlength={255}
-            style="width: 360px"
+            maxLength={255}
+            width={360}
           />
-          <input type="text" name="note" placeholder="Note (optional)" style="width: 150px" />
-          <button type="submit">Add identity</button>
+          <FormTextInput label="Note" name="note" placeholder="Optional" width={180} />
+          <Button type="submit" label="Add identity" />
         </form>
       )}
       <p>
@@ -96,51 +122,49 @@ export function SignupControlPage({
       </p>
 
       {/* Entries table */}
-      <table>
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th>Grant</th>
-            <th>Note</th>
-            <th>Accepted</th>
-            <th>Deployed</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table hasHover>
+        <TableHeader>
+          <TableRow>
+            <TableHeaderCell>Type</TableHeaderCell>
+            <TableHeaderCell>Grant</TableHeaderCell>
+            <TableHeaderCell>Note</TableHeaderCell>
+            <TableHeaderCell>Accepted</TableHeaderCell>
+            <TableHeaderCell>Deployed</TableHeaderCell>
+            <TableHeaderCell>Actions</TableHeaderCell>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {entries.map((entry, i) => (
-            <tr
+            <TableRow
               key={
                 entry.type === 'identity'
                   ? `${entry.type}-${entry.connectionId}-${entry.subject}`
                   : `${entry.type}-${entry.pattern}`
               }
             >
-              <td>{entry.type}</td>
-              <td>
+              <TableCell>{entry.type}</TableCell>
+              <TableCell>
                 {entry.type === 'identity'
                   ? `${entry.connectionId}: ${entry.subject}`
                   : entry.pattern}
-              </td>
-              <td>{entry.note || '-'}</td>
-              <td>
+              </TableCell>
+              <TableCell>{entry.note || '-'}</TableCell>
+              <TableCell>
                 <BooleanBadge value={entry.accepted} />
-              </td>
-              <td>
+              </TableCell>
+              <TableCell>
                 <BooleanBadge value={entry.deployed} />
-              </td>
-              <td>
+              </TableCell>
+              <TableCell>
                 <form method="post" action="/admin/signup-control/delete" style="display: inline">
                   <input type="hidden" name="index" value={String(i)} />
-                  <button type="submit" class="danger-sm">
-                    delete
-                  </button>
+                  <Button type="submit" label="Delete" variant="destructive" size="sm" />
                 </form>
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
       {entries.length === 0 && (
         <p>
           <em>

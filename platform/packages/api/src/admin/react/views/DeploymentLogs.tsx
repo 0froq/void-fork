@@ -1,5 +1,8 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
-import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
+import { Button } from '@astryxdesign/core/Button';
+import { Selector } from '@astryxdesign/core/Selector';
+import { useCallback, useEffect, useState } from 'react';
+import { CopyButton } from './CopyButton.tsx';
 import { SearchTypeahead } from './SearchTypeahead.tsx';
 
 type LogEntry = {
@@ -31,7 +34,6 @@ function formatMessage(message: unknown): string {
 }
 
 function LogRow({ entry }: { entry: LogEntry }) {
-  const [copied, setCopied] = useState(false);
   const messages = [
     ...(entry.logs ?? []).map((log) => ({
       level: log.level ?? 'log',
@@ -61,20 +63,9 @@ function LogRow({ entry }: { entry: LogEntry }) {
       <span style={{ color: entry.outcome === 'ok' ? '#16a34a' : '#dc2626' }}>{entry.outcome}</span>
       {messages.length > 0 && (
         <div style="position: relative; margin-top: 4px; margin-left: 24px">
-          <button
-            type="button"
-            style="position: absolute; top: 4px; right: 4px; font-size: 0.7rem; padding: 2px 6px; cursor: pointer; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 3px"
-            onClick={() => {
-              void navigator.clipboard
-                .writeText(messages.map((message) => message.text).join('\n'))
-                .then(() => {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                });
-            }}
-          >
-            {copied ? 'Copied!' : 'Copy'}
-          </button>
+          <div style="position: absolute; top: 4px; right: 4px">
+            <CopyButton text={messages.map((message) => message.text).join('\n')} />
+          </div>
           <pre style="margin: 0; padding: 8px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 4px; font-size: 0.78rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all">
             {messages.map((message, index) => (
               <div key={index}>
@@ -188,39 +179,23 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
     <>
       <h2>Runtime Logs</h2>
       <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center">
-        <label>
-          Time:{' '}
-          <select
-            id="log-since"
-            value={since}
-            onChange={(event: ChangeEvent<HTMLSelectElement>) => setSince(event.target.value)}
-          >
-            {['1h', '6h', '24h', '7d'].map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="button" id="load-logs-btn" onClick={() => void loadLogs()}>
-          Load
-        </button>
-        <label>
-          Count:{' '}
-          <select
-            id="log-count"
-            value={count}
-            onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-              setCount(Number(event.target.value))
-            }
-          >
-            {[100, 200, 300, 400, 500].map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
+        <Selector
+          id="log-since"
+          label="Time"
+          value={since}
+          onChange={setSince}
+          options={['1h', '6h', '24h', '7d']}
+          width={100}
+        />
+        <Button type="button" id="load-logs-btn" label="Load" onClick={() => void loadLogs()} />
+        <Selector
+          id="log-count"
+          label="Count"
+          value={String(count)}
+          onChange={(value: string) => setCount(Number(value))}
+          options={[100, 200, 300, 400, 500].map(String)}
+          width={110}
+        />
         <SearchTypeahead
           label="Filter logs"
           onChange={setFilter}
@@ -232,24 +207,20 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
           ])}
           width={240}
         />
-        <button
+        <Button
           type="button"
           id="live-tail-btn"
           data-base-path={`/admin/deployments/${deploymentId}`}
-          style={{
-            marginLeft: 'auto',
-            borderColor: tailing ? 'red' : undefined,
-            color: tailing ? 'red' : undefined,
-          }}
+          style={{ marginLeft: 'auto' }}
+          label={tailing ? 'Stop Tail' : 'Live Tail'}
+          variant={tailing ? 'destructive' : 'secondary'}
           onClick={() => {
             if (!tailing) {
               setEntries([]);
             }
             setTailing(!tailing);
           }}
-        >
-          {tailing ? 'Stop Tail' : 'Live Tail'}
-        </button>
+        />
       </div>
       <div id="log-entries">
         {error ? (

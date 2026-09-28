@@ -59,7 +59,8 @@ describe('browser authentication configuration', () => {
     const html = await response.text();
     expect(html).toContain('Platform protection:');
     expect(html).toContain('Login methods');
-    expect(html).toContain('Company-approved users');
+    expect(html).toContain('Signup policy');
+    expect(html).toContain('name="mode" value="public"');
     expect(html).not.toContain(env.GITHUB_CLIENT_SECRET);
     expect(html).not.toContain(env.GOOGLE_CLIENT_SECRET);
     const editor = await (await request(`${home}/connections/google`)).text();

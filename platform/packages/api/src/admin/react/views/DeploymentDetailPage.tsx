@@ -1,5 +1,17 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+
+import { Button } from '@astryxdesign/core/Button';
+import { Collapsible } from '@astryxdesign/core/Collapsible';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+} from '@astryxdesign/core/Table';
 import type { DeployManifest, Deployment, Project } from '../../../types.ts';
+import { CopyButton } from './CopyButton.tsx';
 import { DeploymentLogs } from './DeploymentLogs.tsx';
 import { displayStatus } from './DeploymentTable.tsx';
 import { formatDateTime } from './format.ts';
@@ -22,6 +34,17 @@ export function DeploymentDetailPage({
   platformName: string;
   username?: string;
 }) {
+  const status = displayStatus(deployment, project?.active_deployment_id);
+  const statusStyle =
+    status === 'live'
+      ? { color: '#16a34a', fontWeight: 600 }
+      : status === 'retained'
+        ? { color: '#16a34a' }
+        : status === 'evicted'
+          ? { color: '#888' }
+          : status === 'failed'
+            ? { color: '#dc2626' }
+            : undefined;
   return (
     <Layout platformName={platformName} title={`Deployment ${deployment.id}`} username={username}>
       <h1>Deployment {deployment.id}</h1>
@@ -35,9 +58,7 @@ export function DeploymentDetailPage({
             data-confirm={`Cancel deployment "${deployment.id}"?`}
             data-deployment={deployment.id}
           >
-            <button type="submit" class="danger">
-              Cancel Deploy
-            </button>
+            <Button type="submit" label="Cancel Deploy" variant="destructive" />
           </form>
         </>
       )}
@@ -48,139 +69,116 @@ export function DeploymentDetailPage({
             <h2>Error</h2>
             <pre>{deployment.error_message}</pre>
             <p>
-              <button type="button" class="copy-btn" data-copy={deployment.error_message}>
-                Copy error
-              </button>
+              <CopyButton text={deployment.error_message} label="Copy error" />
             </p>
           </>
         )}
 
-      <table>
-        <tbody>
-          <tr>
-            <th>ID</th>
-            <td>{deployment.id}</td>
-            <th>Project</th>
-            <td>
+      <Table>
+        <TableBody>
+          <TableRow>
+            <TableHeaderCell>ID</TableHeaderCell>
+            <TableCell>{deployment.id}</TableCell>
+            <TableHeaderCell>Project</TableHeaderCell>
+            <TableCell>
               {project ? (
                 <a href={`/admin/projects/${project.id}`}>{project.slug}</a>
               ) : (
                 deployment.project_id
               )}
-            </td>
-          </tr>
-          <tr>
-            <th>Status</th>
-            <td
-              style={(() => {
-                const s = displayStatus(deployment, project?.active_deployment_id);
-                if (s === 'live') {
-                  return 'color: #16a34a; font-weight: 600';
-                }
-                if (s === 'retained') {
-                  return 'color: #16a34a';
-                }
-                if (s === 'evicted') {
-                  return 'color: #888';
-                }
-                if (s === 'failed') {
-                  return 'color: #dc2626';
-                }
-                return undefined;
-              })()}
-            >
-              {displayStatus(deployment, project?.active_deployment_id)}
-            </td>
-            <th>Source</th>
-            <td>{deployment.source ?? '-'}</td>
-          </tr>
-          <tr>
-            <th>Commit</th>
-            <td>{deployment.commit ?? '-'}</td>
-            <th>Created</th>
-            <td>{formatDateTime(deployment.created_at, tz)}</td>
-          </tr>
-          <tr>
-            <th>Deployed</th>
-            <td>{deployment.deployed_at ? formatDateTime(deployment.deployed_at, tz) : '-'}</td>
-            <th>Type</th>
-            <td>{project?.type ?? '-'}</td>
-          </tr>
-          <tr>
-            <th>CLI Version</th>
-            <td>{deployment.cli_version ?? '-'}</td>
-            <th />
-            <td />
-          </tr>
+            </TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Status</TableHeaderCell>
+            <TableCell style={statusStyle}>{status}</TableCell>
+            <TableHeaderCell>Source</TableHeaderCell>
+            <TableCell>{deployment.source ?? '-'}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Commit</TableHeaderCell>
+            <TableCell>{deployment.commit ?? '-'}</TableCell>
+            <TableHeaderCell>Created</TableHeaderCell>
+            <TableCell>{formatDateTime(deployment.created_at, tz)}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Deployed</TableHeaderCell>
+            <TableCell>
+              {deployment.deployed_at ? formatDateTime(deployment.deployed_at, tz) : '-'}
+            </TableCell>
+            <TableHeaderCell>Type</TableHeaderCell>
+            <TableCell>{project?.type ?? '-'}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>CLI Version</TableHeaderCell>
+            <TableCell>{deployment.cli_version ?? '-'}</TableCell>
+            <TableHeaderCell />
+            <TableCell />
+          </TableRow>
           {manifest && (
-            <tr>
-              <td colspan={4} style="padding: 0">
-                <details>
-                  <summary style="padding: 8px; cursor: pointer; font-weight: 600">
-                    Manifest
-                  </summary>
+            <TableRow>
+              <TableCell colSpan={4} style={{ padding: 0 }}>
+                <Collapsible trigger="Manifest">
                   <div style="padding: 0 8px 8px">
-                    <table style="margin: 0">
-                      <tbody>
+                    <Table style={{ margin: 0 }}>
+                      <TableBody>
                         {manifest.bindings &&
                           Object.entries(manifest.bindings).map(([type, value]) =>
                             Array.isArray(value) && value.length > 0 ? (
-                              <tr key={type}>
-                                <th>{type.toUpperCase()}</th>
-                                <td>
+                              <TableRow key={type}>
+                                <TableHeaderCell>{type.toUpperCase()}</TableHeaderCell>
+                                <TableCell>
                                   {value.map((n: string, i: number) => (
                                     <span key={n}>
                                       {i > 0 && ', '}
                                       <code>{n}</code>
                                     </span>
                                   ))}
-                                </td>
-                              </tr>
+                                </TableCell>
+                              </TableRow>
                             ) : value === true ? (
-                              <tr key={type}>
-                                <th>{type.toUpperCase()}</th>
-                                <td>enabled</td>
-                              </tr>
+                              <TableRow key={type}>
+                                <TableHeaderCell>{type.toUpperCase()}</TableHeaderCell>
+                                <TableCell>enabled</TableCell>
+                              </TableRow>
                             ) : null,
                           )}
                         {manifest.migrations && (
-                          <tr>
-                            <th>Migrations</th>
-                            <td>
+                          <TableRow>
+                            <TableHeaderCell>Migrations</TableHeaderCell>
+                            <TableCell>
                               {manifest.migrations.dialect} — {manifest.migrations.pending} pending
-                            </td>
-                          </tr>
+                            </TableCell>
+                          </TableRow>
                         )}
                         {manifest.schedules && manifest.schedules.length > 0 && (
-                          <tr>
-                            <th>Schedules</th>
-                            <td>
+                          <TableRow>
+                            <TableHeaderCell>Schedules</TableHeaderCell>
+                            <TableCell>
                               {manifest.schedules.map((s, i) => (
                                 <span key={s.name}>
                                   {i > 0 && ', '}
                                   {s.name}: {s.cron}
                                 </span>
                               ))}
-                            </td>
-                          </tr>
+                            </TableCell>
+                          </TableRow>
                         )}
-                      </tbody>
-                    </table>
+                      </TableBody>
+                    </Table>
                     {deployment.manifest && (
-                      <details style="margin-top: 8px">
-                        <summary style="cursor: pointer; font-size: 0.85rem">Raw JSON</summary>
+                      <Collapsible trigger="Raw JSON">
                         <pre style="margin-top: 8px; font-size: 0.8rem">
                           {JSON.stringify(JSON.parse(deployment.manifest), null, 2)}
                         </pre>
-                      </details>
+                      </Collapsible>
                     )}
                   </div>
-                </details>
-              </td>
-            </tr>
+                </Collapsible>
+              </TableCell>
+            </TableRow>
           )}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
 
       {deployment.status === 'live' && project && <DeploymentLogs deploymentId={deployment.id} />}
     </Layout>

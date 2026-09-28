@@ -8,6 +8,7 @@ import {
   TableRow,
 } from '@astryxdesign/core/Table';
 import type { Deployment } from '../../../types.ts';
+import { CopyButton } from './CopyButton.tsx';
 import { formatDateTime } from './format.ts';
 
 export function displayStatus(
@@ -115,14 +116,9 @@ export function DeploymentTable({
                       {d.error_message}
                     </span>
                     <br />
-                    <button
-                      type="button"
-                      class="copy-btn"
-                      data-copy={d.error_message}
-                      style="font-size: 0.65rem; padding: 1px 5px; float: right; margin-top: 5px"
-                    >
-                      copy
-                    </button>
+                    <span style="float: right; margin-top: 5px">
+                      <CopyButton text={d.error_message} />
+                    </span>
                   </>
                 ) : (
                   '-'

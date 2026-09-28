@@ -1,4 +1,5 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import { Button } from '@astryxdesign/core/Button';
 import {
   Table,
   TableBody,
@@ -80,9 +81,7 @@ export function UsersListPage({
                   style="display: inline"
                   data-confirm={`Delete user "${user.login}" and all their projects?`}
                 >
-                  <button type="submit" class="danger-sm">
-                    delete
-                  </button>
+                  <Button type="submit" label="Delete" variant="destructive" size="sm" />
                 </form>
               </TableCell>
             </TableRow>

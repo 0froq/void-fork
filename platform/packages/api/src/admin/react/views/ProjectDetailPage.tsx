@@ -1,7 +1,18 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+
+import { Button } from '@astryxdesign/core/Button';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+} from '@astryxdesign/core/Table';
 import type { getOperatorProject } from '../../../operator/tenant-service.ts';
 import { BuildTable } from './BuildTable.tsx';
 import { DeploymentTable } from './DeploymentTable.tsx';
+import { FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 type Detail = Awaited<ReturnType<typeof getOperatorProject>>;
 export function ProjectDetailPage({
@@ -27,27 +38,27 @@ export function ProjectDetailPage({
     <Layout platformName={platformName} title={project.slug} username={username}>
       <h1>{project.slug}</h1>
 
-      <table>
-        <tbody>
-          <tr>
-            <th>ID</th>
-            <td>{project.id}</td>
-          </tr>
-          <tr>
-            <th>Slug</th>
-            <td>{project.slug}</td>
-          </tr>
-          <tr>
-            <th>URL</th>
-            <td>
+      <Table>
+        <TableBody>
+          <TableRow>
+            <TableHeaderCell>ID</TableHeaderCell>
+            <TableCell>{project.id}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Slug</TableHeaderCell>
+            <TableCell>{project.slug}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>URL</TableHeaderCell>
+            <TableCell>
               <a href={deployUrl} target="_blank" rel="noopener noreferrer">
                 {deployUrl}
               </a>
-            </td>
-          </tr>
-          <tr>
-            <th>Custom Domain</th>
-            <td>
+            </TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Custom Domain</TableHeaderCell>
+            <TableCell>
               {domains.length > 0 ? (
                 domains.map((d) => (
                   <span key={d.id}>
@@ -60,47 +71,47 @@ export function ProjectDetailPage({
               ) : (
                 <>None</>
               )}
-            </td>
-          </tr>
-          <tr>
-            <th>Owner</th>
-            <td>
+            </TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Owner</TableHeaderCell>
+            <TableCell>
               {owner ? <a href={`/admin/users/${owner.id}`}>{owner.login}</a> : project.user_id}
-            </td>
-          </tr>
-          <tr>
-            <th>Type</th>
-            <td>{project.type}</td>
-          </tr>
-          <tr>
-            <th>Email</th>
-            <td>
+            </TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Type</TableHeaderCell>
+            <TableCell>{project.type}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Email</TableHeaderCell>
+            <TableCell>
               <a href={`/admin/email/${project.id}`}>usage, limits, destinations</a>
-            </td>
-          </tr>
-          <tr>
-            <th>Created</th>
-            <td>{project.created_at}</td>
-          </tr>
-        </tbody>
-      </table>
+            </TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Created</TableHeaderCell>
+            <TableCell>{project.created_at}</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
 
       <h2>Resources ({resources.length})</h2>
       {resources.length > 0 ? (
-        <table>
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>Binding</th>
-              <th>CF ID</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHeaderCell>Type</TableHeaderCell>
+              <TableHeaderCell>Binding</TableHeaderCell>
+              <TableHeaderCell>CF ID</TableHeaderCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {resources.map((r) => (
-              <tr key={r.id}>
-                <td>{r.type}</td>
-                <td>{r.binding_name}</td>
-                <td>
+              <TableRow key={r.id}>
+                <TableCell>{r.type}</TableCell>
+                <TableCell>{r.binding_name}</TableCell>
+                <TableCell>
                   {cfAccountId && (r.type === 'd1' || r.type === 'kv' || r.type === 'r2') ? (
                     <a
                       href={
@@ -118,11 +129,11 @@ export function ProjectDetailPage({
                   ) : (
                     r.cf_id
                   )}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       ) : (
         <p>
           <em>No resources provisioned.</em>
@@ -145,11 +156,14 @@ export function ProjectDetailPage({
         plan, suspension, active-work, routing, and usage-counter changes before applying them.
       </p>
       <form method="post" action={`/admin/projects/${project.id}/owner/preview`}>
-        <label>
-          New owner user ID
-          <input type="text" name="userId" required maxlength={512} placeholder="user_..." />
-        </label>{' '}
-        <button type="submit">Preview Transfer</button>
+        <FormTextInput
+          label="New owner user ID"
+          name="userId"
+          required
+          maxLength={512}
+          placeholder="user_..."
+        />
+        <Button type="submit" label="Preview Transfer" />
       </form>
 
       <h2>Danger Zone</h2>
@@ -159,9 +173,7 @@ export function ProjectDetailPage({
         data-confirm={`Permanently delete project "${project.slug}" and all its resources? This cannot be undone.`}
         data-slug={project.slug}
       >
-        <button type="submit" class="danger">
-          Delete Project
-        </button>
+        <Button type="submit" label="Delete Project" variant="destructive" />
       </form>
     </Layout>
   );

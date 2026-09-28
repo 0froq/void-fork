@@ -12,6 +12,7 @@ import {
 import { Heading } from '@astryxdesign/core/Text';
 import type { Invitation } from '../../../types.ts';
 import { formatAbsoluteDate } from './format.ts';
+import { FormTextArea } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 import { Pagination } from './Pagination.tsx';
 
@@ -51,12 +52,13 @@ export function InvitationsPage({
         action="/admin/invitations/send"
         style="margin-bottom: 20px; display: flex; gap: 8px; align-items: flex-start"
       >
-        <textarea
+        <FormTextArea
+          label="Email addresses"
           name="email"
           placeholder="user@example.com, teammate@example.com"
           required
           rows={3}
-          style="width: 360px"
+          width={360}
         />
         <Button type="submit" label="Send Invites" />
       </form>

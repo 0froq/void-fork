@@ -1,8 +1,19 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+
+import { Button } from '@astryxdesign/core/Button';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+} from '@astryxdesign/core/Table';
 import type { PlanId } from '../../../tiers.ts';
 import { PLAN_LIMITS, getPlanLimits } from '../../../tiers.ts';
 import type { User, Project } from '../../../types.ts';
 import { formatLimit, formatNumber, formatBytes, formatAbsoluteDate } from './format.ts';
+import { FormSelector, FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 
 type ProjectUsage = Readonly<{
@@ -39,94 +50,95 @@ export function UserDetailPage({
     <Layout platformName={platformName} title={user.login} username={username}>
       <h1>{user.login}</h1>
 
-      <table>
-        <tbody>
-          <tr>
-            <th>ID</th>
-            <td>{user.id}</td>
-          </tr>
-          <tr>
-            <th>Provider</th>
-            <td>{user.provider}</td>
-          </tr>
-          <tr>
-            <th>Email</th>
-            <td>{user.email ?? '-'}</td>
-          </tr>
-          <tr>
-            <th>Role</th>
-            <td>{user.role}</td>
-          </tr>
-          <tr>
-            <th>Status</th>
-            <td>{user.suspended_reason ? `suspended: ${user.suspended_reason}` : 'active'}</td>
-          </tr>
-          <tr>
-            <th>Created</th>
-            <td>{user.created_at}</td>
-          </tr>
-        </tbody>
-      </table>
+      <Table>
+        <TableBody>
+          <TableRow>
+            <TableHeaderCell>ID</TableHeaderCell>
+            <TableCell>{user.id}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Provider</TableHeaderCell>
+            <TableCell>{user.provider}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Email</TableHeaderCell>
+            <TableCell>{user.email ?? '-'}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Role</TableHeaderCell>
+            <TableCell>{user.role}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Status</TableHeaderCell>
+            <TableCell>
+              {user.suspended_reason ? `suspended: ${user.suspended_reason}` : 'active'}
+            </TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Created</TableHeaderCell>
+            <TableCell>{user.created_at}</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
 
       <h2>Plan</h2>
       <form method="post" action={`/admin/users/${user.id}/plan`} style="margin-bottom: 10px">
-        <select name="plan" defaultValue={user.plan} key={user.id}>
-          {plans.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>{' '}
-        <button type="submit">Update</button>
+        <FormSelector
+          label="Plan"
+          name="plan"
+          initialValue={user.plan}
+          options={plans.map((plan) => ({ value: plan, label: plan }))}
+        />
+        <Button type="submit" label="Update" />
       </form>
-      <table>
-        <thead>
-          <tr>
-            <th>Limit</th>
-            <th>Value</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Requests / month</td>
-            <td>{formatLimit(limits.requestsPerMonth)}</td>
-          </tr>
-          <tr>
-            <td>CPU ms / request</td>
-            <td>{formatLimit(limits.cpuMsPerRequest)}</td>
-          </tr>
-          <tr>
-            <td>Sub-requests / invocation</td>
-            <td>{formatLimit(limits.subRequestsPerInvocation)}</td>
-          </tr>
-          <tr>
-            <td>Deploys / day</td>
-            <td>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHeaderCell>Limit</TableHeaderCell>
+            <TableHeaderCell>Value</TableHeaderCell>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow>
+            <TableCell>Requests / month</TableCell>
+            <TableCell>{formatLimit(limits.requestsPerMonth)}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell>CPU ms / request</TableCell>
+            <TableCell>{formatLimit(limits.cpuMsPerRequest)}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell>Sub-requests / invocation</TableCell>
+            <TableCell>{formatLimit(limits.subRequestsPerInvocation)}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell>Deploys / day</TableCell>
+            <TableCell>
               {deploysToday} / {formatLimit(limits.deploysPerDay)}
-            </td>
-          </tr>
-          <tr>
-            <td>D1 storage</td>
-            <td>{formatLimit(limits.d1StorageBytes, 'bytes')}</td>
-          </tr>
-          <tr>
-            <td>R2 storage</td>
-            <td>{formatLimit(limits.r2StorageBytes, 'bytes')}</td>
-          </tr>
-          <tr>
-            <td>KV storage</td>
-            <td>{formatLimit(limits.kvStorageBytes, 'bytes')}</td>
-          </tr>
-          <tr>
-            <td>AI neurons / month</td>
-            <td>{formatLimit(limits.aiNeuronsPerMonth)}</td>
-          </tr>
-          <tr>
-            <td>Retained deployments</td>
-            <td>{formatLimit(limits.retainedDeployments)}</td>
-          </tr>
-        </tbody>
-      </table>
+            </TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell>D1 storage</TableCell>
+            <TableCell>{formatLimit(limits.d1StorageBytes, 'bytes')}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell>R2 storage</TableCell>
+            <TableCell>{formatLimit(limits.r2StorageBytes, 'bytes')}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell>KV storage</TableCell>
+            <TableCell>{formatLimit(limits.kvStorageBytes, 'bytes')}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell>AI neurons / month</TableCell>
+            <TableCell>{formatLimit(limits.aiNeuronsPerMonth)}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell>Retained deployments</TableCell>
+            <TableCell>{formatLimit(limits.retainedDeployments)}</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
 
       <h2>Current Usage (since {formatAbsoluteDate(usage.billingPeriodStart)})</h2>
       <p>
@@ -139,65 +151,68 @@ export function UserDetailPage({
       {usage.projects.length > 1 && (
         <>
           <h3>Per Project</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Project</th>
-                <th>Requests</th>
-                <th>Bandwidth</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHeaderCell>Project</TableHeaderCell>
+                <TableHeaderCell>Requests</TableHeaderCell>
+                <TableHeaderCell>Bandwidth</TableHeaderCell>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {usage.projects.map((p) => (
-                <tr key={p.projectId}>
-                  <td>
+                <TableRow key={p.projectId}>
+                  <TableCell>
                     <a href={`/admin/projects/${p.projectId}`}>{p.slug}</a>
-                  </td>
-                  <td>{formatNumber(p.requests)}</td>
-                  <td>{formatBytes(p.bandwidthBytes)}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell>{formatNumber(p.requests)}</TableCell>
+                  <TableCell>{formatBytes(p.bandwidthBytes)}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </>
       )}
 
       <h2>Suspension</h2>
       {user.suspended_reason ? (
         <form method="post" action={`/admin/users/${user.id}/unsuspend`}>
-          <button type="submit">Unsuspend</button>
+          <Button type="submit" label="Unsuspend" />
         </form>
       ) : (
         <form method="post" action={`/admin/users/${user.id}/suspend`}>
-          <input type="text" name="reason" placeholder="Reason..." value="admin_suspended" />{' '}
-          <button type="submit" class="danger">
-            Suspend
-          </button>
+          <FormTextInput
+            label="Reason"
+            name="reason"
+            initialValue="admin_suspended"
+            placeholder="Reason..."
+          />
+          <Button type="submit" label="Suspend" variant="destructive" />
         </form>
       )}
 
       <h2>Projects ({projects.length})</h2>
       {projects.length > 0 ? (
-        <table>
-          <thead>
-            <tr>
-              <th>Slug</th>
-              <th>Type</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHeaderCell>Slug</TableHeaderCell>
+              <TableHeaderCell>Type</TableHeaderCell>
+              <TableHeaderCell>Created</TableHeaderCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {projects.map((p) => (
-              <tr key={p.id}>
-                <td>
+              <TableRow key={p.id}>
+                <TableCell>
                   <a href={`/admin/projects/${p.id}`}>{p.slug}</a>
-                </td>
-                <td>{p.type}</td>
-                <td>{formatAbsoluteDate(p.created_at)}</td>
-              </tr>
+                </TableCell>
+                <TableCell>{p.type}</TableCell>
+                <TableCell>{formatAbsoluteDate(p.created_at)}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       ) : (
         <p>
           <em>No projects.</em>
@@ -210,9 +225,7 @@ export function UserDetailPage({
         action={`/admin/users/${user.id}/delete`}
         data-confirm={`Permanently delete user "${user.login}" and all ${projects.length} project(s)? This cannot be undone.`}
       >
-        <button type="submit" class="danger">
-          Delete User
-        </button>
+        <Button type="submit" label="Delete User" variant="destructive" />
       </form>
     </Layout>
   );

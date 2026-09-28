@@ -23,29 +23,6 @@ export function Layout({
   }, [title, platformName]);
 
   useEffect(() => {
-    const onClick = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element)) {
-        return;
-      }
-      const button = target.closest<HTMLButtonElement>('.copy-btn');
-      const copy = button?.dataset.copy;
-      if (!button || !copy) {
-        return;
-      }
-      void navigator.clipboard.writeText(copy).then(() => {
-        const previous = button.textContent;
-        button.textContent = 'Copied!';
-        setTimeout(() => {
-          button.textContent = previous;
-        }, 1500);
-      });
-    };
-    document.addEventListener('click', onClick);
-    return () => document.removeEventListener('click', onClick);
-  }, []);
-
-  useEffect(() => {
     const onSubmit = (event: SubmitEvent) => {
       const form = event.target;
       if (!(form instanceof HTMLFormElement)) {

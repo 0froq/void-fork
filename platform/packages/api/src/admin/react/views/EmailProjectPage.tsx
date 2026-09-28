@@ -1,9 +1,20 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+
+import { Button } from '@astryxdesign/core/Button';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+} from '@astryxdesign/core/Table';
 import {
   DEFAULT_EMAIL_BURST_LIMIT as DEFAULT_BURST_LIMIT,
   DEFAULT_EMAIL_MONTHLY_LIMIT as DEFAULT_MONTHLY_LIMIT,
 } from '../../../email/limits.ts';
 import { STATUS_COLORS, formatDateTime } from './format.ts';
+import { FormNumberInput, FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 const META = 'font-size: 0.8rem; color: #666';
 function domainStatusColor(status: string): string {
@@ -73,58 +84,58 @@ export function EmailProjectPage({
         Email &mdash; <a href={`/admin/projects/${projectId}`}>{project.slug}</a>
       </h1>
 
-      <table>
-        <tbody>
-          <tr>
-            <th>Project ID</th>
-            <td>{projectId}</td>
-          </tr>
-          <tr>
-            <th>Sender</th>
-            <td>
+      <Table>
+        <TableBody>
+          <TableRow>
+            <TableHeaderCell>Project ID</TableHeaderCell>
+            <TableCell>{projectId}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Sender</TableHeaderCell>
+            <TableCell>
               {senderDomain ? (
                 <code>{`${project.slug}+noreply@${senderDomain}`}</code>
               ) : (
                 <em>EMAIL_SENDER_DOMAIN is not configured for this environment</em>
               )}
-            </td>
-          </tr>
-          <tr>
-            <th>Status</th>
-            <td>
+            </TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Status</TableHeaderCell>
+            <TableCell>
               {isSuspended ? (
                 <strong style="color: red">SUSPENDED</strong>
               ) : (
                 <span style="color: #16a34a">active</span>
               )}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
 
       <h2>Usage ({month})</h2>
-      <table>
-        <tbody>
-          <tr>
-            <th>Outbound recipient attempts</th>
-            <td>
+      <Table>
+        <TableBody>
+          <TableRow>
+            <TableHeaderCell>Outbound recipient attempts</TableHeaderCell>
+            <TableCell>
               {attempts} / {monthlyLimit ?? DEFAULT_MONTHLY_LIMIT}{' '}
               <span style={META}>({monthlyLimit === undefined ? 'default' : 'override'})</span>
-            </td>
-          </tr>
-          <tr>
-            <th>Inbound (received)</th>
-            <td>{received}</td>
-          </tr>
-          <tr>
-            <th>Burst cap</th>
-            <td>
+            </TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Inbound (received)</TableHeaderCell>
+            <TableCell>{received}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>Burst cap</TableHeaderCell>
+            <TableCell>
               {burstLimit ?? DEFAULT_BURST_LIMIT} / minute{' '}
               <span style={META}>({burstLimit === undefined ? 'default' : 'override'})</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
       <p style={META}>
         Recipient submission attempts and inbound receipts are recorded in the platform database.
       </p>
@@ -134,9 +145,11 @@ export function EmailProjectPage({
         {/* Post the desired terminal state rather than a "toggle" intent, so a
             double-click cannot race two toggles and flip the switch back on. */}
         <input type="hidden" name="state" value={isSuspended ? 'active' : 'suspended'} />
-        <button type="submit" class={isSuspended ? '' : 'danger'}>
-          {isSuspended ? 'Unsuspend email' : 'Suspend email'}
-        </button>{' '}
+        <Button
+          type="submit"
+          label={isSuspended ? 'Unsuspend email' : 'Suspend email'}
+          variant={isSuspended ? 'secondary' : 'destructive'}
+        />{' '}
         <span style={META}>
           Suspending stops new outbound attempts and rejects new inbound messages with a permanent
           SMTP error. Outbound submissions that already started may still finish. There is no
@@ -145,14 +158,14 @@ export function EmailProjectPage({
       </form>
 
       <form method="post" action={`/admin/email/${projectId}/limit`} style="margin-top: 12px">
-        <input type="number" name="limit" min="1" placeholder="blank = default" />
-        <button type="submit">Set monthly limit</button>{' '}
+        <FormNumberInput label="Monthly limit" name="limit" width={200} />
+        <Button type="submit" label="Set monthly limit" />{' '}
         <span style={META}>Submit blank to drop the override back to the platform default.</span>
       </form>
 
       <form method="post" action={`/admin/email/${projectId}/burst-limit`} style="margin-top: 12px">
-        <input type="number" name="burstLimit" min="1" placeholder="blank = default" />
-        <button type="submit">Set burst limit</button>{' '}
+        <FormNumberInput label="Burst limit" name="burstLimit" width={200} />
+        <Button type="submit" label="Set burst limit" />{' '}
         <span style={META}>Per-minute cap. Submit blank to drop the override.</span>
       </form>
 
@@ -168,47 +181,45 @@ export function EmailProjectPage({
           <em>No destinations yet.</em>
         </p>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Address</th>
-              <th>Status</th>
-              <th>Source</th>
-              <th>Verified</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHeaderCell>Address</TableHeaderCell>
+              <TableHeaderCell>Status</TableHeaderCell>
+              <TableHeaderCell>Source</TableHeaderCell>
+              <TableHeaderCell>Verified</TableHeaderCell>
+              <TableHeaderCell></TableHeaderCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {destinations.map((destination) => (
-              <tr key={destination.id}>
-                <td>{destination.address}</td>
-                <td>
+              <TableRow key={destination.id}>
+                <TableCell>{destination.address}</TableCell>
+                <TableCell>
                   {destination.status === 'verified' ? (
                     <span style="color: #16a34a">verified</span>
                   ) : (
                     <span style="color: #d97706">pending</span>
                   )}
-                </td>
-                <td>{destination.verification_source}</td>
-                <td>
+                </TableCell>
+                <TableCell>{destination.verification_source}</TableCell>
+                <TableCell>
                   {destination.verified_at ? formatDateTime(destination.verified_at, tz) : '-'}
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
                   <form
                     method="post"
                     action={`/admin/email/${projectId}/destinations/${destination.id}/delete`}
                     data-confirm={`Remove "${destination.address}" from this project?`}
                     data-address={destination.address}
                   >
-                    <button type="submit" class="danger-sm">
-                      remove
-                    </button>
+                    <Button type="submit" label="Remove" variant="destructive" size="sm" />
                   </form>
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
       <p style={META}>
         Destinations are added by the project owner through{' '}
@@ -228,68 +239,69 @@ export function EmailProjectPage({
         action={`/admin/email/${projectId}/domains/add`}
         style="margin-bottom: 12px; display: flex; gap: 8px; align-items: center"
       >
-        <input
-          type="text"
+        <FormTextInput
+          label="Domain"
           name="domain"
           placeholder="mail.example.com"
-          autocomplete="off"
+          autoComplete="off"
           required
-          style="width: 240px"
+          width={240}
         />
-        <input
-          type="password"
+        <FormTextInput
+          label="API token"
           name="token"
-          placeholder="API token (blank = platform credential)"
-          autocomplete="off"
-          style="width: 300px"
+          type="password"
+          placeholder="Blank = platform credential"
+          autoComplete="off"
+          width={300}
         />
-        <button type="submit">Add domain</button>
+        <Button type="submit" label="Add domain" />
       </form>
       {domains.length === 0 ? (
         <p>
           <em>No custom domains.</em>
         </p>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Domain</th>
-              <th>Inbound</th>
-              <th>Outbound</th>
-              <th>Management</th>
-              <th>Managed by</th>
-              <th>Ingress worker</th>
-              <th>v</th>
-              <th>Latest operation</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHeaderCell>Domain</TableHeaderCell>
+              <TableHeaderCell>Inbound</TableHeaderCell>
+              <TableHeaderCell>Outbound</TableHeaderCell>
+              <TableHeaderCell>Management</TableHeaderCell>
+              <TableHeaderCell>Managed by</TableHeaderCell>
+              <TableHeaderCell>Ingress worker</TableHeaderCell>
+              <TableHeaderCell>v</TableHeaderCell>
+              <TableHeaderCell>Latest operation</TableHeaderCell>
+              <TableHeaderCell></TableHeaderCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {domains.map((domain) => (
-              <tr key={domain.id}>
-                <td>{domain.domain}</td>
-                <td>
+              <TableRow key={domain.id}>
+                <TableCell>{domain.domain}</TableCell>
+                <TableCell>
                   <span style={`color: ${domainStatusColor(domain.inbound)}`}>
                     {domain.inbound}
                   </span>
                   {domain.inboundReason && <small> — {domain.inboundReason}</small>}
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
                   <span style={`color: ${domainStatusColor(domain.outbound)}`}>
                     {domain.outbound}
                   </span>
                   {domain.outboundReason && <small> — {domain.outboundReason}</small>}
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
                   <span style={`color: ${domainStatusColor(domain.management)}`}>
                     {domain.management}
                   </span>
                   {domain.managementReason && <small> — {domain.managementReason}</small>}
-                </td>
-                <td>{domain.managed_by}</td>
-                <td>{domain.relay_worker_name ?? '-'}</td>
-                <td>{domain.relay_version ?? '-'}</td>
-                <td>
+                </TableCell>
+                <TableCell>{domain.managed_by}</TableCell>
+                <TableCell>{domain.relay_worker_name ?? '-'}</TableCell>
+                <TableCell>{domain.relay_version ?? '-'}</TableCell>
+                <TableCell>
                   {domain.operation ? (
                     <>
                       <code>{domain.operation.id}</code> ({domain.operation.status})
@@ -297,13 +309,13 @@ export function EmailProjectPage({
                   ) : (
                     '-'
                   )}
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
                   <form
                     method="post"
                     action={`/admin/email/${projectId}/domains/${domain.domain}/rotate-secret`}
                   >
-                    <button type="submit">rotate secret</button>
+                    <Button type="submit" label="Rotate secret" size="sm" />
                   </form>
                   {/* Keep apostrophes out of the `onsubmit` text (see the Danger
                       Zone note above); the typed slug is the real confirmation
@@ -314,22 +326,21 @@ export function EmailProjectPage({
                     data-confirm={`Remove "${domain.domain}"? This disables its exact assignment. Shared ingress stays while another domain uses it.`}
                     data-domain={domain.domain}
                   >
-                    <input
-                      type="text"
+                    <FormTextInput
+                      label="Confirm project slug"
                       name="confirm"
                       placeholder={project.slug}
-                      autocomplete="off"
+                      autoComplete="off"
                       required
+                      width={190}
                     />{' '}
-                    <button type="submit" class="danger-sm">
-                      revoke
-                    </button>
+                    <Button type="submit" label="Revoke" variant="destructive" size="sm" />
                   </form>
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
     </Layout>
   );

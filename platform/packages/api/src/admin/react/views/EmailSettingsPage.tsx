@@ -1,5 +1,10 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+
+import { Button } from '@astryxdesign/core/Button';
+import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList';
+import { useState } from 'react';
 import type { EmailDomainManagement, EmailRecipientPolicy } from '../../../email/settings.ts';
+import { FormTextArea } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 
 const META = 'font-size: 0.8rem; color: #666';
@@ -17,6 +22,8 @@ export function EmailSettingsPage({
   platformName: string;
   username?: string;
 }) {
+  const [mode, setMode] = useState(policy.mode);
+  const [domainManagement, setDomainManagement] = useState(management);
   return (
     <Layout platformName={platformName} title="Email" username={username}>
       <h1>Email</h1>
@@ -37,32 +44,38 @@ export function EmailSettingsPage({
         may reach. Custom-domain sends are not affected.
       </p>
       <form method="post" action="/admin/email/policy" style="margin-bottom: 8px">
-        <label style="display: block">
-          <input type="radio" name="mode" value="verified" checked={policy.mode === 'verified'} />{' '}
-          <strong>verified</strong> — only each project's verified destinations (default)
-        </label>
-        <label style="display: block">
-          <input type="radio" name="mode" value="domains" checked={policy.mode === 'domains'} />{' '}
-          <strong>domains</strong> — verified destinations, plus any address on these domains
-          (addresses on the platform's own mail domain stay verified-destination-only):
-        </label>
-        <textarea
-          name="domains"
-          rows={3}
-          style="width: 360px; margin-left: 24px"
-          placeholder="example.com, corp.example.net"
+        <RadioList
+          label="Recipient policy"
+          isLabelHidden
+          htmlName="mode"
+          value={mode}
+          onChange={(value: string) => setMode(value as EmailRecipientPolicy['mode'])}
         >
-          {policy.domains.join('\n')}
-        </textarea>
-        <label style="display: block">
-          <input type="radio" name="mode" value="any" checked={policy.mode === 'any'} />{' '}
-          <strong>any</strong> — every recipient; addresses on the platform's own mail domain stay
-          verified-destination-only, so no project reaches another project's inbox without its
-          consent
-        </label>
-        <button type="submit" style="margin-top: 8px">
-          Save policy
-        </button>
+          <RadioListItem
+            value="verified"
+            label="verified"
+            description="Only each project's verified destinations (default)"
+          />
+          <RadioListItem
+            value="domains"
+            label="domains"
+            description="Verified destinations, plus any address on these domains. Addresses on the platform's own mail domain stay verified-destination-only."
+          />
+          <RadioListItem
+            value="any"
+            label="any"
+            description="Every recipient; addresses on the platform's own mail domain stay verified-destination-only, so no project reaches another project's inbox without its consent."
+          />
+        </RadioList>
+        <FormTextArea
+          label="Allowed domains"
+          name="domains"
+          initialValue={policy.domains.join('\n')}
+          rows={3}
+          width={360}
+          placeholder="example.com, corp.example.net"
+        />
+        <Button type="submit" label="Save policy" />
       </form>
       <p style={META}>
         With <code>domains</code> or <code>any</code>, Cloudflare still refuses a destination it has
@@ -73,24 +86,25 @@ export function EmailSettingsPage({
       <h2>Domain management</h2>
       <p>Who registers custom email domains for projects.</p>
       <form method="post" action="/admin/email/settings">
-        <label style="display: block">
-          <input
-            type="radio"
-            name="domains"
+        <RadioList
+          label="Domain management"
+          isLabelHidden
+          htmlName="domains"
+          value={domainManagement}
+          onChange={(value: string) => setDomainManagement(value as EmailDomainManagement)}
+        >
+          <RadioListItem
             value="self-serve"
-            checked={management === 'self-serve'}
-          />{' '}
-          <strong>self-serve</strong> — project owners grant a Cloudflare credential from{' '}
-          <code>void email domain add</code>
-        </label>
-        <label style="display: block">
-          <input type="radio" name="domains" value="admin" checked={management === 'admin'} />{' '}
-          <strong>admin</strong> — administrators add domains; <code>void email domain add</code>{' '}
-          prints the administrator's command instead
-        </label>
-        <button type="submit" style="margin-top: 8px">
-          Save
-        </button>
+            label="self-serve"
+            description="Project owners grant a Cloudflare credential from void email domain add."
+          />
+          <RadioListItem
+            value="admin"
+            label="admin"
+            description="Administrators add domains; void email domain add prints the administrator's command instead."
+          />
+        </RadioList>
+        <Button type="submit" label="Save" />
       </form>
     </Layout>
   );

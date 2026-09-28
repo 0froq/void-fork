@@ -1,4 +1,14 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+
+import { Button } from '@astryxdesign/core/Button';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+} from '@astryxdesign/core/Table';
 import type { previewOperatorProjectOwner } from '../../../operator/tenant-service.ts';
 import { Layout } from './Layout.tsx';
 type Preview = Awaited<ReturnType<typeof previewOperatorProjectOwner>>;
@@ -31,34 +41,34 @@ export function ProjectOwnerPreviewPage({
       <h1>
         {convergenceOnly ? 'Converge Ownership State' : 'Transfer Ownership'}: {result.target.slug}
       </h1>
-      <table>
-        <thead>
-          <tr>
-            <th>Account</th>
-            <th>User</th>
-            <th>Plan</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <th>Current owner</th>
-            <td>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHeaderCell>Account</TableHeaderCell>
+            <TableHeaderCell>User</TableHeaderCell>
+            <TableHeaderCell>Plan</TableHeaderCell>
+            <TableHeaderCell>Status</TableHeaderCell>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow>
+            <TableHeaderCell>Current owner</TableHeaderCell>
+            <TableCell>
               {result.currentOwner.login} (<code>{result.currentOwner.id}</code>)
-            </td>
-            <td>{result.currentOwner.plan}</td>
-            <td>{suspensionLabel(result.currentOwner)}</td>
-          </tr>
-          <tr>
-            <th>New owner</th>
-            <td>
+            </TableCell>
+            <TableCell>{result.currentOwner.plan}</TableCell>
+            <TableCell>{suspensionLabel(result.currentOwner)}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableHeaderCell>New owner</TableHeaderCell>
+            <TableCell>
               {result.newOwner.login} (<code>{result.newOwner.id}</code>)
-            </td>
-            <td>{result.newOwner.plan}</td>
-            <td>{suspensionLabel(result.newOwner)}</td>
-          </tr>
-        </tbody>
-      </table>
+            </TableCell>
+            <TableCell>{result.newOwner.plan}</TableCell>
+            <TableCell>{suspensionLabel(result.newOwner)}</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
 
       {convergenceOnly ? (
         <p>
@@ -123,9 +133,11 @@ export function ProjectOwnerPreviewPage({
       {!operationBlocked ? (
         <form method="post" action={`/admin/projects/${projectId}/owner`}>
           <input type="hidden" name="userId" value={userId} />
-          <button type="submit" class="danger">
-            {convergenceOnly ? 'Apply Convergence' : 'Apply Ownership Transfer'}
-          </button>
+          <Button
+            type="submit"
+            label={convergenceOnly ? 'Apply Convergence' : 'Apply Ownership Transfer'}
+            variant="destructive"
+          />
         </form>
       ) : (
         <p>

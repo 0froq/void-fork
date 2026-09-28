@@ -1881,13 +1881,14 @@ describe('GET /admin/signup-control', () => {
     const html = await res.text();
 
     function rowFor(pattern: string): string {
-      const row = html.split('<tr').find((part) => part.includes(`<td>${pattern}</td>`));
+      const markup = html.slice(html.indexOf('<div id="app">'));
+      const row = markup.split('<tr').find((part) => part.includes(`>${pattern}</td>`));
       expect(row).not.toBeNull();
       return `<tr${row}`;
     }
 
-    expect(html).toContain('<th>Accepted</th>');
-    expect(html).toContain('<th>Deployed</th>');
+    expect(html).toMatch(/<th[^>]*>Accepted<\/th>/);
+    expect(html).toMatch(/<th[^>]*>Deployed<\/th>/);
     expect(rowFor('accepted@example.com').match(/>yes<\/strong>/g)).toHaveLength(2);
     expect(rowFor('octocat').match(/>yes<\/strong>/g)).toHaveLength(1);
     expect(rowFor('octocat').match(/>no<\/strong>/g)).toHaveLength(1);
