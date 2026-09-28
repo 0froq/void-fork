@@ -5,7 +5,7 @@
 @import '@astryxdesign/theme-neutral/theme.css';
 
 @supports (color: AccentColor) and (color: color-mix(in srgb, red, blue)) {
-  html[data-astryx-theme='neutral'] {
+  [data-astryx-theme='neutral'] {
     --color-accent: AccentColor;
     --color-on-accent: AccentColorText;
     --color-accent-muted: color-mix(in srgb, AccentColor 14%, Canvas);
@@ -15,7 +15,7 @@
 }
 
 @supports (corner-shape: squircle) {
-  html[data-astryx-theme='neutral'] {
+  [data-astryx-theme='neutral'] {
     /* Squircle curves need about twice the radius to read as rounded. */
     --radius-inner: 0.75rem;
     --radius-element: 1.25rem;
@@ -23,9 +23,9 @@
     --radius-page: 3.5rem;
   }
 
-  :where(html[data-astryx-theme='neutral'], html[data-astryx-theme='neutral'] *),
-  html[data-astryx-theme='neutral'] *::before,
-  html[data-astryx-theme='neutral'] *::after {
+  :where([data-astryx-theme='neutral'], [data-astryx-theme='neutral'] *),
+  [data-astryx-theme='neutral'] *::before,
+  [data-astryx-theme='neutral'] *::after {
     corner-shape: squircle;
   }
 }
