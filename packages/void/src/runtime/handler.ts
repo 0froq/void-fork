@@ -36,6 +36,15 @@ export interface CloudContextVariables {
   [key: string]: unknown;
 }
 
+// Generated env types augment this stable global interface. Public module
+// augmentation alone cannot reach CloudBindings after declaration bundling
+// moves its source interface into a shared declaration chunk.
+declare global {
+  interface VoidGeneratedEnvBindings {
+    readonly [key: string]: unknown;
+  }
+}
+
 /**
  * Hono `Bindings` shape for Void workers.
  *
@@ -44,7 +53,7 @@ export interface CloudContextVariables {
  * working for bindings that aren't in the schema (queues, custom
  * bindings, etc.).
  */
-export interface CloudBindings {
+export interface CloudBindings extends VoidGeneratedEnvBindings {
   DB: D1Database;
   KV: KVNamespace;
   STORAGE: R2Bucket;

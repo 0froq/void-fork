@@ -68,6 +68,10 @@ export function generateEnvTypes(envFileAbs: string, outDir: string): EnvTypesRe
   lines.push('  interface ValidatedEnv extends _VoidEnvShape {}');
   lines.push('}');
   lines.push('');
+  lines.push('declare global {');
+  lines.push('  interface VoidGeneratedEnvBindings extends _VoidEnvShape {}');
+  lines.push('}');
+  lines.push('');
   // Augment Hono c.env via the CloudBindings interface re-exported from void/handler.
   lines.push('declare module "void/handler" {');
   lines.push('  interface CloudBindings extends _VoidEnvShape {}');
