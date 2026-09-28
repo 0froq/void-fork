@@ -4593,6 +4593,43 @@ describe('Deploy with prerendering', () => {
     expect(deployment?.status).toBe('live');
   });
 
+  it('does not prewarm non-HTML output from a framework prerender path', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'framework-prerender-json');
+    env.DISPATCH = {
+      get: vi
+        .fn()
+        .mockReturnValue({ fetch: vi.fn().mockResolvedValue(Response.json({ data: true })) }),
+    } as unknown as DispatchNamespace;
+    mockCfApi();
+
+    const response = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        manifest: {
+          version: 3,
+          bindings: {},
+          type: 'framework',
+          framework: 'sveltekit',
+          revalidate: 60,
+          prerender: ['/data'],
+        },
+      }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    await response.text();
+
+    const [deployment] = await env.db
+      .select({ id: deployments.id })
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id));
+    const { value } = await env.ISR_CACHE.getWithMetadata(
+      `${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app/data`,
+      'arrayBuffer',
+    );
+    expect(value).toBeNull();
+  });
+
   it('preserves other deployments v2 ISR namespaces on redeploy', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'v2-isr-isolation');

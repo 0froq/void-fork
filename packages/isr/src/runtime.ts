@@ -5,6 +5,7 @@ import {
   extractPageDataFromHtml,
   hasCurrentSharedCachePolicy,
   hasSharedCacheOptOut,
+  isFrameworkDocumentRequest,
   isSharedCacheableResponse,
   isrCacheResponse,
   isStale,
@@ -49,7 +50,7 @@ export { canonicalIsrPathname, denormalizeIsrPath, normalizeIsrPath } from './in
 
 /**
  * Single-tenant ISR (incremental static regeneration) cache ladder for the
- * self-hosted Void worker (`vite build && wrangler deploy`).
+ * direct Cloudflare Worker (Void apps and framework deploy wrappers).
  *
  * On managed Void, ISR lives in the dispatch worker that sits IN FRONT of the
  * user worker. Self-host has no dispatch worker, so this module ports that
@@ -512,6 +513,7 @@ async function revalidateInBackground(
   keys: { htmlKey: string; jsonKey: string },
   render: RenderFn,
   variantUrl: string | null,
+  htmlOnly: boolean,
 ): Promise<void> {
   try {
     const cleanRequest = cloneWithoutVoidPages(request);
@@ -524,7 +526,7 @@ async function revalidateInBackground(
       }
       return;
     }
-    if (ttl > 0 && isSharedCacheableResponse(response)) {
+    if (ttl > 0 && isSharedCacheableResponse(response) && (!htmlOnly || isHtmlResponse(response))) {
       await writeIsrCache(env, host, pathname, response, ttl, variantUrl);
       // Update HTML edge cache with the fresh response.
       const headers = new Headers(response.headers);
@@ -542,7 +544,11 @@ async function revalidateInBackground(
         }),
       );
       await populateJsonEdgeCache(cache, keys.jsonKey, response, ttl, 'HIT');
-    } else if (ttl === 0 || hasSharedCacheOptOut(response)) {
+    } else if (
+      ttl === 0 ||
+      hasSharedCacheOptOut(response) ||
+      (htmlOnly && !isHtmlResponse(response))
+    ) {
       // An authoritative opt-out invalidates every previously public variant.
       await deleteSharedIsrVariants(env, cache, host, pathname, keys, variantUrl);
     }
@@ -554,6 +560,26 @@ async function revalidateInBackground(
 // ---------------------------------------------------------------------------
 // Orchestrator
 // ---------------------------------------------------------------------------
+
+function isHtmlResponse(response: Response): boolean {
+  return (
+    response.headers.get('content-type')?.toLowerCase().split(';', 1)[0]?.trim() === 'text/html'
+  );
+}
+
+/** Cache only framework document HTML; leave client data requests and other response types live. */
+export async function handleFrameworkIsr(
+  request: Request,
+  env: IsrCacheEnv,
+  ctx: ExecutionContext,
+  options: HandleIsrOptions,
+  render: RenderFn,
+): Promise<Response | null> {
+  if (!isFrameworkDocumentRequest(request)) {
+    return null;
+  }
+  return handleIsrInternal(request, env, ctx, options, render, true);
+}
 
 /**
  * Run the ISR caching ladder for a request.
@@ -580,6 +606,17 @@ export async function handleIsr(
   ctx: ExecutionContext,
   options: HandleIsrOptions,
   render: RenderFn,
+): Promise<Response | null> {
+  return handleIsrInternal(request, env, ctx, options, render, false);
+}
+
+async function handleIsrInternal(
+  request: Request,
+  env: IsrCacheEnv,
+  ctx: ExecutionContext,
+  options: HandleIsrOptions,
+  render: RenderFn,
+  htmlOnly: boolean,
 ): Promise<Response | null> {
   const { revalidate, pages, pathRevalidate, deploymentId, queryAllowlist } = options;
 
@@ -691,6 +728,7 @@ export async function handleIsr(
             { htmlKey, jsonKey },
             render,
             variantUrl,
+            htmlOnly,
           ),
         );
       }
@@ -713,11 +751,11 @@ export async function handleIsr(
     return response;
   }
   const ttl = resolveRevalidateTtl(response, isrTtl);
-  if (ttl > 0 && isSharedCacheableResponse(response)) {
+  if (ttl > 0 && isSharedCacheableResponse(response) && (!htmlOnly || isHtmlResponse(response))) {
     // Every clone below is taken synchronously (before `response.body` is read
     // for the client) so no consumer races the body away.
     ctx.waitUntil(writeIsrCache(env, host, pathname, response, ttl, variantUrl));
-    ctx.waitUntil(populateJsonEdgeCache(cache, jsonKey, response, ttl, 'MISS'));
+    ctx.waitUntil(populateJsonEdgeCache(cache, jsonKey, response, ttl, 'HIT'));
 
     const cacheHeaders = new Headers(response.headers);
     cacheHeaders.set('Cache-Control', `public, s-maxage=${ttl}, max-age=0, must-revalidate`);
@@ -725,9 +763,11 @@ export async function handleIsr(
     markSharedCachePolicy(cacheHeaders);
     cacheHeaders.delete('x-void-page-data');
     cacheHeaders.delete('set-cookie');
+    const edgeHeaders = new Headers(cacheHeaders);
+    edgeHeaders.set('x-isr-cache', 'HIT');
     const cacheResponse = new Response(response.clone().body, {
       status: response.status,
-      headers: cacheHeaders,
+      headers: edgeHeaders,
     });
     ctx.waitUntil(safeCachePut(cache, htmlKey, cacheResponse));
 
@@ -739,7 +779,10 @@ export async function handleIsr(
       headers: clientHeaders,
     });
   }
-  if (response.status === 200 && (ttl === 0 || hasSharedCacheOptOut(response))) {
+  if (
+    response.status === 200 &&
+    (ttl === 0 || hasSharedCacheOptOut(response) || (htmlOnly && !isHtmlResponse(response)))
+  ) {
     ctx.waitUntil(
       deleteSharedIsrVariants(env, cache, host, pathname, { htmlKey, jsonKey }, variantUrl),
     );

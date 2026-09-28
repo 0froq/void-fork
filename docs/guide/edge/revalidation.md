@@ -6,7 +6,7 @@ outline: deep
 
 Revalidation caches rendered pages and refreshes them in the background. When a cached page becomes stale, visitors can keep reading it while the Worker renders an updated version. This is often called [Incremental Static Regeneration (ISR)](https://vercel.com/docs/incremental-static-regeneration).
 
-This requires [SSR](../ssr.md) or [Pages mode](../pages-routing/overview) to be configured.
+Use revalidation with [Void SSR](../ssr.md), [Pages mode](../pages-routing/overview), or a [supported SSR framework](../../integrations/frameworks/overview.md). For framework apps, Void caches public HTML document responses, not framework data requests.
 
 To disable Void's ISR caching across the app while keeping your per-page settings, set `"routing": { "isr": false }` in `void.json`. This overrides per-page revalidate and prerender policies. Set `isr` back to `true` to enable those policies again. Build-time HTML generation with `output: "static"` is unaffected.
 

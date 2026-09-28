@@ -2,6 +2,7 @@ import {
   cloneWithoutVoidPages,
   deleteIsrCache,
   denormalizeIsrPath,
+  handleFrameworkIsr,
   handleIsr,
   hostRegistryKey,
   htmlEdgeKey,
@@ -596,6 +597,86 @@ describe('handleIsr', () => {
     return new Request(`https://${HOST}${path}`, { method: 'GET', headers });
   }
 
+  it('caches framework documents but never serves their HTML to data requests', async () => {
+    const { store, kv } = createKvMock();
+    const env = makeEnv(kv);
+    const render = vi.fn(
+      async () => new Response('<html>page</html>', { headers: { 'content-type': 'text/html' } }),
+    );
+    const document = htmlRequest('/news', { Accept: 'text/html' });
+    const first = createCtx();
+    expect(
+      (await handleFrameworkIsr(document, env, first.ctx, OPTS, render))?.headers.get(
+        'x-isr-cache',
+      ),
+    ).toBe('MISS');
+    await first.flush();
+    expect(store.has(isrKey(DPL, HOST, '/news'))).toBe(true);
+    expect(await readIsrCache(env, HOST, '/news')).not.toBeNull();
+    expect(edge.store.has(htmlEdgeKey(HOST, '/news', DPL))).toBe(true);
+
+    const second = createCtx();
+    expect(
+      (await handleFrameworkIsr(document, env, second.ctx, OPTS, render))?.headers.get(
+        'x-isr-cache',
+      ),
+    ).toBe('HIT');
+    expect(render).toHaveBeenCalledTimes(1);
+    expect(
+      await handleFrameworkIsr(
+        htmlRequest('/news', { Accept: 'application/json' }),
+        env,
+        second.ctx,
+        OPTS,
+        render,
+      ),
+    ).toBeNull();
+    expect(
+      await handleFrameworkIsr(
+        htmlRequest('/news', { Accept: 'text/html', 'Sec-Fetch-Dest': 'empty' }),
+        env,
+        second.ctx,
+        OPTS,
+        render,
+      ),
+    ).toBeNull();
+  });
+
+  it('does not cache framework JSON returned from a document path', async () => {
+    const { store, kv } = createKvMock();
+    const env = makeEnv(kv);
+    const render = vi.fn(async () => Response.json({ data: 'private' }));
+    const ctx = createCtx();
+    const response = await handleFrameworkIsr(
+      htmlRequest('/news', { Accept: 'text/html' }),
+      env,
+      ctx.ctx,
+      OPTS,
+      render,
+    );
+    await ctx.flush();
+    expect(response?.headers.get('x-isr-cache')).toBeNull();
+    expect(store.has(isrKey(DPL, HOST, '/news'))).toBe(false);
+  });
+
+  it('evicts stale framework HTML when the fresh render is no longer HTML', async () => {
+    const { store, kv } = createKvMock();
+    const env = makeEnv(kv);
+    seedEntry(store, '/news', { createdAt: BASE - 120_000 });
+    const render = vi.fn(async () => Response.json({ data: true }));
+    const ctx = createCtx();
+    const stale = await handleFrameworkIsr(
+      htmlRequest('/news', { Accept: 'text/html' }),
+      env,
+      ctx.ctx,
+      OPTS,
+      render,
+    );
+    expect(stale?.headers.get('x-isr-cache')).toBe('STALE');
+    await ctx.flush();
+    expect(store.has(isrKey(DPL, HOST, '/news'))).toBe(false);
+  });
+
   it('leaves an explicitly opted-out page to the live renderer despite a conflicting flat TTL', async () => {
     const { kv } = createKvMock();
     const render = vi.fn(async () => new Response('<html>private</html>'));
@@ -987,6 +1068,7 @@ describe('handleIsr', () => {
     expect(res!.headers.get('X-VoidPages')).toBe('true');
     expect(res!.headers.get('Vary')).toBe('X-VoidPages');
     expect(res!.headers.get('content-type')).toBe('application/json');
+    expect(res!.headers.get('x-isr-cache')).toBe('HIT');
     expect(await res!.text()).toBe('{"component":"Blog","props":{}}');
   });
 

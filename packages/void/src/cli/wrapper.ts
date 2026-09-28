@@ -29,6 +29,11 @@ export type WrapperFeatures = {
   readiness?: boolean;
   /** Database dialect for migration handler. */
   migrationDialect?: 'sqlite' | 'postgresql' | 'mysql';
+  /** Direct Cloudflare ISR policy; managed deployments cache in dispatch instead. */
+  isr?: {
+    revalidate: number | Record<string, number>;
+    queryAllowlist?: Record<string, Array<string>>;
+  };
 };
 
 export type WrapperResult = {
@@ -66,7 +71,8 @@ export function needsWrapper(features: WrapperFeatures): boolean {
     features.crons.length > 0 ||
     features.queues.length > 0 ||
     !!features.hasMigrations ||
-    !!features.readiness
+    !!features.readiness ||
+    !!features.isr
   );
 }
 
@@ -189,6 +195,10 @@ export async function generateWrapper(
     );
   }
 
+  if (features.isr) {
+    await bundleFrameworkIsr(root, workerDir);
+  }
+
   // Write wrapper in place of original entry
   const wrapperSource = generateWrapperSource(
     renamedName,
@@ -208,6 +218,36 @@ export async function generateWrapper(
     renameSync(stagedPath, mainPath);
   } finally {
     rmSync(stagedPath, { force: true });
+  }
+}
+
+async function bundleFrameworkIsr(root: string, workerDir: string): Promise<void> {
+  const entry = fileURLToPath(import.meta.resolve('@void/isr/runtime'));
+  const tmpDir = join(root, '.void', 'isr');
+  const outDir = join(tmpDir, 'out');
+  mkdirSync(tmpDir, { recursive: true });
+  await build({
+    root: tmpDir,
+    logLevel: 'silent',
+    ssr: { noExternal: true },
+    build: {
+      outDir,
+      emptyOutDir: true,
+      minify: false,
+      ssr: entry,
+      target: 'esnext',
+      rollupOptions: {
+        input: entry,
+        external: [/^cloudflare:/, /^node:/],
+        output: {
+          entryFileNames: '__void_isr.mjs',
+          chunkFileNames: '__void_isr-[hash].mjs',
+        },
+      },
+    },
+  });
+  for (const file of readdirSync(outDir)) {
+    copyFileSync(join(outDir, file), join(workerDir, file));
   }
 }
 
@@ -392,7 +432,7 @@ export async function bundleEntry(root: string, entry: string): Promise<WrapperR
 /** Clean up the temporary directories created while generating a deploy wrapper. */
 export function cleanupWrapper(root: string): void {
   const voidDir = join(root, '.void');
-  for (const directory of ['handlers', 'migration-handler', 'bundle']) {
+  for (const directory of ['handlers', 'migration-handler', 'isr', 'bundle']) {
     rmSync(join(voidDir, directory), { recursive: true, force: true });
   }
 }
@@ -409,6 +449,17 @@ function generateWrapperSource(
   const lines: Array<string> = [];
   lines.push(WRAPPER_MARKER);
   lines.push(`import original from "./${renamedEntry}";`);
+
+  if (features.isr) {
+    lines.push('import { handleFrameworkIsr } from "./__void_isr.mjs";');
+    lines.push(`const __voidIsrDeploymentId = ${JSON.stringify(crypto.randomUUID())};`);
+    lines.push(
+      `const __voidIsrPolicy = ${JSON.stringify({
+        revalidate: features.isr.revalidate,
+        queryAllowlist: features.isr.queryAllowlist,
+      })};`,
+    );
+  }
 
   if (features.crons.length > 0) {
     lines.push(`import { handleScheduled } from "./${handlersModule}";`);
@@ -432,11 +483,16 @@ function generateWrapperSource(
     features.readiness ||
     features.crons.length > 0 ||
     features.queues.length > 0 ||
-    (migrations && migrations.length > 0);
+    (migrations && migrations.length > 0) ||
+    !!features.isr;
 
   if (needsFetchWrap) {
     lines.push('async function wrappedFetch(request, env, ctx) {');
     lines.push('  const url = new URL(request.url);');
+    if (features.isr) {
+      lines.push('  env.__VOID_ISR_DEPLOYMENT_ID ??= __voidIsrDeploymentId;');
+      lines.push('  env.__VOID_ISR_HOST = url.hostname;');
+    }
 
     // Readiness probe — platform polls this to confirm the worker is live
     // after WfP upload. Handled here (before original.fetch) so the user's
@@ -531,6 +587,16 @@ function generateWrapperSource(
       lines.push('  }');
     }
 
+    if (features.isr) {
+      lines.push(
+        '  if (env.ISR_CACHE && request.headers.get("upgrade")?.toLowerCase() !== "websocket") {',
+      );
+      lines.push(
+        '    const cached = await handleFrameworkIsr(request, env, ctx, { ...__voidIsrPolicy, deploymentId: __voidIsrDeploymentId }, (req) => original.fetch(req, env, ctx));',
+      );
+      lines.push('    if (cached) return cached;');
+      lines.push('  }');
+    }
     lines.push('  return original.fetch(request, env, ctx);');
     lines.push('}');
     lines.push('');
@@ -545,11 +611,19 @@ function generateWrapperSource(
   }
 
   if (features.crons.length > 0) {
-    lines.push('  scheduled: handleScheduled,');
+    lines.push(
+      features.isr
+        ? '  scheduled(controller, env, ctx) { env.__VOID_ISR_DEPLOYMENT_ID ??= __voidIsrDeploymentId; return handleScheduled(controller, env, ctx); },'
+        : '  scheduled: handleScheduled,',
+    );
   }
 
   if (features.queues.length > 0) {
-    lines.push('  queue: handleQueue,');
+    lines.push(
+      features.isr
+        ? '  queue(batch, env, ctx) { env.__VOID_ISR_DEPLOYMENT_ID ??= __voidIsrDeploymentId; return handleQueue(batch, env, ctx); },'
+        : '  queue: handleQueue,',
+    );
   }
 
   lines.push('};');

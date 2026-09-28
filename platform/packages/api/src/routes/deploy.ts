@@ -4768,7 +4768,14 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               // dispatch's `resolveRevalidateTtl` does; a full 200 is required
               // (parity with the dispatch write sites — no partial/redirect body).
               const effectiveTtl = resolveRevalidateTtl(response, ttl);
-              if (response.status === 200 && effectiveTtl > 0 && !hasSharedCacheOptOut(response)) {
+              if (
+                response.status === 200 &&
+                effectiveTtl > 0 &&
+                !hasSharedCacheOptOut(response) &&
+                (manifest.type !== 'framework' ||
+                  response.headers.get('content-type')?.toLowerCase().split(';', 1)[0]?.trim() ===
+                    'text/html')
+              ) {
                 // Host-scope the warmed key to the slug host implied by the
                 // fetch URL — dispatch reads `<pid>/isr/v3/<did>/<host>/<path>`
                 // keyed on the request hostname, so without this the warmed

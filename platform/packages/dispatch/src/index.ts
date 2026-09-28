@@ -20,6 +20,7 @@ import {
   matchesLiteralPage,
   isDottedPathIsrEligible,
   shouldBypassIsr,
+  isFrameworkDocumentRequest,
   extractPageDataFromHtml,
   normalizePageDataForJsonCache,
 } from './isr.ts';
@@ -1041,6 +1042,7 @@ export default {
     // 'ssr') below and how meta-frameworks resolve API routes to non-ISR outputs.
     const isSsrPath =
       routing.ssr === true &&
+      (routing.type !== 'framework' || isFrameworkDocumentRequest(request)) &&
       isIsrEligiblePath(pathname, routing.pages, routing.revalidate, routing.pathRevalidate);
     if (isSsrPath && (routing.revalidate || routing.pages?.length)) {
       const isrTtl = resolvePageTtl(
@@ -1300,6 +1302,7 @@ export default {
           if (
             ttl > 0 &&
             workerResponse.status === 200 &&
+            (routing.type !== 'framework' || isHtmlResponse(workerResponse)) &&
             !isApiPath(effectiveMissPathname) &&
             !hasSharedCacheOptOut(workerResponse) &&
             (!missFallbackApplied ||
@@ -1355,7 +1358,9 @@ export default {
           if (
             workerResponse.status === 200 &&
             !missFallbackApplied &&
-            (ttl === 0 || hasSharedCacheOptOut(workerResponse))
+            (ttl === 0 ||
+              hasSharedCacheOptOut(workerResponse) ||
+              (routing.type === 'framework' && !isHtmlResponse(workerResponse)))
           ) {
             ctx.waitUntil(purgePoisonedIsrEntry());
           }
@@ -1687,7 +1692,8 @@ export default {
             sharedIsrEntry.pathname,
           ),
         ) === 0 ||
-          hasSharedCacheOptOut(response))
+          hasSharedCacheOptOut(response) ||
+          (routing.type === 'framework' && !isHtmlResponse(response)))
       ) {
         ctx.waitUntil(deleteSharedIsrEntry(env, sharedIsrEntry));
       }
@@ -1731,6 +1737,7 @@ export default {
         !request.headers.has('X-VoidPages') &&
         request.method === 'GET' &&
         !request.headers.has('Range') &&
+        (routing.type !== 'framework' || isFrameworkDocumentRequest(request)) &&
         !shouldBypassIsr(request)
       ) {
         const configTtl = resolvePageTtl(
@@ -1764,6 +1771,7 @@ export default {
           isrTtl > 0 &&
           response.status === 200 &&
           requestType === 'ssr' &&
+          (routing.type !== 'framework' || isHtmlResponse(response)) &&
           !hasSharedCacheOptOut(response) &&
           (!writebackFallbackApplied ||
             isFallbackTargetCacheable(routing.pages, pathname, response, routing.pathRevalidate))
@@ -2268,6 +2276,7 @@ async function revalidateInBackground(
     if (
       ttl > 0 &&
       response.status === 200 &&
+      (routing.type !== 'framework' || isHtmlResponse(response)) &&
       !isApiPath(effectiveBgPathname) &&
       !hasSharedCacheOptOut(response) &&
       (!fallbackResult.applied ||
@@ -2308,7 +2317,9 @@ async function revalidateInBackground(
       response.status === 200 &&
       !isApiPath(effectiveBgPathname) &&
       !fallbackResult.applied &&
-      (ttl === 0 || hasSharedCacheOptOut(response))
+      (ttl === 0 ||
+        hasSharedCacheOptOut(response) ||
+        (routing.type === 'framework' && !isHtmlResponse(response)))
     ) {
       // Evict the stale shared entry ONLY on an AUTHORITATIVE opt-out render of the
       // ORIGIN page itself: a successful render (200, NOT an `/api/*` fallback, and

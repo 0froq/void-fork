@@ -20,6 +20,7 @@ import { matchSegmentPattern } from './pattern.ts';
 // Re-export so callers that import from `./isr` (tests, index.ts) still work.
 export {
   extractPageDataFromHtml,
+  isFrameworkDocumentRequest,
   hasCurrentSharedCachePolicy,
   hasSharedCacheOptOut,
   isrCacheResponse,

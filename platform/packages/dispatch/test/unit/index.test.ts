@@ -438,6 +438,94 @@ describe('custom domain routing', () => {
 });
 
 describe('ISR (stale-while-revalidate)', () => {
+  it('keeps framework data requests separate from a cached document at the same URL', async () => {
+    let renders = 0;
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        type: 'framework',
+        ssr: true,
+        revalidate: 60,
+      },
+      workerFetchImpl: async () =>
+        ++renders === 2
+          ? Response.json({ data: true })
+          : new Response('<html>document</html>', { headers: { 'Content-Type': 'text/html' } }),
+    });
+    const documentCtx = createCtx();
+    const document = await app.fetch(
+      new Request('https://my-app.void.app/dashboard', { headers: { Accept: 'text/html' } }),
+      env,
+      documentCtx,
+    );
+    expect(await document.text()).toBe('<html>document</html>');
+    await Promise.all(
+      (documentCtx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]),
+    );
+
+    const data = await app.fetch(
+      new Request('https://my-app.void.app/dashboard', { headers: { Accept: 'application/json' } }),
+      env,
+      createCtx(),
+    );
+    expect(await data.json()).toEqual({ data: true });
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not cache a framework JSON response to a document request', async () => {
+    const { env, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        type: 'framework',
+        ssr: true,
+        revalidate: 60,
+      },
+      workerResponse: Response.json({ data: true }),
+    });
+    const ctx = createCtx();
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/dashboard', { headers: { Accept: 'text/html' } }),
+      env,
+      ctx,
+    );
+    expect(await response.json()).toEqual({ data: true });
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(kvStore.has('proj_1/isr/v3/legacy/my-app.void.app/dashboard')).toBe(false);
+  });
+
+  it('evicts stale framework HTML when revalidation returns JSON', async () => {
+    const key = 'proj_1/isr/v3/legacy/my-app.void.app/dashboard';
+    const { env, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        type: 'framework',
+        ssr: true,
+        revalidate: 60,
+      },
+      assets: {
+        [key]: {
+          body: '<html>stale</html>',
+          headers: { 'Content-Type': 'text/html' },
+          createdAt: Date.now() - 120_000,
+          ttl: 60,
+        },
+      },
+      workerResponse: Response.json({ data: true }),
+    });
+    const ctx = createCtx();
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/dashboard', { headers: { Accept: 'text/html' } }),
+      env,
+      ctx,
+    );
+    expect(response.headers.get('x-isr-cache')).toBe('STALE');
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(kvStore.has(key)).toBe(false);
+  });
+
   it('caches worker response in KV on first ISR request', async () => {
     const { env, workerFetch, kvStore } = createEnv({
       routing: {

@@ -48,6 +48,74 @@ describe('repeated wrapper generation', () => {
     expect((await worker.fetch(new Request('https://app/__void/ready'), {}, {})).status).toBe(200);
   });
 
+  it('serves cached framework HTML while leaving client data requests live', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-framework-isr-'));
+    roots.push(root);
+    writeFileSync(
+      join(root, 'index.mjs'),
+      `export default {
+      fetch(request, env) {
+        env.renders++;
+        return request.headers.get('accept') === 'application/json'
+          ? Response.json({ live: env.renders })
+          : new Response('<html>page</html>', { headers: { 'content-type': 'text/html' } });
+      }
+    };`,
+    );
+    const kvStore = new Map<string, { value: ArrayBuffer; metadata: unknown }>();
+    const edgeStore = new Map<string, Response>();
+    const env = {
+      renders: 0,
+      ISR_CACHE: {
+        getWithMetadata: async (key: string) => kvStore.get(key) ?? { value: null, metadata: null },
+        put: async (key: string, value: ArrayBuffer, options?: { metadata?: unknown }) => {
+          kvStore.set(key, { value, metadata: options?.metadata ?? null });
+        },
+        delete: async (key: string) => {
+          kvStore.delete(key);
+        },
+        list: async () => ({ keys: [], list_complete: true, cursor: '' }),
+      },
+    };
+    vi.stubGlobal('caches', {
+      default: {
+        match: async (key: string) => edgeStore.get(key)?.clone(),
+        put: async (key: string, response: Response) => {
+          edgeStore.set(key, response);
+        },
+        delete: async (key: string) => edgeStore.delete(key),
+      },
+    });
+    try {
+      await generateWrapper(root, 'index.mjs', root, { ...base, isr: { revalidate: 60 } });
+      const worker = (await import(pathToFileURL(join(root, 'index.mjs')).href)).default;
+      const tasks: Array<Promise<unknown>> = [];
+      const ctx = {
+        waitUntil: (task: Promise<unknown>) => {
+          tasks.push(task);
+        },
+      };
+      const document = new Request('https://app.test/news', { headers: { accept: 'text/html' } });
+
+      const first = await worker.fetch(document, env, ctx);
+      expect(first.headers.get('x-isr-cache')).toBe('MISS');
+      await Promise.all(tasks);
+      const second = await worker.fetch(document, env, ctx);
+      expect(second.headers.get('x-isr-cache')).toBe('HIT');
+      expect(env.renders).toBe(1);
+
+      const data = await worker.fetch(
+        new Request('https://app.test/news', { headers: { accept: 'application/json' } }),
+        env,
+        ctx,
+      );
+      expect(await data.json()).toEqual({ live: 2 });
+      expect(env.renders).toBe(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('keeps the entry intact when compiling handlers fails', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-failed-wrapper-'));
     roots.push(root);
@@ -159,7 +227,7 @@ describe('cleanupWrapper', () => {
 
     const voidDir = join(root, '.void');
     const projectFile = join(voidDir, 'project.json');
-    const temporaryDirectories = ['handlers', 'migration-handler', 'bundle'];
+    const temporaryDirectories = ['handlers', 'migration-handler', 'isr', 'bundle'];
     for (const directory of temporaryDirectories) {
       mkdirSync(join(voidDir, directory), { recursive: true });
       writeFileSync(join(voidDir, directory, 'generated.js'), 'export default {};');

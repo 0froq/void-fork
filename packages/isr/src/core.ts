@@ -248,6 +248,35 @@ export function shouldBypassIsr(request: Request): boolean {
   );
 }
 
+/** Only document navigations may read a framework's shared HTML cache. */
+export function isFrameworkDocumentRequest(request: Request): boolean {
+  if (request.method !== 'GET' || request.headers.has('X-VoidPages')) {
+    return false;
+  }
+  if (new URL(request.url).pathname.startsWith('/__void/')) {
+    return false;
+  }
+  const acceptsHtml = request.headers
+    .get('accept')
+    ?.split(',')
+    .some((value) => value.trim().toLowerCase().split(';', 1)[0] === 'text/html');
+  if (!acceptsHtml) {
+    return false;
+  }
+  const mode = request.headers.get('sec-fetch-mode')?.toLowerCase();
+  if (mode && mode !== 'navigate') {
+    return false;
+  }
+  const destination = request.headers.get('sec-fetch-dest')?.toLowerCase();
+  if (destination && destination !== 'document') {
+    return false;
+  }
+  if (request.headers.has('rsc') || request.headers.has('x-nextjs-data')) {
+    return false;
+  }
+  return true;
+}
+
 /** Return whether a response explicitly forbids storage in a shared cache. */
 export function hasSharedCacheOptOut(response: Response): boolean {
   if (response.headers.has('Set-Cookie')) {

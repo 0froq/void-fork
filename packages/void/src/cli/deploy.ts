@@ -5888,6 +5888,7 @@ export async function prepareCloudflareFrameworkArtifact(
   const paths = resolveProjectPaths(root, voidConfig);
   const crons = scanJobsSync(root, paths.cronsDir);
   const queues = scanQueuesSync(root, paths.queuesDir);
+  const revalidate = collectRevalidate(voidConfig, null);
   await generateDeployWrapperIfNeeded(root, join(root, preset.workerDir), preset.workerMain, {
     auth: null,
     crons,
@@ -5897,6 +5898,12 @@ export async function prepareCloudflareFrameworkArtifact(
     hasMigrations: false,
     migrationDialect: getDatabaseDialect(voidConfig),
     readiness: true,
+    ...(hasRevalidate(revalidate) && {
+      isr: {
+        revalidate: revalidate!,
+        queryAllowlist: voidConfig.routing?.revalidateQueryAllowlist,
+      },
+    }),
   });
   if (preset.cloudflareArtifact === 'vite-plugin') {
     return;
@@ -5925,6 +5932,7 @@ export async function prepareCloudflareFrameworkArtifact(
             '__original.js',
             '__original.mjs',
             '__void_handlers.mjs',
+            '__void_isr*.mjs',
             '__void_migration_handler*.mjs',
           ],
         }
@@ -7633,8 +7641,8 @@ async function runFrameworkDeploy(
   const wranglerCompat = resolveDeployWranglerCompat(root, voidConfig, workerDir, { dialect });
 
   // 9. Resolve revalidate + prerender from void.json
-  const revalidate = voidConfig.routing?.revalidate;
-  const prerender = voidConfig.routing?.prerender;
+  const revalidate = collectRevalidate(voidConfig, null);
+  const prerender = voidConfig.routing?.isr === false ? undefined : voidConfig.routing?.prerender;
 
   // Build manifest-format schedules and queues from raw scans
   const schedules = rawJobs.flatMap((job) =>

@@ -6488,6 +6488,83 @@ describe('runCloudflareDeploy — framework artifact guard', () => {
     expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc'))).not.toHaveProperty('main');
   });
 
+  it.each([
+    'tanstack-start',
+    'react-router',
+    'vinext-app',
+    'vinext-pages',
+    'sveltekit',
+    'nuxt',
+    'analog',
+    'astro',
+  ])(
+    'adds ISR to the direct Cloudflare %s worker when revalidation is configured',
+    async (name) => {
+      const preset = FRAMEWORK_PRESETS[name]!;
+      const root = makeProject({
+        'void.json': JSON.stringify({ routing: { revalidate: { '/news/*': 60 } } }),
+        'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'framework-app' }),
+        [`${preset.workerDir}/${preset.workerMain}`]:
+          'export default { fetch() { return new Response("<html>page</html>", { headers: { "content-type": "text/html" } }); } };',
+        [`${preset.assetsDir}/client.js`]: 'console.log("client");',
+      });
+
+      await prepareCloudflareFrameworkArtifact(
+        root,
+        join(root, 'wrangler.jsonc'),
+        'acc123',
+        'framework-app',
+        readConfig(root),
+        {
+          name,
+          class: ['tanstack-start', 'react-router', 'vinext-app', 'vinext-pages'].includes(name)
+            ? 'a'
+            : name === 'sveltekit'
+              ? 'b'
+              : 'c',
+        },
+        preset,
+      );
+
+      const entry = readFileSync(join(root, preset.workerDir, preset.workerMain), 'utf8');
+      expect(entry).toContain('handleFrameworkIsr');
+      expect(entry).toContain('from "./__void_isr.mjs"');
+      const isrModule = join(root, preset.workerDir, '__void_isr.mjs');
+      expect(existsSync(isrModule)).toBe(true);
+      expect(readFileSync(isrModule, 'utf8')).not.toMatch(/from ["']@void\//);
+      expect(entry).toContain('"/news/*":60');
+      expect(entry).toContain('__VOID_ISR_DEPLOYMENT_ID');
+      expect(entry).toContain('return original.fetch(request, env, ctx)');
+      if (preset.workerDir === preset.assetsDir) {
+        expect(readFileSync(join(root, preset.workerDir, '.assetsignore'), 'utf8')).toContain(
+          '__void_isr*.mjs',
+        );
+      }
+    },
+  );
+
+  it('does not add ISR to a framework worker when routing.isr is false', async () => {
+    const preset = FRAMEWORK_PRESETS['tanstack-start']!;
+    const root = makeProject({
+      'void.json': JSON.stringify({ routing: { revalidate: 60, isr: false } }),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'framework-app' }),
+      [`${preset.workerDir}/${preset.workerMain}`]:
+        'export default { fetch() { return new Response("page"); } };',
+      [`${preset.assetsDir}/client.js`]: 'console.log("client");',
+    });
+    await prepareCloudflareFrameworkArtifact(
+      root,
+      join(root, 'wrangler.jsonc'),
+      'acc123',
+      'framework-app',
+      readConfig(root),
+      { name: 'tanstack-start', class: 'a' },
+      preset,
+    );
+    const entry = readFileSync(join(root, preset.workerDir, preset.workerMain), 'utf8');
+    expect(entry).not.toContain('handleFrameworkIsr');
+  });
+
   it('fails closed when a framework build omits its Worker or assets', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'nuxt-app', dependencies: { nuxt: '4.0.0' } }),
