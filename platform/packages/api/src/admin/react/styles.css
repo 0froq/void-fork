@@ -327,7 +327,8 @@ body {
 }
 .void-admin-url {
   display: inline-flex;
-  max-width: 20rem;
+  min-width: 0;
+  max-width: min(20rem, 100%);
   vertical-align: bottom;
 }
 .void-admin-url > :first-child {
@@ -341,6 +342,77 @@ body {
   width: 1rem;
   height: 1rem;
   font-size: 1rem;
+}
+.void-admin-projects-table,
+.void-admin-top-projects-table {
+  table-layout: fixed;
+}
+.void-admin-projects-table {
+  min-width: 58rem;
+}
+.void-admin-projects-table th:nth-child(1) {
+  width: 16%;
+}
+.void-admin-projects-table th:nth-child(2) {
+  width: 32%;
+}
+.void-admin-projects-table th:nth-child(3) {
+  width: 12%;
+}
+.void-admin-projects-table th:nth-child(4) {
+  width: 8%;
+}
+.void-admin-projects-table th:nth-child(5) {
+  width: 14%;
+}
+.void-admin-projects-table th:nth-child(6) {
+  width: 18%;
+}
+.void-admin-projects-table td:nth-child(2) {
+  overflow: hidden;
+}
+.void-admin-top-projects-table {
+  min-width: 54rem;
+}
+.void-admin-top-projects-table th:nth-child(1) {
+  width: 4%;
+}
+.void-admin-top-projects-table th:nth-child(2) {
+  width: 36%;
+}
+.void-admin-top-projects-table th:nth-child(3) {
+  width: 14%;
+}
+.void-admin-top-projects-table th:nth-child(4) {
+  width: 12%;
+}
+.void-admin-top-projects-table th:nth-child(5) {
+  width: 12%;
+}
+.void-admin-top-projects-table th:nth-child(6) {
+  width: 22%;
+}
+.void-admin-top-project {
+  min-width: 0;
+}
+.void-admin-top-project-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.void-admin-top-project-meta {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  gap: var(--spacing-2);
+  color: var(--color-text-secondary);
+}
+.void-admin-top-project-meta .void-admin-url {
+  flex: 0 1 auto;
+}
+.void-admin-top-project-type {
+  flex: 0 0 auto;
 }
 .void-admin-loading-lines {
   display: grid;

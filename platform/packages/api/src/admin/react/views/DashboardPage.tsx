@@ -190,7 +190,7 @@ function TopProjectsWidget({
       <Heading level={2}>Top 10 Projects</Heading>
       <Text type="supporting">Last hour, site traffic only (static / ssr / isr)</Text>
       {projects.length > 0 ? (
-        <Table hasHover>
+        <Table className="void-admin-top-projects-table" hasHover>
           <TableHeader>
             <TableRow>
               <TableHeaderCell>#</TableHeaderCell>
@@ -233,12 +233,18 @@ function TopProjectTableRow({
     <TableRow>
       <TableCell>{index + 1}</TableCell>
       <TableCell>
-        <div>
-          <a href={`/admin/projects/${project.id}`}>{project.slug}</a>
-        </div>
-        <div>
-          <ProjectUrlLink url={project.url ?? `https://${project.slug}.${siteDomain}`} /> ·{' '}
-          {project.type}
+        <div className="void-admin-top-project">
+          <a
+            className="void-admin-top-project-name"
+            href={`/admin/projects/${project.id}`}
+            title={project.slug}
+          >
+            {project.slug}
+          </a>
+          <div className="void-admin-top-project-meta">
+            <ProjectUrlLink url={project.url ?? `https://${project.slug}.${siteDomain}`} />
+            <span className="void-admin-top-project-type">{project.type}</span>
+          </div>
         </div>
       </TableCell>
       <TableCell>

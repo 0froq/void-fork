@@ -28,7 +28,7 @@ export function ProjectsTable({
 }) {
   return (
     <>
-      <Table hasHover>
+      <Table className="void-admin-projects-table" hasHover>
         <TableHeader>
           <TableRow>
             <TableHeaderCell>Slug</TableHeaderCell>
