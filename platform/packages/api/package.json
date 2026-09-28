@@ -40,6 +40,7 @@
     "graphql-sse": "2.6.1",
     "hono": "catalog:platform",
     "jose": "6.2.12",
+    "lucide-react": "1.48.0",
     "mime": "^4.1.0",
     "oauth4webapi": "catalog:",
     "pg": "8.23.0",
