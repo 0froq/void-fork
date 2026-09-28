@@ -52,6 +52,7 @@ export type {
 } from '@void/deploy-core';
 
 export type InvitationStatus = 'pending' | 'accepted' | 'revoked';
+export type InvitationEmailDeliveryStatus = 'sent' | 'failed' | 'unavailable';
 export type ProjectMemberRole = 'reader' | 'collaborator' | 'admin';
 export type ProjectRole = ProjectMemberRole | 'owner';
 export type ProjectCapability = 'read' | 'deploy' | 'configure' | 'settings' | 'members' | 'delete';

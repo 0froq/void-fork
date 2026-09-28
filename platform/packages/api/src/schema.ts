@@ -22,6 +22,7 @@ import type { PlatformOidcIdentity, CompanyIdentity } from './auth/identity-type
 import type { PlatformWorkerName, PlatformEnv } from './operator/platform-workers.ts';
 import type { PlanId } from './tiers.ts';
 import type {
+  InvitationEmailDeliveryStatus,
   InvitationStatus,
   ProjectAccessEventAction,
   ProjectInvitationStatus,
@@ -1348,6 +1349,8 @@ export const invitations = pgTable(
     id: text('id').primaryKey(),
     email: text('email').notNull(),
     status: text('status').notNull().default('pending').$type<InvitationStatus>(),
+    // Null covers invitations created before delivery tracking and interrupted attempts.
+    email_delivery_status: text('email_delivery_status').$type<InvitationEmailDeliveryStatus>(),
     // Invitation actor ids are durable audit data. They deliberately outlive
     // the corresponding user rows, like operator_events.user_id.
     invited_by: text('invited_by').notNull(),
@@ -1360,6 +1363,10 @@ export const invitations = pgTable(
   (table) => [
     index('idx_invitations_email').on(table.email),
     index('idx_invitations_status').on(table.status),
+    check(
+      'invitations_email_delivery_status_check',
+      sql`${table.email_delivery_status} IS NULL OR ${table.email_delivery_status} IN ('sent', 'failed', 'unavailable')`,
+    ),
   ],
 );
 

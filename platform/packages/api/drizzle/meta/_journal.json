@@ -295,6 +295,13 @@
       "when": 1789920262096,
       "tag": "0048_project_teams",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1790570687921,
+      "tag": "0049_invitation_delivery_status",
+      "breakpoints": true
     }
   ]
 }

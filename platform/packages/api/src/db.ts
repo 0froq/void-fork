@@ -3545,6 +3545,22 @@ export async function createInvitation(
   return row;
 }
 
+export async function setInvitationEmailDeliveryStatus(
+  db: Db,
+  id: string,
+  status: NonNullable<Invitation['email_delivery_status']>,
+): Promise<Invitation> {
+  const [row] = await db
+    .update(invitations)
+    .set({ email_delivery_status: status })
+    .where(eq(invitations.id, id))
+    .returning();
+  if (!row) {
+    throw new Error(`Invitation ${id} disappeared before its email status could be saved.`);
+  }
+  return row;
+}
+
 export async function revokeInvitation(db: Db, id: string, revokedBy: string): Promise<boolean> {
   const rows = await db
     .update(invitations)

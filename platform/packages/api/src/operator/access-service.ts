@@ -17,6 +17,7 @@ import {
   getPendingInvitationByEmail,
   getUserByEmail,
   revokeInvitation,
+  setInvitationEmailDeliveryStatus,
 } from '../db.ts';
 import { sendInvitationEmail } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
@@ -211,6 +212,17 @@ export async function removeOperatorSignup(
   if (!removed.length) {
     throw new OperatorError(404, 'Signup allowlist entry not found.');
   }
+  if (
+    candidate.type === 'email' &&
+    !candidate.pattern.includes('*') &&
+    (await getPendingInvitationByEmail(context.get('db'), candidate.pattern))
+  ) {
+    throw new OperatorError(
+      409,
+      'This email has a pending invitation. Revoke the invitation to remove its signup access.',
+      'invitation_pending',
+    );
+  }
   const target = entryTarget(candidate);
   if (dryRun) {
     return preview(`signup.${action}`, target, { removed });
@@ -317,18 +329,38 @@ export async function sendOperatorInvitations(
     );
   }
   const emailDelivery: Array<{ email: string; status: 'sent' | 'failed' | 'unavailable' }> = [];
-  for (const email of emails) {
+  for (const [index, email] of emails.entries()) {
+    let status: 'sent' | 'failed' | 'unavailable';
     if (!context.env.EMAIL) {
-      emailDelivery.push({ email, status: 'unavailable' });
-      continue;
+      status = 'unavailable';
+    } else {
+      try {
+        await sendInvitationEmail(context.env, email);
+        status = 'sent';
+      } catch (error) {
+        console.error('[admin] invitation email failed', { email, error });
+        status = 'failed';
+      }
     }
     try {
-      await sendInvitationEmail(context.env, email);
-      emailDelivery.push({ email, status: 'sent' });
+      created[index] = await setInvitationEmailDeliveryStatus(db, created[index]!.id, status);
     } catch (error) {
-      console.error('[admin] invitation email failed', { email, error });
-      emailDelivery.push({ email, status: 'failed' });
+      console.error('[admin] invitation email status could not be saved', { email, status, error });
+      throw new OperatorError(
+        500,
+        'Invitation email status could not be saved. Inspect invitations before retrying.',
+        'partial_failure',
+        {
+          partial: true,
+          target,
+          invitations: created,
+          emailDelivery,
+          uncertainEmail: { email, attemptedStatus: status },
+          allowlistConfirmed: true,
+        },
+      );
     }
+    emailDelivery.push({ email, status });
   }
   return {
     action: 'invitation.send',

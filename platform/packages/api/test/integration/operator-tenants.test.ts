@@ -1376,6 +1376,12 @@ describe('operator signup access and invitations', () => {
       warnings: Array<string>;
     };
     expect(result.invitations).toHaveLength(2);
+    expect(result.invitations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ email: 'one@example.com', email_delivery_status: 'sent' }),
+        expect.objectContaining({ email: 'two@example.com', email_delivery_status: 'sent' }),
+      ]),
+    );
     expect(result.warnings).toEqual([]);
     expect(send).toHaveBeenCalledTimes(2);
     expect(send).toHaveBeenCalledWith(
@@ -1390,6 +1396,9 @@ describe('operator signup access and invitations', () => {
     };
     expect(listed).toMatchObject({ total: 2, limit: 1, totalPages: 2 });
     expect(listed.invitations).toHaveLength(1);
+    expect(listed.invitations).toEqual([
+      expect.objectContaining({ email_delivery_status: 'sent' }),
+    ]);
     const id = result.invitations[0].id;
     expect((await req(`/invitations/${id}/revoke`, { dryRun: true })).status).toBe(200);
     expect(await getInvitation(env.db, id)).toMatchObject({ status: 'pending' });
@@ -1414,10 +1423,78 @@ describe('operator signup access and invitations', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       emailDelivery: [{ email: 'delivery@example.com', status: 'failed' }],
-      invitations: [{ email: 'delivery@example.com' }],
+      invitations: [{ email: 'delivery@example.com', email_delivery_status: 'failed' }],
       warnings: ['Email failed: delivery@example.com. Signup access was granted.'],
     });
+    expect(
+      await getInvitation(env.db, (await env.db.select().from(invitations))[0]!.id),
+    ).toMatchObject({
+      email_delivery_status: 'failed',
+    });
     expect(await getAllowlist(env.ROUTING)).toHaveLength(1);
+  });
+
+  test('records unavailable delivery and leaves older invitation histories unknown', async () => {
+    const old = await createInvitation(env.db, 'old@example.com', operatorAdminId);
+    expect(old.email_delivery_status).toBeNull();
+    const response = await req('/invitations/send', { emails: ['offline@example.com'] });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      invitations: [{ email: 'offline@example.com', email_delivery_status: 'unavailable' }],
+      emailDelivery: [{ email: 'offline@example.com', status: 'unavailable' }],
+    });
+    const rows = (await (await req('/invitations?limit=100')).json()) as {
+      invitations: Array<{ email: string; email_delivery_status: string | null }>;
+    };
+    expect(rows.invitations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ email: 'old@example.com', email_delivery_status: null }),
+        expect.objectContaining({
+          email: 'offline@example.com',
+          email_delivery_status: 'unavailable',
+        }),
+      ]),
+    );
+  });
+
+  test('reports an ambiguous email outcome if saving delivery status fails', async () => {
+    const send = vi.fn(async () => {});
+    vi.spyOn(dbModule, 'setInvitationEmailDeliveryStatus').mockRejectedValue(
+      new Error('database unavailable'),
+    );
+    const response = await req(
+      '/invitations/send',
+      { emails: ['ambiguous@example.com'] },
+      { EMAIL: { send } as unknown as SendEmail },
+    );
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      error: 'partial_failure',
+      details: {
+        partial: true,
+        invitations: [{ email: 'ambiguous@example.com', email_delivery_status: null }],
+        emailDelivery: [],
+        uncertainEmail: { email: 'ambiguous@example.com', attemptedStatus: 'sent' },
+        allowlistConfirmed: true,
+      },
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(await getAllowlist(env.ROUTING)).toEqual([
+      expect.objectContaining({ type: 'email', pattern: 'ambiguous@example.com' }),
+    ]);
+  });
+
+  test('requires revoking a pending invitation to remove its exact-email grant', async () => {
+    const response = await req('/invitations/send', { emails: ['invited@example.com'] });
+    const result = (await response.json()) as { invitations: Array<{ id: string }> };
+    const remove = await req('/signup/remove', { type: 'email', pattern: 'invited@example.com' });
+    expect(remove.status).toBe(409);
+    expect(await remove.json()).toMatchObject({ error: 'invitation_pending' });
+    expect(await getAllowlist(env.ROUTING)).toEqual([
+      expect.objectContaining({ type: 'email', pattern: 'invited@example.com' }),
+    ]);
+    expect((await req(`/invitations/${result.invitations[0]!.id}/revoke`, {})).status).toBe(200);
+    expect(await getAllowlist(env.ROUTING)).toEqual([]);
   });
 
   test('reports invitations committed before an allowlist failure, and sends no emails', async () => {

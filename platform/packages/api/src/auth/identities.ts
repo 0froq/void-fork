@@ -139,7 +139,7 @@ export async function resolvePlatformLogin(
         (admission.mode === 'company' &&
           (admission.connections.includes(connection.id) ||
             (admission.access && !!settings.protection && !!companyIdentity))) ||
-        (admission.mode === 'restricted' &&
+        ((admission.mode === 'restricted' || admission.mode === 'company') &&
           isSignupAllowed(
             connection.kind,
             identity.login,

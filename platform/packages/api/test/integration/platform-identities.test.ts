@@ -86,6 +86,34 @@ describe('platform company enrollment', () => {
     expect((await resolvePlatformLogin(env.db, env, attempt, identity)).user.role).toBe('user');
   });
 
+  it('admits an individually invited verified email as an exception to company-only signup', async () => {
+    await importLegacyAuthentication(env.db, env);
+    await env.db
+      .update(platformAuthSettings)
+      .set({ admission: { mode: 'company', access: false, connections: ['google'] } });
+    await env.ROUTING.put(
+      'signup:allowlist',
+      JSON.stringify([{ type: 'email', pattern: identity.email }]),
+    );
+    await expect(
+      resolvePlatformLogin(env.db, env, attempt, {
+        ...identity,
+        subject: 'unverified',
+        emailVerified: false,
+      }),
+    ).rejects.toMatchObject({ code: 'signup_restricted' });
+    await expect(
+      resolvePlatformLogin(env.db, env, attempt, {
+        ...identity,
+        subject: 'different-email',
+        email: 'different@example.net',
+      }),
+    ).rejects.toMatchObject({ code: 'signup_restricted' });
+    expect((await resolvePlatformLogin(env.db, env, attempt, identity)).user.email).toBe(
+      identity.email,
+    );
+  });
+
   it('does not merge with an existing administrator based on a verified email', async () => {
     const admin = await createTestUser(env.db, 'admin', 'google', 'google-user', 'custom', 'admin');
     await env.db.update(users).set({ email: identity.email }).where(eq(users.id, admin.id));

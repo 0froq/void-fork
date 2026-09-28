@@ -625,7 +625,7 @@ void platform signup allow identity <connection-id> <subject> [--note <text>]
 void platform signup disallow identity <connection-id> <subject>
 ```
 
-Connection IDs are shown by `void platform config auth list`. Identity subjects match exactly and case-sensitively; wildcards, email inference, and account linking are not applied. The login method's domain or group restrictions must still pass, and a newly admitted account has the ordinary user role. With restrictions enabled and an empty allowlist, nobody new can sign up.
+Connection IDs are shown by `void platform config auth list`. Identity subjects match exactly and case-sensitively; wildcards, email inference, and account linking are not applied. The login method's domain or group restrictions must still pass, and a newly admitted account has the ordinary user role. Under invited/allowlisted signup, an empty allowlist blocks new accounts. Under company-approved signup, explicit grants admit people in addition to the company rules.
 
 #### Invitations {#operator-invitations}
 
@@ -637,7 +637,7 @@ void platform invitation send <email[,email...]>
 void platform invitation revoke <id>
 ```
 
-Send accepts up to 100 comma-separated addresses. Invitations grant signup access even if email delivery is unavailable or fails; delivery is reported separately. Revoking a pending invitation removes its exact email grant. A broader domain entry can still allow that person to sign up.
+Send accepts up to 100 comma-separated addresses. Invitations grant signup access even if email delivery is unavailable or fails; delivery is reported separately. Share the platform's `/invite` page or `void connect '<platform URL>'` command yourself when no email is sent. Revoking a pending invitation removes its exact email grant. A broader domain entry can still allow that person to sign up.
 
 #### Email {#operator-email}
 
