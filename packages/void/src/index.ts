@@ -342,9 +342,14 @@ import original from ${JSON.stringify(original)};
 export default {
   ...original,
   async fetch(request, env, ctx) {
-    const { handleDevTrigger } = await import(${JSON.stringify(frameworkTriggersDispatchPath(root))});
-    const response = await handleDevTrigger(request, env, ctx);
-    if (response) return response;
+    if (request.method === "POST") {
+      const pathname = new URL(request.url).pathname;
+      if (pathname === "/__void/scheduled" || pathname === "/__void/queue") {
+        const { handleDevTrigger } = await import(${JSON.stringify(frameworkTriggersDispatchPath(root))});
+        const response = await handleDevTrigger(request, env, ctx);
+        if (response) return response;
+      }
+    }
     return original.fetch(request, env, ctx);
   },
 };

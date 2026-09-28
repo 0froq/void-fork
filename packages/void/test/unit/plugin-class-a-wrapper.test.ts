@@ -1,5 +1,7 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { join } from 'pathslash';
 import type { Plugin, ResolvedConfig } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -105,6 +107,44 @@ describe('Class A framework build wrapper', () => {
     const code = readFileSync(join(root, '.void', 'tanstack-start-trigger-wrapper.ts'), 'utf-8');
     expect(code).toContain('asset.headers.get("content-type")');
     expect(code).toContain('new Response(asset.body, asset)');
+  });
+});
+
+describe('Class A framework dev wrapper', () => {
+  it('serves an ordinary request without loading a broken cron dependency', async () => {
+    const root = createTanStackRoot();
+    mkdirSync(join(root, 'crons'), { recursive: true });
+    mkdirSync(join(root, 'helpers'), { recursive: true });
+    writeFileSync(join(root, 'helpers/explode.ts'), 'throw new Error("cron dependency loaded");');
+    writeFileSync(
+      join(root, 'crons/tick.ts'),
+      'import "../helpers/explode.ts"; export const cron = "* * * * *"; export default async function tick() {}',
+    );
+    const packageRoot = join(root, 'node_modules/@tanstack/react-start');
+    mkdirSync(packageRoot, { recursive: true });
+    writeFileSync(
+      join(packageRoot, 'package.json'),
+      JSON.stringify({ type: 'module', exports: { './server-entry': './server-entry.js' } }),
+    );
+    writeFileSync(
+      join(packageRoot, 'server-entry.js'),
+      'export default { fetch: async () => new Response("ordinary page") };',
+    );
+
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+    const { voidPlugin } = await import('../../src/index.ts');
+    voidPlugin();
+
+    const runner = join(root, 'run.mjs');
+    writeFileSync(
+      runner,
+      `import worker from ${JSON.stringify(pathToFileURL(join(root, '.void/tanstack-start-trigger-wrapper.ts')).href)};\n` +
+        'const response = await worker.fetch(new Request("https://example.test/"), {}, {});\n' +
+        'process.stdout.write(await response.text());\n',
+    );
+    expect(execFileSync(process.execPath, [runner], { cwd: root, encoding: 'utf8' })).toBe(
+      'ordinary page',
+    );
   });
 });
 
