@@ -18,6 +18,6 @@ export const renderOperationError: ErrorHandler<ApiEnv> = (error, context) => {
       status: error.status,
       platformName: getPlatformDisplayName(context.env, context.req.url),
     },
-    { status: error.status, css: false },
+    { status: error.status },
   );
 };

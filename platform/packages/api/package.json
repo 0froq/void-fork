@@ -22,8 +22,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@astryxdesign/core": "catalog:",
+    "@astryxdesign/theme-neutral": "catalog:",
     "@cloudflare/containers": "0.3.7",
     "@cloudflare/sandbox": "0.12.9",
+    "@stylexjs/stylex": "catalog:",
     "@void/deploy-core": "workspace:*",
     "@void/isr": "workspace:*",
     "@void/react": "workspace:*",

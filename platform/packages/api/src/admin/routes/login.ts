@@ -43,7 +43,7 @@ function loginFailure(
       message,
       platformName: getPlatformDisplayName(context.env, context.req.url),
     },
-    { status, css: false },
+    { status },
   );
 }
 

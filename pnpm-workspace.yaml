@@ -9,6 +9,7 @@ packages:
 catalogMode: strict
 
 allowBuilds:
+  '@astryxdesign/core': false
   '@parcel/watcher': false
   '@prisma/engines': false
   better-sqlite3: false
@@ -36,6 +37,9 @@ catalog:
   vitest: 4.1.11
   wrangler: 4.131.0
   oauth4webapi: ^3.8.8
+  '@astryxdesign/core': 0.6.3
+  '@astryxdesign/theme-neutral': 0.6.3
+  '@stylexjs/stylex': 0.19.1
 
 catalogs:
   angular:

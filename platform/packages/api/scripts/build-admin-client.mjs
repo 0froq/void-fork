@@ -29,6 +29,7 @@ await build({
       name: 'VoidAdmin',
       formats: ['iife'],
       fileName: () => 'client.js',
+      cssFileName: 'style',
     },
   },
 });

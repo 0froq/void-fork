@@ -1,3 +1,4 @@
+import { AdminProviders } from './AdminProviders.tsx';
 import { AdminErrorPage } from './views/AdminErrorPage.tsx';
 import { AdminLoginPage } from './views/AdminLoginPage.tsx';
 import { AuthEditPage } from './views/AuthEditPage.tsx';
@@ -22,6 +23,7 @@ import { UserDetailPage } from './views/UserDetailPage.tsx';
 import { UsersListPage } from './views/UsersListPage.tsx';
 
 export const adminComponents = {
+  adminLayout: async () => ({ default: AdminProviders }),
   dashboard: async () => ({ default: DashboardPage }),
   adminLogin: async () => ({ default: AdminLoginPage }),
   loginError: async () => ({ default: LoginErrorPage }),
@@ -46,7 +48,13 @@ export const adminComponents = {
   invitations: async () => ({ default: InvitationsPage }),
 };
 
-export type AdminPageId = keyof typeof adminComponents;
+export type AdminPageId = Exclude<keyof typeof adminComponents, 'adminLayout'>;
+
+export const adminLayoutTree: Record<AdminPageId, Array<string>> = Object.fromEntries(
+  Object.keys(adminComponents)
+    .filter((name) => name !== 'adminLayout')
+    .map((name) => [name, ['adminLayout']]),
+) as Record<AdminPageId, Array<string>>;
 
 export function matchAdminRoute(url: string): AdminPageId | null {
   const path = new URL(url, 'https://void.invalid').pathname;

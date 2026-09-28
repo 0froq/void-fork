@@ -1,24 +1,10 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import { AppShell } from '@astryxdesign/core/AppShell';
+import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav';
+import { TopNav, TopNavHeading } from '@astryxdesign/core/TopNav';
+import { useRouter } from '@void/react';
 import { useEffect, type ReactNode } from 'react';
 import { formatPlatformPageTitle } from '../../../platform-identity.ts';
-
-export const ADMIN_CSS = `
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: monospace; line-height: 1.5; }
-  a { color: #2563eb; }
-  a:hover { text-decoration: underline; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 12px 12px 12px 0; border-bottom: 1px solid #ccc; font-size: 0.8rem; }
-  th { font-weight: 600; }
-  pre { background: #f5f5f5; padding: 10px; white-space: pre-wrap; word-break: break-word; overflow-x: auto; }
-  button, input, select { background: white; border: 1px solid black; border-radius: 0; padding: 4px 10px; font-family: monospace; font-size: 0.85rem; line-height: 1.5; }
-  button { cursor: pointer; }
-  button.danger { color: red; border-color: red; }
-  button.danger-sm { color: red; border-color: red; font-size: 0.7rem; padding: 2px 6px; }
-  h1 { margin-bottom: 10px; }
-  h2 { margin-top: 60px; margin-bottom: 10px; }
-  tr.build-active { background: #fef9c3; }
-`;
 
 export function Layout({
   title,
@@ -31,6 +17,7 @@ export function Layout({
   username?: string;
   children: ReactNode;
 }) {
+  const path = useRouter().path;
   useEffect(() => {
     document.title = formatPlatformPageTitle(title, platformName);
   }, [title, platformName]);
@@ -74,22 +61,76 @@ export function Layout({
   }, []);
 
   return (
-    <div style="max-width: 1100px; margin: 0 auto; padding: 20px; padding-bottom: 60px">
-      <nav style="display: flex; justify-content: space-between; padding-bottom: 10px; margin-bottom: 20px; border-bottom: 1px solid #ccc">
-        <span>
-          <strong>Void Admin</strong> &mdash; <a href="/admin/">Dashboard</a> |{' '}
-          <a href="/admin/users">Users</a> | <a href="/admin/projects">Projects</a> |{' '}
-          <a href="/admin/deployments">Deployments</a> |{' '}
-          <a href="/admin/cli-versions">CLI Versions</a> |{' '}
-          <a href="/admin/signup-control">Signup</a> | <a href="/admin/config/auth">Settings</a> |{' '}
-          <a href="/admin/email">Email</a> | <a href="/admin/invitations">Invitations</a>
-        </span>
-        <span>
-          {username && <>{username} | </>}
-          <a href="/admin/logout">Logout</a>
-        </span>
-      </nav>
-      {children}
-    </div>
+    <AppShell
+      height="auto"
+      contentPadding={6}
+      topNav={
+        <TopNav
+          label="Platform administration"
+          heading={<TopNavHeading heading={platformName} subheading="Admin" />}
+          endContent={
+            <div style="display: flex; align-items: center; gap: 16px">
+              {username && <span>{username}</span>}
+              <a href="/admin/logout">Log out</a>
+            </div>
+          }
+        />
+      }
+      sideNav={
+        <SideNav label="Admin sections" collapsible>
+          <SideNavSection title="Overview">
+            <SideNavItem label="Dashboard" href="/admin/" isSelected={path === '/admin/'} />
+          </SideNavSection>
+          <SideNavSection title="Applications">
+            <SideNavItem
+              label="Projects"
+              href="/admin/projects"
+              isSelected={path.startsWith('/admin/projects')}
+            />
+            <SideNavItem
+              label="Deployments"
+              href="/admin/deployments"
+              isSelected={path.startsWith('/admin/deployments')}
+            />
+          </SideNavSection>
+          <SideNavSection title="People">
+            <SideNavItem
+              label="Users"
+              href="/admin/users"
+              isSelected={path.startsWith('/admin/users')}
+            />
+            <SideNavItem
+              label="Invitations"
+              href="/admin/invitations"
+              isSelected={path === '/admin/invitations'}
+            />
+          </SideNavSection>
+          <SideNavSection title="Platform">
+            <SideNavItem
+              label="Authentication"
+              href="/admin/config/auth"
+              isSelected={path.startsWith('/admin/config/auth')}
+            />
+            <SideNavItem
+              label="Email"
+              href="/admin/email"
+              isSelected={path.startsWith('/admin/email')}
+            />
+            <SideNavItem
+              label="Signup"
+              href="/admin/signup-control"
+              isSelected={path === '/admin/signup-control'}
+            />
+            <SideNavItem
+              label="CLI Versions"
+              href="/admin/cli-versions"
+              isSelected={path === '/admin/cli-versions'}
+            />
+          </SideNavSection>
+        </SideNav>
+      }
+    >
+      <div className="void-admin-content">{children}</div>
+    </AppShell>
   );
 }

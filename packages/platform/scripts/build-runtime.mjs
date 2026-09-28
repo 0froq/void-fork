@@ -16,6 +16,7 @@ const drizzleRoot = join(repositoryRoot, 'platform', 'packages', 'api', 'drizzle
 const apiRoot = join(repositoryRoot, 'platform', 'packages', 'api');
 const {
   PLATFORM_ADMIN_CLIENT_ASSET_PATH,
+  PLATFORM_ADMIN_STYLE_ASSET_PATH,
   parsePlatformRuntimeManifest,
   platformDatabaseSchemaDigest,
 } = await import(pathToFileURL(join(packageRoot, 'dist', 'installer.mjs')).href);
@@ -73,6 +74,9 @@ try {
   mkdirSync(dirname(adminClientAsset), { recursive: true });
   cpSync(join(apiRoot, 'dist', 'admin-assets', 'admin', 'client.js'), adminClientAsset);
   const adminClientContents = readFileSync(adminClientAsset);
+  const adminStyleAsset = join(runtimeRoot, PLATFORM_ADMIN_STYLE_ASSET_PATH);
+  cpSync(join(apiRoot, 'dist', 'admin-assets', 'admin', 'style.css'), adminStyleAsset);
+  const adminStyleContents = readFileSync(adminStyleAsset);
   const artifacts = {};
   const controller = buildSandboxController(temporaryRoot);
 
@@ -127,6 +131,11 @@ try {
         path: PLATFORM_ADMIN_CLIENT_ASSET_PATH,
         sha256: createHash('sha256').update(adminClientContents).digest('hex'),
         size: adminClientContents.byteLength,
+      },
+      adminStyle: {
+        path: PLATFORM_ADMIN_STYLE_ASSET_PATH,
+        sha256: createHash('sha256').update(adminStyleContents).digest('hex'),
+        size: adminStyleContents.byteLength,
       },
     },
     applicationRoutingVersion: 1,

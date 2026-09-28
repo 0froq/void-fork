@@ -55,6 +55,7 @@ describe('platform runtime manifest', () => {
       manifest.database.journalSha256,
     );
     expect(manifest.assets?.adminClient.path).toBe('api/assets/admin/client.js');
+    expect(manifest.assets?.adminStyle?.path).toBe('api/assets/admin/style.css');
     for (const artifact of [
       ...Object.values(manifest.artifacts),
       ...Object.values(manifest.assets ?? {}),
@@ -94,6 +95,15 @@ describe('platform runtime manifest', () => {
         },
       }),
     ).toThrow('admin client asset path must be');
+    expect(() =>
+      parsePlatformRuntimeManifest({
+        ...manifest,
+        assets: {
+          ...manifest.assets,
+          adminStyle: { ...manifest.assets?.adminStyle, path: 'other/style.css' },
+        },
+      }),
+    ).toThrow('admin style asset path must be');
     expect(() =>
       parsePlatformRuntimeManifest({
         ...manifest,
@@ -190,6 +200,10 @@ describe('platform runtime manifest', () => {
       expect(client.status).toBe(200);
       expect(client.headers.get('Content-Type')).toContain('text/javascript');
       expect(digest(Buffer.from(await client.text()))).toBe(runtime.assets?.adminClient.sha256);
+      const style = await miniflare.dispatchFetch('http://localhost/admin/style.css');
+      expect(style.status).toBe(200);
+      expect(style.headers.get('Content-Type')).toContain('text/css');
+      expect(digest(Buffer.from(await style.text()))).toBe(runtime.assets?.adminStyle?.sha256);
     } finally {
       await miniflare.dispose();
     }
@@ -208,6 +222,10 @@ describe('platform runtime manifest', () => {
       cpSync(getPlatformRuntimeDirectory(), runtimeDirectory, { recursive: true });
       const assetPath = join(runtimeDirectory, runtime.manifest.assets!.adminClient.path);
       writeFileSync(assetPath, `${readFileSync(assetPath, 'utf8')}\n// changed\n`);
+      expect(() => loadPlatformRuntime(runtimeDirectory)).toThrow('integrity verification');
+      cpSync(getPlatformRuntimeDirectory(), runtimeDirectory, { recursive: true });
+      const stylePath = join(runtimeDirectory, runtime.manifest.assets!.adminStyle!.path);
+      writeFileSync(stylePath, `${readFileSync(stylePath, 'utf8')}\n/* changed */\n`);
       expect(() => loadPlatformRuntime(runtimeDirectory)).toThrow('integrity verification');
     } finally {
       rmSync(temporary, { force: true, recursive: true });

@@ -11,6 +11,7 @@ export type PlatformRuntimeArtifact = Readonly<{
 
 export const PLATFORM_ADMIN_ASSETS_DIRECTORY = 'api/assets';
 export const PLATFORM_ADMIN_CLIENT_ASSET_PATH: string = `${PLATFORM_ADMIN_ASSETS_DIRECTORY}/admin/client.js`;
+export const PLATFORM_ADMIN_STYLE_ASSET_PATH: string = `${PLATFORM_ADMIN_ASSETS_DIRECTORY}/admin/style.css`;
 
 export type PlatformRuntimeMigration = Readonly<{
   index: number;
@@ -40,7 +41,10 @@ export type PlatformRuntimeManifest = Readonly<{
     Record<'api' | 'dispatch' | 'proxy' | 'tail', PlatformRuntimeArtifact> &
       Partial<Record<'emailGateway', PlatformRuntimeArtifact>>
   >;
-  assets?: Readonly<{ adminClient: PlatformRuntimeArtifact }>;
+  assets?: Readonly<{
+    adminClient: PlatformRuntimeArtifact;
+    adminStyle?: PlatformRuntimeArtifact;
+  }>;
   emailProtocolVersion?: 1;
   database: PlatformRuntimeDatabaseManifest;
   platformVersion: string;
@@ -120,7 +124,16 @@ export function parsePlatformRuntimeManifest(value: unknown): PlatformRuntimeMan
         `runtime manifest admin client asset path must be ${PLATFORM_ADMIN_CLIENT_ASSET_PATH}`,
       );
     }
-    assets = { adminClient };
+    const adminStyle =
+      assetsValue.adminStyle === undefined
+        ? undefined
+        : parseArtifact(assetsValue.adminStyle, 'admin style asset');
+    if (adminStyle && adminStyle.path !== PLATFORM_ADMIN_STYLE_ASSET_PATH) {
+      throw new Error(
+        `runtime manifest admin style asset path must be ${PLATFORM_ADMIN_STYLE_ASSET_PATH}`,
+      );
+    }
+    assets = { adminClient, ...(adminStyle ? { adminStyle } : {}) };
   }
   const databaseValue = record(root.database, 'runtime manifest database');
   if (databaseValue.protocolVersion !== 1) {

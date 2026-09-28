@@ -5111,7 +5111,12 @@ export function verifyRuntimeArtifacts(
 ): void {
   for (const artifact of [
     ...Object.values(manifest.artifacts),
-    ...(manifest.assets ? [manifest.assets.adminClient] : []),
+    ...(manifest.assets
+      ? [
+          manifest.assets.adminClient,
+          ...(manifest.assets.adminStyle ? [manifest.assets.adminStyle] : []),
+        ]
+      : []),
   ]) {
     const path = join(runtimeDirectory, artifact.path);
     let contents: Buffer;

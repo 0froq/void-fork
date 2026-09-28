@@ -3,15 +3,14 @@ import type { Context } from 'hono';
 import type { PageObject } from 'void/pages-protocol';
 import type { ApiEnv } from '../../env.ts';
 import { formatPlatformPageTitle } from '../../platform-identity.ts';
-import { adminComponents, type AdminPageId } from './pages.ts';
-import { ADMIN_CSS } from './views/Layout.tsx';
+import { adminComponents, adminLayoutTree, type AdminPageId } from './pages.ts';
 
 export async function renderAdminPage(
   context: Context<ApiEnv>,
   component: AdminPageId,
   title: string,
   props: Record<string, unknown>,
-  options: { status?: number; css?: boolean } = {},
+  options: { status?: number } = {},
 ): Promise<Response> {
   const platformName = String(props.platformName ?? 'Void');
   const pageObj: PageObject = {
@@ -23,6 +22,7 @@ export async function renderAdminPage(
     errors: null,
     head: {
       title: formatPlatformPageTitle(title, platformName),
+      htmlAttrs: { lang: 'en', 'data-astryx-theme': 'neutral' },
       meta: [
         { charset: 'utf-8' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
@@ -40,9 +40,9 @@ export async function renderAdminPage(
   const stream = await renderReactPage({
     pageObj,
     components: adminComponents,
-    layoutTree: {},
+    layoutTree: adminLayoutTree,
     assetTags: {
-      css: options.css === false ? '' : `<style>${ADMIN_CSS}</style>`,
+      css: '<link rel="stylesheet" href="/admin/style.css">',
       preloads: '',
       body: '<script src="/admin/client.js" defer></script>',
     },

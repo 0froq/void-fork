@@ -1,9 +1,10 @@
 import { startReactPages } from '@void/react/pages-client';
-import { adminComponents, matchAdminRoute } from './pages.ts';
+import { adminComponents, adminLayoutTree, matchAdminRoute } from './pages.ts';
+import './styles.css';
 
 void startReactPages({
   components: adminComponents,
-  layoutTree: {},
+  layoutTree: adminLayoutTree,
   routeMeta: {},
   matchRoute: matchAdminRoute,
   staticPageData: false,
