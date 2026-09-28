@@ -19,7 +19,7 @@ const TITLES: Partial<Record<AdminPageId, string>> = {
   deploymentDetail: 'Deployment',
   buildDetail: 'Build',
   cliVersions: 'CLI Versions',
-  signupControl: 'Signup',
+  signupControl: 'Access',
   authSettings: 'Authentication',
   authNew: 'Add login method',
   authEdit: 'Edit login method',
