@@ -407,12 +407,7 @@ body {
   gap: var(--spacing-3);
   margin-block: var(--spacing-5);
 }
-.void-admin-content .astryx-typeahead .astryx-token {
-  inset-inline-start: 0;
-  padding-inline: 0;
-  background: transparent;
-  font: inherit;
-}
+/* Keep the selected token's button from picking up the legacy form-button paint. */
 .void-admin-content .astryx-typeahead .astryx-token > button {
   padding: 0;
   border: 0;
