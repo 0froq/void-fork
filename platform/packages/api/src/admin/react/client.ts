@@ -1,4 +1,5 @@
 import { startReactPages } from '@void/react/pages-client';
+import { AdminNavigationFallback } from './AdminNavigationFallback.tsx';
 import { adminComponents, adminLayoutTree, matchAdminRoute } from './pages.ts';
 import './styles.css';
 
@@ -12,4 +13,5 @@ void startReactPages({
   viewTransitions: false,
   prefetchHoverDelay: 75,
   prefetchDefaultCacheFor: { stale: 0, expires: 0 },
+  navigationFallback: AdminNavigationFallback,
 });

@@ -65,6 +65,11 @@ body {
   white-space: nowrap;
   vertical-align: bottom;
 }
+.void-admin-loading-lines {
+  display: grid;
+  gap: var(--spacing-4);
+  margin-block-start: var(--spacing-6);
+}
 
 @layer legacy {
   .void-admin-content {

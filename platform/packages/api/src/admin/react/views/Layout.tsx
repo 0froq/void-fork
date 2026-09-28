@@ -2,7 +2,7 @@
 import { AppShell } from '@astryxdesign/core/AppShell';
 import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav';
 import { TopNav, TopNavHeading } from '@astryxdesign/core/TopNav';
-import { useRouter } from '@void/react';
+import { useNavigation, useRouter } from '@void/react';
 import { useEffect, type ReactNode } from 'react';
 import { formatPlatformPageTitle } from '../../../platform-identity.ts';
 
@@ -17,7 +17,8 @@ export function Layout({
   username?: string;
   children: ReactNode;
 }) {
-  const path = useRouter().path;
+  const routerPath = useRouter().path;
+  const path = useNavigation().location?.pathname ?? routerPath;
   useEffect(() => {
     document.title = formatPlatformPageTitle(title, platformName);
   }, [title, platformName]);
