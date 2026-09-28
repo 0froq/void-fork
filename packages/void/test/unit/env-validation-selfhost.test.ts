@@ -362,6 +362,22 @@ describe('readEmittedWorkerVars — ground-truth worker vars via the deploy poin
     expect(result).toEqual({ ok: true, vars: { APP_NAME: 'demo', PORT: '8080' } });
   });
 
+  it('reads vars from a generated JSONC config with comments and trailing commas', () => {
+    const root = createTempProject();
+    mkdirSync(join(root, '.wrangler', 'deploy'), { recursive: true });
+    writeFileSync(
+      join(root, '.wrangler', 'deploy', 'config.json'),
+      JSON.stringify({ configPath: '../../dist/ssr/wrangler.jsonc' }),
+    );
+    mkdirSync(join(root, 'dist', 'ssr'), { recursive: true });
+    writeFileSync(
+      join(root, 'dist', 'ssr', 'wrangler.jsonc'),
+      '{ // project config\n "vars": { "APP_NAME": "demo", }, }',
+    );
+
+    expect(readEmittedWorkerVars(root)).toEqual({ ok: true, vars: { APP_NAME: 'demo' } });
+  });
+
   it('fails closed when the build wrote no deploy pointer', () => {
     const root = createTempProject();
     const result = readEmittedWorkerVars(root);

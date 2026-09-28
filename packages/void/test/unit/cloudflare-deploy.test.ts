@@ -575,6 +575,24 @@ describe('existing Cloudflare site handoff', () => {
     );
     expect(existsSync(join(root, '.void/cloudflare-link.json'))).toBe(false);
   });
+  it('accepts comments in the generated config during an existing site deploy', async () => {
+    const root = site();
+    const { deps } = harness({
+      readExistingWorker: async () => existing,
+      runBuild: () => {
+        build(root);
+        const generatedPath = join(root, 'dist/ssr/wrangler.json');
+        writeFileSync(
+          generatedPath,
+          `// generated from wrangler.jsonc\n${readFileSync(generatedPath, 'utf8')}`,
+        );
+      },
+    });
+
+    await expect(
+      runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+    ).resolves.toBeUndefined();
+  });
   it('records the resolved traffic snapshot across ordinary deployments', async () => {
     const root = site();
     const trafficConfig = {
@@ -3838,6 +3856,19 @@ describe('verifyGeneratedDeployConfig', () => {
 
   it('passes when account_id and name match the pinned target', () => {
     const root = deployConfigProject({ account_id: 'acc123', name: 'myapp' });
+    expect(verifyGeneratedDeployConfig(root, { accountId: 'acc123', workerName: 'myapp' })).toEqual(
+      {
+        ok: true,
+      },
+    );
+  });
+
+  it('accepts comments and trailing commas in a generated JSONC config', () => {
+    const root = deployConfigProject({ account_id: 'acc123', name: 'myapp' });
+    writeFileSync(
+      join(root, 'dist/ssr/wrangler.json'),
+      '{ // project config\n "account_id": "acc123", "name": "myapp", }',
+    );
     expect(verifyGeneratedDeployConfig(root, { accountId: 'acc123', workerName: 'myapp' })).toEqual(
       {
         ok: true,

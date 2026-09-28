@@ -19,6 +19,7 @@ import type { EnvValidationReport } from '../runtime/env-public.ts';
 import { findLegacyEnvFiles, isClientEnvKey, loadLocalEnv } from '../shared/env.ts';
 import type { StandardSchemaV1 } from '../standard-schema.ts';
 import type { PlatformClient } from './client.ts';
+import { readGeneratedWranglerConfigFile } from './generated-wrangler-config.ts';
 import { resolveWranglerArgv } from './preset.ts';
 
 type EnvPublicModule = {
@@ -627,10 +628,13 @@ function readGeneratedWranglerConfig(
     return { ok: false, reason: `generated wrangler config ${redirectedPath} does not exist.` };
   }
   try {
-    const config = JSON.parse(readFileSync(redirectedPath, 'utf-8')) as Record<string, unknown>;
+    const config = readGeneratedWranglerConfigFile(redirectedPath);
     return { ok: true, config };
   } catch {
-    return { ok: false, reason: `generated wrangler config ${redirectedPath} is not valid JSON.` };
+    return {
+      ok: false,
+      reason: `generated wrangler config ${redirectedPath} is not valid JSON/JSONC.`,
+    };
   }
 }
 

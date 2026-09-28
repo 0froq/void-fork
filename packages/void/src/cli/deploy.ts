@@ -145,6 +145,7 @@ import {
   resolveCloudflareWorkersDevSubdomain,
 } from './cloudflare-readiness.ts';
 import { formatCloudflareUserMessage } from './cloudflare-user-output.ts';
+import { readGeneratedWranglerConfigFile } from './generated-wrangler-config.ts';
 export { parseRootWranglerConfig } from '@void/deploy-cloudflare';
 import { promptAndCreateProject } from './create-project.ts';
 import {
@@ -1556,14 +1557,10 @@ function readGeneratedDeployConfig(root: string): {
 } {
   const redirectedPath = resolveGeneratedDeployConfigPathDefault(root);
   try {
-    const config = JSON.parse(readFileSync(redirectedPath, 'utf-8')) as unknown;
-    if (config === null || typeof config !== 'object' || Array.isArray(config)) {
-      throw new Error('malformed config');
-    }
-    return { path: redirectedPath, config: config as Record<string, unknown> };
+    return { path: redirectedPath, config: readGeneratedWranglerConfigFile(redirectedPath) };
   } catch {
     throw new Error(
-      `Generated Cloudflare deploy config ${redirectedPath} is missing or invalid JSON.`,
+      `Generated Cloudflare deploy config ${redirectedPath} is missing or invalid JSON/JSONC.`,
     );
   }
 }
@@ -1719,9 +1716,12 @@ export function verifyGeneratedDeployConfig(
   }
   let generated: Record<string, unknown>;
   try {
-    generated = JSON.parse(readFileSync(redirectedPath, 'utf-8')) as Record<string, unknown>;
+    generated = readGeneratedWranglerConfigFile(redirectedPath);
   } catch {
-    return { ok: false, reason: `generated wrangler config ${redirectedPath} is not valid JSON.` };
+    return {
+      ok: false,
+      reason: `generated wrangler config ${redirectedPath} is not valid JSON/JSONC.`,
+    };
   }
   if (generated.account_id !== expected.accountId) {
     return {
