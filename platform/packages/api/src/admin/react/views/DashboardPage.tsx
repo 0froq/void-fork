@@ -165,9 +165,11 @@ function TopProjectsWidget({
                   </div>
                   <div>
                     <a
+                      className="void-admin-url"
                       href={project.url ?? `https://${project.slug}.${siteDomain}`}
                       target="_blank"
                       rel="noopener noreferrer"
+                      title={project.url ?? `${project.slug}.${siteDomain}`}
                     >
                       {project.url ?? `${project.slug}.${siteDomain}`}
                     </a>{' '}

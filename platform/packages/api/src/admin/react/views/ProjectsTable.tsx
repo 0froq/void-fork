@@ -46,9 +46,11 @@ export function ProjectsTable({
               </TableCell>
               <TableCell>
                 <a
+                  className="void-admin-url"
                   href={p.url ?? `https://${p.slug}.${siteDomain}`}
                   target="_blank"
                   rel="noopener noreferrer"
+                  title={p.url ?? `${p.slug}.${siteDomain}`}
                 >
                   {p.url ?? `${p.slug}.${siteDomain}`}
                 </a>

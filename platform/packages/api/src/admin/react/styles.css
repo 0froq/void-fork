@@ -57,6 +57,14 @@ body {
   gap: var(--spacing-3);
   margin-block: var(--spacing-5);
 }
+.void-admin-url {
+  display: inline-block;
+  max-width: 20rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
 
 @layer legacy {
   .void-admin-content {
