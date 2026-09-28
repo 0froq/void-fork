@@ -4,12 +4,12 @@
 @import '@astryxdesign/core/astryx.css';
 @import '@astryxdesign/theme-neutral/theme.css';
 
-@supports (color: AccentColor) {
+@supports (color: AccentColor) and (color: color-mix(in srgb, red, blue)) {
   html[data-astryx-theme='neutral'] {
     --color-accent: AccentColor;
     --color-on-accent: AccentColorText;
     --color-accent-muted: color-mix(in srgb, AccentColor 14%, Canvas);
-    --color-text-accent: color-mix(in oklab, AccentColor 45%, CanvasText);
+    --color-text-accent: color-mix(in srgb, AccentColor 40%, CanvasText);
     --color-icon-accent: var(--color-text-accent);
   }
 }

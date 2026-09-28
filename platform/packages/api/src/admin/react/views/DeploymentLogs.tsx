@@ -68,7 +68,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
           <div style="position: absolute; top: 4px; right: 4px">
             <CopyButton text={messages.map((message) => message.text).join('\n')} />
           </div>
-          <pre style="margin: 0; padding: 8px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 4px; font-size: 0.78rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all">
+          <pre style="margin: 0; padding: 8px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: var(--radius-inner); font-size: 0.78rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all">
             {messages.map((message, index) => (
               <div key={index}>
                 <span
