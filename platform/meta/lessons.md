@@ -145,6 +145,10 @@
 
 ## Dashboard and product surfaces
 
+- Keep admin settings readable by grouping independent controls into clear sections
+  with visible status and actions beside the item they affect.
+- A disabled admin feature still needs to render inside the dashboard layout
+  for both direct visits and client-side page navigation.
 - Render the expected system-health check slots before polling and keep their
   status details on one line so asynchronous updates do not shift dashboard content.
 - Cloudflare Tail sees top-level logs and uncaught throws. Log caught errors
