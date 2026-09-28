@@ -4,7 +4,7 @@ import { Skeleton } from '@astryxdesign/core/Skeleton';
 import { Heading } from '@astryxdesign/core/Text';
 import { useNavigation } from '@void/react';
 import type { PageObject } from 'void/pages-protocol';
-import { AdminProviders } from './AdminProviders.tsx';
+import { AdminUiProviders } from './AdminProviders.tsx';
 import { matchAdminRoute, type AdminPageId } from './pages.ts';
 import { Layout } from './views/Layout.tsx';
 
@@ -38,7 +38,7 @@ export function AdminNavigationFallback({ initialPageData }: { initialPageData: 
     typeof initialPageData.props.username === 'string' ? initialPageData.props.username : undefined;
 
   return (
-    <AdminProviders>
+    <AdminUiProviders>
       <Layout title={title} platformName={platformName} username={username}>
         <div className="void-admin-loading" role="status" aria-live="polite">
           <Heading level={1}>{title}</Heading>
@@ -51,6 +51,6 @@ export function AdminNavigationFallback({ initialPageData }: { initialPageData: 
           </div>
         </div>
       </Layout>
-    </AdminProviders>
+    </AdminUiProviders>
   );
 }

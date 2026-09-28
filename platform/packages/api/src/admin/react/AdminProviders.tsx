@@ -16,6 +16,15 @@ type AdminShared = {
   adminPageUrl?: string;
 };
 
+/** Appearance and navigation work in both a page and its Suspense fallback. */
+export function AdminUiProviders({ children }: { children: ReactNode }) {
+  return (
+    <Theme theme={neutralTheme}>
+      <LinkProvider component={Link}>{children}</LinkProvider>
+    </Theme>
+  );
+}
+
 export function AdminProviders({ children }: { children: ReactNode }) {
   const shared = useShared<AdminShared>();
   const session = shared.adminFateSession ?? 'guest';
@@ -42,12 +51,10 @@ export function AdminProviders({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
   return (
-    <Theme theme={neutralTheme}>
+    <AdminUiProviders>
       <FateClient client={fate} key={session}>
-        <LinkProvider component={Link}>
-          <AdminFateErrorBoundary key={shared.adminPageUrl}>{children}</AdminFateErrorBoundary>
-        </LinkProvider>
+        <AdminFateErrorBoundary key={shared.adminPageUrl}>{children}</AdminFateErrorBoundary>
       </FateClient>
-    </Theme>
+    </AdminUiProviders>
   );
 }
