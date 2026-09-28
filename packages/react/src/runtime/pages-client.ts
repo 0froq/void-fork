@@ -53,6 +53,8 @@ export type ReactPagesConfig = Readonly<{
   viewTransitions: boolean;
   prefetchHoverDelay: number;
   prefetchDefaultCacheFor: CacheForResult;
+  /** Show this fallback immediately for client visits while the destination page loads. */
+  navigationFallback?: ComponentType<{ initialPageData: PageObject }>;
 }>;
 
 export type ReactPagesClient = Readonly<{
@@ -172,7 +174,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'begin':
       return {
         resource: state.resource,
-        rollbackResource: state.resource,
+        rollbackResource: state.rollbackResource || state.resource,
         pendingId: action.resource.id,
         routeUrl: state.routeUrl,
         navigation: action.navigation,
@@ -202,6 +204,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
       }
       return {
         ...state,
+        resource: state.rollbackResource || state.resource,
         rollbackResource: null,
         pendingId: null,
         routeUrl: action.location,
@@ -345,10 +348,12 @@ function App({
   engine,
   router,
   viewTransitions,
+  navigationFallback: NavigationFallback,
 }: {
   engine: Awaited<ReturnType<typeof createPageNavigationEngine>>;
   router: VoidRouter;
   viewTransitions: boolean;
+  navigationFallback?: ComponentType<{ initialPageData: PageObject }>;
 }): React.ReactNode {
   const initialPageData = engine.initialPageData as ReactPageData;
   const sharedStateRef = useRef<Record<string, unknown>>(initialPageData.shared);
@@ -480,7 +485,11 @@ function App({
               if (activePendingNavigationId === prepared.id) {
                 activePendingNavigationId = null;
               }
-              dispatch({ type: 'finish', resource: prepared, location: currentUrl() });
+              dispatch({
+                type: NavigationFallback ? 'abandon' : 'finish',
+                resource: prepared,
+                location: currentUrl(),
+              });
               resolveVisit(undefined);
             } else if (prepared.options._resolveOnShell) {
               pendingVisitSettlers.delete(prepared.id);
@@ -508,6 +517,7 @@ function App({
               activePendingNavigationId = null;
             }
             if (
+              NavigationFallback ||
               prepared.options._resolveOnShell ||
               isAbortError(error) ||
               isCallSiteActionError(error)
@@ -526,6 +536,11 @@ function App({
       activePendingNavigationId = next.id;
       dispatch({ type: 'begin', resource: next, navigation });
 
+      if (NavigationFallback) {
+        dispatch({ type: 'reveal', resource: next });
+        return pagePromise;
+      }
+
       const reveal = () => {
         startTransition(() => {
           dispatch({ type: 'reveal', resource: next });
@@ -542,7 +557,7 @@ function App({
       );
       return pagePromise;
     },
-    [engine, mergeShared, startTransition, viewTransitions],
+    [engine, mergeShared, NavigationFallback, startTransition, viewTransitions],
   );
 
   useInsertionEffect(() => {
@@ -584,7 +599,12 @@ function App({
       { value: navigationValue },
       React.createElement(
         Suspense,
-        { fallback: null },
+        {
+          fallback:
+            NavigationFallback && state.pendingId !== null
+              ? React.createElement(NavigationFallback, { initialPageData })
+              : null,
+        },
         React.createElement(RouteResource, {
           resource: state.resource,
           onCommit: finishNavigation,
@@ -630,6 +650,7 @@ export async function startReactPages(config: ReactPagesConfig): Promise<ReactPa
     engine,
     router,
     viewTransitions: config.viewTransitions,
+    navigationFallback: config.navigationFallback,
   });
   const isSsr = appEl.getAttribute('data-void-ssr') !== 'false';
   const hasDeferred = Boolean((engine.initialPageData as ReactPageData).deferredKeys);
