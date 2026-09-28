@@ -503,7 +503,8 @@ export function syncWranglerBindings(
   root: string,
   bindings: InferredBindings,
   options?: {
-    bindingNames?: { d1?: string; kv?: string; r2?: string; sandbox?: string };
+    bindingNames?: { d1?: string; kv?: string; r2?: string; ai?: string; sandbox?: string };
+    directCloudflareAi?: { gateway?: string };
     durableObjects?: Array<DurableObjectModule>;
     websockets?: Array<WebSocketRouteDefinition>;
     sandbox?: ResolvedSandboxConfig;
@@ -565,6 +566,34 @@ export function syncWranglerBindings(
     if (!existing.some((b) => b.binding === r2Name)) {
       parsed.r2_buckets = [...existing, { binding: r2Name, bucket_name: 'default' }];
       modified = true;
+    }
+  }
+
+  // Framework adapters read bindings from the root Wrangler config. Workers AI
+  // has no local simulator, so direct Cloudflare development needs remote mode.
+  // Managed projects keep using Void's proxy and do not gain a billable binding.
+  if (bindings.needsAI && options?.directCloudflareAi) {
+    const existing = parsed.ai as Record<string, unknown> | undefined;
+    const binding =
+      typeof existing?.binding === 'string' ? existing.binding : (options.bindingNames?.ai ?? 'AI');
+    const nextAi = { ...(existing ?? {}), binding, remote: true };
+    if (JSON.stringify(existing) !== JSON.stringify(nextAi)) {
+      parsed.ai = nextAi;
+      modified = true;
+    }
+    if (binding !== 'AI' || options.directCloudflareAi.gateway) {
+      const vars = (parsed.vars as Record<string, unknown> | undefined) ?? {};
+      const nextVars = {
+        ...vars,
+        ...(binding !== 'AI' ? { __VOID_AI_BINDING: binding } : {}),
+        ...(options.directCloudflareAi.gateway
+          ? { __VOID_AI_GATEWAY: options.directCloudflareAi.gateway }
+          : {}),
+      };
+      if (JSON.stringify(vars) !== JSON.stringify(nextVars)) {
+        parsed.vars = nextVars;
+        modified = true;
+      }
     }
   }
 

@@ -14,6 +14,7 @@ export type CloudflareFrameworkDeployConfig = Readonly<{
   assetsIgnore?: ReadonlyArray<string>;
   crons?: ReadonlyArray<string>;
   requiredSecrets?: ReadonlyArray<string>;
+  ai?: Readonly<{ binding: string; gateway?: string }>;
 }>;
 
 /**
@@ -77,6 +78,20 @@ export function writeCloudflareFrameworkDeployConfig(
     }
     const current = (required as Array<string> | undefined) ?? [];
     upsert(['secrets', 'required'], [...new Set([...current, ...options.requiredSecrets])]);
+  }
+
+  if (options.ai) {
+    const config = parse(content) as { ai?: { binding?: unknown }; vars?: Record<string, unknown> };
+    if (config.ai === undefined) {
+      upsert(['ai'], { binding: options.ai.binding });
+    }
+    const binding = typeof config.ai?.binding === 'string' ? config.ai.binding : options.ai.binding;
+    if (binding !== 'AI') {
+      upsert(['vars', '__VOID_AI_BINDING'], binding);
+    }
+    if (options.ai.gateway) {
+      upsert(['vars', '__VOID_AI_GATEWAY'], options.ai.gateway);
+    }
   }
 
   let changed = content !== initial;

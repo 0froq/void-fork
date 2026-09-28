@@ -1040,6 +1040,9 @@ export function voidPlugin(options?: {
       name: 'void:wrangler-compat',
       enforce: 'pre',
       config(_, env) {
+        if (env.command === 'serve' && directCloudflareDestination && bindings.needsAI) {
+          process.env.CLOUDFLARE_AUTH_USE_KEYRING = 'true';
+        }
         syncFrameworkCompat(ensureWranglerCompat(root, config));
         if (env.command !== 'serve') {
           return;
@@ -1057,30 +1060,42 @@ export function voidPlugin(options?: {
       },
     };
 
-    // Wrangler.jsonc binding sync plugin — runs on dev startup
+    // Sync before framework adapters read Wrangler during Vite configuration.
+    // Repeat at configResolved for adapters that create the file later.
+    const syncFrameworkBindings = (command: string): void => {
+      if (command !== 'serve') {
+        return;
+      }
+      const synced = syncWranglerBindings(
+        root,
+        {
+          ...bindings,
+          needsD1: dialect === 'sqlite' && bindings.needsD1,
+        },
+        {
+          bindingNames,
+          ...(directCloudflareDestination && bindings.needsAI
+            ? { directCloudflareAi: { gateway: config.ai?.gateway } }
+            : {}),
+          websockets: websocketRoutes,
+          sandbox: sandboxConfig,
+          live: liveConfig,
+        },
+      );
+      if (synced) {
+        voidLog('Synced bindings to wrangler.jsonc');
+      }
+    };
+
     const wranglerSyncPlugin: Plugin = {
       name: 'void:wrangler-sync',
+      enforce: 'pre',
+      config(_, env) {
+        syncFrameworkBindings(env.command);
+      },
       configResolved(resolvedConfig) {
         syncFrameworkCompat(readWranglerCompat(root, config));
-        if (resolvedConfig.command !== 'serve') {
-          return;
-        }
-        const synced = syncWranglerBindings(
-          root,
-          {
-            ...bindings,
-            needsD1: dialect === 'sqlite' && bindings.needsD1,
-          },
-          {
-            bindingNames,
-            websockets: websocketRoutes,
-            sandbox: sandboxConfig,
-            live: liveConfig,
-          },
-        );
-        if (synced) {
-          voidLog('Synced bindings to wrangler.jsonc');
-        }
+        syncFrameworkBindings(resolvedConfig.command);
       },
     };
 

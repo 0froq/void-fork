@@ -6413,6 +6413,7 @@ describe('runCloudflareDeploy — framework artifact guard', () => {
       { name: 'sveltekit', class: 'b' },
       FRAMEWORK_PRESETS.sveltekit,
       ['API_TOKEN'],
+      { binding: 'AI' },
     );
 
     const wrapper = readFileSync(join(root, '.svelte-kit/cloudflare/_worker.js'), 'utf-8');
@@ -6436,6 +6437,7 @@ describe('runCloudflareDeploy — framework artifact guard', () => {
       },
       triggers: { crons: ['0 * * * *'] },
       secrets: { required: ['API_TOKEN'] },
+      ai: { binding: 'AI' },
     });
     expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toContain('// keep this comment');
   });

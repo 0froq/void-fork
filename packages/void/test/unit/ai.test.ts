@@ -30,6 +30,17 @@ describe('runtime ai', () => {
     vi.unstubAllGlobals();
   });
 
+  it('explains missing bindings without suggesting Void login for a direct Cloudflare project', async () => {
+    vi.resetModules();
+    const { envContext } = await import('../../src/runtime/env-raw.ts');
+    const { ai } = await import('../../src/runtime/ai.ts');
+    await envContext.run({}, async () => {
+      expect(() => ai.run('@cf/meta/llama', {})).toThrow(
+        'Configure a Workers AI binding (env.AI) for direct Cloudflare development',
+      );
+    });
+  });
+
   it('routes Cloudflare provider models through the run endpoint unchanged', async () => {
     vi.resetModules();
     const { envContext } = await import('../../src/runtime/env-raw.ts');

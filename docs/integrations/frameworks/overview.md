@@ -94,7 +94,7 @@ Frameworks that use Cloudflare's dev runtime for local dev (SvelteKit, Nuxt with
 }
 ```
 
-Existing bindings are preserved. Only missing ones are added with local placeholder IDs.
+Existing bindings are preserved. D1, KV, and R2 use local placeholder IDs until deployment. For a project connected directly to Cloudflare, importing `void/ai` adds a remote Workers AI binding during development; [Cloudflare login](../../guide/ai.md#local-development) is required to use it. Direct deployments also include the inferred AI binding.
 
 For `void deploy`, compatibility settings are read from `wrangler.jsonc` automatically (no need to duplicate them in `void.json`).
 

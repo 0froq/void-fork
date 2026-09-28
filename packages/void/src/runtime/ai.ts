@@ -422,7 +422,7 @@ function resolveBackend(): AiBackend {
   }
 
   throw new Error(
-    `ai: Not available. Run \`void auth login\` and \`void project link\` first, or bind Workers AI (env.${aiBindingName}) for self-hosted deploys.`,
+    `ai: Not available. Configure a Workers AI binding (env.${aiBindingName}) for direct Cloudflare development or deployment, or connect and link a Void platform.`,
   );
 }
 

@@ -4988,6 +4988,7 @@ export async function runCloudflareDeploy(
         detectedFramework,
         frameworkPreset,
         schemaFacts.requiredKeys,
+        needsAI ? { binding: aiBindingName } : undefined,
       );
     } catch (error) {
       log.error(
@@ -5870,6 +5871,7 @@ export async function prepareCloudflareFrameworkArtifact(
   framework: DetectedFramework,
   preset: FrameworkPreset,
   requiredSecretNames: ReadonlyArray<string> = [],
+  ai?: { binding: string },
 ): Promise<void> {
   const workerMain = join(root, preset.workerDir, preset.workerMain);
   const assetsDirectory = join(root, preset.assetsDir);
@@ -5914,6 +5916,7 @@ export async function prepareCloudflareFrameworkArtifact(
     compatibilityFlags: preset.cloudflareCompatibilityFlags,
     crons: [...new Set(crons.flatMap((job) => job.crons))],
     requiredSecrets: requiredSecretNames,
+    ...(ai ? { ai: { ...ai, gateway: voidConfig.ai?.gateway } } : {}),
     ...(preset.workerDir === preset.assetsDir
       ? {
           assetsIgnore: [
