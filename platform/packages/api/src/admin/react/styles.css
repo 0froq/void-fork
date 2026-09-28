@@ -16,11 +16,11 @@
 
 @supports (corner-shape: squircle) {
   html[data-astryx-theme='neutral'] {
-    /* Astryx's four finite radius tokens, enlarged by 50% for squircles. */
-    --radius-inner: 0.5625rem;
-    --radius-element: 0.9375rem;
-    --radius-container: 1.125rem;
-    --radius-page: 2.625rem;
+    /* Squircle curves need about twice the radius to read as rounded. */
+    --radius-inner: 0.75rem;
+    --radius-element: 1.25rem;
+    --radius-container: 1.5rem;
+    --radius-page: 3.5rem;
   }
 
   :where(html[data-astryx-theme='neutral'], html[data-astryx-theme='neutral'] *),
