@@ -1172,6 +1172,15 @@ describe('GET /admin/projects', () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('my-proj');
+    const projectLink = visibleMarkup(html).match(
+      /<a\b[^>]*href="https:\/\/my-proj\.void\.app"[^>]*>[\s\S]*?<\/a>/,
+    )?.[0];
+    expect(projectLink).toBeDefined();
+    expect(projectLink).toContain('target="_blank"');
+    expect(projectLink).toContain('rel="noopener noreferrer"');
+    expect(projectLink).toContain('<svg');
+    expect(projectLink?.replace(/<[^>]+>/g, '')).toContain('my-proj.void.app');
+    expect(projectLink?.replace(/<[^>]+>/g, '')).not.toContain('https://');
   });
 
   test('paginates projects', async () => {

@@ -9,6 +9,7 @@ import {
 } from '@astryxdesign/core/Table';
 import type { Project } from '../../../types.ts';
 import { formatAbsoluteDate, formatAbsoluteDateTime } from './format.ts';
+import { ProjectUrlLink } from './ProjectUrlLink.tsx';
 
 export type ProjectRow = Project & {
   url?: string;
@@ -45,15 +46,7 @@ export function ProjectsTable({
                 <a href={`/admin/projects/${p.id}`}>{p.slug}</a>
               </TableCell>
               <TableCell>
-                <a
-                  className="void-admin-url"
-                  href={p.url ?? `https://${p.slug}.${siteDomain}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title={p.url ?? `${p.slug}.${siteDomain}`}
-                >
-                  {p.url ?? `${p.slug}.${siteDomain}`}
-                </a>
+                <ProjectUrlLink url={p.url ?? `https://${p.slug}.${siteDomain}`} />
               </TableCell>
               <TableCell>
                 {p.owner_login ? <a href={`/admin/users/${p.user_id}`}>{p.owner_login}</a> : '-'}

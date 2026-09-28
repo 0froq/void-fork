@@ -38,6 +38,7 @@ import { DeploymentTable } from './DeploymentTable.tsx';
 import { formatAbsoluteDateTime } from './format.ts';
 import { Layout } from './Layout.tsx';
 import { ProjectsTable } from './ProjectsTable.tsx';
+import { ProjectUrlLink } from './ProjectUrlLink.tsx';
 
 export type TopProjectRow = Readonly<{
   url?: string;
@@ -236,16 +237,8 @@ function TopProjectTableRow({
           <a href={`/admin/projects/${project.id}`}>{project.slug}</a>
         </div>
         <div>
-          <a
-            className="void-admin-url"
-            href={project.url ?? `https://${project.slug}.${siteDomain}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={project.url ?? `${project.slug}.${siteDomain}`}
-          >
-            {project.url ?? `${project.slug}.${siteDomain}`}
-          </a>{' '}
-          · {project.type}
+          <ProjectUrlLink url={project.url ?? `https://${project.slug}.${siteDomain}`} /> ·{' '}
+          {project.type}
         </div>
       </TableCell>
       <TableCell>
