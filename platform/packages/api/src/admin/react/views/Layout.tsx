@@ -15,8 +15,10 @@ import {
   Terminal,
   Users,
 } from 'lucide-react';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { formatPlatformPageTitle } from '../../../platform-identity.ts';
+
+let isSideNavCollapsed = false;
 
 export function Layout({
   title,
@@ -31,6 +33,7 @@ export function Layout({
 }) {
   const routerPath = useRouter().path;
   const path = useNavigation().location?.pathname ?? routerPath;
+  const [collapsed, setCollapsed] = useState(isSideNavCollapsed);
   useEffect(() => {
     document.title = formatPlatformPageTitle(title, platformName);
   }, [title, platformName]);
@@ -74,7 +77,16 @@ export function Layout({
         />
       }
       sideNav={
-        <SideNav label="Admin sections" collapsible>
+        <SideNav
+          label="Admin sections"
+          collapsible={{
+            isCollapsed: collapsed,
+            onCollapsedChange: (next: boolean) => {
+              isSideNavCollapsed = next;
+              setCollapsed(next);
+            },
+          }}
+        >
           <SideNavSection title="Overview">
             <SideNavItem
               label="Dashboard"
