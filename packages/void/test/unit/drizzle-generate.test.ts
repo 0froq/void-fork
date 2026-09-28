@@ -40,6 +40,7 @@ afterEach(() => {
 });
 
 describe('SQLite migration generation', () => {
+  // This exercises three Drizzle Kit CLI runs, which can exceed the default timeout on Windows CI.
   it('rolls back SQL, journal and snapshots when Drizzle copies a newly added column from the old table', async () => {
     const root = fixture();
     const migrations = join(root, 'migrations');
@@ -101,7 +102,7 @@ describe('SQLite migration generation', () => {
     } finally {
       db.close();
     }
-  });
+  }, 20_000);
 
   it('leaves existing invalid history untouched and explains why regenerating cannot fix it', async () => {
     const root = fixture();
