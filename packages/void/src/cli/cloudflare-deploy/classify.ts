@@ -46,7 +46,11 @@ export function classifyCloudflareDeployApp(
     }
   }
 
-  const staticPreset = detectPreset(root, { dir: options.dir, spa: options.spa });
+  // Frameworks have their own Worker output. Their Vite dependency does not
+  // imply that the project is a standalone SPA.
+  const staticPreset = framework
+    ? null
+    : detectPreset(root, { dir: options.dir, spa: options.spa });
   const configuredStatic =
     voidConfig.inference?.appType === 'static' || voidConfig.inference?.appType === 'spa';
   if (staticPreset || configuredStatic || options.dir || options.spa) {
