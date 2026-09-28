@@ -407,6 +407,20 @@ body {
   gap: var(--spacing-3);
   margin-block: var(--spacing-5);
 }
+.void-admin-content .astryx-typeahead .astryx-token {
+  inset-inline-start: 0;
+  padding-inline: 0;
+  background: transparent;
+  font: inherit;
+}
+.void-admin-content .astryx-typeahead .astryx-token > button {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
 .void-admin-url {
   display: inline-flex;
   min-width: 0;
