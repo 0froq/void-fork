@@ -13,7 +13,8 @@ export type VoidSvelteKitTsconfigOptions = {
 
 /**
  * Merge Void's generated tsconfig fragment into SvelteKit's generated
- * tsconfig. Use from `kit.typescript.config` in `svelte.config.js`.
+ * tsconfig. Use from `typescript.config` in `sveltekit()` or from
+ * `kit.typescript.config` in `svelte.config.js`.
  */
 export function mergeVoidSvelteKitTsconfig(
   config: Tsconfig,
