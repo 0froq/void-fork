@@ -131,6 +131,11 @@ it('returns to the initial page before its shell refresh finishes', async () => 
       .getAttribute('data-layout-instance');
     await page.getByRole('button', { name: 'Dashboard' }).click();
     await page.getByRole('heading', { name: 'Dashboard loaded' }).waitFor({ state: 'visible' });
+    const fallbackMounts = await page.evaluate(
+      () =>
+        (window as Window & { __navigationFallbackMounts?: number }).__navigationFallbackMounts ??
+        0,
+    );
     expect(await page.locator('[data-layout-instance]').getAttribute('data-layout-instance')).toBe(
       initialLayout,
     );
@@ -141,10 +146,74 @@ it('returns to the initial page before its shell refresh finishes', async () => 
     await page.getByRole('button', { name: 'Home' }).click();
     await page.getByRole('heading', { name: 'Home' }).waitFor({ state: 'visible' });
     await refresh;
+    expect(
+      await page.evaluate(
+        () =>
+          (window as Window & { __navigationFallbackMounts?: number }).__navigationFallbackMounts ??
+          0,
+      ),
+    ).toBe(fallbackMounts);
     expect(await page.locator('[data-layout-instance]').getAttribute('data-layout-instance')).toBe(
       initialLayout,
     );
     expect(page.url()).toBe(base);
+  } finally {
+    releaseRefresh();
+    await page.close();
+  }
+});
+
+it('shows a visited page without remounting the fallback while refreshing it', async () => {
+  const page = await browser.newPage();
+  let releaseRefresh!: () => void;
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  await page.route('**/dashboard', async (route) => {
+    if (route.request().headers()['purpose'] === 'prefetch') {
+      await refreshGate;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'X-VoidPages': 'true' },
+      body: JSON.stringify({
+        component: 'dashboard',
+        props: {},
+        params: {},
+        shared: {},
+        url: '/dashboard',
+        errors: null,
+      }),
+    });
+  });
+
+  try {
+    await page.goto(base);
+    await page.getByRole('button', { name: 'Dashboard' }).click();
+    await page.getByRole('heading', { name: 'Dashboard loaded' }).waitFor({ state: 'visible' });
+    await page.getByRole('button', { name: 'Home' }).click();
+    await page.getByRole('heading', { name: 'Home' }).waitFor({ state: 'visible' });
+    const fallbackMounts = await page.evaluate(
+      () =>
+        (window as Window & { __navigationFallbackMounts?: number }).__navigationFallbackMounts ??
+        0,
+    );
+    const refresh = page.waitForRequest(
+      (request) =>
+        new URL(request.url()).pathname === '/dashboard' &&
+        request.headers()['purpose'] === 'prefetch',
+    );
+    await page.getByRole('button', { name: 'Dashboard' }).click();
+    await page.getByRole('heading', { name: 'Dashboard loaded' }).waitFor({ state: 'visible' });
+    await refresh;
+    expect(
+      await page.evaluate(
+        () =>
+          (window as Window & { __navigationFallbackMounts?: number }).__navigationFallbackMounts ??
+          0,
+      ),
+    ).toBe(fallbackMounts);
   } finally {
     releaseRefresh();
     await page.close();

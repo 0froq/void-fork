@@ -37,6 +37,10 @@ function Dashboard() {
 }
 
 function NavigationFallback() {
+  React.useLayoutEffect(() => {
+    const state = window as Window & { __navigationFallbackMounts?: number };
+    state.__navigationFallbackMounts = (state.__navigationFallbackMounts ?? 0) + 1;
+  }, []);
   return React.createElement('main', null, React.createElement('h1', null, 'Loading dashboard'));
 }
 

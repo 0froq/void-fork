@@ -54,7 +54,7 @@ export type ReactPagesConfig = Readonly<{
   prefetchHoverDelay: number;
   prefetchDefaultCacheFor: CacheForResult;
   cacheVisitedPageData?: boolean;
-  /** Show this fallback immediately for client visits while the destination page loads. */
+  /** Show this fallback for client visits whose destination remains pending at the next paint. */
   navigationFallback?: ComponentType<{ initialPageData: PageObject }>;
 }>;
 
@@ -538,7 +538,32 @@ function App({
       dispatch({ type: 'begin', resource: next, navigation });
 
       if (NavigationFallback) {
-        dispatch({ type: 'reveal', resource: next });
+        let shellSettled = false;
+        let revealed = false;
+        const reveal = (settled: boolean) => {
+          if (revealed || activePendingNavigationId !== next.id) {
+            return;
+          }
+          revealed = true;
+          if (settled) {
+            startTransition(() => dispatch({ type: 'reveal', resource: next }));
+          } else {
+            dispatch({ type: 'reveal', resource: next });
+          }
+        };
+        next.shell.then((result) => {
+          shellSettled = true;
+          if (result) {
+            reveal(true);
+          }
+        });
+        // A cached shell settles before the next paint. Avoid committing the fallback
+        // for that visit, while still revealing it promptly for a network-bound shell.
+        requestAnimationFrame(() => {
+          if (!shellSettled) {
+            reveal(false);
+          }
+        });
         return pagePromise;
       }
 
