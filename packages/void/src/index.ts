@@ -1060,12 +1060,19 @@ export function voidPlugin(options?: {
         if (resolvedConfig.command !== 'serve') {
           return;
         }
-        const synced = syncWranglerBindings(root, bindings, {
-          bindingNames,
-          websockets: websocketRoutes,
-          sandbox: sandboxConfig,
-          live: liveConfig,
-        });
+        const synced = syncWranglerBindings(
+          root,
+          {
+            ...bindings,
+            needsD1: dialect === 'sqlite' && bindings.needsD1,
+          },
+          {
+            bindingNames,
+            websockets: websocketRoutes,
+            sandbox: sandboxConfig,
+            live: liveConfig,
+          },
+        );
         if (synced) {
           voidLog('Synced bindings to wrangler.jsonc');
         }
@@ -1305,7 +1312,8 @@ export function voidPlugin(options?: {
     const d1Name = bindingNames?.d1 ?? 'DB';
     const d1: Array<Record<string, unknown>> = [];
     if (
-      (bindings.needsD1 || (authEnabled && dialect === 'sqlite')) &&
+      dialect === 'sqlite' &&
+      (bindings.needsD1 || authEnabled) &&
       !hasBinding(resolved.d1_databases, d1Name)
     ) {
       d1.push({ binding: d1Name, database_name: 'default', database_id: 'local' });
