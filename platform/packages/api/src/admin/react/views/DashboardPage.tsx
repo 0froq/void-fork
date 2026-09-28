@@ -11,7 +11,14 @@ import {
   TableRow,
 } from '@astryxdesign/core/Table';
 import { Heading, Text } from '@astryxdesign/core/Text';
-import { Suspense, useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import {
+  Suspense,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import {
   useFateClient,
   useListView,
@@ -48,6 +55,9 @@ const AdminSuspense = Suspense as unknown as (props: {
   children: ReactNode;
   fallback: ReactNode;
 }) => ReactElement;
+const subscribeToClientRender = () => () => {};
+const isClientRender = () => true;
+const isServerRender = () => false;
 
 type DashboardProps = Readonly<{
   platformName: string;
@@ -79,9 +89,10 @@ function HealthStatusBanner() {
   const health = useView(HealthView, healthRef);
   useEffect(() => {
     let active = true;
-    const poll = async () => {
+    const retained = client.retain(healthRequest);
+    const poll = async (mode: 'stale-while-revalidate' | 'network-only') => {
       try {
-        const { health: ref } = await client.request(healthRequest, { mode: 'network-only' });
+        const { health: ref } = await client.request(healthRequest, { mode });
         if (!ref) {
           throw new Error('Health data is unavailable.');
         }
@@ -95,11 +106,12 @@ function HealthStatusBanner() {
         }
       }
     };
-    void poll();
-    const interval = setInterval(() => void poll(), 30_000);
+    void poll('stale-while-revalidate');
+    const interval = setInterval(() => void poll('network-only'), 30_000);
     return () => {
       active = false;
       clearInterval(interval);
+      retained.dispose();
     };
   }, [client]);
   const failed = health?.checks.filter((check) => !check.ok).length ?? 0;
@@ -235,8 +247,7 @@ function DeferredTopProjects({
   topProjects: Deferred<{ items: ReadonlyArray<{ node: ViewRef<'AdminTopProject'> }> }>;
   siteDomain: string;
 }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(subscribeToClientRender, isClientRender, isServerRender);
   const fallback = (
     <Card>
       <Heading level={2}>Top 10 Projects</Heading>
