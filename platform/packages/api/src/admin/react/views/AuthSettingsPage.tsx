@@ -42,7 +42,7 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
             <div className="void-admin-auth-section-header">
               <div>
                 <Heading level={2} id="platform-protection-heading">
-                  Platform protection:
+                  Platform protection
                 </Heading>
                 <p>Control access to the platform before visitors reach a login page.</p>
               </div>
@@ -54,7 +54,7 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
               />
             </div>
             <div className="void-admin-auth-protection-details">
-              <Collapsible trigger="Change platform protection">
+              <Collapsible trigger="Change platform protection" defaultIsOpen={false}>
                 <p>
                   Use the installing CLI to create or connect a Cloudflare Access application,
                   verify every platform origin, and sign in through the company policy. The CLI

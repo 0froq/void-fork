@@ -57,7 +57,8 @@ describe('browser authentication configuration', () => {
     const response = await request(home);
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain('Platform protection:');
+    expect(html).toContain('Platform protection');
+    expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('Login methods');
     expect(html).toContain('Signup policy');
     expect(html).toContain('name="mode" value="public"');
