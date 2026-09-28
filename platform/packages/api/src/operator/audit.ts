@@ -89,6 +89,13 @@ function auditTarget(
   }
   if (segments[0] === 'projects' && id) {
     if (segments[2] === 'team') {
+      if (segments[3] === 'add') {
+        return JSON.stringify({
+          projectId: id,
+          userId: boundedString(body.userId, 512),
+          role: boundedString(body.role, 32),
+        });
+      }
       if (segments[3] === 'invite') {
         return JSON.stringify({
           projectId: id,

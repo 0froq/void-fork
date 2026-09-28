@@ -467,7 +467,7 @@ export const projectAccessEvents = pgTable(
     ),
     check(
       'project_access_events_action_check',
-      sql`${table.action} IN ('invited', 'invitation_resent', 'accepted', 'declined', 'invitation_revoked', 'role_changed', 'member_removed', 'left')`,
+      sql`${table.action} IN ('invited', 'invitation_resent', 'member_added', 'accepted', 'declined', 'invitation_revoked', 'role_changed', 'member_removed', 'left')`,
     ),
   ],
 );

@@ -626,6 +626,85 @@ async function createProjectAccessEvent(
   });
 }
 
+export async function addProjectMember(
+  db: Db,
+  args: {
+    projectId: string;
+    subjectUserId: string;
+    role: ProjectMemberRole;
+    actorUserId: string;
+    platformAdmin?: boolean;
+  },
+): Promise<ProjectMember> {
+  return db.transaction(async (tx) => {
+    const txDb = tx as unknown as Db;
+    const project = await lockProject(txDb, args.projectId);
+    await requireLockedMembersCapability(txDb, project, args.actorUserId, args.platformAdmin);
+    if (project.user_id === args.subjectUserId) {
+      throw new ProjectTeamMutationError('owner-conflict');
+    }
+    const [target] = await txDb
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, args.subjectUserId))
+      .for('share')
+      .limit(1);
+    if (!target) {
+      throw new ProjectTeamMutationError('target-user-not-found');
+    }
+    if (await getProjectMember(txDb, args.projectId, args.subjectUserId)) {
+      throw new ProjectTeamMutationError('member-conflict');
+    }
+
+    // A direct grant supersedes an invitation. The project lock also serializes
+    // this with an attempt to accept that invitation.
+    const [pending] = await txDb
+      .select()
+      .from(projectInvitations)
+      .where(
+        and(
+          eq(projectInvitations.project_id, args.projectId),
+          eq(projectInvitations.target_user_id, args.subjectUserId),
+          eq(projectInvitations.status, 'pending'),
+        ),
+      )
+      .for('update')
+      .limit(1);
+    if (pending) {
+      await txDb
+        .update(projectInvitations)
+        .set({ status: 'revoked', revoked_at: sql`now()`, revoked_by_user_id: args.actorUserId })
+        .where(eq(projectInvitations.id, pending.id));
+      await createProjectAccessEvent(txDb, {
+        projectId: args.projectId,
+        actorUserId: args.actorUserId,
+        subjectUserId: args.subjectUserId,
+        invitationEmailSnapshot: pending.target_email_snapshot,
+        action: 'invitation_revoked',
+        previousRole: pending.role,
+      });
+    }
+
+    const [member] = await txDb
+      .insert(projectMembers)
+      .values({
+        project_id: args.projectId,
+        user_id: args.subjectUserId,
+        role: args.role,
+        added_by_user_id: args.actorUserId,
+      })
+      .returning();
+    await createProjectAccessEvent(txDb, {
+      projectId: args.projectId,
+      actorUserId: args.actorUserId,
+      subjectUserId: args.subjectUserId,
+      action: 'member_added',
+      newRole: args.role,
+    });
+    return member;
+  });
+}
+
 export async function setProjectMemberRole(
   db: Db,
   args: {

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import {
+  addProjectMember,
   createOrRefreshProjectInvitation,
   getProject,
   ProjectTeamMutationError,
@@ -49,7 +50,7 @@ function teamMutationError(error: unknown): never {
       'owner-conflict': 'Transfer ownership before changing or removing the project owner.',
       'member-conflict': 'This user is already a project team member.',
       'member-not-found': 'Project team member not found. Refresh the page and try again.',
-      'target-user-not-found': 'Choose a registered user to invite.',
+      'target-user-not-found': 'Choose an existing platform user.',
       'invitation-not-found': 'Invitation not found. Refresh the page and try again.',
       'invitation-not-pending': 'This invitation is no longer pending.',
       'pending-invitation-limit':
@@ -66,6 +67,34 @@ app.get('/', (context) => renderFateListPage(context, 'projects'));
 
 // GET /projects/:id
 app.get('/:id', (context) => renderFateDetailPage(context, 'projectDetail'));
+
+app.post('/:id/team/add', async (context) => {
+  const projectId = context.req.param('id');
+  const body = await context.req.parseBody();
+  const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
+  if (!userId || userId.length > 512) {
+    throw new OperatorError(400, 'Choose a user to add to the team.');
+  }
+  const role = teamRole(body.role);
+  return executeAuditedMutation(
+    context,
+    operatorAuditIntent(`projects/${projectId}/team/add`, { userId, role }),
+    async () => {
+      try {
+        await addProjectMember(context.get('db'), {
+          projectId,
+          subjectUserId: userId,
+          role,
+          actorUserId: context.get('user').id,
+          platformAdmin: true,
+        });
+        return { response: context.redirect(`/admin/projects/${projectId}#team`), succeeded: true };
+      } catch (error) {
+        teamMutationError(error);
+      }
+    },
+  );
+});
 
 app.post('/:id/team/invite', async (context) => {
   const projectId = context.req.param('id');

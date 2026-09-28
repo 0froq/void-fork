@@ -302,6 +302,13 @@
       "when": 1790570687921,
       "tag": "0049_invitation_delivery_status",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1790587573932,
+      "tag": "0050_project_member_direct_grants",
+      "breakpoints": true
     }
   ]
 }

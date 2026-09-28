@@ -60,6 +60,7 @@ export type ProjectInvitationStatus = 'pending' | 'accepted' | 'declined' | 'rev
 export type ProjectAccessEventAction =
   | 'invited'
   | 'invitation_resent'
+  | 'member_added'
   | 'accepted'
   | 'declined'
   | 'invitation_revoked'
