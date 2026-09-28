@@ -3,7 +3,6 @@
 import { Badge } from '@astryxdesign/core/Badge';
 import { Button } from '@astryxdesign/core/Button';
 import { Card } from '@astryxdesign/core/Card';
-import { Collapsible } from '@astryxdesign/core/Collapsible';
 import { Heading } from '@astryxdesign/core/Text';
 import type { PlatformLoginConfiguration } from '@void/platform';
 import { useRequest, useView } from 'react-fate';
@@ -54,22 +53,26 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
               />
             </div>
             <div className="void-admin-auth-protection-details">
-              <Collapsible trigger="Change platform protection" defaultIsOpen={false}>
-                <p>
-                  Use the installing CLI to create or connect a Cloudflare Access application,
-                  verify every platform origin, and sign in through the company policy. The CLI
-                  needs the installation's recovery credentials and separate Cloudflare Access setup
-                  permission.
-                </p>
-                <pre>void platform config auth protection enable --installation &lt;id&gt;</pre>
-                <p>To remove protection, first change any signup policy that relies on Access:</p>
-                <pre>void platform config auth protection disable --installation &lt;id&gt;</pre>
-                <p>
-                  Changes revoke existing human sessions. Access applications remain available for
-                  deliberate cleanup. Login methods and deployed applications keep their own
-                  settings.
-                </p>
-              </Collapsible>
+              <div className="void-admin-auth-protection-steps">
+                <div>
+                  <h3>Enable Cloudflare Access</h3>
+                  <p>
+                    Create or connect an Access application and verify every platform origin. The
+                    installing CLI needs the installation's recovery credentials and Access setup
+                    permission.
+                  </p>
+                  <pre>void platform config auth protection enable --installation &lt;id&gt;</pre>
+                </div>
+                <div>
+                  <h3>Disable Cloudflare Access</h3>
+                  <p>First change any signup policy that relies on Access.</p>
+                  <pre>void platform config auth protection disable --installation &lt;id&gt;</pre>
+                </div>
+              </div>
+              <p className="void-admin-auth-note">
+                Either change revokes human sessions. Access applications remain for deliberate
+                cleanup; login methods and deployed applications keep their own settings.
+              </p>
             </div>
           </Card>
         </section>

@@ -110,16 +110,30 @@ body {
   white-space: nowrap;
 }
 .void-admin-auth-protection-details {
+  display: grid;
+  gap: var(--spacing-4);
   border-top: 1px solid var(--color-border);
   padding-top: var(--spacing-4);
 }
-.void-admin-auth-protection-details p {
-  margin-block: var(--spacing-3);
+.void-admin-auth-protection-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: var(--spacing-3);
 }
-.void-admin-auth-protection-details pre {
-  margin-block: var(--spacing-2);
+.void-admin-auth-protection-steps > div {
+  display: grid;
+  align-content: start;
+  gap: var(--spacing-3);
+  min-width: 0;
+  padding: var(--spacing-4);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-element);
   background: var(--color-background-body);
+}
+.void-admin-auth-protection-details pre {
+  margin: 0;
+  border-radius: var(--radius-element);
+  background: var(--color-background-surface);
 }
 .void-admin-auth-settings .void-admin-auth-actions {
   flex-direction: row;

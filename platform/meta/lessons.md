@@ -145,6 +145,8 @@
 
 ## Dashboard and product surfaces
 
+- Show a short, fixed set of administrator setup steps directly; a disclosure
+  adds friction when there is no meaningful detail to hide.
 - Keep admin settings readable by grouping independent controls into clear sections
   with visible status and actions beside the item they affect.
 - A disabled admin feature still needs to render inside the dashboard layout

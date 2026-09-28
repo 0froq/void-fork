@@ -58,7 +58,9 @@ describe('browser authentication configuration', () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain('Platform protection');
-    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('Enable Cloudflare Access');
+    expect(html).toContain('Disable Cloudflare Access');
+    expect(html).not.toContain('Change platform protection');
     expect(html).toContain('Login methods');
     expect(html).toContain('Signup policy');
     expect(html).toContain('name="mode" value="public"');
