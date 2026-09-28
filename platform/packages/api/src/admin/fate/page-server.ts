@@ -83,6 +83,8 @@ export const projectDetailDataView = dataView<ProjectDetailRecord>('AdminProject
   deployments: true,
   resources: true,
   owner: true,
+  teamMembers: true,
+  pendingTeamInvitations: true,
   domains: true,
   builds: true,
   cfAccountId: true,

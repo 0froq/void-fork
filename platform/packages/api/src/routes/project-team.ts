@@ -149,7 +149,7 @@ function mutationErrorResponse(context: Context<ApiEnv>, error: unknown): Respon
   );
 }
 
-async function deliverInvitation(
+export async function deliverInvitation(
   context: Context<ApiEnv>,
   invitation: ProjectInvitation,
   target: User,

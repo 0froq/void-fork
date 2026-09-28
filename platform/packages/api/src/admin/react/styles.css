@@ -63,6 +63,36 @@ body {
   justify-self: start;
 }
 
+.void-admin-project-team {
+  display: grid;
+  gap: var(--spacing-4);
+  min-width: 0;
+}
+.void-admin-project-team > * {
+  margin: 0;
+}
+.void-admin-team-table-scroll {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.void-admin-team-email {
+  display: block;
+  color: var(--color-text-secondary);
+  font-size: 0.875em;
+}
+.void-admin-team-actions,
+.void-admin-team-actions form,
+.void-admin-team-invite {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--spacing-3);
+}
+.void-admin-team-invite {
+  justify-content: start;
+}
+
 .void-admin-metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));

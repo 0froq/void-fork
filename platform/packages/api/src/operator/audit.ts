@@ -88,6 +88,25 @@ function auditTarget(
     }
   }
   if (segments[0] === 'projects' && id) {
+    if (segments[2] === 'team') {
+      if (segments[3] === 'invite') {
+        return JSON.stringify({
+          projectId: id,
+          email: boundedString(body.email, 320, true),
+          role: boundedString(body.role, 32),
+        });
+      }
+      if (segments[3] === 'invitations' && segments[5] === 'revoke') {
+        return JSON.stringify({ projectId: id, invitationId: pathIdentifier(segments[4]) });
+      }
+      if (segments[4] === 'role' || segments[4] === 'remove') {
+        return JSON.stringify({
+          projectId: id,
+          userId: pathIdentifier(segments[3]),
+          role: segments[4] === 'role' ? boundedString(body.role, 32) : undefined,
+        });
+      }
+    }
     if (segments[2] === 'owner') {
       return JSON.stringify({ projectId: id, userId: boundedString(body.userId, 512) });
     }

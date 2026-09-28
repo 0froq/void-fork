@@ -119,6 +119,8 @@ export const ProjectDetailView = view<AdminProjectDetail>()({
   deployments: true,
   resources: true,
   owner: true as never,
+  teamMembers: true,
+  pendingTeamInvitations: true,
   domains: true,
   builds: true,
   cfAccountId: true,

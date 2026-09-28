@@ -23,6 +23,8 @@ void platform project show <project-id>
 
 Project details include resources, domains, and recent builds and deployments. The [command reference](/reference/cli#operator-commands) also covers suspending and restoring users, deleting projects, and removing accounts.
 
+In the admin dashboard, open a project to view its team. Search for a registered user to invite, choose a role, or change and remove an existing member. Invitations require acceptance before access begins. If email is unavailable, share the invitation ID shown on the project page so the user can accept it with `void project team accept <invitation-id>`. The owner cannot be removed from the team; transfer ownership first.
+
 ### Transferring Project Ownership
 
 Only an installation administrator can change a project's owner. The new owner must already have an account on this platform. Preview the transfer before applying it:

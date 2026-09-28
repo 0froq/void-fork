@@ -17,6 +17,7 @@ import { DeploymentTable } from './DeploymentTable.tsx';
 import { formatDateTime } from './format.ts';
 import { FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
+import { ProjectTeamSection } from './ProjectTeamSection.tsx';
 export function ProjectDetailPage({ path, platformName, username }: AdminPageProps) {
   const { projectDetail: ref } = useRequest(projectDetailRequest(path), {
     mode: 'stale-while-revalidate',
@@ -25,8 +26,19 @@ export function ProjectDetailPage({ path, platformName, username }: AdminPagePro
   if (!pageData) {
     throw new Error('Project data is unavailable.');
   }
-  const { project, deployments, resources, owner, domains, builds, cfAccountId, deployUrl, tz } =
-    pageData;
+  const {
+    project,
+    deployments,
+    resources,
+    owner,
+    teamMembers,
+    pendingTeamInvitations,
+    domains,
+    builds,
+    cfAccountId,
+    deployUrl,
+    tz,
+  } = pageData;
   useDetailTitle(pageData.project.slug, platformName);
   return (
     <Layout platformName={platformName} title={project.slug} username={username}>
@@ -144,7 +156,15 @@ export function ProjectDetailPage({ path, platformName, username }: AdminPagePro
       <h2>Builds ({builds.length})</h2>
       <BuildTable builds={builds} tz={tz} />
 
-      <section className="void-admin-owner-transfer">
+      <ProjectTeamSection
+        projectId={project.id}
+        owner={owner}
+        members={teamMembers}
+        invitations={pendingTeamInvitations}
+        tz={tz}
+      />
+
+      <section id="owner-transfer" className="void-admin-owner-transfer">
         <h2>Transfer Ownership</h2>
         <p>
           Transfer this project to an existing Void Platform user. You will review the ownership,

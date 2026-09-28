@@ -17,6 +17,8 @@ import {
   getBuild,
   getDeployment,
   getProject,
+  getProjectMembers,
+  getPendingProjectInvitations,
   searchDeployments,
   searchProjects,
   searchUsers,
@@ -149,10 +151,27 @@ export async function loadUserDetailPage(context: AdminContext, path: string) {
 export async function loadProjectDetailPage(context: AdminContext, path: string) {
   const { id } = detailLocation(path, '/admin/projects/');
   const { getOperatorProject } = await import('../../operator/tenant-service.ts');
-  const detail = await getOperatorProject(context.get('db'), id);
+  const db = context.get('db');
+  const [detail, members, invitations] = await Promise.all([
+    getOperatorProject(db, id),
+    getProjectMembers(db, id),
+    getPendingProjectInvitations(db, id),
+  ]);
   return {
     id: path,
     ...detail,
+    teamMembers: members.map(({ member, user }) => ({
+      user: { id: user.id, login: user.login, email: user.email },
+      role: member.role,
+      createdAt: member.created_at,
+    })),
+    pendingTeamInvitations: invitations.map((invitation) => ({
+      id: invitation.id,
+      targetUserId: invitation.target_user_id,
+      email: invitation.target_email_snapshot,
+      role: invitation.role,
+      expiresAt: invitation.expires_at,
+    })),
     cfAccountId: context.env.CF_ACCOUNT_ID,
     deployUrl: projectUrl(detail.project, context.env),
     tz: (context.req.raw.cf?.timezone as string | undefined) ?? undefined,

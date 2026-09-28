@@ -578,9 +578,10 @@ async function requireLockedMembersCapability(
   db: Db,
   project: Project,
   actorUserId: string,
+  platformAdmin = false,
 ): Promise<void> {
   await requireLockedProjectOwnerActive(db, project);
-  if (project.user_id === actorUserId) {
+  if (platformAdmin || project.user_id === actorUserId) {
     return;
   }
   const actorMember = await getProjectMember(db, project.id, actorUserId);
@@ -632,12 +633,13 @@ export async function setProjectMemberRole(
     subjectUserId: string;
     role: ProjectMemberRole;
     actorUserId: string;
+    platformAdmin?: boolean;
   },
 ): Promise<{ member: ProjectMember; cancelledBuilds: ReadonlyArray<TerminatedBuild> }> {
   return db.transaction(async (tx) => {
     const txDb = tx as unknown as Db;
     const project = await lockProject(txDb, args.projectId);
-    await requireLockedMembersCapability(txDb, project, args.actorUserId);
+    await requireLockedMembersCapability(txDb, project, args.actorUserId, args.platformAdmin);
     if (project.user_id === args.subjectUserId) {
       throw new ProjectTeamMutationError('owner-conflict');
     }
@@ -681,7 +683,7 @@ export async function setProjectMemberRole(
 
 export async function removeProjectMember(
   db: Db,
-  args: { projectId: string; subjectUserId: string; actorUserId: string },
+  args: { projectId: string; subjectUserId: string; actorUserId: string; platformAdmin?: boolean },
 ): Promise<{ cancelledBuilds: ReadonlyArray<TerminatedBuild> }> {
   return db.transaction(async (tx) => {
     const txDb = tx as unknown as Db;
@@ -693,8 +695,8 @@ export async function removeProjectMember(
     if (!current) {
       throw new ProjectTeamMutationError('member-not-found');
     }
-    if (args.actorUserId !== args.subjectUserId) {
-      await requireLockedMembersCapability(txDb, project, args.actorUserId);
+    if (args.platformAdmin || args.actorUserId !== args.subjectUserId) {
+      await requireLockedMembersCapability(txDb, project, args.actorUserId, args.platformAdmin);
     } else {
       await requireLockedProjectOwnerActive(txDb, project);
     }
@@ -714,7 +716,8 @@ export async function removeProjectMember(
       projectId: args.projectId,
       actorUserId: args.actorUserId,
       subjectUserId: args.subjectUserId,
-      action: args.actorUserId === args.subjectUserId ? 'left' : 'member_removed',
+      action:
+        !args.platformAdmin && args.actorUserId === args.subjectUserId ? 'left' : 'member_removed',
       previousRole: member.role,
     });
     const cancelledBuilds = await invalidateGitHubConnectionAuthorizedBy(
@@ -748,6 +751,24 @@ export async function getProjectInvitations(
     .from(projectInvitations)
     .where(eq(projectInvitations.project_id, projectId))
     .orderBy(desc(projectInvitations.created_at));
+}
+
+export async function getPendingProjectInvitations(
+  db: Db,
+  projectId: string,
+): Promise<ReadonlyArray<ProjectInvitation>> {
+  return db
+    .select()
+    .from(projectInvitations)
+    .where(
+      and(
+        eq(projectInvitations.project_id, projectId),
+        eq(projectInvitations.status, 'pending'),
+        gt(projectInvitations.expires_at, sql`now()`),
+      ),
+    )
+    .orderBy(desc(projectInvitations.created_at))
+    .limit(100);
 }
 
 export async function getPendingProjectInvitationsByUserId(
@@ -800,6 +821,7 @@ export async function createOrRefreshProjectInvitation(
     email: string;
     role: ProjectMemberRole;
     actorUserId: string;
+    platformAdmin?: boolean;
   },
 ): Promise<Readonly<{ invitation: ProjectInvitation; target: User; refreshed: boolean }>> {
   const normalizedEmail = args.email.trim().toLowerCase();
@@ -832,7 +854,7 @@ export async function createOrRefreshProjectInvitation(
     if (lockedOwner && isAdminSuspended(lockedOwner.suspended_reason)) {
       throw new ProjectTeamMutationError('owner-suspended');
     }
-    if (project.user_id !== args.actorUserId) {
+    if (!args.platformAdmin && project.user_id !== args.actorUserId) {
       const actorMember = await getProjectMember(txDb, project.id, args.actorUserId);
       if (actorMember?.role !== 'admin') {
         throw new ProjectTeamMutationError('forbidden');
@@ -954,12 +976,12 @@ export async function resendProjectInvitation(
 
 export async function revokeProjectInvitation(
   db: Db,
-  args: { projectId: string; invitationId: string; actorUserId: string },
+  args: { projectId: string; invitationId: string; actorUserId: string; platformAdmin?: boolean },
 ): Promise<void> {
   await db.transaction(async (tx) => {
     const txDb = tx as unknown as Db;
     const project = await lockProject(txDb, args.projectId);
-    await requireLockedMembersCapability(txDb, project, args.actorUserId);
+    await requireLockedMembersCapability(txDb, project, args.actorUserId, args.platformAdmin);
     const [invitation] = await txDb
       .select()
       .from(projectInvitations)
