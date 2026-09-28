@@ -11,6 +11,7 @@ import { FormTextArea } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 
 const META = 'font-size: 0.8rem; color: #666';
+const EMAIL_SETUP_GUIDE = 'https://void.cloud/guide/platform/installation/credentials#enable-email';
 
 export function EmailSettingsPage({
   path,
@@ -23,6 +24,8 @@ export function EmailSettingsPage({
       <Layout platformName={platformName} title="Email" username={username}>
         <h1>Email</h1>
         <p>Email is not enabled on this platform.</p>
+        <p>Set up a shared sender domain and Cloudflare zone, then upgrade the platform.</p>
+        <Button as="a" href={EMAIL_SETUP_GUIDE} label="How to enable email" variant="secondary" />
       </Layout>
     );
   }

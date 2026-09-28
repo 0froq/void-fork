@@ -208,6 +208,9 @@ describe('email disabled on this platform', () => {
     expect(html).toContain('void-admin-content');
     expect(html).toContain('Authentication');
     expect(html).toContain('Email is not enabled on this platform.');
+    expect(html).toContain(
+      'https://void.cloud/guide/platform/installation/credentials#enable-email',
+    );
 
     for (const path of ['/admin/email', `/admin/email/${projectId}`]) {
       const page = await app.fetch(
