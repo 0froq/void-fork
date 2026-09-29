@@ -3597,7 +3597,7 @@ export function createDeployWranglerRunner(
     const result = spawnSync(command as string, [...prefix, ...args], {
       cwd: root,
       stdio: interactiveLogin
-        ? ['inherit', 'inherit', 'ignore']
+        ? 'inherit'
         : opts.input === undefined
           ? opts.capture
             ? ['ignore', 'pipe', 'pipe']

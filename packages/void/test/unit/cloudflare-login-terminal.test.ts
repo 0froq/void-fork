@@ -46,7 +46,7 @@ describe('cf browser login', () => {
     vi.mocked(spawnSync).mockImplementation((_command, args, options) => {
       const action = args?.slice(1).join(' ');
       if (action === 'login') {
-        expect(options?.stdio).toEqual(['inherit', 'inherit', 'ignore']);
+        expect(options?.stdio).toBe('inherit');
       } else {
         expect(options?.stdio).toEqual(['ignore', 'pipe', 'pipe']);
       }
@@ -83,7 +83,7 @@ describe('cf browser login', () => {
       process.execPath,
       ['bundled-cli.js', 'login'],
       expect.objectContaining({
-        stdio: ['inherit', 'inherit', 'ignore'],
+        stdio: 'inherit',
         signal: controller.signal,
       }),
     );

@@ -48,7 +48,7 @@ describe('Cloudflare authentication', () => {
     expect(session.accounts).toEqual([{ id: 'account-1', name: 'Example' }]);
     expect(calls).toEqual(['whoami --json', 'login', 'whoami --json']);
     expect(loginNotice).toHaveBeenCalledWith(
-      'Opening Cloudflare login in your browser. Press Ctrl+C to cancel.',
+      'Opening Cloudflare login in your browser. Compare the code below with the browser prompt. Press Ctrl+C to cancel.',
     );
   });
 

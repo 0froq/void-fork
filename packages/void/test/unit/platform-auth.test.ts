@@ -98,7 +98,7 @@ describe('platform Cloudflare authentication', () => {
     expect(credential).toEqual({ source: 'oauth', token: 'browser-token' });
     expect(calls).toEqual(['auth token --json', 'login', 'auth token --json']);
     expect(loginNotice).toHaveBeenCalledWith(
-      'Opening Cloudflare login in your browser. Press Ctrl+C to cancel.',
+      'Opening Cloudflare login in your browser. Compare the code below with the browser prompt. Press Ctrl+C to cancel.',
     );
   });
 

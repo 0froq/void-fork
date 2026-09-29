@@ -194,7 +194,7 @@ export function createBundledCloudflareAuthRunner(root: string): CloudflareAuthR
       maxBuffer: 10 * 1024 * 1024,
       shell: false,
       stdio: cloudflareAuthNeedsTerminal(args)
-        ? ['inherit', 'inherit', 'ignore']
+        ? 'inherit'
         : capture
           ? ['ignore', 'pipe', 'pipe']
           : 'inherit',
@@ -226,7 +226,7 @@ export function runCloudflareAuthCommand(
         env: cloudflareAuthCommandEnvironment(args),
         shell: false,
         signal,
-        stdio: ['inherit', 'inherit', 'ignore'],
+        stdio: 'inherit',
         timeout: 10 * 60 * 1000,
         windowsHide: true,
       });
@@ -309,5 +309,7 @@ function isCleanExit(result: CloudflareAuthRunResult): boolean {
 }
 
 export function announceCloudflareLogin(): void {
-  log.info('Opening Cloudflare login in your browser. Press Ctrl+C to cancel.');
+  log.info(
+    'Opening Cloudflare login in your browser. Compare the code below with the browser prompt. Press Ctrl+C to cancel.',
+  );
 }
