@@ -27,7 +27,30 @@ describe('migrateLegacyVoidConfig', () => {
       worker: { compatibility_date: '2026-02-24' },
     });
     expect(readFileSync(join(root, '.void/config-migration/void.json'), 'utf8')).toBe(original);
+    expect(readFileSync(join(root, '.gitignore'), 'utf8')).toBe('.void-wrangler.jsonc\n');
     expect(migrateLegacyVoidConfig(root)).toBe(false);
+  });
+
+  it('recovers the fallback void.json emitted by an older installed plugin after migration', () => {
+    setup('{"head":{"title":"Blog"},"worker":{"compatibility_date":"2025-12-17"}}');
+    migrateLegacyVoidConfig(root);
+    writeFileSync(join(root, 'void.json'), '{"worker":{"compatibility_date":"2026-02-24"}}\n');
+
+    expect(migrateLegacyVoidConfig(root)).toBe(true);
+    expect(existsSync(join(root, 'void.json'))).toBe(false);
+    expect(readConfig(root).head?.title).toBe('Blog');
+  });
+
+  it('preserves a conflicting legacy config rather than treating it as generated', () => {
+    setup('{"head":{"title":"Blog"}}');
+    migrateLegacyVoidConfig(root);
+    writeFileSync(
+      join(root, 'void.json'),
+      '{"head":{"title":"Changed"},"worker":{"compatibility_date":"2026-02-24"}}\n',
+    );
+
+    expect(() => migrateLegacyVoidConfig(root)).toThrow('differ');
+    expect(existsSync(join(root, 'void.json'))).toBe(true);
   });
 
   it('leaves invalid JSON and an existing typed config untouched', () => {

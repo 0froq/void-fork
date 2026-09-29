@@ -78,7 +78,7 @@ Use `void --help` for the command list. For a specific command, try `void deploy
 
 ### `void migrate`
 
-`void migrate` converts `void.json` and root `wrangler.jsonc` or `wrangler.json` into a typed `void.config.ts`. It also recognizes a single root `wrangler*.json(c)` file explicitly referenced by a supported framework adapter. Void backs up the originals under `.void/config-migration/`, keeps Cloudflare resource state in `void.lock.json`, and updates supported framework adapters to use its generated Cloudflare config. `void init` and `void deploy` run this migration automatically when they find legacy files. Review and commit the new config and lock. If multiple Cloudflare config files exist or existing files disagree, resolve them before retrying.
+`void migrate` converts `void.json` and root `wrangler.jsonc` or `wrangler.json` into a typed `void.config.ts`. It also recognizes a single root `wrangler*.json(c)` file explicitly referenced by a supported framework adapter. Void backs up the originals under `.void/config-migration/`, keeps Cloudflare resource state in `void.lock.json`, and updates supported framework adapters to use its generated Cloudflare config. `.void-wrangler.jsonc` is a generated Cloudflare tooling file; migration adds it to `.gitignore`. `void init` and `void deploy` run this migration automatically when they find legacy files. Before Cloudflare deployment, the project's installed `void` package must match the CLI version. Review and commit the new config, lock, and `.gitignore`. If multiple Cloudflare config files exist or existing files disagree, resolve them before retrying.
 
 ### `void init`
 
