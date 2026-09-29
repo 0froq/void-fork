@@ -30,24 +30,18 @@ if (!result.ok) {
 }
 ```
 
-Both branches are real. `result.error` exists only on the first, so reading it
-unconditionally throws on the second — and the second is the one a new project
-hits first, because a recipient you have not verified yet fails per-recipient.
+Check both failure shapes: `result.error` reports a request failure, while `result.deliveries` reports failures for individual recipients. An unverified recipient fails in `deliveries`.
 
 ## Setup
 
-On a platform with email enabled, your app needs no email configuration before
-`void deploy`. Ask your administrator for the platform's shared mail domain. A
-self-hosted administrator [enables email during installation or upgrade](/guide/platform/installation/credentials#runtime-token-permissions); installations without it do not offer platform email. Void Cloud uses `mail.void.cloud`.
+On a platform with email enabled, deploy without additional email configuration. Ask your administrator for its shared mail domain. Administrators [enable email during installation or upgrade](/guide/platform/installation/credentials#runtime-token-permissions); Void Cloud uses `mail.void.cloud`.
 
 Each project on an email-enabled platform has:
 
-- **Sender** — `<your-slug>+noreply@<mail-domain>`. Used as the default `from` if you omit it. The platform administrator configures the mail zone and its Email Routing, DKIM, SPF, and DMARC records. Project slugs are capped at 56 characters so this local part fits RFC 5321's 64 octets; a project created before the cap with a longer slug must pass `from` explicitly.
-- **No worker binding to add** — outbound mail is sent by the Void proxy, which holds the
-  platform `send_email` binding. Your worker never gets one, so there is nothing to configure.
-- **Your own address as a recipient** — the email on your Void account is registered as a recipient when the project is created. It is verified at once when Cloudflare already holds it verified for the platform (you clicked its link for an earlier project of yours); otherwise Cloudflare mails it a verification link, and until you click that link and run `void email destinations` — the listing is what records the click — a send to yourself comes back `ok: false` with a per-recipient `UNVERIFIED_DESTINATION` in `result.deliveries`.
+- **Default sender:** `<your-slug>+noreply@<mail-domain>`. Older projects with slugs longer than 56 characters must pass `from` explicitly.
+- **Your account email as a recipient:** it is registered when the project is created. If Cloudflare has not verified it for the platform, follow the emailed verification link and run `void email destinations` before sending to it.
 
-That's it for configuration. Delivery is gated separately: outbound mail only reaches verified recipients, so `sendEmail({ to: '...', subject: '...', text: '...' })` works on first deploy for your own address once it is verified, and for anyone else after `void email allow` — see [Adding recipients](#adding-recipients).
+The shared sender can send only to verified recipients. Verify your own address or [add another recipient](#adding-recipients) before sending.
 
 Deploying to your own Cloudflare account instead (`void deploy --platform cloudflare`) takes one line of `void.config.ts` and one Enter on the first deploy — see [Your own Cloudflare account](#your-own-cloudflare-account).
 
@@ -68,9 +62,9 @@ void email destinations
 The project owner's account email is added automatically when the project is created on an email-enabled platform, so it skips `void email allow` — not the verification. See [Setup](#setup) for when it is verified at once and when there is a link to click.
 
 ::: warning When this is the right fit
-The shared sender is great for: ops alerts to the team, notifications to the project owner, reply-by-email flows on top of inbound, internal/app-internal mail.
+The shared sender suits team alerts, project notifications, and replies to inbound mail.
 
-For SaaS sending to arbitrary end-users (every signup gets a welcome email), the per-recipient verification model doesn't fit. On the platform, [registering your own domain](#your-own-domain-on-the-platform) lifts that gate for sends from that domain. On [your own Cloudflare account](#your-own-cloudflare-account) with Workers Paid, Void onboards your mail domain for Email Sending, which lifts the verified-recipient gate. Otherwise use [Resend](https://resend.com), [Postmark](https://postmarkapp.com), or [SES](https://aws.amazon.com/ses/) directly — install their SDK and call it from your handler. We may formalize this with a provider abstraction later if there is demand; until then, calling the SDK directly is simple enough that the wrapper would not earn its keep.
+For mail to arbitrary users, [register your own domain](#your-own-domain-on-the-platform), use [Workers Paid on your own Cloudflare account](#your-own-cloudflare-account), or call another email provider from your handler.
 :::
 
 ## Your own domain on the platform
@@ -120,7 +114,7 @@ On an administrator-managed platform, `add` prints the administrator command for
 | `attachments`    | `Attachment[]`               | See [Attachments](#attachments).                                                                                |
 | `idempotencyKey` | `string`                     | Optional on the Void Platform: 1–128 printable, non-space ASCII characters. Reuse for retries of the same send. |
 
-At most 50 recipients across `to`, `cc` and `bcc` per call. Each address is checked with [`email-validator`](https://www.npmjs.com/package/email-validator): an ASCII dot-atom local part (before the `@`) of at most 64 characters — no whitespace, control character or RFC 5322 special, no leading, trailing or doubled dot, and no quoted local part — and a dotted domain of ASCII labels (at most 63 characters each) whose TLD starts with a letter and is at least 2 characters, so `user@localhost` is refused and an IDN domain must be given as punycode (`xn--…`); at most 254 characters in total (RFC 5321: a 256-octet forward-path `<local@domain>` and a 64-octet local part are the longest every receiver must accept). The address itself carries no display-name syntax; a display name goes around it (`"Name <addr>"` or `{ email, name }`). All of these are checked before anything is built and return `INVALID_TO` (`INVALID_FROM` for `from`; `MIME_ERROR` for `cc`, `bcc` and `replyTo`). The platform's inbound router applies the same package to `forward()` and `reply()` addresses, so nothing a handler records is dropped there for its shape. Custom header names must be RFC 5322 field names (printable ASCII, no colon); a name too long to fit a 998-octet line — a field name cannot be folded — is rejected with `MIME_ERROR` before anything is built.
+You can send to at most 50 recipients across `to`, `cc`, and `bcc`. Addresses must have an ASCII local part of at most 64 characters and a dotted domain; the whole address can be at most 254 characters. Quoted local parts, `user@localhost`, and malformed dots are rejected. Use punycode for internationalized domains. Void returns `INVALID_TO` for an invalid `to`, `INVALID_FROM` for `from`, and `MIME_ERROR` for `cc`, `bcc`, `replyTo`, or invalid custom header names.
 
 `Address` accepts either a string (`"hello@acme.dev"` or `"Name <hello@acme.dev>"`) or an object (`{ email, name? }`). Display names with non-ASCII characters are RFC 2047 encoded automatically.
 
@@ -164,7 +158,7 @@ await sendEmail({
 });
 ```
 
-`contentType` is inferred from the filename extension when omitted; when given, it must be a valid media type (`type/subtype`, optionally followed by `; attribute=value` parameters — no `name`, which is set from `filename`), or `sendEmail` returns `MIME_ERROR`. `contentId` is the identifier the HTML references as `cid:<id>`: letters, digits, the RFC 5322 `atext` symbols and dots, optionally with an `@domain` part and optionally in one pair of angle brackets (`logo`, `logo@acme.dev` and `<logo@acme.dev>` all render as `Content-ID: <…>`); anything else — whitespace, quotes, parentheses, a stray `<` or `>`, or an empty string — returns `MIME_ERROR`. Total encoded message size is capped at 5 MiB, and custom headers at 16 KiB; oversize payloads return `MIME_ERROR` instead of failing upstream.
+Void infers `contentType` from the filename if you omit it. An explicit value must be a valid media type. `contentId` names the image referenced by `cid:<id>` in HTML; use an ID such as `logo` or `logo@acme.dev`. The encoded message is limited to 5 MiB and custom headers to 16 KiB. Invalid attachment fields or oversized messages return `MIME_ERROR`.
 
 ## Result and errors
 
@@ -207,7 +201,7 @@ For 30 days, repeating a key with the same payload returns its recorded outcome 
 | `OUTCOME_UNKNOWN`        | The send may have reached the provider; do not blindly resend. |
 | `UPSTREAM_ERROR`         | The provider or platform refused the request.                  |
 
-The default platform allowance is 200 recipient submissions per UTC calendar month and 10 in a rolling 60-second window. Reserved submissions count toward the limits. Hourly cleanup cancels reservations older than 15 minutes that never started and releases their quota. Once an attempt starts, it stays charged even if the provider fails or the outcome is unknown. Administrators can change these limits.
+The default platform allowance is 200 recipient submissions per UTC month and 10 per rolling minute. Reserved and started submissions count toward the limits; a started attempt stays charged even if it fails or its outcome is unknown. Administrators can change these limits.
 
 `void email usage` shows monthly recipient attempts, inbound receipts, and the remaining allowance. `void email logs --limit 50` shows up to 100 recent metadata entries retained for 30 days: operation, recipient, direction, state, provider reference, and error code. It does not store subjects, bodies, or attachments. Receiving a message and sending a reply are separate events.
 
@@ -233,13 +227,11 @@ curl -X DELETE http://localhost:5173/__void/inbox \
   -H "x-void-dev-trigger: <printed-token>"
 ```
 
-The buffer holds the most recent 100 messages and survives HMR but not a full server restart. No disk persistence.
+The inbox keeps the most recent 100 messages through HMR and clears on a full server restart.
 
-Under the hood, your code runs in workerd (a separate process from the Vite dev server), so `sendEmail` hands each captured message to the dev server over the worker's `assets` binding, which Vite wires back into its own middleware. Void apps always have that binding, and so do apps built on a Class A framework (TanStack Start, React Router) once their wrangler config declares one.
+The dev inbox works in native Void apps, TanStack Start, and React Router. It is unavailable in SvelteKit, Nuxt, Analog, and Astro; sends from those apps return `BINDING_MISSING`. Use `createEmailTestHarness` from `void/email/testing` to capture sends in tests. If a configured inbox cannot be reached, `sendEmail` returns `UPSTREAM_ERROR` without sending.
 
-The dev inbox is **not** available under a Class B or C framework — SvelteKit, Nuxt, Analog, Astro. Those adapters own their own dev server and worker build, so Void never installs the Cloudflare Vite plugin for them and has nowhere to register the inbox. Declaring an `assets` binding does not help: SvelteKit, Nuxt and Analog do not run your code in a workerd instance fronted by Vite at all, so there is no loopback to bind to. Sends from those apps return `BINDING_MISSING`. Use `createEmailTestHarness` from `void/email/testing` instead, which captures in-process and works everywhere. When the inbox is configured but unreachable, `sendEmail` returns `UPSTREAM_ERROR` — nothing is captured and nothing is sent.
-
-`sendInDev: true` bypasses the dev inbox for a single send. `void dev` binds no send transport at all — the platform's `__VOID_PROXY` service binding is added only on a deployed worker, and the own-account `SEND_EMAIL` binding is stripped under `serve` so miniflare cannot write stray `.eml` files or send real mail (only that entry: a `send_email` binding of your own under another name is left exactly as `cloudflare.send_email` in `void.config.ts` declares it). With the inbox skipped there is nothing left to fall through to, so the call returns `BINDING_MISSING`: it proves the inbox was bypassed, it does not deliver. To verify real delivery, deploy and send from the deployed worker.
+`sendInDev: true` skips the inbox for one call. It returns `BINDING_MISSING` in `void dev` because no live send transport is bound. Deploy the app to test real delivery.
 
 ```ts
 const result = await sendEmail({
@@ -362,7 +354,7 @@ export default defineEmail(async (message, env, ctx, info) => {
 
 `replyEmail` builds the reply MIME with `Subject: Re: <original>` (no double-prefix), `In-Reply-To: <Message-ID>`, and a continued `References` chain, then dispatches through the message's `reply()`. Defaults: `to = message.from`, `subject = "Re: <original>"`.
 
-Everything taken from the inbound message is best-effort, because the remote sender controls it. A `Message-ID` or `References` value too long for a header line is dropped rather than threaded, and a `References` chain over 8 KiB keeps only its newest ids — the parent's `Message-ID` always ends it. Control characters in the subject become a space, and a subject over 4096 characters, or an ASCII one too long to fold, falls back to a bare `Re:`. None of these fallbacks suppresses the reply; pass `subject` to control it exactly.
+Void uses the inbound message's `Message-ID` and `References` when they fit in reply headers. It drops unusable values and falls back to a bare `Re:` for a subject it cannot safely reuse. Pass `subject` to set it explicitly.
 
 On the platform, shared-domain replies default to
 `<slug>+noreply@<mail domain>`. For mail received at a registered custom domain,
