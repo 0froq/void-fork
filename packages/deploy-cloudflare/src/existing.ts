@@ -46,6 +46,13 @@ export async function readExistingCloudflareWorker(options: {
   return worker.snapshot;
 }
 
+/** Read the active Worker if one exists, while preserving other inspection failures. */
+export async function readOptionalExistingCloudflareWorker(
+  options: ExistingCloudflareWorkerOptions,
+): Promise<ExistingCloudflareWorker | null> {
+  return (await readCloudflareWorker(options, true))?.snapshot ?? null;
+}
+
 async function readCloudflareWorker(
   options: ExistingCloudflareWorkerOptions,
   allowMissing: boolean,

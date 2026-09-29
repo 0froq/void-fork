@@ -78,6 +78,7 @@ function copyBundle(source: string, destination: string): boolean {
 export async function prepareCfBuildOutput(
   workerDirectory: string,
   accountId: string,
+  options: { inheritedBindings?: ReadonlyArray<Record<string, unknown>> } = {},
 ): Promise<CfBuildOutput | null> {
   const source = resolve(workerDirectory);
   const raw = object(JSON.parse(readFileSync(join(source, 'wrangler.json'), 'utf8')));
@@ -87,7 +88,7 @@ export async function prepareCfBuildOutput(
   if (typeof raw.account_id === 'string' && raw.account_id !== accountId) {
     return null;
   }
-  const config = migrateBuiltWranglerConfig(raw);
+  const config = migrateBuiltWranglerConfig(raw, options);
   if (!config.worker) {
     throw new Error('cf did not produce a Worker configuration.');
   }
@@ -150,6 +151,7 @@ export async function prepareCfStaticBuildOutput(options: {
   configPath: string;
   assetsDirectory: string;
   accountId: string;
+  inheritedBindings?: ReadonlyArray<Record<string, unknown>>;
 }): Promise<CfBuildOutput | null> {
   const raw = object(JSON.parse(readFileSync(options.configPath, 'utf8')));
   if (!raw || typeof raw.main !== 'string' || basename(raw.main) !== raw.main) {
@@ -182,7 +184,9 @@ export async function prepareCfStaticBuildOutput(options: {
       }),
       { mode: 0o600 },
     );
-    return await prepareCfBuildOutput(scratch, options.accountId);
+    return await prepareCfBuildOutput(scratch, options.accountId, {
+      inheritedBindings: options.inheritedBindings,
+    });
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

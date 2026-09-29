@@ -15,6 +15,7 @@ import { InputConfigSchema } from '@cloudflare/config';
 import { dirname, join } from 'pathslash';
 
 type JsonObject = Record<string, unknown>;
+type MigrationOptions = { inheritedBindings?: ReadonlyArray<JsonObject> };
 
 function record(value: unknown): JsonObject | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -32,7 +33,7 @@ function empty(value: unknown): boolean {
 }
 
 /** Values emitted solely for Wrangler's build/dev machinery are not deployment settings. */
-function migrationInput(raw: JsonObject): JsonObject {
+function migrationInput(raw: JsonObject, options: MigrationOptions): JsonObject {
   const result = { ...raw };
   if (
     !empty(result.rules) &&
@@ -42,6 +43,54 @@ function migrationInput(raw: JsonObject): JsonObject {
   }
   if (empty(result.logfwdr) || isDeepStrictEqual(result.logfwdr, { bindings: [] })) {
     delete result.logfwdr;
+  }
+  if (result.keep_assets === true && !record(result.assets)?.directory) {
+    throw new Error('cf cannot preserve existing Worker assets without a new assets directory.');
+  }
+  if (result.keep_vars === true || result.keep_secrets === true) {
+    const bindings = options.inheritedBindings;
+    if (!bindings) {
+      throw new Error('Existing Worker bindings are required to preserve variables and secrets.');
+    }
+    const vars = { ...record(result.vars) };
+    const secrets = record(result.secrets);
+    const required = new Set(
+      Array.isArray(secrets?.required) ? (secrets.required as Array<string>) : [],
+    );
+    for (const binding of bindings) {
+      if (typeof binding.name !== 'string') {
+        throw new Error('Cloudflare returned a binding without a name.');
+      }
+      if (result.keep_vars === true && !Object.hasOwn(vars, binding.name)) {
+        if (binding.type === 'plain_text') {
+          if (typeof binding.text !== 'string') {
+            throw new Error(
+              `Cloudflare did not return the value of Worker variable ${binding.name}.`,
+            );
+          }
+          vars[binding.name] = binding.text;
+        } else if (binding.type === 'json') {
+          if (binding.json === undefined) {
+            throw new Error(
+              `Cloudflare did not return the value of Worker variable ${binding.name}.`,
+            );
+          }
+          vars[binding.name] = binding.json;
+        }
+      }
+      if (
+        (result.keep_vars === true || result.keep_secrets === true) &&
+        (binding.type === 'secret_text' || binding.type === 'secret_key')
+      ) {
+        required.add(binding.name);
+      }
+    }
+    if (Object.keys(vars).length > 0) {
+      result.vars = vars;
+    }
+    if (required.size > 0) {
+      result.secrets = { ...secrets, required: [...required] };
+    }
   }
   for (const key of [
     'configPath',
@@ -55,6 +104,11 @@ function migrationInput(raw: JsonObject): JsonObject {
     'dev',
     'no_bundle',
     'build',
+    'keep_vars',
+    'keep_secrets',
+    'keep_assets',
+    'send_metrics',
+    'workflows',
   ]) {
     delete result[key];
   }
@@ -64,6 +118,81 @@ function migrationInput(raw: JsonObject): JsonObject {
     }
   }
   return result;
+}
+
+function applyWorkflows(raw: JsonObject, worker: JsonObject): void {
+  if (raw.workflows === undefined || empty(raw.workflows)) {
+    return;
+  }
+  if (!Array.isArray(raw.workflows)) {
+    throw new Error('Invalid Workflow bindings in the built Cloudflare config.');
+  }
+  const env = record(worker.env) ?? {};
+  const exports = record(worker.exports) ?? {};
+  for (const item of raw.workflows) {
+    const workflow = record(item);
+    if (
+      !workflow ||
+      typeof workflow.binding !== 'string' ||
+      typeof workflow.name !== 'string' ||
+      typeof workflow.class_name !== 'string' ||
+      (workflow.script_name !== undefined && typeof workflow.script_name !== 'string')
+    ) {
+      throw new Error('Invalid Workflow binding in the built Cloudflare config.');
+    }
+    const allowed = new Set([
+      'binding',
+      'name',
+      'class_name',
+      'script_name',
+      'limits',
+      'concurrency',
+      'schedules',
+      'default_retention',
+    ]);
+    for (const key of Object.keys(workflow)) {
+      if (!allowed.has(key)) {
+        throw new Error(`cf cannot migrate Workflow setting ${key}.`);
+      }
+    }
+    if (Object.hasOwn(env, workflow.binding)) {
+      throw new Error(`Duplicate Worker binding ${workflow.binding}.`);
+    }
+    env[workflow.binding] = {
+      type: 'workflow',
+      name: workflow.name,
+      worker: workflow.script_name ?? worker.name,
+      exportName: workflow.class_name,
+    };
+    if (workflow.script_name !== undefined && workflow.script_name !== worker.name) {
+      continue;
+    }
+    const retention = record(workflow.default_retention);
+    if (Object.hasOwn(exports, workflow.class_name)) {
+      throw new Error(`Duplicate Worker export ${workflow.class_name}.`);
+    }
+    exports[workflow.class_name] = {
+      type: 'workflow',
+      name: workflow.name,
+      ...(workflow.limits !== undefined ? { limits: workflow.limits } : {}),
+      ...(workflow.concurrency !== undefined ? { concurrency: workflow.concurrency } : {}),
+      ...(workflow.schedules !== undefined ? { schedules: workflow.schedules } : {}),
+      ...(retention
+        ? {
+            defaultRetention: {
+              ...(retention.success_retention !== undefined
+                ? { successRetention: retention.success_retention }
+                : {}),
+              ...(retention.error_retention !== undefined
+                ? { errorRetention: retention.error_retention }
+                : {}),
+            },
+          }
+        : {}),
+    };
+  }
+  worker.env = env;
+  worker.exports = exports;
 }
 
 function uncredentialedEnvironment(): NodeJS.ProcessEnv {
@@ -201,6 +330,7 @@ function containersFromWrangler(raw: JsonObject, exports: JsonObject): Array<Jso
  */
 export function migrateBuiltWranglerConfig(
   raw: JsonObject,
+  options: MigrationOptions = {},
 ): ReturnType<typeof InputConfigSchema.parse> {
   const cfPackage = fileURLToPath(import.meta.resolve('cf/package.json'));
   const cfBinary = join(dirname(cfPackage), 'bin', 'cf');
@@ -219,7 +349,7 @@ export function migrateBuiltWranglerConfig(
       { mode: 0o600 },
     );
     const configPath = join(directory, 'wrangler.json');
-    writeFileSync(configPath, JSON.stringify(migrationInput(raw)), { mode: 0o600 });
+    writeFileSync(configPath, JSON.stringify(migrationInput(raw, options)), { mode: 0o600 });
     const env = uncredentialedEnvironment();
     const migrated = spawnSync(
       process.execPath,
@@ -259,6 +389,7 @@ export function migrateBuiltWranglerConfig(
     if (!result || !worker) {
       throw new Error('cf did not generate a Worker configuration.');
     }
+    applyWorkflows(raw, worker);
     const exports = { ...record(worker.exports), ...durableObjectExports(raw) };
     const containers = containersFromWrangler(raw, exports);
     if (containers.length > 0) {

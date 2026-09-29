@@ -33,6 +33,8 @@ it('produces deployable cf build output without changing the authored project', 
     name: 'void-test',
     compatibility_date: '2026-09-29',
     main: 'index.js',
+    send_metrics: false,
+    keep_assets: true,
     vars: { MESSAGE: 'hello' },
     kv_namespaces: [{ binding: 'CACHE', id: 'namespace-id' }],
     d1_databases: [{ binding: 'DB', database_id: 'database-id', database_name: 'database' }],
@@ -88,6 +90,101 @@ it('preserves worker settings that the previous bridge dropped', async () => {
     const built = await readBuildOutput(prepared.directory);
     expect(built.workers.default.config.limits).toEqual({ cpuMs: 100 });
     expect(built.workers.default.config.placement).toEqual({ mode: 'smart' });
+  } finally {
+    prepared.dispose();
+  }
+});
+
+it('preserves linked Worker variables and secrets in the cf upload', async () => {
+  const output = worker({
+    name: 'void-test',
+    compatibility_date: '2026-09-29',
+    main: 'index.js',
+    keep_vars: true,
+    vars: { EDITED: 'current' },
+  });
+  const prepared = await prepareCfBuildOutput(output, 'account-id', {
+    inheritedBindings: [
+      { name: 'PRESERVED', type: 'plain_text', text: 'production' },
+      { name: 'STRUCTURED', type: 'json', json: { active: true } },
+      { name: 'TOKEN', type: 'secret_text' },
+    ],
+  });
+  expect(prepared).not.toBeNull();
+  if (!prepared) {
+    return;
+  }
+  try {
+    const built = await readBuildOutput(prepared.directory);
+    expect(built.workers.default.config.env).toMatchObject({
+      EDITED: { type: 'text', value: 'current' },
+      PRESERVED: { type: 'text', value: 'production' },
+      STRUCTURED: { type: 'json', value: { active: true } },
+      TOKEN: { type: 'secret' },
+    });
+    const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
+    const dryRun = spawnSync(
+      process.execPath,
+      [cf, 'workers', 'versions', 'create', '--prebuilt', '--dry-run'],
+      {
+        cwd: prepared.directory,
+        encoding: 'utf8',
+      },
+    );
+    expect(dryRun.status, `${dryRun.stdout}\n${dryRun.stderr}`).toBe(0);
+  } finally {
+    prepared.dispose();
+  }
+});
+
+it('deploys Worker Workflow declarations through cf build output', async () => {
+  const output = worker({
+    name: 'void-test',
+    compatibility_date: '2026-09-29',
+    main: 'index.js',
+    workflows: [
+      {
+        binding: 'FLOW',
+        name: 'void-test-flow',
+        class_name: 'Flow',
+        schedules: '0 * * * *',
+        limits: { steps: 100 },
+      },
+    ],
+  });
+  writeFileSync(
+    join(output, 'index.js'),
+    'export class Flow { async run() {} }\nexport default { fetch() { return new Response("ok") } };\n',
+  );
+  const prepared = await prepareCfBuildOutput(output, 'account-id');
+  expect(prepared).not.toBeNull();
+  if (!prepared) {
+    return;
+  }
+  try {
+    const built = await readBuildOutput(prepared.directory);
+    expect(built.workers.default.config.env?.FLOW).toEqual({
+      type: 'workflow',
+      name: 'void-test-flow',
+      worker: 'void-test',
+      exportName: 'Flow',
+    });
+    expect(built.workers.default.config.exports?.Flow).toEqual({
+      type: 'workflow',
+      name: 'void-test-flow',
+      schedules: '0 * * * *',
+      limits: { steps: 100 },
+    });
+    const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
+    const dryRun = spawnSync(
+      process.execPath,
+      [cf, 'workers', 'versions', 'create', '--prebuilt', '--dry-run'],
+      {
+        cwd: prepared.directory,
+        encoding: 'utf8',
+      },
+    );
+    expect(dryRun.status, `${dryRun.stdout}\n${dryRun.stderr}`).toBe(0);
   } finally {
     prepared.dispose();
   }

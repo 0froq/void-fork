@@ -42,6 +42,7 @@ import {
   writeCloudflareFrameworkDeployConfig,
   writeCloudflareStaticDeployConfig,
   readExistingCloudflareWorker,
+  readOptionalExistingCloudflareWorker,
   assertCloudflareDurableObjectLifecycleSupported,
   assertExistingCloudflareConfig,
   assertCloudflareBindingsPreserved,
@@ -3608,6 +3609,27 @@ export function createDeployWranglerRunner(
   };
 }
 
+async function cfInheritedBindings(
+  configPath: string,
+  workerName: string,
+  existingWorker: ExistingCloudflareWorker | null,
+  runWrangler: DeployWranglerRun,
+): Promise<ReadonlyArray<Record<string, unknown>> | undefined> {
+  const config = parseRootWranglerConfig(configPath);
+  if (config.keep_vars !== true && config.keep_secrets !== true) {
+    return undefined;
+  }
+  if (existingWorker) {
+    return existingWorker.bindings;
+  }
+  const remote = await readOptionalExistingCloudflareWorker({
+    runWrangler,
+    configPath,
+    workerName,
+  });
+  return remote?.bindings ?? [];
+}
+
 async function chooseCloudflareDeployAccount(options: {
   persist?: boolean;
   beforeWranglerRun: () => boolean;
@@ -5374,6 +5396,25 @@ export async function runCloudflareDeploy(
     }
   }
 
+  const generatedConfigPath = (
+    deps.resolveGeneratedConfigPath ?? resolveGeneratedDeployConfigPathDefault
+  )(root);
+  const inheritedBindings =
+    deps.activateVersion || deps.runWrangler
+      ? undefined
+      : await cfInheritedBindings(generatedConfigPath, workerName, existingWorker, runWrangler);
+  if (!deps.activateVersion && !deps.runWrangler) {
+    // Validate the exact upload format before changing a remote database or secret.
+    const preflight = await prepareCfBuildOutput(dirname(generatedConfigPath), accountId, {
+      inheritedBindings,
+    });
+    if (!preflight) {
+      log.error('deploy: cf could not prepare the built Worker for deployment.');
+      return exit(1);
+    }
+    preflight.dispose();
+  }
+
   // Remember whether a secret operation proved the Worker was absent before it wrote anything.
   // Wrangler creates an active placeholder version while attaching the first secret. The version
   // activator needs this proof to distinguish that placeholder from an existing application when
@@ -5625,9 +5666,6 @@ export async function runCloudflareDeploy(
   //
   // Final uploader re-verification immediately before the deploy — the last and most privileged
   // credentialed run of the hashed bundle. Against the same pre-build baseline; fail closed.
-  const generatedConfigPath = (
-    deps.resolveGeneratedConfigPath ?? resolveGeneratedDeployConfigPathDefault
-  )(root);
   const queueConsumerCleanup = readWranglerManagedQueueCleanupCandidates(configPath);
   if (existingWorker) {
     assertCloudflareLinkUnchanged(root, pinnedHandoffLink);
@@ -5639,7 +5677,9 @@ export async function runCloudflareDeploy(
   const cfOutput =
     deps.activateVersion || deps.runWrangler
       ? null
-      : await prepareCfBuildOutput(dirname(generatedConfigPath), accountId);
+      : await prepareCfBuildOutput(dirname(generatedConfigPath), accountId, {
+          inheritedBindings,
+        });
   if (!cfOutput && !deps.activateVersion && !deps.runWrangler) {
     log.error('deploy: cf could not prepare the built Worker for deployment.');
     return exit(1);
@@ -6302,6 +6342,10 @@ async function runCloudflareStaticDeploy(
   if (!deps.activateVersion && !deps.runWrangler && !cfUploaderIsPinned()) {
     return exit(1);
   }
+  const inheritedBindings =
+    deps.activateVersion || deps.runWrangler
+      ? undefined
+      : await cfInheritedBindings(staticConfigPath, workerName, existingWorker, runWrangler);
   const cfOutput =
     deps.activateVersion || deps.runWrangler
       ? null
@@ -6310,6 +6354,7 @@ async function runCloudflareStaticDeploy(
           configPath: staticConfigPath,
           assetsDirectory: stagedAssetsDirectory,
           accountId,
+          inheritedBindings,
         });
   if (!cfOutput && !deps.activateVersion && !deps.runWrangler) {
     log.error('deploy: cf could not prepare the static Worker for deployment.');
