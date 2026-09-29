@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { parse, type ParseError } from 'jsonc-parser';
 import { join } from 'pathslash';
@@ -8,6 +8,7 @@ import { readConfig } from './config.ts';
 
 export const MATERIALIZED_CLOUDFLARE_FILE = '.void-wrangler.jsonc';
 export const VOID_LOCK_FILE = 'void.lock.json';
+const PREVIEW_POINTER_FILE = 'preview-deploy-config.json';
 
 type JsonObject = Record<string, unknown>;
 type CloudflareState = {
@@ -135,9 +136,39 @@ function writeAtomic(path: string, content: string): void {
 function writeState(root: string, state: CloudflareState): void {
   const path = join(root, VOID_LOCK_FILE);
   const content = `${JSON.stringify(state, null, 2)}\n`;
-  if (!existsSync(path) || readFileSync(path, 'utf8') !== content) {
-    writeAtomic(path, content);
+  if (existsSync(path)) {
+    try {
+      if (isDeepStrictEqual(JSON.parse(readFileSync(path, 'utf8')), state)) {
+        return;
+      }
+    } catch {
+      // Replace an invalid lock only after the caller has validated its state.
+    }
   }
+  writeAtomic(path, content);
+}
+
+/** Keep Vite preview usable without leaving Wrangler's implicit deploy pointer after a build. */
+export function stashCloudflareDeployPointer(root: string): void {
+  const pointer = join(root, '.wrangler', 'deploy', 'config.json');
+  if (!existsSync(pointer)) {
+    return;
+  }
+  const directory = join(root, '.void');
+  mkdirSync(directory, { recursive: true });
+  writeAtomic(join(directory, PREVIEW_POINTER_FILE), readFileSync(pointer, 'utf8'));
+  rmSync(pointer, { force: true });
+}
+
+export function restoreCloudflarePreviewPointer(root: string): boolean {
+  const saved = join(root, '.void', PREVIEW_POINTER_FILE);
+  if (!existsSync(saved)) {
+    return false;
+  }
+  const directory = join(root, '.wrangler', 'deploy');
+  mkdirSync(directory, { recursive: true });
+  writeAtomic(join(directory, 'config.json'), readFileSync(saved, 'utf8'));
+  return true;
 }
 
 /** Preserve Void's JSONC provenance comments when authored settings change. */

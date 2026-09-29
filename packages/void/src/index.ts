@@ -43,7 +43,11 @@ import {
   syncWranglerDurableObjects,
   syncWranglerWebSockets,
 } from './cli/wrangler.ts';
-import { materializeCloudflareConfig } from './cloudflare-config.ts';
+import {
+  materializeCloudflareConfig,
+  restoreCloudflarePreviewPointer,
+  stashCloudflareDeployPointer,
+} from './cloudflare-config.ts';
 import { writeFileIfChanged } from './codegen/write-if-changed.ts';
 import {
   readConfig,
@@ -769,6 +773,7 @@ async function runAiSetupPrompt(
  * for deploying directly to Cloudflare without the Void platform.
  */
 const scheduledPointerCleanups = new Set<string>();
+const scheduledPreviewPointerCleanups = new Set<string>();
 
 export function voidPlugin(options?: {
   persistTo?: string;
@@ -793,15 +798,28 @@ export function voidPlugin(options?: {
     projectCloudflareConfigPath && existsSync(projectCloudflareConfigPath)
       ? projectCloudflareConfigPath
       : undefined;
+  let previewing = false;
   const implicitDeployGuard: Plugin = {
     name: 'void:remove-implicit-cloudflare-deploy-pointer',
+    enforce: 'pre',
+    config(_config, environment) {
+      previewing = environment.isPreview === true;
+      if (previewing && existsSync(join(root, 'void.config.ts'))) {
+        if (restoreCloudflarePreviewPointer(root) && !scheduledPreviewPointerCleanups.has(root)) {
+          scheduledPreviewPointerCleanups.add(root);
+          process.once('exit', () => {
+            rmSync(join(root, '.wrangler', 'deploy', 'config.json'), { force: true });
+          });
+        }
+      }
+    },
     closeBundle() {
       if (
+        !previewing &&
         existsSync(join(root, 'void.config.ts')) &&
         process.env[CLOUDFLARE_DEPLOY_BUILD_ENV] !== '1'
       ) {
-        const removePointer = () =>
-          rmSync(join(root, '.wrangler', 'deploy', 'config.json'), { force: true });
+        const removePointer = () => stashCloudflareDeployPointer(root);
         if (detected?.name === 'astro') {
           // Astro previews the built Worker after Vite closes its bundle.
           if (!scheduledPointerCleanups.has(root)) {

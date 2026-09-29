@@ -57,7 +57,7 @@ import {
 } from '../asset-routing.ts';
 import { findVoidAuthConfig } from '../auth/config.ts';
 import type { VoidAuthMigrationSchema } from '../auth/drizzle.ts';
-import { materializeCloudflareConfig } from '../cloudflare-config.ts';
+import { materializeCloudflareConfig, stashCloudflareDeployPointer } from '../cloudflare-config.ts';
 import { findEnvFile } from '../codegen/env-types.ts';
 import {
   readConfig,
@@ -6434,7 +6434,7 @@ async function runDeployInner(
     return await deployTargets[platform].deploy(root, options ?? {}, cliLog);
   } finally {
     if (existsSync(join(root, 'void.config.ts'))) {
-      removeDeployPointer(root);
+      stashCloudflareDeployPointer(root);
     }
   }
 }

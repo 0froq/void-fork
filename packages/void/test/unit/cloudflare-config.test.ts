@@ -5,7 +5,9 @@ import { writeProvisionedWranglerConfig } from '../../src/cli/wrangler.ts';
 import {
   materializeCloudflareConfig,
   persistCloudflareConfig,
+  restoreCloudflarePreviewPointer,
   seedCloudflareConfig,
+  stashCloudflareDeployPointer,
 } from '../../src/cloudflare-config.ts';
 
 const root = join(import.meta.dirname, '.tmp-cloudflare-config-test');
@@ -19,6 +21,19 @@ function config(source: string): void {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe('materializeCloudflareConfig', () => {
+  it('stashes a build deploy pointer for preview and restores it only when needed', () => {
+    config('export default {};\n');
+    const directory = join(root, '.wrangler', 'deploy');
+    mkdirSync(directory, { recursive: true });
+    const pointer = join(directory, 'config.json');
+    const original = '{"configPath":"../../dist/ssr/wrangler.json"}';
+    writeFileSync(pointer, original);
+    stashCloudflareDeployPointer(root);
+    expect(existsSync(pointer)).toBe(false);
+    expect(restoreCloudflarePreviewPointer(root)).toBe(true);
+    expect(readFileSync(pointer, 'utf8')).toBe(original);
+  });
+
   it('passes through custom Cloudflare settings and keeps the generated file outside Wrangler discovery', () => {
     config(
       'export default { cloudflare: { name: "app", vars: { FOO: "bar" }, limits: { cpu_ms: 50 } } };\n',
@@ -125,5 +140,18 @@ describe('materializeCloudflareConfig', () => {
       name: 'app',
     });
     expect(JSON.parse(JSON.parse(readFileSync(lockPath, 'utf8')).text)).toEqual({ name: 'app' });
+  });
+
+  it('leaves an equivalently formatted checked-in lock unchanged', () => {
+    config('export default { cloudflare: { compatibility_flags: ["nodejs_als"] } };\n');
+    const path = materializeCloudflareConfig(root);
+    writeFileSync(path, JSON.stringify({ compatibility_flags: ['nodejs_als'], account_id: '123' }));
+    persistCloudflareConfig(root);
+    const lockPath = join(root, 'void.lock.json');
+    const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
+    const formatted = `${JSON.stringify(lock)}\n`;
+    writeFileSync(lockPath, formatted);
+    materializeCloudflareConfig(root);
+    expect(readFileSync(lockPath, 'utf8')).toBe(formatted);
   });
 });
