@@ -33,6 +33,12 @@ the HTTP-200 assertion has nothing to hit. Opening the Workers & Pages dashboard
 subdomain automatically; a freshly-registered subdomain takes a few minutes for its cert to go live,
 during which the first run may see a TLS handshake failure — rerun once the cert is ready.
 
+If Zero Trust **Block traffic to all domains in this account** is enabled, add an Access application
+with a **Bypass + Everyone** policy for
+`void-e2e-cf-deploy-*.<account-subdomain>.workers.dev`. The suite uses a new Worker name for every run,
+so a rule for one hostname is insufficient. Without this Access application, Cloudflare returns error
+1050 and Void cannot verify the deployment. Keep the account-wide block enabled.
+
 With no env vars the suite SKIPS cleanly (0 run, N skipped).
 
 ### Running it
