@@ -4576,52 +4576,48 @@ async function provisionCloudflareResourcesLocked(
 
     // The database-level setting is separate from the Worker binding. A reused
     // database may predate this feature, so converge it on every provision run.
-    // Injected Wrangler runners own their remote transport in tests; an explicit
-    // replication seam lets those tests assert this side effect without network I/O.
-    if (opts?.enableD1ReadReplication || !opts?.runWrangler) {
-      const databaseId = readBindingEntry(configPath, 'd1_databases', binding)?.database_id;
-      if (!isRealD1Id(databaseId)) {
-        throw new Error(`provision: D1 binding ${binding} has no real database id after setup.`);
-      }
-      const context: D1ReplicationContext = {
-        databaseId,
-        accountId: transportAccountId,
-        apiBaseUrl: transportApiBaseUrl,
-      };
-      if (opts?.enableD1ReadReplication) {
-        await opts.enableD1ReadReplication(context);
-      } else {
-        let token = opts?.apiToken ?? process.env.CLOUDFLARE_API_TOKEN;
-        if (!token) {
-          const auth = await runWrangler(
-            ['auth', 'token', '--json', ...wranglerConfigArgs(configPath)],
-            { captureJson: true, suppressLogs: true },
-          );
-          const start = auth.stdout.indexOf('{');
-          const end = auth.stdout.lastIndexOf('}');
-          let parsed: { type?: unknown; token?: unknown } | undefined;
-          if (isCleanSuccess(auth) && start >= 0 && end > start) {
-            try {
-              parsed = JSON.parse(auth.stdout.slice(start, end + 1)) as typeof parsed;
-            } catch {
-              // A malformed response is handled by the missing-token error below.
-            }
-          }
-          if (
-            (parsed?.type === 'oauth' || parsed?.type === 'api_token') &&
-            typeof parsed.token === 'string'
-          ) {
-            token = parsed.token;
+    const databaseId = readBindingEntry(configPath, 'd1_databases', binding)?.database_id;
+    if (!isRealD1Id(databaseId)) {
+      throw new Error(`provision: D1 binding ${binding} has no real database id after setup.`);
+    }
+    const context: D1ReplicationContext = {
+      databaseId,
+      accountId: transportAccountId,
+      apiBaseUrl: transportApiBaseUrl,
+    };
+    if (opts?.enableD1ReadReplication) {
+      await opts.enableD1ReadReplication(context);
+    } else {
+      let token = opts?.apiToken ?? process.env.CLOUDFLARE_API_TOKEN;
+      if (!token) {
+        const auth = await runWrangler(
+          ['auth', 'token', '--json', ...wranglerConfigArgs(configPath)],
+          { captureJson: true, suppressLogs: true },
+        );
+        const start = auth.stdout.indexOf('{');
+        const end = auth.stdout.lastIndexOf('}');
+        let parsed: { type?: unknown; token?: unknown } | undefined;
+        if (isCleanSuccess(auth) && start >= 0 && end > start) {
+          try {
+            parsed = JSON.parse(auth.stdout.slice(start, end + 1)) as typeof parsed;
+          } catch {
+            // A malformed response is handled by the missing-token error below.
           }
         }
-        if (!token) {
-          throw new Error(
-            'provision: D1 read replication requires a Cloudflare API bearer with D1 Edit permission. ' +
-              'Log in with `wrangler login` or set CLOUDFLARE_API_TOKEN, then retry.',
-          );
+        if (
+          (parsed?.type === 'oauth' || parsed?.type === 'api_token') &&
+          typeof parsed.token === 'string'
+        ) {
+          token = parsed.token;
         }
-        await enableD1ReadReplicationViaApi(context, token);
       }
+      if (!token) {
+        throw new Error(
+          'provision: D1 read replication requires a Cloudflare API bearer with D1 Edit permission. ' +
+            'Log in with `wrangler login` or set CLOUDFLARE_API_TOKEN, then retry.',
+        );
+      }
+      await enableD1ReadReplicationViaApi(context, token);
     }
   }
 

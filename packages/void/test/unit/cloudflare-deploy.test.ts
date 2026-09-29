@@ -1884,6 +1884,7 @@ describe('computeDesiredCloudflareResources — provisioned resources are never 
         calls.push(args);
         return { stdout: '', stderr: '', status: 0 };
       },
+      enableD1ReadReplication: async () => {},
       log: { info: () => {}, warn: () => {} },
     });
     // Read-first everywhere: no list, no create — the recorded resources are kept.
