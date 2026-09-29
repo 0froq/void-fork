@@ -1187,6 +1187,15 @@ function hashCfUploader(): string | undefined {
   }
 }
 
+function needsCloudflareProxy(): boolean {
+  return Boolean(
+    process.env.https_proxy ||
+    process.env.HTTPS_PROXY ||
+    process.env.http_proxy ||
+    process.env.HTTP_PROXY,
+  );
+}
+
 /**
  * sha256 over every file under `dir`, walked in a STABLE (name-sorted, depth-first) order with
  * each file's relative path folded into the digest, so the hash depends only on the directory's
@@ -5634,6 +5643,7 @@ export async function runCloudflareDeploy(
     !existingWorker &&
     !needsSandbox &&
     !preBuildRootConfig.compliance_region &&
+    !needsCloudflareProxy() &&
     apiBaseUrl === 'https://api.cloudflare.com/client/v4' &&
     queueConsumerCleanup.length === 0 &&
     cfUploaderIsPinned()
@@ -6337,6 +6347,7 @@ async function runCloudflareStaticDeploy(
     cfUploaderHashBefore &&
     !existingWorker &&
     !rootConfig.compliance_region &&
+    !needsCloudflareProxy() &&
     apiBaseUrl === 'https://api.cloudflare.com/client/v4' &&
     queueConsumerCleanup.length === 0 &&
     cfUploaderIsPinned()
