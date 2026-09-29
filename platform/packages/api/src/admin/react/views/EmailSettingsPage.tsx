@@ -55,19 +55,20 @@ function EnabledEmailSettingsPage({ path, platformName, username }: AdminPagePro
 
       <h2>Recipient policy</h2>
       <p>
-        Who mail from the shared sender
+        Choose which recipients can receive email sent from the shared sender
         {senderDomain ? (
           <>
             {' '}
             (<code>{`<slug>+tag@${senderDomain}`}</code>)
           </>
-        ) : null}{' '}
-        may reach. Custom-domain sends are not affected.
+        ) : null}
+        . This does not affect email sent from custom domains.
       </p>
-      <form method="post" action="/admin/email/policy" style="margin-bottom: 8px">
+      <form method="post" action="/admin/email/policy" className="void-admin-email-choice-form">
         <RadioList
           label="Recipient policy"
           isLabelHidden
+          size="sm"
           htmlName="mode"
           value={mode}
           onChange={(value: string) => setMode(value as EmailRecipientPolicy['mode'])}
@@ -106,10 +107,11 @@ function EnabledEmailSettingsPage({ path, platformName, username }: AdminPagePro
 
       <h2>Domain management</h2>
       <p>Who registers custom email domains for projects.</p>
-      <form method="post" action="/admin/email/settings">
+      <form method="post" action="/admin/email/settings" className="void-admin-email-choice-form">
         <RadioList
           label="Domain management"
           isLabelHidden
+          size="sm"
           htmlName="domains"
           value={domainManagement}
           onChange={(value: string) => setDomainManagement(value as EmailDomainManagement)}

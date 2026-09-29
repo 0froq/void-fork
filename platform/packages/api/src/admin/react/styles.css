@@ -28,6 +28,11 @@
   [data-astryx-theme='neutral'] *::after {
     corner-shape: squircle;
   }
+
+  [data-astryx-theme='neutral'] .astryx-radio-indicator,
+  [data-astryx-theme='neutral'] .astryx-radio-indicator-dot {
+    corner-shape: round;
+  }
 }
 
 body {
@@ -294,6 +299,17 @@ body {
   display: grid;
   gap: 4px;
   justify-items: start;
+}
+.void-admin-email-choice-form {
+  padding-block-start: var(--spacing-4);
+}
+.void-admin-email-choice-form .astryx-radio-indicator {
+  width: 1rem;
+  height: 1rem;
+}
+.void-admin-email-choice-form .astryx-radio-indicator-dot {
+  width: 0.375rem;
+  height: 0.375rem;
 }
 .void-admin-access-page {
   display: grid;
