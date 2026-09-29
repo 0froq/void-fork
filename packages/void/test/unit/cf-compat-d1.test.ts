@@ -1,0 +1,63 @@
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'pathslash';
+import { expect, it } from 'vite-plus/test';
+
+it('passes the validated custom D1 migration pattern to cf', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'void-cf-d1-pattern-test-'));
+  try {
+    const config = join(directory, 'wrangler.json');
+    const capture = join(directory, 'cf-args.json');
+    const preload = join(directory, 'capture-cf.mjs');
+    writeFileSync(
+      config,
+      JSON.stringify({
+        d1_databases: [
+          {
+            binding: 'DB',
+            database_id: 'database-id',
+            migrations_dir: 'db/migrations',
+            migrations_pattern: 'db/migrations/*/migration.sql',
+          },
+        ],
+      }),
+    );
+    writeFileSync(
+      preload,
+      `import child from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { writeFileSync } from 'node:fs';
+child.spawnSync = (_binary, args) => {
+  writeFileSync(process.env.VOID_TEST_CF_CAPTURE, JSON.stringify(args));
+  return { status: 0, stdout: '[]', stderr: '' };
+};
+syncBuiltinESMExports();
+`,
+    );
+    const entry = join(import.meta.dirname, '..', '..', 'src', 'cli', 'cf-compat.ts');
+    const result = spawnSync(
+      process.execPath,
+      ['--import', preload, entry, 'd1', 'migrations', 'list', 'DB', '-c', config],
+      {
+        env: { ...process.env, VOID_TEST_CF_CAPTURE: capture },
+        encoding: 'utf8',
+      },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect((JSON.parse(readFileSync(capture, 'utf8')) as Array<string>).slice(1)).toEqual([
+      'd1',
+      'migrations',
+      'list',
+      'database-id',
+      '--dir',
+      'db/migrations',
+      '--pattern',
+      'db/migrations/*/migration.sql',
+      '--table',
+      'd1_migrations',
+    ]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

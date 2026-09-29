@@ -155,7 +155,7 @@ function updateBinding(section: string, binding: string, values: Json): void {
   writeFileSync(path, `${JSON.stringify(current, null, 2)}\n`);
 }
 
-function d1Database(token: string): { id: string; dir: string; table: string } {
+function d1Database(token: string): { id: string; dir: string; table: string; pattern?: string } {
   const entries = config().d1_databases;
   if (!Array.isArray(entries)) {
     throw new Error('D1 database binding is unavailable.');
@@ -172,6 +172,9 @@ function d1Database(token: string): { id: string; dir: string; table: string } {
   return {
     id: selected.database_id,
     dir: typeof selected.migrations_dir === 'string' ? selected.migrations_dir : './migrations',
+    ...(typeof selected.migrations_pattern === 'string'
+      ? { pattern: selected.migrations_pattern }
+      : {}),
     table:
       typeof selected.migrations_table === 'string' ? selected.migrations_table : 'd1_migrations',
   };
@@ -316,6 +319,7 @@ async function resources(): Promise<Result> {
       database.id,
       '--dir',
       database.dir,
+      ...(database.pattern ? ['--pattern', database.pattern] : []),
       '--table',
       database.table,
     ]);
