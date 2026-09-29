@@ -810,7 +810,7 @@ const HELP_TREE: HelpTree = {
       },
       setup: {
         summary:
-          'Set email up on your own Cloudflare account: enable Email Routing, onboard Email Sending, write send_email + addresses into wrangler.jsonc. Asks once before changing the account.',
+          'Set email up on your own Cloudflare account: enable Email Routing, onboard Email Sending, and record send_email + addresses in the Cloudflare config managed by Void. Asks once before changing the account.',
         usage: ['void email setup --platform cloudflare'],
         options: [
           {
