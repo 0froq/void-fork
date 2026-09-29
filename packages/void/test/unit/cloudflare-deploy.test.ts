@@ -2862,7 +2862,7 @@ describe('runCloudflareDeploy — resource provisioning', () => {
       'wrangler.jsonc': JSON.stringify(PROVISIONED_D1, null, 2),
     });
     const { deps, trace, wranglerArgs } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { backend: 'cloudflare', provision: true }, silentCliLog, deps);
     // The BUILD runs BEFORE the secret gate (ground-truth validation reads the real emitted
     // artifact); the LOCAL migration gate runs AFTER the build (against the post-build files),
     // and the REMOTE D1 apply runs after that (a failed gate never mutates D1).
@@ -3171,11 +3171,21 @@ describe('runCloudflareDeploy — pg/Hyperdrive app skips D1 migrations', () => 
 });
 
 describe('runCloudflareDeploy — D1 migrations_dir gate', () => {
-  it('rechecks replication for an already provisioned D1 database', async () => {
+  it('does not reprovision an already configured D1 database on a normal deploy', async () => {
     const root = d1Project(PROVISIONED_D1);
     const { deps, trace } = harness();
 
     await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+
+    expect(trace).not.toContain('provision');
+    expect(trace).toContain('wrangler:deploy');
+  });
+
+  it('rechecks replication for an existing D1 database when provisioning is requested', async () => {
+    const root = d1Project(PROVISIONED_D1);
+    const { deps, trace } = harness();
+
+    await runCloudflareDeploy(root, { backend: 'cloudflare', provision: true }, silentCliLog, deps);
 
     expect(trace).toContain('provision');
     expect(trace).toContain('wrangler:deploy');
