@@ -375,7 +375,7 @@ describe('void email setup --platform cloudflare', () => {
     expect(printed[0]).toContain('! email/_default.ts');
     expect(output).toContain('✔ routing   mail.acme.com enabled');
     expect(output).toContain('✔ sending   mail.acme.com onboarded');
-    expect(output).toContain('✔ config    wrangler.jsonc updated');
+    expect(output).toContain('✔ config    void.lock.json updated');
     expect(printed.at(-1)).toBe(
       [
         '    inbound   support@mail.acme.com  →  email/support+[ticket].ts',

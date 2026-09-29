@@ -58,7 +58,7 @@ export function classifyCloudflareDeployApp(
     return unsupported(
       [
         `deploy: --platform cloudflare could not resolve the ${appType} output to deploy.`,
-        'Set inference.outputDir in void.json, pass --dir with an existing build directory,',
+        'Set inference.outputDir in void.config.ts, pass --dir with an existing build directory,',
         'or add a supported build tool so Void can locate the generated static assets.',
       ].join('\n'),
     );

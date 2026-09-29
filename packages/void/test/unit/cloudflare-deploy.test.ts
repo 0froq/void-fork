@@ -9617,7 +9617,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
       'This changes YOUR Cloudflare account. acme.com itself is not touched.',
     );
     expect(printed).toContain('✔ routing   mail.acme.com enabled');
-    expect(printed).toContain('✔ config    wrangler.jsonc updated');
+    expect(printed).toContain('✔ config    void.lock.json updated');
     expect(printed).toContain('inbound   support@mail.acme.com  →  email/support+[ticket].ts');
     expect(printed).toContain('outbound  sendEmail() from noreply@mail.acme.com');
   });
@@ -9759,7 +9759,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     const printed = output.lines.join('\n');
     expect(printed).toContain('This changes YOUR Cloudflare account.');
     expect(printed).toContain(
-      'Run `void email setup --platform cloudflare` once locally, commit wrangler.jsonc, then redeploy',
+      'Run `void email setup --platform cloudflare` once locally, commit void.lock.json, then redeploy',
     );
     // No apply: no bearer writes, no `sending enable`, no config write.
     expect(fetchCalls.filter((c) => c.method !== 'GET')).toEqual([]);
@@ -9852,7 +9852,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     expect(spawns.some((s) => s.args[0] === 'deploy')).toBe(true);
   });
 
-  it('no `email.from`: says what to add to void.json and deploys without email (no wrangler email call)', async () => {
+  it('no `email.from`: says what to add to void.config.ts and deploys without email (no wrangler email call)', async () => {
     const root = emailProject(PROVISIONED_D1, {}, {});
     const { deps, spawns, exitCalls } = emailHarness();
     const output = captureOutput();
@@ -9863,7 +9863,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     }
     expect(exitCalls).toEqual([]);
     expect(output.lines.join('\n')).toContain(
-      'Add "email": { "from": "you@mail.acme.com" } to void.json',
+      'Set email.from to "you@mail.acme.com" in void.config.ts',
     );
     expect(spawns.some((s) => s.args[0] === 'email' || s.args[0] === 'auth')).toBe(false);
     expect(spawns.some((s) => s.args[0] === 'deploy')).toBe(true);
@@ -10441,10 +10441,9 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     expect(printed).toContain('no longer declares email handlers');
     expect(printed).toContain('support@mail.acme.com — still routed to worker "myapp"');
     expect(printed).toContain('send_email SEND_EMAIL binding');
-    // The detach guidance names a dashboard path and a Void command, not a wrangler command
-    // (which the deploy log wrapper would render as "the underlying Cloudflare operation").
+    // The detach guidance names the checked-in config and dashboard path.
     expect(printed).toContain(
-      'delete the rules in the Cloudflare dashboard (Email → Email Routing → Routing rules), or set `addresses: []` and let `void deploy --platform cloudflare` ask',
+      'remove `addresses`, `send_email`, and `vars.__VOID_EMAIL_FROM` from `resolved` in void.lock.json',
     );
     expect(printed).not.toContain('underlying Cloudflare operation');
   });

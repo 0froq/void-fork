@@ -21,10 +21,38 @@ function isObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function arrayIdentity(value: unknown): string {
+  if (isObject(value)) {
+    for (const key of ['binding', 'name', 'tag', 'class_name', 'pattern', 'route']) {
+      if (typeof value[key] === 'string') {
+        return `${key}:${value[key]}`;
+      }
+    }
+  }
+  return JSON.stringify(value) ?? String(value);
+}
+
 /** Keep authored values authoritative while retaining fields produced by Void. */
 function mergeConfig(previous: unknown, resolved: unknown, authored: unknown): unknown {
   if (isDeepStrictEqual(previous, authored)) {
     return resolved;
+  }
+  if (Array.isArray(previous) && Array.isArray(resolved) && Array.isArray(authored)) {
+    const previousByIdentity = new Map(previous.map((item) => [arrayIdentity(item), item]));
+    const resolvedByIdentity = new Map(resolved.map((item) => [arrayIdentity(item), item]));
+    const authoredIdentities = new Set(authored.map(arrayIdentity));
+    return [
+      ...authored.map((item) => {
+        const identity = arrayIdentity(item);
+        return previousByIdentity.has(identity) && resolvedByIdentity.has(identity)
+          ? mergeConfig(previousByIdentity.get(identity), resolvedByIdentity.get(identity), item)
+          : item;
+      }),
+      ...resolved.filter((item) => {
+        const identity = arrayIdentity(item);
+        return !previousByIdentity.has(identity) && !authoredIdentities.has(identity);
+      }),
+    ];
   }
   if (isObject(previous) && isObject(resolved) && isObject(authored)) {
     const result: JsonObject = {};
@@ -82,12 +110,16 @@ function readState(root: string): CloudflareState | undefined {
     value.version !== 1 ||
     !isObject(value.source) ||
     !isObject(value.resolved) ||
-    typeof value.text !== 'string' ||
-    !isDeepStrictEqual(parseCloudflareText(value.text, VOID_LOCK_FILE), value.resolved)
+    typeof value.text !== 'string'
   ) {
     throw new Error(`config: Invalid ${VOID_LOCK_FILE}. Fix or restore it before continuing.`);
   }
-  return value as CloudflareState;
+  const state = value as CloudflareState;
+  if (!isDeepStrictEqual(parseCloudflareText(state.text, VOID_LOCK_FILE), state.resolved)) {
+    // `resolved` is the editable checked-in state. Rebuild the materialized text after an edit.
+    state.text = `${provenance(state.text)}${JSON.stringify(state.resolved, null, 2)}\n`;
+  }
+  return state;
 }
 
 function writeAtomic(path: string, content: string): void {

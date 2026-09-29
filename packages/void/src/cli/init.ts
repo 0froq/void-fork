@@ -28,6 +28,7 @@ import { detectAgents, getPackageDir } from './agents.ts';
 import { connectCloudflare } from './cloudflare-connect.ts';
 import { maybeSetupDeployProject } from './deploy-setup.ts';
 import { maybeScaffoldEnvTs } from './env-scaffold.ts';
+import { migrateFrameworkAdapterPaths } from './framework-config-migrate.ts';
 import { initialCommitCommand, setupGit } from './init-git.ts';
 import { migrateLegacyVoidConfig } from './migrate.ts';
 import { cliTitle } from './output.ts';
@@ -1600,7 +1601,7 @@ function setupWranglerConfig(root: string, framework: DetectedFramework): void {
     log.success(
       hadConfig
         ? 'Updated Cloudflare config with compatibility_date and nodejs_als'
-        : 'Created wrangler.jsonc with compatibility_date and nodejs_als',
+        : 'Created Cloudflare config with compatibility_date and nodejs_als',
     );
   } else {
     log.success(`${basename(result.configPath)} looks good`);
@@ -2091,7 +2092,7 @@ function setupGithubActions(
     note(
       'Pushes to main will deploy through the same readiness-gated Cloudflare path.\n' +
         'Add a scoped CLOUDFLARE_API_TOKEN repository secret; PostgreSQL/MySQL apps also need DATABASE_URL.\n' +
-        'Keep account_id in wrangler.jsonc.',
+        'Keep cloudflare.account_id in void.config.ts.',
       'GitHub Actions Cloudflare deploy',
     );
   } else if (slug) {
@@ -3552,6 +3553,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   if (framework) {
     setupWranglerConfig(root, framework);
   }
+  migrateFrameworkAdapterPaths(root);
 
   // Step 3: Database dialect
   if (!targeted && !didScaffoldStarter) {

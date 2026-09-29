@@ -294,7 +294,7 @@ async function runConnect(
 ): Promise<void> {
   if (dialect === 'sqlite') {
     log.error(
-      'db: `void db connect` requires an external database. Set "database" to "pg" or "mysql" in void.json first.',
+      'db: `void db connect` requires an external database. Set "database" to "pg" or "mysql" in void.config.ts first.',
     );
     process.exit(1);
   }
@@ -905,7 +905,7 @@ async function runExecute(
 
     // D1 remote: route through the platform proxy.
     const platformClient = new PlatformClient(token, { root });
-    // Resolve the locally-configured binding name (inference.bindings.db in void.json) so that
+    // Resolve the locally-configured binding name (inference.bindings.db in void.config.ts) so that
     // the fallback honours custom names instead of always hardcoding 'DB'.
     const voidConfig = readConfig(root);
     const configuredBindingNames = resolveBindingNames(voidConfig.inference?.bindings);
@@ -2191,7 +2191,7 @@ async function runSetUrl(root: string): Promise<void> {
 
   if (dialect === 'sqlite') {
     log.error(
-      'db: This command is only for PostgreSQL and MySQL projects. Set "database" to "pg" or "mysql" in void.json.',
+      'db: This command is only for PostgreSQL and MySQL projects. Set "database" to "pg" or "mysql" in void.config.ts.',
     );
     process.exit(1);
   }

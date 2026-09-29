@@ -187,7 +187,7 @@ describe('Class A routing.notFound self-host warning', () => {
   }
 
   function notFoundWarnings(lines: Array<string>): Array<string> {
-    return lines.filter((line) => line.includes('"routing.notFound" in void.json'));
+    return lines.filter((line) => line.includes('"routing.notFound" in void.config.ts'));
   }
 
   it('warns once that a self-hosted build generates no policy for routing.notFound', async () => {

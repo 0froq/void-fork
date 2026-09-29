@@ -61,7 +61,7 @@ export const WRANGLER_EMAIL_PROSE_VERSION = '4.131.0';
 /** The `send_email` binding name Void provisions and the runtime reads. */
 export const SEND_EMAIL_BINDING = 'SEND_EMAIL';
 
-/** The root-config `vars` key carrying `void.json` `email.from` into the worker. */
+/** The root-config `vars` key carrying `void.config.ts` `email.from` into the worker. */
 export const EMAIL_FROM_VAR = '__VOID_EMAIL_FROM';
 
 /** Cloudflare's public API base — the same one `wrangler` targets by default. */
@@ -130,7 +130,7 @@ export type EmailFetch = typeof fetch;
  */
 export interface EmailCloudflareInputs {
   handlers: EmailHandlersScan;
-  /** `void.json` `email.from` — the ONLY domain input (decision 9). */
+  /** `void.config.ts` `email.from` — the ONLY domain input (decision 9). */
   from: string;
   /** The worker name `wrangler deploy` uploads as (rules are matched to it). */
   workerName: string;
@@ -175,12 +175,12 @@ export function findEmailConfigConflicts(config: Record<string, unknown>): Array
     try {
       owner = findBindingNameOwner(config, field, name);
     } catch (err) {
-      conflicts.add(`wrangler.jsonc: ${err instanceof Error ? err.message : String(err)}`);
+      conflicts.add(`Cloudflare config: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
     if (owner !== undefined) {
       conflicts.add(
-        `wrangler.jsonc already uses ${name} as a ${owner} binding; rename it (Void writes ${name} into ${field})`,
+        `Cloudflare config already uses ${name} as a ${owner} binding; rename it in void.config.ts (Void writes ${name} into ${field})`,
       );
     }
   };
@@ -203,7 +203,7 @@ export interface DerivedEmailAddresses {
 }
 
 /**
- * Host part of `email.from`, lowercased; `null` when it is not `local@host`. `void.json`
+ * Host part of `email.from`, lowercased; `null` when it is not `local@host`. `void.config.ts`
  * also accepts the display-name form (`Acme <noreply@mail.acme.com>`, see `config.ts`),
  * so the address inside `<…>` is read when present.
  *
@@ -1055,7 +1055,7 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
     pre.binding = { state: 'foreign', foreignName: names[0] };
     block(
       'all',
-      `wrangler.jsonc already has a send_email binding named ${JSON.stringify(names[0])}; rename it to ${SEND_EMAIL_BINDING} (a second binding would be silent)`,
+      `Cloudflare config already has a send_email binding named ${JSON.stringify(names[0])}; rename it to ${SEND_EMAIL_BINDING} in void.config.ts (a second binding would be silent)`,
     );
   }
   if (inputs.existingAddresses !== undefined && inputs.existingAddresses !== null) {
@@ -1076,7 +1076,7 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
       pre.addressesOwnership = { state: 'foreign', foreign: unknown };
       block(
         'all',
-        `wrangler.jsonc addresses holds entries Void did not derive (${unknown.join(', ')}); remove ${unknown.map((a) => JSON.stringify(a)).join(', ')} from addresses, or manage addresses by hand and unset email.from — skipping email setup this deploy`,
+        `Cloudflare addresses holds entries Void did not derive (${unknown.join(', ')}); remove ${unknown.map((a) => JSON.stringify(a)).join(', ')} from cloudflare.addresses in void.config.ts, or manage addresses by hand and unset email.from — skipping email setup this deploy`,
       );
     } else {
       pre.addressesOwnership = { state: 'mine', foreign: [] };
@@ -1163,7 +1163,7 @@ export function renderEmailChecklist(pre: EmailPreflight): string {
   const row = (label: string, value: string, note = ''): void => {
     lines.push(`    ${pad(label, 10)}${note ? `${pad(value, 23)}${note}` : value}`);
   };
-  row('domain', pre.domain, '(void.json email.from)');
+  row('domain', pre.domain, '(void.config.ts email.from)');
   const session = [
     pre.session.accountName
       ? `account ${pre.session.accountName} (${shortId(pre.accountId)})`
@@ -1289,7 +1289,7 @@ export function renderEmailChecklist(pre: EmailPreflight): string {
     parts.push(`vars.${EMAIL_FROM_VAR}: ${JSON.stringify(pre.from)}`);
   }
   if (parts.length > 0) {
-    change('wrangler.jsonc', parts.join(', '));
+    change('Cloudflare config', parts.join(', '));
   }
   for (const address of pre.rules.absent) {
     change('routing rule (created on deploy)', `${address} → ${pre.workerName}`);
@@ -1621,7 +1621,7 @@ export async function applyEmailSetup(
     }
   }
   if (result.patch.sendEmail || result.patch.addresses !== undefined) {
-    lines.push('  ✔ config    wrangler.jsonc updated');
+    lines.push('  ✔ config    void.lock.json updated');
   }
   result.inboundReady =
     result.routingReady && result.subaddressingReady && !result.addressesWithheld;

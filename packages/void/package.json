@@ -333,6 +333,7 @@
     "@void/edge": "workspace:*",
     "@void/isr": "workspace:*",
     "@void/platform": "workspace:*",
+    "acorn": "^8.15.0",
     "better-auth": "^1.7.3",
     "better-sqlite3": "^13.0.3",
     "blake3-jit": "^1.1.0",

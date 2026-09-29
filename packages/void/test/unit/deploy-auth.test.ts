@@ -215,7 +215,7 @@ describe('runDeploy project access', () => {
       mockListProjects.mockResolvedValue([{ id: 'proj_1', slug: 'my-app', role }]);
 
       await expect(runDeploy(root, { platform: 'void', projectSlug: 'my-app' })).rejects.toThrow(
-        'config: Invalid JSON in void.json.',
+        'migrate: Invalid JSON in void.json. Fix it before migrating.',
       );
 
       expect(mockListProjects).toHaveBeenCalledOnce();
@@ -229,7 +229,7 @@ describe('runDeploy project access', () => {
       mockListProjects.mockResolvedValue([{ id: 'proj_1', slug: 'my-app', role }]);
 
       await expect(runDeploy(root, { platform: 'void' })).rejects.toThrow(
-        'config: Invalid JSON in void.json.',
+        'migrate: Invalid JSON in void.json. Fix it before migrating.',
       );
 
       expect(mockListProjects).toHaveBeenCalledOnce();

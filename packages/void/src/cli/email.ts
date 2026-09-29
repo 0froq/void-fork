@@ -1088,7 +1088,7 @@ export async function runEmailCloudflareCommand(
   const from = voidConfig.email?.from;
   if (!from) {
     log.error(
-      'email: no sender configured. Add "email": { "from": "you@mail.acme.com" } to void.json — its host is the domain email is set up on.',
+      'email: no sender configured. Set email.from to "you@mail.acme.com" in void.config.ts — its host is the domain email is set up on.',
     );
     return rawExit(1);
   }
@@ -1155,7 +1155,7 @@ async function runEmailCloudflareCommandInConfig(
     return fail(
       [
         'email: no Cloudflare account is pinned.',
-        'Set `account_id` in your root wrangler.jsonc, or export CLOUDFLARE_ACCOUNT_ID —',
+        'Set `cloudflare.account_id` in void.config.ts, or export CLOUDFLARE_ACCOUNT_ID —',
         'the same pin `void deploy --platform cloudflare` needs.',
       ].join('\n'),
     );
@@ -1229,7 +1229,7 @@ async function runEmailCloudflareCommandInConfig(
     const interactive = deps.isInteractive ?? !isWranglerNonInteractiveOrCI();
     if (!interactive) {
       return fail(
-        'email: `void email setup` changes your Cloudflare account, so it needs an interactive terminal. Run it locally once, commit wrangler.jsonc, then redeploy.',
+        'email: `void email setup` changes your Cloudflare account, so it needs an interactive terminal. Run it locally once, commit void.lock.json, then redeploy.',
       );
     }
     const ask =

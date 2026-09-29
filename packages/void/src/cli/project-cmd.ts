@@ -11,7 +11,7 @@ export async function runProjectCommand(root: string, args: ProjectArgs): Promis
   if (args.subcommand === 'link') {
     if (cloudflare) {
       throw new Error(
-        'project: Direct Cloudflare apps are identified by the name in wrangler.jsonc and do not need linking.',
+        'project: Direct Cloudflare apps are identified by cloudflare.name in void.config.ts and do not need linking.',
       );
     }
     const { runLink } = await import('./link.ts');

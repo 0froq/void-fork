@@ -721,7 +721,7 @@ describe('preflightEmail', () => {
     expect(pre.addressesStale).toBe(false);
     expect(pre.ready).toBe(true);
     const text = renderEmailChecklist(pre);
-    expect(text).not.toContain('+ wrangler.jsonc');
+    expect(text).not.toContain('+ Cloudflare config');
     expect(text).toContain('+ routing rule (created on deploy)');
   });
 
@@ -774,7 +774,7 @@ describe('preflightEmail', () => {
     expect(stale.sender.state).toBe('stale');
     expect(stale.ready).toBe(true);
     expect(renderEmailChecklist(stale)).toContain(
-      '    + wrangler.jsonc                              vars.__VOID_EMAIL_FROM: "noreply@mail.acme.com"',
+      '    + Cloudflare config                           vars.__VOID_EMAIL_FROM: "noreply@mail.acme.com"',
     );
     const absent = await preflightEmail(readyAccount({ existingVars: undefined }).inputs);
     expect(absent.sender.state).toBe('absent');
@@ -797,7 +797,7 @@ describe('preflightEmail', () => {
       {
         scope: 'all',
         message:
-          'wrangler.jsonc already uses SEND_EMAIL as a Environment Variable binding; rename it (Void writes SEND_EMAIL into send_email)',
+          'Cloudflare config already uses SEND_EMAIL as a Environment Variable binding; rename it in void.config.ts (Void writes SEND_EMAIL into send_email)',
       },
     ]);
     calls.length = 0;
@@ -1189,7 +1189,9 @@ Catch-all rule:`,
     ]);
     expect(pre.blockers[0]?.message).toContain('skipping email setup this deploy');
     // The exact edit is named, so the developer does not have to guess which entries.
-    expect(pre.blockers[0]?.message).toContain('remove "billing@mail.acme.com" from addresses');
+    expect(pre.blockers[0]?.message).toContain(
+      'remove "billing@mail.acme.com" from cloudflare.addresses',
+    );
   });
 
   it('refuses an existing send_email binding not named SEND_EMAIL, with the rename', async () => {
@@ -1197,7 +1199,7 @@ Catch-all rule:`,
     const pre = await preflightEmail(inputs);
     expect(pre.binding).toEqual({ state: 'foreign', foreignName: 'EMAIL' });
     expect(pre.blockers[0]?.message).toBe(
-      'wrangler.jsonc already has a send_email binding named "EMAIL"; rename it to SEND_EMAIL (a second binding would be silent)',
+      'Cloudflare config already has a send_email binding named "EMAIL"; rename it to SEND_EMAIL in void.config.ts (a second binding would be silent)',
     );
   });
 
@@ -1408,7 +1410,7 @@ describe('renderEmailChecklist', () => {
     expect(renderEmailChecklist(pre)).toBe(
       [
         '  Email in use   email/support+[ticket].ts · email/_default.ts · sendEmail() in 2 files',
-        '    domain    mail.acme.com          (void.json email.from)',
+        '    domain    mail.acme.com          (void.config.ts email.from)',
         '    zone      acme.com               account Acme (f721b8e5…) · session dev@acme.com',
         '    apex MX   aspmx.l.google.com     left alone — mail lives on the subdomain',
         '    routing   mail.acme.com  not enabled · subaddressing off',
@@ -1421,7 +1423,7 @@ describe('renderEmailChecklist', () => {
         '    + enable Email Routing on mail.acme.com       Cloudflare writes and locks 3 MX + 1 SPF record there',
         '    + turn on subaddressing for acme.com          support+anything@ reaches support@',
         '    + onboard mail.acme.com for Email Sending     MX/SPF/DKIM on cf-bounce.mail.acme.com, _dmarc.mail.acme.com (p=reject)',
-        '    + wrangler.jsonc                              send_email: [{ name: "SEND_EMAIL" }], addresses: ["support@mail.acme.com"], vars.__VOID_EMAIL_FROM: "noreply@mail.acme.com"',
+        '    + Cloudflare config                           send_email: [{ name: "SEND_EMAIL" }], addresses: ["support@mail.acme.com"], vars.__VOID_EMAIL_FROM: "noreply@mail.acme.com"',
         '    + routing rule (created on deploy)            support@mail.acme.com → acme-support',
         '    ! email/_default.ts                           a catch-all exists only on an apex; other @mail.acme.com mail bounces',
       ].join('\n'),
@@ -1433,7 +1435,9 @@ describe('renderEmailChecklist', () => {
     const pre = await preflightEmail(inputs);
     const text = renderEmailChecklist(pre);
     expect(text).toContain('    binding   SEND_EMAIL             (found EMAIL instead)');
-    expect(text).toContain('    ✘ wrangler.jsonc already has a send_email binding named "EMAIL"');
+    expect(text).toContain(
+      '    ✘ Cloudflare config already has a send_email binding named "EMAIL"',
+    );
   });
 });
 
@@ -1484,7 +1488,7 @@ describe('applyEmailSetup', () => {
       '  ✔ routing   mail.acme.com enabled',
       '  ✔ routing   subaddressing on for acme.com',
       '  ✔ sending   mail.acme.com onboarded',
-      '  ✔ config    wrangler.jsonc updated',
+      '  ✔ config    void.lock.json updated',
     ]);
 
     expect(calls.map((c) => c.args)).toEqual([['email', 'sending', 'enable', 'mail.acme.com']]);
@@ -1633,7 +1637,7 @@ describe('applyEmailSetup', () => {
       '    turn it on in the Cloudflare dashboard → acme.com → Email → Settings → Subaddressing',
       '  ✔ sending   mail.acme.com onboarded',
       '  ! config    addresses withheld this run (session-bearer step failed); no routing rule is created for support@mail.acme.com',
-      '  ✔ config    wrangler.jsonc updated',
+      '  ✔ config    void.lock.json updated',
     ]);
   });
 
@@ -1746,7 +1750,7 @@ describe('applyEmailSetup', () => {
       '  ✘ routing   subaddressing on acme.com: skipped (Email Routing is not enabled on acme.com)',
       '  ✔ sending   mail.acme.com onboarded',
       '  ! config    addresses withheld this run (routing not ready); no routing rule is created for support@mail.acme.com',
-      '  ✔ config    wrangler.jsonc updated',
+      '  ✔ config    void.lock.json updated',
     ]);
   });
 
@@ -1907,7 +1911,7 @@ describe('applyEmailSetup', () => {
     expect(calls).toEqual([]);
     expect(fetchCalls).toEqual([]);
     expect(out.patch).toEqual({});
-    expect(out.lines[0]).toContain('✘ wrangler.jsonc already has a send_email binding');
+    expect(out.lines[0]).toContain('✘ Cloudflare config already has a send_email binding');
   });
 
   it('never surfaces the bearer in a printed line, a thrown error, or the returned object', async () => {
@@ -1961,12 +1965,12 @@ describe('findEmailConfigConflicts', () => {
     expect(
       findEmailConfigConflicts({ kv_namespaces: [{ binding: 'SEND_EMAIL', id: 'x' }] }),
     ).toEqual([
-      'wrangler.jsonc already uses SEND_EMAIL as a KV Namespace binding; rename it (Void writes SEND_EMAIL into send_email)',
+      'Cloudflare config already uses SEND_EMAIL as a KV Namespace binding; rename it in void.config.ts (Void writes SEND_EMAIL into send_email)',
     ]);
     expect(
       findEmailConfigConflicts({ kv_namespaces: [{ binding: '__VOID_EMAIL_FROM', id: 'x' }] }),
     ).toEqual([
-      'wrangler.jsonc already uses __VOID_EMAIL_FROM as a KV Namespace binding; rename it (Void writes __VOID_EMAIL_FROM into vars)',
+      'Cloudflare config already uses __VOID_EMAIL_FROM as a KV Namespace binding; rename it in void.config.ts (Void writes __VOID_EMAIL_FROM into vars)',
     ]);
     expect(findEmailConfigConflicts({ send_email: { name: 'SEND_EMAIL' } })).toEqual([
       expect.stringContaining('"send_email"'),

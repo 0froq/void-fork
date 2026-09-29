@@ -82,7 +82,7 @@ it('does not guess between accounts in CI', async () => {
 });
 it('rejects malformed config instead of overwriting it', async () => {
   writeFileSync(join(root, 'wrangler.jsonc'), '{invalid');
-  await expect(connectCloudflare(root, true)).rejects.toThrow('Invalid wrangler.jsonc');
+  await expect(connectCloudflare(root, true)).rejects.toThrow('Invalid Cloudflare config');
   expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')).toBe('{invalid');
   expect(mocks.authenticate).not.toHaveBeenCalled();
 });

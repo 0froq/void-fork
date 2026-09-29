@@ -772,21 +772,21 @@ function runMigration(root: string, name: string): void {
     // Round 40: the journal is authoritative once it exists. `existingJournal.
     // dialect` is the dialect drizzle-kit committed to when the first migration
     // was generated; every subsequent snapshot under `meta/` is chained off
-    // that same dialect. Reading the dialect from `void.json` and passing it
+    // that same dialect. Reading the dialect from `void.config.ts` and passing it
     // to `drizzle-kit generate --custom` risks writing a new snapshot in the
-    // WRONG dialect if the user edited `void.json`'s `database` field without
+    // WRONG dialect if the user edited `void.config.ts`'s `database` field without
     // dropping the existing migrations. The next `void db generate` would then
     // diff against an incompatible chain and corrupt the project.
     //
     // Cross-check that the two agree. If they disagree, refuse — the only
-    // correct recovery is an explicit one (revert void.json, or drop
+    // correct recovery is an explicit one (revert void.config.ts, or drop
     // db/migrations/ and regenerate).
     //
     // Whitelist the dialects Void supports instead of collapsing anything unknown
     // to sqlite. A hand-edited or merge-corrupted journal with e.g.
     // `mysql`, `pg`, or an empty dialect would otherwise silently be
     // treated as sqlite, producing either a sqlite snapshot on top of
-    // a non-sqlite chain or a confusing "void.json is configured for
+    // a non-sqlite chain or a confusing "void.config.ts is configured for
     // X but journal says sqlite" cross-check message. Refuse loudly
     // instead so the user restores the journal (or drops db/migrations/)
     // on their terms.
@@ -809,10 +809,10 @@ function runMigration(root: string, name: string): void {
     const configDialect = getDatabaseDialect(readConfig(root));
     if (configDialect !== journalDialect) {
       log.error(
-        `db/migrations/meta/_journal.json was generated for ${journalDialect}, but void.json is configured for ${configDialect}.`,
+        `db/migrations/meta/_journal.json was generated for ${journalDialect}, but void.config.ts is configured for ${configDialect}.`,
       );
       log.error(
-        `Generating a new custom migration now would append a snapshot in the wrong dialect. Revert void.json's \`database\` field to ${journalDialect}, or drop db/migrations/ and regenerate from scratch.`,
+        `Generating a new custom migration now would append a snapshot in the wrong dialect. Revert void.config.ts's \`database\` field to ${journalDialect}, or drop db/migrations/ and regenerate from scratch.`,
       );
       process.exit(1);
     }

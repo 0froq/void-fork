@@ -2226,7 +2226,7 @@ export type DeployWranglerRun = (
  * units (`cli/env-validation.ts`) use.
  */
 export interface CloudflareDeployDeps {
-  /** Interactive migration choice; persisted in void.json before provisioning. */
+  /** Interactive migration choice; persisted in void.config.ts before provisioning. */
   confirmIsrSetup?: (message: string) => Promise<boolean>;
   readExistingWorker?: typeof readExistingCloudflareWorker;
   /** Fail closed on a pending existing-Worker Durable Object class migration. */
@@ -2565,7 +2565,7 @@ export async function computeDesiredCloudflareResources(
   aiBindingName: string;
   /**
    * Whether Void's build emits the sandbox container application — the SAME signal `mergeBindings`
-   * (index.ts) gates emission on: `isSandboxEnabled(config)` (a `sandbox` field in `void.json`) OR
+   * (index.ts) gates emission on: `isSandboxEnabled(config)` (a `sandbox` field in `void.config.ts`) OR
    * the import walk detecting a `void/sandbox` import (`inferProjectBindings(...).needsSandbox`).
    * Threaded into {@link verifyGeneratedDeployConfig} (via {@link reconstructExpectedContainers})
    * to pin the emitted `containers` array.
@@ -2606,7 +2606,7 @@ export async function computeDesiredCloudflareResources(
   const isFrameworkMode = detectFramework(root) != null;
   const scanDirs =
     voidConfig.inference?.scanDirs ?? (isFrameworkMode ? FRAMEWORK_SCAN_DIRS : undefined);
-  // Mirror voidPlugin's inference options EXACTLY (index.ts): when `void.json`
+  // Mirror voidPlugin's inference options EXACTLY (index.ts): when `void.config.ts`
   // declares `inference.bindings`, those explicit overrides (forced `true`, a
   // custom binding name, or disabled `false`) drive the build — so the desired set
   // must consume the same overrides, or a `false` override would still provision a
@@ -2706,7 +2706,7 @@ export async function computeDesiredCloudflareResources(
   }
 
   // ISR_CACHE (a KV namespace) — self-host-only, not in the import walk. Desired
-  // when the merged revalidate config (void.json `routing.revalidate` + per-page
+  // when the merged revalidate config (void.config.ts `routing.revalidate` + per-page
   // `export const revalidate`) turns ISR on — the SAME gate the build's `emitIsr`
   // uses (`plugin-routing.ts`).
   const pageScan = existsSync(paths.pagesDir)
@@ -2748,7 +2748,7 @@ export async function computeDesiredCloudflareResources(
     needsEmail: bindings.needsEmail === true || hasEmailHandlers(emailHandlers),
     emailHandlers,
     // Mirror index.ts's emission signal EXACTLY (line 658): the sandbox container is emitted when
-    // `void.json` enables it OR the source imports `void/sandbox` (the import-walk signal). Using
+    // `void.config.ts` enables it OR the source imports `void/sandbox` (the import-walk signal). Using
     // `isSandboxEnabled` alone would miss an import-only sandbox app (e.g. kitchen-sink) and the
     // container pin would then FALSE-POSITIVE a legitimate build.
     needsSandbox: isSandboxEnabled(voidConfig) || bindings.needsSandbox,
@@ -3778,8 +3778,8 @@ async function runCloudflareEmailStep(
   if (!from) {
     log.warn(
       [
-        'deploy: this app uses email, but void.json names no sender.',
-        'Add "email": { "from": "you@mail.acme.com" } to void.json — deploying without email.',
+        'deploy: this app uses email, but void.config.ts names no sender.',
+        'Set email.from to "you@mail.acme.com" in void.config.ts — deploying without email.',
       ].join('\n'),
     );
     return without;
@@ -3966,7 +3966,7 @@ async function runCloudflareEmailStep(
     return leaveAccount(
       [
         `email on ${pre.domain} is not ${shipsBinding ? 'fully ' : ''}set up, and this shell cannot ask.`,
-        'Run `void email setup --platform cloudflare` once locally, commit wrangler.jsonc, then redeploy.',
+        'Run `void email setup --platform cloudflare` once locally, commit void.lock.json, then redeploy.',
       ].join('\n'),
     );
   }
@@ -4454,13 +4454,13 @@ export async function runCloudflareDeploy(
     if (staleAddresses.length > 0 || staleBinding) {
       log.warn(
         [
-          'deploy: this app no longer declares email handlers or imports void/email, but wrangler.jsonc still carries the email setup Void wrote:',
+          'deploy: this app no longer declares email handlers or imports void/email, but the Cloudflare config still carries the email setup Void wrote:',
           ...staleAddresses.map(
             (a) =>
               `  • ${a} — still routed to worker "${workerName}", which no longer exports email(); inbound mail there will fail.`,
           ),
           ...(staleBinding ? [`  • send_email ${SEND_EMAIL_BINDING} binding`] : []),
-          'Deploying as-is. To detach: remove `addresses`, `send_email` and `vars.__VOID_EMAIL_FROM` from wrangler.jsonc and delete the rules in the Cloudflare dashboard (Email → Email Routing → Routing rules), or set `addresses: []` and let `void deploy --platform cloudflare` ask before deleting every Void-owned rule.',
+          'Deploying as-is. To detach: remove `addresses`, `send_email`, and `vars.__VOID_EMAIL_FROM` from `resolved` in void.lock.json (and any authored overrides in void.config.ts), then delete the rules in the Cloudflare dashboard (Email → Email Routing → Routing rules).',
         ].join('\n'),
       );
     }
@@ -4662,7 +4662,7 @@ export async function runCloudflareDeploy(
               missing,
               reasons,
               'Linking cannot provision these inferred resources:',
-              `Check the existing Worker's binding names and resource IDs in ${basename(configPath)} and inference.bindings in void.json, then rerun \`void deploy\`. Keep new resources for a later deployment.`,
+              `Check the existing Worker's binding names and resource IDs in void.config.ts and inference.bindings there, then rerun \`void deploy\`. Keep new resources for a later deployment.`,
             )
           : 'Linking cannot provision resources. Remove --provision and rerun `void deploy` to reuse the existing Worker.',
       );
@@ -6358,6 +6358,11 @@ const cloudflareDeployTarget: RunDeployTargetAdapter = {
         'deploy: --project is not supported with platform cloudflare — this platform deploys to your own Cloudflare account and no Void project is involved.',
       );
     }
+    if (migrateLegacyVoidConfig(root)) {
+      log.success(
+        'Migrated project configuration to void.config.ts. Commit void.config.ts and void.lock.json.',
+      );
+    }
     return runCloudflareDeploy(root, options, cliLog);
   },
 };
@@ -6412,11 +6417,6 @@ async function runDeployInner(
   }
   if (link === 'existing') {
     options = { ...options, platform: 'cloudflare', reuseExistingWorker: true };
-  }
-  if (migrateLegacyVoidConfig(root)) {
-    log.success(
-      'Migrated project configuration to void.config.ts. Commit void.config.ts and void.lock.json.',
-    );
   }
   const platform = resolveDeploymentPlatform(root, options);
 
@@ -6561,7 +6561,13 @@ async function runManagedDeploy(
         slug: config.slug,
       });
 
-      // 3. Resolve deploy app type: void.json > CLI flags > auto-detection
+      if (migrateLegacyVoidConfig(root)) {
+        log.success(
+          'Migrated project configuration to void.config.ts. Commit void.config.ts and void.lock.json.',
+        );
+      }
+
+      // 3. Resolve deploy app type: void.config.ts > CLI flags > auto-detection
       const voidConfig = readConfig(root);
       cliLog.info('config_resolved', {
         target: voidConfig.target,
@@ -6794,7 +6800,7 @@ export type PrerenderSourceInputs = {
   hasPages: boolean;
   /** A custom SSR entry exists — it may export a top-level `getPrerenderPaths()`. */
   hasSsrEntry: boolean;
-  /** `routing.prerender` from void.json — compiled in as explicit paths. */
+  /** `routing.prerender` from void.config.ts — compiled in as explicit paths. */
   explicitPrerenderPaths: ReadonlyArray<string> | undefined;
 };
 
@@ -6806,7 +6812,7 @@ export type PrerenderSourceInputs = {
  * (`router/compile.ts`) emits a `paths.push(...)` for:
  *   1. `scan.pages.pages` — static patterns + dynamic pages' `getPrerenderPaths()`
  *   2. the custom SSR entry's top-level `getPrerenderPaths()` (`ssr` argument)
- *   3. `options.explicitPrerenderPaths` — void.json `routing.prerender`
+ *   3. `options.explicitPrerenderPaths` — void.config.ts `routing.prerender`
  * With none of them present the collector is a generated function whose body
  * returns `[...new Set([])]`, so skipping is result-identical.
  *
@@ -7445,7 +7451,7 @@ export function warnIgnoredNotFoundForFramework(
     return;
   }
   log.warn(
-    `"routing.notFound" in void.json is ignored for ${frameworkName} deploys ` +
+    `"routing.notFound" in void.config.ts is ignored for ${frameworkName} deploys ` +
       `(not_found_handling is pinned to "none" — the framework's own worker owns unmatched HTML).`,
   );
 }
@@ -7493,7 +7499,7 @@ async function runFrameworkDeploy(
       ? [`/${fwPreset.workerMain}`, '/_routes.json']
       : [];
 
-  // Merge framework-generated `_headers` / `_redirects` + void.json routing rules.
+  // Merge framework-generated `_headers` / `_redirects` + void.config.ts routing rules.
   // Netlify-symmetric phases:
   //   - `_redirects` `200!` + routing.rewrites  → redirectRules (always-fires)
   //   - `_redirects` `200`  + routing.fallbacks → fallbackRules (asset-miss only)
@@ -7641,13 +7647,13 @@ async function runFrameworkDeploy(
     log.info('Wrapper generated');
   }
 
-  // 8. Read wrangler compat settings (void.json > wrangler.jsonc > build output)
+  // 8. Read wrangler compat settings (void.config.ts > wrangler.jsonc > build output)
   // Use the original workerDir (not actualWorkerDir) because bundleEntry() may
   // reassign actualWorkerDir to a temporary output — the plugin-generated
   // wrangler.json with correct compat settings lives in the original build output.
   const wranglerCompat = resolveDeployWranglerCompat(root, voidConfig, workerDir, { dialect });
 
-  // 9. Resolve revalidate + prerender from void.json
+  // 9. Resolve revalidate + prerender from void.config.ts
   const revalidate = collectRevalidate(voidConfig, null);
   const prerender = voidConfig.routing?.isr === false ? undefined : voidConfig.routing?.prerender;
 
@@ -7802,7 +7808,7 @@ async function runFullDeploy(
   config: ProjectConfig,
   client: PlatformClient,
   /**
-   * The already-read `void.json`, threaded from `runDeploy` the same way
+   * The already-read `void.config.ts`, threaded from `runDeploy` the same way
    * `runFrameworkDeploy` receives it. The build step reads
    * `inference.build` from it, so it must be available BEFORE the build —
    * this used to be read further down as `deployConfig`, after the build had
@@ -7955,7 +7961,7 @@ async function runFullDeploy(
   }
 
   // Merge user/framework `_headers` / `_redirects` in the built client dir with
-  // `void.json` routing rules. See the framework branch above for phase splitting.
+  // `void.config.ts` routing rules. See the framework branch above for phase splitting.
   const clientDir = join(distDir, 'client');
   const { headerRules, redirectRules, fallbackRules, redundantForceOn3xx } = mergeRoutingRules({
     dir: clientDir,
@@ -8079,7 +8085,7 @@ async function runFullDeploy(
     ? true
     : Boolean(ssrEntry) || (hasPages && deployConfig.output !== 'static');
 
-  // Resolve revalidate config from void.json + per-page .server.ts exports.
+  // Resolve revalidate config from void.config.ts + per-page .server.ts exports.
   // The page scan is also reused by the fully-static optimization below.
   const pageScan = existsSync(paths.pagesDir)
     ? routeScan.pages.pages.length > 0

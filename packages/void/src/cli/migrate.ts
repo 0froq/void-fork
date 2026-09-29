@@ -15,6 +15,10 @@ import { join } from 'pathslash';
 import { seedCloudflareConfig, VOID_LOCK_FILE } from '../cloudflare-config.ts';
 import { loadTypedVoidConfigFile, TYPED_CONFIG_FILE } from '../config-loader.ts';
 import { validateConfig } from '../config.ts';
+import {
+  applyFrameworkConfigMigration,
+  planFrameworkConfigMigration,
+} from './framework-config-migrate.ts';
 import { cliTitle } from './output.ts';
 
 const LEGACY_FILE = 'void.json';
@@ -83,8 +87,13 @@ export function migrateLegacyVoidConfig(root: string): boolean {
     throw new Error('migrate: Wrangler TOML is not supported. Convert it to JSON/JSONC first.');
   }
   const wranglerName = wranglerFiles[0];
-  if (!existsSync(legacyPath) && !wranglerName) {
+  const typedPath = join(root, TYPED_CONFIG_FILE);
+  if (!existsSync(legacyPath) && !wranglerName && !existsSync(typedPath)) {
     return false;
+  }
+  const frameworkPatches = planFrameworkConfigMigration(root);
+  if (!existsSync(legacyPath) && !wranglerName) {
+    return applyFrameworkConfigMigration(root, frameworkPatches);
   }
 
   const raw = existsSync(legacyPath) ? readFileSync(legacyPath, 'utf8') : undefined;
@@ -106,7 +115,6 @@ export function migrateLegacyVoidConfig(root: string): boolean {
       ? parseWranglerJsonc(wranglerName, wranglerRaw)
       : undefined;
 
-  const typedPath = join(root, TYPED_CONFIG_FILE);
   const hadTyped = existsSync(typedPath);
   let current: Record<string, unknown> | undefined;
   if (hadTyped) {
@@ -172,6 +180,7 @@ export function migrateLegacyVoidConfig(root: string): boolean {
     if (needsTypedWrite) {
       renameSync(temporaryPath, typedPath);
     }
+    applyFrameworkConfigMigration(root, frameworkPatches);
     if (raw !== undefined) {
       unlinkSync(legacyPath);
     }

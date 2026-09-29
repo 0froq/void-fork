@@ -53,6 +53,33 @@ describe('materializeCloudflareConfig', () => {
     });
   });
 
+  it('retains provisioned bindings when authored binding arrays change', () => {
+    config(
+      'export default { cloudflare: { d1_databases: [{ binding: "CUSTOM", database_id: "old" }] } };\n',
+    );
+    const path = materializeCloudflareConfig(root);
+    writeFileSync(
+      path,
+      JSON.stringify({
+        d1_databases: [
+          { binding: 'CUSTOM', database_id: 'old' },
+          { binding: 'DB', database_id: 'provisioned-id' },
+        ],
+      }),
+    );
+    persistCloudflareConfig(root);
+    writeFileSync(
+      join(root, 'void.config.ts'),
+      'export default { cloudflare: { d1_databases: [{ binding: "CUSTOM", database_id: "new" }] } };\n',
+    );
+    expect(
+      JSON.parse(readFileSync(materializeCloudflareConfig(root), 'utf8')).d1_databases,
+    ).toEqual([
+      { binding: 'CUSTOM', database_id: 'new' },
+      { binding: 'DB', database_id: 'provisioned-id' },
+    ]);
+  });
+
   it('restores exact JSONC provenance from a migration seed', () => {
     config('export default { cloudflare: { name: "app" } };\n');
     const raw =
@@ -83,5 +110,20 @@ describe('materializeCloudflareConfig', () => {
       compatibility_date: '2026-02-24',
     });
     expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(false);
+  });
+
+  it('accepts an edit to resolved lock settings and refreshes generated text', () => {
+    config('export default { cloudflare: { name: "app" } };\n');
+    const path = materializeCloudflareConfig(root);
+    writeFileSync(path, JSON.stringify({ name: 'app', addresses: ['old@example.com'] }));
+    persistCloudflareConfig(root);
+    const lockPath = join(root, 'void.lock.json');
+    const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
+    delete lock.resolved.addresses;
+    writeFileSync(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
+    expect(JSON.parse(readFileSync(materializeCloudflareConfig(root), 'utf8'))).toEqual({
+      name: 'app',
+    });
+    expect(JSON.parse(JSON.parse(readFileSync(lockPath, 'utf8')).text)).toEqual({ name: 'app' });
   });
 });

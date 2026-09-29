@@ -762,13 +762,14 @@ async function runAiSetupPrompt(
  * Binding inference runs synchronously here so results are available
  * before the Cloudflare plugin initializes.
  *
- * If the user has a `wrangler.jsonc` / `wrangler.json` in their project root,
- * the Cloudflare plugin reads it and provides the resolved config to our
+ * The Cloudflare plugin reads Void's generated config and provides it to our
  * config function. Bindings already defined there (with real IDs for
  * production deployment) are preserved — we only add inferred bindings
  * that are missing. This allows `vite build && wrangler deploy` to work
  * for deploying directly to Cloudflare without the Void platform.
  */
+const scheduledPointerCleanups = new Set<string>();
+
 export function voidPlugin(options?: {
   persistTo?: string;
   auxiliaryWorkers?: PluginConfig['auxiliaryWorkers'];
@@ -799,7 +800,17 @@ export function voidPlugin(options?: {
         existsSync(join(root, 'void.config.ts')) &&
         process.env[CLOUDFLARE_DEPLOY_BUILD_ENV] !== '1'
       ) {
-        rmSync(join(root, '.wrangler', 'deploy', 'config.json'), { force: true });
+        const removePointer = () =>
+          rmSync(join(root, '.wrangler', 'deploy', 'config.json'), { force: true });
+        if (detected?.name === 'astro') {
+          // Astro previews the built Worker after Vite closes its bundle.
+          if (!scheduledPointerCleanups.has(root)) {
+            scheduledPointerCleanups.add(root);
+            process.once('exit', removePointer);
+          }
+        } else {
+          removePointer();
+        }
       }
     },
   };
@@ -1103,7 +1114,7 @@ export function voidPlugin(options?: {
         },
       );
       if (synced) {
-        voidLog('Synced bindings to wrangler.jsonc');
+        voidLog('Synced bindings to Cloudflare config');
       }
     };
 
@@ -1254,7 +1265,7 @@ export function voidPlugin(options?: {
   // envPlugin.config so mergeBindings can gate credential injection on 'serve'.
   let viteCommand: 'serve' | 'build' = 'build';
 
-  // Merge curated wrangler fields from void.json
+  // Merge curated wrangler fields from void.config.ts
   const wranglerCompat = isNodeTarget(config.target) ? undefined : readWranglerCompat(root, config);
   if (wranglerCompat) {
     workerConfig.compatibility_date = wranglerCompat.compatibilityDate;
@@ -1262,7 +1273,7 @@ export function voidPlugin(options?: {
       workerConfig.compatibility_flags = wranglerCompat.compatibilityFlags;
     }
   }
-  // CPU cap from void.json `worker.limits.cpu_ms` (validated in config.ts as an
+  // CPU cap from void.config.ts `worker.limits.cpu_ms` (validated in config.ts as an
   // integer 1..300000). The CF plugin passes `limits` through into the generated
   // `dist/ssr/wrangler.json`, so a self-host `wrangler deploy` / `void deploy
   // --backend cloudflare` enforces it directly. Managed `void deploy` ignores
@@ -1482,7 +1493,7 @@ export function voidPlugin(options?: {
       }
     }
 
-    // Default sender for `sendEmail()` from void.json `email.from`. Serve-only,
+    // Default sender for `sendEmail()` from void.config.ts `email.from`. Serve-only,
     // the same gate as `__VOID_TOKEN` — not because it is a credential, but
     // because on a build the root wrangler.jsonc already owns the var:
     // `void deploy --platform cloudflare` writes the same `__VOID_EMAIL_FROM`
@@ -2093,7 +2104,7 @@ export function voidPlugin(options?: {
           notFoundIgnoredWarned = true;
           voidWarn(
             `Void generates no asset routing policy for a ${framework} build, so "routing.notFound" in ` +
-              'void.json is not written to the built worker config. During a self-hosted build and ' +
+              'void.config.ts is not written to the built worker config. During a self-hosted build and ' +
               'direct Cloudflare deployment, it takes effect only if your own Cloudflare config declares a complete ' +
               '`assets` policy (`binding`, `directory`, `not_found_handling`, `run_worker_first`); ' +
               "otherwise Cloudflare's default applies. Managed `void deploy` supplies the policy for you.",
@@ -2204,13 +2215,15 @@ export function voidPlugin(options?: {
       );
     }
     if (config.inference?.bindings) {
-      voidWarn('"inference.bindings" in void.json is ignored with target: "' + config.target + '"');
+      voidWarn(
+        '"inference.bindings" in void.config.ts is ignored with target: "' + config.target + '"',
+      );
     }
     if (config.worker) {
-      voidWarn('"worker" in void.json is ignored with target: "' + config.target + '"');
+      voidWarn('"worker" in void.config.ts is ignored with target: "' + config.target + '"');
     }
     if (config.remote) {
-      voidWarn('"remote" in void.json is ignored with target: "' + config.target + '"');
+      voidWarn('"remote" in void.config.ts is ignored with target: "' + config.target + '"');
     }
     if (bindings.needsSandbox) {
       throw new Error(
@@ -2237,7 +2250,7 @@ export function voidPlugin(options?: {
     }
     if (config.routing?.revalidate) {
       voidWarn(
-        '"routing.revalidate" in void.json is ignored with target: "' +
+        '"routing.revalidate" in void.config.ts is ignored with target: "' +
           config.target +
           '" (edge caching is CF-only)',
       );
@@ -2257,7 +2270,7 @@ export function voidPlugin(options?: {
         prerenderPaths: config.routing?.prerender,
         target: config.target as 'node' | 'bun' | 'deno',
         // Pass the full routing section so the plugin can merge
-        // `public/_redirects` / `public/_headers` with `void.json` rules at
+        // `public/_redirects` / `public/_headers` with `void.config.ts` rules at
         // `configResolved` time and again on HMR (parity with deploy).
         routing: config.routing,
         hasSandbox: false,
@@ -2390,7 +2403,7 @@ export function voidPlugin(options?: {
       prerenderPaths: config.routing?.prerender,
       remoteMode,
       // Pass the full routing section so the plugin can merge
-      // `public/_redirects` / `public/_headers` with `void.json` rules for
+      // `public/_redirects` / `public/_headers` with `void.config.ts` rules for
       // parity with the deployment runtime. Managed production builds omit
       // the rules because dispatch owns them; native builds keep them.
       routing: config.routing,

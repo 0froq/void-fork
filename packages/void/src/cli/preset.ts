@@ -57,7 +57,7 @@ export type FrameworkPreset = {
   cloudflareArtifact: 'vite-plugin' | 'worker-output';
   /** Compatibility flags required by a standalone framework Worker. */
   cloudflareCompatibilityFlags?: ReadonlyArray<string>;
-  /** Default build command (overridable via void.json `build`). */
+  /** Default build command (overridable via void.config.ts `build`). */
   buildCommand: string;
   /** Directory containing the worker entry, relative to project root. */
   workerDir: string;
@@ -451,7 +451,7 @@ export function detectPreset(
 function ssgWithBackendMessage(ssgDep: string, backendSources: Array<string>): string {
   return [
     `deploy: "${ssgDep}" was detected, but this project also has backend code: ${backendSources.join(', ')}.`,
-    'A static deploy would silently drop it, so Void will not guess. Pick one in void.json:',
+    'A static deploy would silently drop it, so Void will not guess. Pick one in void.config.ts:',
     '',
     '  Deploy the static output only (the backend is NOT deployed):',
     '    { "inference": { "appType": "static" } }',
