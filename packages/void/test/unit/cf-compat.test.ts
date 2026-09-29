@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { connect } from 'node:net';
@@ -8,7 +8,7 @@ import { join } from 'pathslash';
 import { expect, it } from 'vite-plus/test';
 import { resolveWranglerArgv } from '../../src/cli/preset.ts';
 
-it('uses cf for remote D1 SQL and preserves the existing result shape and CF token alias', async () => {
+it('uses pinned cf despite a project-local CLI and preserves D1 results and the CF token alias', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'void-cf-d1-contract-'));
   const requests: Array<{ method: string; path: string; authorization: string | undefined }> = [];
   const server = createServer((request, response) => {
@@ -30,6 +30,14 @@ it('uses cf for remote D1 SQL and preserves the existing result shape and CF tok
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
+    const local = join(directory, 'node_modules', 'cf');
+    mkdirSync(local, { recursive: true });
+    writeFileSync(join(directory, 'package.json'), '{}');
+    writeFileSync(
+      join(local, 'package.json'),
+      JSON.stringify({ name: 'cf', version: '0.0.0', bin: { cf: 'fake.cjs' } }),
+    );
+    writeFileSync(join(local, 'fake.cjs'), 'console.log("UNPINNED_PROJECT_CF_EXECUTED");');
     const configPath = join(directory, 'wrangler.json');
     writeFileSync(
       configPath,

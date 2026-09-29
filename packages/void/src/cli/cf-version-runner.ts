@@ -47,7 +47,11 @@ export function createCfCommand(options: {
     if (!options.verifyUploader()) {
       return failed('The Cloudflare uploader changed during deployment.');
     }
-    const env = options.env(options.accountId, options.apiBaseUrl);
+    // Keep credentials in the verified CLI even if cwd resolves another cf.
+    const env: NodeJS.ProcessEnv = {
+      ...options.env(options.accountId, options.apiBaseUrl),
+      CF_DELEGATION: '1',
+    };
     if (options.token) {
       env.CLOUDFLARE_API_TOKEN = options.token;
     }

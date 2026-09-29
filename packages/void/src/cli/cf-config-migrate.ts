@@ -202,6 +202,7 @@ function uncredentialedEnvironment(): NodeJS.ProcessEnv {
       delete env[key];
     }
   }
+  env.CF_DELEGATION = '1';
   return env;
 }
 

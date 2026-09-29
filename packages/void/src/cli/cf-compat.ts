@@ -20,7 +20,8 @@ const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 
 const args = process.argv.slice(2);
 
 function cfEnvironment(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
+  // The pinned bin otherwise delegates to any cf installed by the project.
+  const env: NodeJS.ProcessEnv = { ...process.env, CF_DELEGATION: '1' };
   for (const [canonical, alias] of [
     ['CLOUDFLARE_API_TOKEN', 'CF_API_TOKEN'],
     ['CLOUDFLARE_API_KEY', 'CF_API_KEY'],

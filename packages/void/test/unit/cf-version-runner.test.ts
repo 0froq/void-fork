@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'pathslash';
 import { afterEach, expect, it } from 'vite-plus/test';
 import { prepareCfBuildOutput } from '../../src/cli/cf-build-output.ts';
-import { createCfVersionRunner } from '../../src/cli/cf-version-runner.ts';
+import { createCfCommand, createCfVersionRunner } from '../../src/cli/cf-version-runner.ts';
 
 const roots: Array<string> = [];
 afterEach(() => {
@@ -31,6 +31,29 @@ async function output() {
   expect(prepared).not.toBeNull();
   return prepared!;
 }
+
+it('does not delegate credentialed commands to a project-local cf', () => {
+  const root = mkdtempSync(join(tmpdir(), 'void-cf-pinned-command-'));
+  roots.push(root);
+  const local = join(root, 'node_modules', 'cf');
+  mkdirSync(local, { recursive: true });
+  writeFileSync(join(root, 'package.json'), '{}');
+  writeFileSync(
+    join(local, 'package.json'),
+    JSON.stringify({ name: 'cf', version: '0.0.0', bin: { cf: 'fake.cjs' } }),
+  );
+  writeFileSync(join(local, 'fake.cjs'), 'console.log("UNPINNED_PROJECT_CF_EXECUTED");');
+  const command = createCfCommand({
+    accountId: 'test-account',
+    apiBaseUrl: 'https://api.cloudflare.com/client/v4',
+    verifyUploader: () => true,
+    env: () => ({ PATH: process.env.PATH, CI: 'true', CLOUDFLARE_API_TOKEN: 'synthetic-token' }),
+  });
+  const result = command(['--version'], { cwd: root, capture: true });
+  expect(result.status, result.stderr).toBe(0);
+  expect(result.stdout).not.toContain('UNPINNED_PROJECT_CF_EXECUTED');
+  expect(result.stdout).toContain('1.0.0-beta.5');
+});
 
 it('preserves activation metadata and sorts cf version history for the existing protocol', async () => {
   const prepared = await output();
