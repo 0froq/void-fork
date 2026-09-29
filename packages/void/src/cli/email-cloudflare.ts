@@ -44,8 +44,9 @@
  *     its permissions, so it is gated by the reads, which fail closed; a Global API Key is
  *     refused by name (no single bearer for the two REST-only calls).
  *
- * The prose parsers are PINNED to the wrangler version void ships (see
+ * The prose parsers retain the historical Wrangler fixture format (see
  * `WRANGLER_EMAIL_PROSE_VERSION` and `test/fixtures/wrangler-email/<version>/`).
+ * The private cf adapter emits that format from cf's structured responses.
  * A parser miss fails CLOSED: the row reads `unknown` and the checklist says to run
  * `void email setup`. Every `wrangler email` command prints an "open beta command"
  * warning on stderr, so the parsers read STDOUT only; stderr is consulted solely for
@@ -55,7 +56,7 @@
 import type { EmailHandlersScan } from '../router/email.ts';
 import { findBindingNameOwner } from './wrangler.ts';
 
-/** The wrangler whose `email` prose the parsers below are pinned to. */
+/** Historical fixture version for the email prose compatibility parser. */
 export const WRANGLER_EMAIL_PROSE_VERSION = '4.131.0';
 
 /** The `send_email` binding name Void provisions and the runtime reads. */

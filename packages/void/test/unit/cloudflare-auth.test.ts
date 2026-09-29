@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe('Cloudflare authentication', () => {
-  it('uses an existing secure session without opening browser login', async () => {
+  it('uses an existing cf session without opening browser login', async () => {
     const runWrangler = vi.fn(() => ({ status: 0, stderr: '', stdout: SESSION }));
 
     await expect(ensureCloudflareAuthentication({ runWrangler })).resolves.toEqual({
@@ -26,7 +26,7 @@ describe('Cloudflare authentication', () => {
     expect(runWrangler).toHaveBeenCalledTimes(1);
   });
 
-  it('signs in with the bundled secure flow and resumes', async () => {
+  it('signs in with cf and resumes', async () => {
     const loginNotice = vi.spyOn(log, 'info').mockImplementation(() => {});
     const calls: Array<string> = [];
     let whoamiCalls = 0;
@@ -46,12 +46,7 @@ describe('Cloudflare authentication', () => {
     });
 
     expect(session.accounts).toEqual([{ id: 'account-1', name: 'Example' }]);
-    expect(calls).toEqual([
-      'whoami --json',
-      'auth keyring enable',
-      'login --use-keyring',
-      'whoami --json',
-    ]);
+    expect(calls).toEqual(['whoami --json', 'login', 'whoami --json']);
     expect(loginNotice).toHaveBeenCalledWith(
       'Opening Cloudflare login in your browser. Press Ctrl+C to cancel.',
     );
@@ -96,7 +91,7 @@ describe('Cloudflare authentication', () => {
     expect(parseCloudflareAuthSession('not json')).toBeNull();
   });
 
-  it('forces keyring storage and removes unrelated sensitive values', () => {
+  it('removes unrelated sensitive values from auth commands', () => {
     expect(
       cloudflareAuthEnvironment({
         CF_ACCESS_CLIENT_SECRET: 'access',
@@ -104,19 +99,13 @@ describe('Cloudflare authentication', () => {
         PATH: '/bin',
         VOID_PLATFORM_RECOVERY_KEY: 'recovery',
       }),
-    ).toEqual({
-      CLOUDFLARE_AUTH_USE_KEYRING: 'true',
-      PATH: '/bin',
-      WRANGLER_LOG_SANITIZE: 'true',
-    });
+    ).toEqual({ PATH: '/bin' });
   });
 
-  it('suppresses branded login output without suppressing JSON commands', () => {
-    expect(cloudflareAuthCommandEnvironment(['login'], {}).WRANGLER_LOG).toBe('none');
-    expect(cloudflareAuthCommandEnvironment(['logout'], {}).WRANGLER_LOG).toBe('none');
-    expect(cloudflareAuthCommandEnvironment(['whoami', '--json'], {}).WRANGLER_LOG).toBeUndefined();
-    expect(
-      cloudflareAuthCommandEnvironment(['auth', 'token', '--json'], {}).WRANGLER_LOG,
-    ).toBeUndefined();
+  it('uses the same safe environment for all cf auth commands', () => {
+    expect(cloudflareAuthCommandEnvironment(['login'], { PATH: '/bin' })).toEqual({ PATH: '/bin' });
+    expect(cloudflareAuthCommandEnvironment(['whoami', '--json'], { PATH: '/bin' })).toEqual({
+      PATH: '/bin',
+    });
   });
 });

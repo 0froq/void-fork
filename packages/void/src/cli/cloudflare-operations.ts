@@ -618,7 +618,7 @@ export async function changeCloudflareDomain(
     writeFileSync(before.configPath, original);
     persistCloudflareConfig(root);
     throw new Error(
-      'Deleting the final Cloudflare custom domain requires CLOUDFLARE_API_TOKEN because Wrangler cannot reconcile an empty custom-domain set. Export a scoped token with Workers Scripts: Edit permission and retry. No local or remote state changed.',
+      'Deleting the final Cloudflare custom domain requires CLOUDFLARE_API_TOKEN for the empty-domain API update. Export a scoped token with Workers Scripts: Edit permission and retry. No local or remote state changed.',
     );
   }
   const triggerConfigDir = mkdtempSync(join(tmpdir(), 'void-domain-triggers-'));
@@ -677,7 +677,7 @@ export async function publishEmptyCloudflareCustomDomainSet(
   const token = resolveCloudflareApiToken();
   if (!token) {
     throw new Error(
-      'CLOUDFLARE_API_TOKEN is required to restore an empty custom-domain set after Wrangler failed.',
+      'CLOUDFLARE_API_TOKEN is required to restore an empty custom-domain set after the Cloudflare trigger update failed.',
     );
   }
   const response = await fetch(
@@ -788,7 +788,7 @@ async function run(
   ) {
     const detail = result.stderr.trim() || result.stdout.trim() || result.error || 'unknown error';
     throw new Error(
-      `Wrangler failed (${args.slice(0, 2).join(' ')}, exit ${result.status}): ${detail}`,
+      `Cloudflare command failed (${args.slice(0, 2).join(' ')}, exit ${result.status}): ${detail}`,
     );
   }
   return result;

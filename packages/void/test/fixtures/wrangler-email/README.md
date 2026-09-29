@@ -1,11 +1,9 @@
 # wrangler email prose fixtures
 
-Verbatim stdout / stderr / exit code of the pinned wrangler's `email` command group
-and `whoami --json`, captured READ-ONLY against a real account, one directory per
-wrangler version. `src/cli/email-cloudflare.ts` pins its prose parsers to these
-(`WRANGLER_EMAIL_PROSE_VERSION`); `test/unit/wrangler-pin.test.ts` asserts that constant
-equals the installed wrangler's version, so a catalog move fails that test until the prose is
-re-captured into a new `<version>/` directory and the constant is moved.
+Historical stdout / stderr / exit code of Wrangler's `email` command group and
+`whoami --json`, captured read-only against a real account. The `cf` command
+adapter emits compatible prose for the existing parsers, and parser tests use
+these fixtures. The directory name records the original capture version.
 
 Capture (all read-only; `WRANGLER_SEND_METRICS=false`, account pinned via
 `CLOUDFLARE_ACCOUNT_ID`):

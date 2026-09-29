@@ -90,7 +90,7 @@ export async function resolvePlatformCloudflareCredentialWithInput<T>(
     }
 
     announceCloudflareLogin();
-    const login = await runWrangler(['login', '--use-keyring'], true);
+    const login = await runWrangler(['login'], false);
     assertNotCancelled();
     if (login.status !== 0) {
       throw new Error('platform: Cloudflare browser login did not complete.');
@@ -122,12 +122,6 @@ async function readExistingCredential(
   if (!(dependencies.interactive ?? process.stdin.isTTY === true)) {
     throw new Error(
       'platform: Cloudflare authentication is required. Run `void cloudflare login` interactively, or set CLOUDFLARE_API_TOKEN in CI.',
-    );
-  }
-  const keyring = await runWrangler(['auth', 'keyring', 'enable'], true);
-  if (keyring.status !== 0) {
-    throw new Error(
-      'platform: Could not enable secure Cloudflare credential storage. Refusing to use a plaintext OAuth credential.',
     );
   }
   return await readWranglerOAuthCredential(runWrangler);

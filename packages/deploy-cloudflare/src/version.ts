@@ -250,7 +250,7 @@ export async function deployCloudflareVersionTriggers(options: {
           status: 1,
           stdout: '',
           stderr:
-            'Wrangler cannot publish an empty Custom Domain set and no direct publisher was available.',
+            'Cloudflare could not publish an empty Custom Domain set and no direct publisher was available.',
         };
       }
       const published = await options.publishEmptyCustomDomains();

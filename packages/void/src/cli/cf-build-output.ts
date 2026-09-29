@@ -164,6 +164,7 @@ export async function prepareCfStaticBuildOutput(options: {
     await build({
       configFile: false,
       root: options.projectRoot,
+      publicDir: false,
       logLevel: 'error',
       build: {
         outDir: scratch,

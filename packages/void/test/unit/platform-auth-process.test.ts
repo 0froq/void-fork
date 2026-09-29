@@ -24,26 +24,21 @@ afterEach(() => {
 });
 
 describe('non-blocking platform auth processes', () => {
-  it('captures credential output and preserves secure, scrubbed command environments', async () => {
+  it('captures credential output and scrubs unrelated secrets from command environments', async () => {
     vi.stubEnv('VOID_PLATFORM_RECOVERY_KEY', 'synthetic-recovery-secret');
     vi.stubEnv('DATABASE_URL', 'synthetic-database-secret');
     fixture.source = `
       process.stdout.write(JSON.stringify({
         args: process.argv.slice(1),
-        keyring: process.env.CLOUDFLARE_AUTH_USE_KEYRING,
         sanitize: process.env.WRANGLER_LOG_SANITIZE,
-        log: process.env.WRANGLER_LOG,
         recovery: process.env.VOID_PLATFORM_RECOVERY_KEY,
         database: process.env.DATABASE_URL,
       }));
     `;
-    const result = await runCloudflareAuthCommand(root, ['login', '--use-keyring']);
+    const result = await runCloudflareAuthCommand(root, ['auth', 'token', '--json']);
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({
-      args: ['login', '--use-keyring'],
-      keyring: 'true',
-      sanitize: 'true',
-      log: 'none',
+      args: ['auth', 'token', '--json'],
     });
     expect(result.stderr).toBe('');
   });
@@ -92,7 +87,7 @@ describe('non-blocking platform auth processes', () => {
     const ready = join(root, 'login-ready');
     fixture.source = `
       const args = process.argv.slice(1);
-      if (args[0] === 'auth') process.exit(args[1] === 'keyring' ? 0 : 1);
+      if (args[0] === 'auth') process.exit(1);
       require('node:fs').writeFileSync(${JSON.stringify(ready)}, String(process.pid));
       setTimeout(() => process.exit(2), 10_000);
     `;

@@ -127,7 +127,7 @@ import {
 } from './client.ts';
 import {
   CloudflareAuthenticationError,
-  cloudflareKeyringNeedsTerminal,
+  cloudflareAuthNeedsTerminal,
   ensureCloudflareAuthentication,
 } from './cloudflare-auth.ts';
 import { classifyCloudflareDeployApp } from './cloudflare-deploy/classify.ts';
@@ -1231,13 +1231,13 @@ export function assertWranglerUploaderUnchanged(
   if (before === undefined || after === undefined) {
     return {
       ok: false,
-      reason: `could not resolve or hash the wrangler uploader to verify it across the build — refusing to run a deploy binary that cannot be verified.`,
+      reason: `could not resolve or hash the Cloudflare uploader to verify it across the build — refusing to run a deploy binary that cannot be verified.`,
     };
   }
   if (before !== after) {
     return {
       ok: false,
-      reason: `the build modified the wrangler uploader (its bundle hash changed across the build) — refusing to run it with your Cloudflare credentials.`,
+      reason: `the build modified the Cloudflare uploader (its bundle hash changed across the build) — refusing to run it with your Cloudflare credentials.`,
     };
   }
   return { ok: true };
@@ -3576,8 +3576,8 @@ export function createDeployWranglerRunner(
   const [command, ...prefix] = launcher;
   return (args, opts) => {
     const childEnv = deployChildEnv(accountId, apiBaseUrl);
-    const keyringTerminal = cloudflareKeyringNeedsTerminal(args);
-    if (!opts.capture || keyringTerminal) {
+    const interactiveLogin = cloudflareAuthNeedsTerminal(args);
+    if (!opts.capture || interactiveLogin) {
       childEnv.WRANGLER_LOG = 'none';
     }
     if (opts.env) {
@@ -3585,7 +3585,7 @@ export function createDeployWranglerRunner(
     }
     const result = spawnSync(command as string, [...prefix, ...args], {
       cwd: root,
-      stdio: keyringTerminal
+      stdio: interactiveLogin
         ? ['inherit', 'inherit', 'ignore']
         : opts.input === undefined
           ? opts.capture
@@ -4153,7 +4153,7 @@ export async function ensureCloudflareAuthSecret(options: {
   if (!isCleanWranglerExit(put)) {
     throw new CloudflareAuthSecretError(
       `deploy: could not create the remote ${BETTER_AUTH_SECRET_NAME} ` +
-        `(wrangler exit ${String(put.status)}). No worker was uploaded. ` +
+        `(Cloudflare command exit ${String(put.status)}). No worker was uploaded. ` +
         `Run \`void secret put ${BETTER_AUTH_SECRET_NAME}\` and retry.`,
       'put-failed',
     );
@@ -4162,7 +4162,7 @@ export async function ensureCloudflareAuthSecret(options: {
   const verified = await list(false);
   if (!verified.includes(BETTER_AUTH_SECRET_NAME)) {
     throw new CloudflareAuthSecretError(
-      `deploy: wrangler reported success but ${BETTER_AUTH_SECRET_NAME} was not present afterward. ` +
+      `deploy: Cloudflare reported success but ${BETTER_AUTH_SECRET_NAME} was not present afterward. ` +
         'No worker was uploaded; retry once Cloudflare secret storage is available.',
       'verification-failed',
     );
@@ -4380,7 +4380,7 @@ export async function runCloudflareDeploy(
     }
     log.error(
       [
-        'deploy: refusing to run the wrangler uploader with your Cloudflare credentials.',
+        'deploy: refusing to run the Cloudflare uploader with your Cloudflare credentials.',
         check.reason,
       ]
         .filter(Boolean)
@@ -6126,7 +6126,7 @@ async function runCloudflareStaticDeploy(
     if (!result.ok) {
       log.error(
         [
-          'deploy: refusing to run the wrangler uploader with your Cloudflare credentials.',
+          'deploy: refusing to run the Cloudflare uploader with your Cloudflare credentials.',
           result.reason,
         ]
           .filter(Boolean)

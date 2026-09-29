@@ -44,12 +44,7 @@ export type EnsureCloudflareAuthenticationOptions = Readonly<{
 
 export class CloudflareAuthenticationError extends Error {
   override name = 'CloudflareAuthenticationError';
-  readonly reason:
-    | 'keyring'
-    | 'login'
-    | 'not-authenticated'
-    | 'uploader-changed'
-    | 'environment-credentials';
+  readonly reason: 'login' | 'not-authenticated' | 'uploader-changed' | 'environment-credentials';
 
   constructor(message: string, reason: CloudflareAuthenticationError['reason']) {
     super(message);
@@ -109,11 +104,6 @@ export async function ensureCloudflareAuthentication(
 
   const existing = options.forceLogin ? null : await readSession();
   if (existing) {
-    if (existing.authType === 'OAuth Token') {
-      // A secure whoami can migrate default.toml to default.enc. Persist the
-      // same storage preference so a later CLI login updates that same store.
-      await enableCloudflareKeyring(run);
-    }
     return existing;
   }
 
@@ -125,10 +115,8 @@ export async function ensureCloudflareAuthentication(
     );
   }
 
-  await enableCloudflareKeyring(run);
-
   announceCloudflareLogin();
-  const login = await run(['login', '--use-keyring'], true);
+  const login = await run(['login'], false);
   if (!isCleanExit(login)) {
     throw new CloudflareAuthenticationError(
       'Cloudflare browser sign-in did not complete. Run `void cloudflare login` to try again.',
@@ -144,16 +132,6 @@ export async function ensureCloudflareAuthentication(
     );
   }
   return authenticated;
-}
-
-export async function enableCloudflareKeyring(run: CloudflareAuthRunner): Promise<void> {
-  const keyring = await run(['auth', 'keyring', 'enable'], true);
-  if (!isCleanExit(keyring)) {
-    throw new CloudflareAuthenticationError(
-      'Void could not enable secure Cloudflare credential storage in your operating-system keychain.',
-      'keyring',
-    );
-  }
 }
 
 /** Credential names only: never include their values in diagnostics. */
@@ -215,7 +193,7 @@ export function createBundledCloudflareAuthRunner(root: string): CloudflareAuthR
       env,
       maxBuffer: 10 * 1024 * 1024,
       shell: false,
-      stdio: cloudflareKeyringNeedsTerminal(args)
+      stdio: cloudflareAuthNeedsTerminal(args)
         ? ['inherit', 'inherit', 'ignore']
         : capture
           ? ['ignore', 'pipe', 'pipe']
@@ -240,9 +218,8 @@ export function runCloudflareAuthCommand(
   signal?: AbortSignal,
 ): Promise<CloudflareAuthRunResult> {
   const [command, ...prefix] = resolveWranglerArgv(root);
-  if (cloudflareKeyringNeedsTerminal(args)) {
-    // Only backend setup inherits the terminal; token reads and browser login
-    // continue through execFile below with bounded, captured output.
+  if (cloudflareAuthNeedsTerminal(args)) {
+    // cf can prompt or print a device code while the browser login is active.
     return new Promise((resolve) => {
       const child = spawn(command!, [...prefix, ...args], {
         cwd: root,
@@ -293,30 +270,13 @@ export function cloudflareAuthCommandEnvironment(
   args: ReadonlyArray<string>,
   source: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  const env = cloudflareAuthEnvironment(source);
-  if (args[0] === 'login' || args[0] === 'logout' || isCloudflareKeyringEnable(args)) {
-    env.WRANGLER_LOG = 'none';
-  }
-  return env;
+  void args;
+  return cloudflareAuthEnvironment(source);
 }
 
-function isCloudflareKeyringEnable(args: ReadonlyArray<string>): boolean {
-  return args.length === 3 && args[0] === 'auth' && args[1] === 'keyring' && args[2] === 'enable';
-}
-
-/**
- * Wrangler installs its Windows keyring backend only when stdin AND stdout are
- * terminals. Capturing `auth keyring enable` makes first-time setup fail even
- * inside PowerShell. This command only configures storage; it never reads or
- * prints a credential. Keep every other auth command captured.
- */
-export function cloudflareKeyringNeedsTerminal(args: ReadonlyArray<string>): boolean {
-  return (
-    process.platform === 'win32' &&
-    process.stdin.isTTY === true &&
-    process.stdout.isTTY === true &&
-    isCloudflareKeyringEnable(args)
-  );
+/** Browser login must display cf's prompts before it completes. */
+export function cloudflareAuthNeedsTerminal(args: ReadonlyArray<string>): boolean {
+  return args[0] === 'login';
 }
 
 export function cloudflareAuthEnvironment(
@@ -339,8 +299,6 @@ export function cloudflareAuthEnvironment(
       delete env[key];
     }
   }
-  env.CLOUDFLARE_AUTH_USE_KEYRING = 'true';
-  env.WRANGLER_LOG_SANITIZE = 'true';
   return env;
 }
 

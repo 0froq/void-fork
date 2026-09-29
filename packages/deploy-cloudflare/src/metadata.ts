@@ -2,7 +2,7 @@ import type { CloudflareCommandRunner } from './execute.ts';
 
 /**
  * Share one authenticated transport for the activator's read-only metadata calls.
- * Writes and unsupported commands retain the pinned Wrangler runner. Responses
+ * Writes and unsupported commands use the pinned cf command adapter. Responses
  * keep its JSON contract so activation and concurrency checks remain unchanged.
  */
 export function createCloudflareMetadataRunner(options: {
@@ -14,7 +14,7 @@ export function createCloudflareMetadataRunner(options: {
   getToken: () => Promise<string | null>;
   verifyUploader: () => boolean;
   fetch?: typeof globalThis.fetch;
-  /** Environment used to decide whether Wrangler's proxy-aware transport is required. */
+  /** Environment used to decide whether the CLI's proxy-aware transport is required. */
   env?: Readonly<Record<string, string | undefined>>;
 }): CloudflareCommandRunner {
   let tokenPromise: Promise<string | null> | undefined;
@@ -28,7 +28,7 @@ export function createCloudflareMetadataRunner(options: {
   const prefix = `${options.apiBaseUrl.replace(/\/$/, '')}/accounts/${encodeURIComponent(options.accountId)}/workers/scripts/${encodeURIComponent(options.workerName)}`;
   const fetcher = options.fetch ?? globalThis.fetch;
   const proxyEnv = options.env ?? process.env;
-  const requiresWranglerProxy = Boolean(
+  const requiresProxyTransport = Boolean(
     proxyEnv.https_proxy || proxyEnv.HTTPS_PROXY || proxyEnv.http_proxy || proxyEnv.HTTP_PROXY,
   );
   const refused = {
@@ -69,11 +69,9 @@ export function createCloudflareMetadataRunner(options: {
     ) {
       return fallback(args, runOptions);
     }
-    // Wrangler installs an EnvHttpProxyAgent for both upper- and lower-case
-    // proxy variables. Node's global fetch does not reliably do that, so take
-    // the pinned Wrangler path before reading credentials or attempting direct
-    // egress. Wrangler remains the sole owner of NO_PROXY interpretation.
-    if (requiresWranglerProxy) {
+    // Node's global fetch does not reliably honor both upper- and lower-case
+    // proxy variables. Keep the CLI transport in charge of proxy routing.
+    if (requiresProxyTransport) {
       return fallback(args, runOptions);
     }
     let response: Response | undefined;
@@ -89,7 +87,7 @@ export function createCloudflareMetadataRunner(options: {
           signal: AbortSignal.timeout(10_000),
         });
         if (response.status === 401 || response.status === 403) {
-          // Wrangler can refresh an expired OAuth session on the fallback path.
+          // The CLI can retry with its current session on the fallback path.
           tokenPromise = undefined;
         }
         if (response.ok) {
@@ -122,7 +120,7 @@ export function createCloudflareMetadataRunner(options: {
                     typeof item.metadata.created_on === 'string',
                 )
               ) {
-                // Match Wrangler's oldest-first, ten-most-recent JSON result.
+                // Preserve the oldest-first, ten-most-recent JSON contract.
                 const sorted = (items as Array<{ metadata: { created_on: string } }>)
                   .sort((a, b) => a.metadata.created_on.localeCompare(b.metadata.created_on))
                   .slice(-10);
@@ -133,7 +131,7 @@ export function createCloudflareMetadataRunner(options: {
         }
       }
     } catch {
-      // Read-only fallback retains Wrangler's retry/error/auth behavior. Never
+      // Read-only fallback retains the CLI's retry/error/auth behavior. Never
       // include token responses or provider payloads in a diagnostic here.
       tokenPromise = undefined;
     } finally {

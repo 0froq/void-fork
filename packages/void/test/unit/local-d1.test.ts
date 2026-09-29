@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { dirname, join } from 'pathslash';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
-import { getPlatformProxy } from 'wrangler';
 import { getLocalD1Target } from '../../src/cli/db.ts';
 import { voidPlugin } from '../../src/index.ts';
 import { resolveLocalD1Target, writeLocalD1PersistState } from '../../src/local-d1.ts';
@@ -156,17 +156,19 @@ describe('local D1 identity', () => {
     expect(existsSync(cliTarget.databasePath)).toBe(true);
     expect(await getApplicationTables(cliTarget.databasePath)).toContain('users');
 
-    // Read the migrated database through Wrangler's actual local D1 binding selection.
-    const proxy = await getPlatformProxy<{ APP_DATABASE: D1Database }>({
-      configPath: join(root, 'wrangler.jsonc'),
-      // Unlike the Vite plugin, this API accepts the versioned persistence path.
-      persist: { path: join(cliTarget.persistRoot, 'v3') },
-    });
+    // Read the migrated database through the local runtime's D1 binding.
+    const proxy = new Miniflare(
+      convertV4MiniflareOptions({
+        modules: true,
+        script: 'export default { fetch() { return new Response("ok") } }',
+        d1Databases: { APP_DATABASE: 'preview-app-id' },
+        resourcePersistencePath: join(cliTarget.persistRoot, 'v3'),
+      }),
+    );
     try {
-      await proxy.env.APP_DATABASE.prepare('INSERT INTO users (name) VALUES (?)').bind('Ada').run();
-      expect(await proxy.env.APP_DATABASE.prepare('SELECT name FROM users').first('name')).toBe(
-        'Ada',
-      );
+      const binding = (await proxy.getBindings()).APP_DATABASE as D1Database;
+      await binding.prepare('INSERT INTO users (name) VALUES (?)').bind('Ada').run();
+      expect(await binding.prepare('SELECT name FROM users').first('name')).toBe('Ada');
     } finally {
       await proxy.dispose();
     }

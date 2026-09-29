@@ -1102,10 +1102,12 @@ function isWorkerNotFoundOutput(output: string): boolean {
   const normalized = output.replace(/\s+/g, ' ');
   return (
     /Worker ".*?"(?: \(env: [^)]*\))? not found\./.test(normalized) &&
-    normalized.includes('If this is a new Worker, run `wrangler deploy` first to create it.') &&
-    normalized.includes(
-      "Otherwise, check that the Worker name is correct and you're logged into the right account.",
-    )
+    (normalized.includes('[code: 10007]') ||
+      normalized.includes('[code: 10090]') ||
+      (normalized.includes('If this is a new Worker, run `wrangler deploy` first to create it.') &&
+        normalized.includes(
+          "Otherwise, check that the Worker name is correct and you're logged into the right account.",
+        )))
   );
 }
 

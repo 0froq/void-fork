@@ -4,7 +4,6 @@ import type { CloudflareArgs } from './cloudflare-args.ts';
 import {
   createBundledCloudflareAuthRunner,
   cloudflareCredentialOverrides,
-  enableCloudflareKeyring,
   ensureCloudflareAuthentication,
   parseCloudflareAuthSession,
   type CloudflareAuthSession,
@@ -28,14 +27,10 @@ export async function runCloudflareCommand(root: string, args: CloudflareArgs): 
       if (!session) {
         throw new Error('Not signed in to Cloudflare. Run `void cloudflare login`.');
       }
-      if (session.authType === 'OAuth Token') {
-        await enableCloudflareKeyring(runWrangler);
-      }
       log.info(formatSession(root, session));
       return;
     }
     case 'logout': {
-      await enableCloudflareKeyring(runWrangler);
       const result = await runWrangler(['logout'], true);
       if (result.status !== 0) {
         throw new Error('Could not remove the local Cloudflare browser session.');
@@ -60,9 +55,6 @@ function formatSession(root: string, session: CloudflareAuthSession): string {
   }
   if (session.authType) {
     lines.push(`Authentication: ${session.authType}`);
-  }
-  if (session.authType === 'OAuth Token') {
-    lines.push('Credential storage: encrypted file protected by the OS keychain.');
   }
   const overrides = cloudflareCredentialOverrides();
   if (overrides.length > 0) {

@@ -1,7 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { pathToFileURL } from 'node:url';
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { join } from 'pathslash';
 import { build } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
@@ -87,14 +86,6 @@ export default { async fetch(request) {
         },
       });
     }
-    const requireVoid = createRequire(join(root, 'packages/void/package.json'));
-    const modulePath = createRequire(requireVoid.resolve('wrangler')).resolve('miniflare');
-    const { Miniflare, convertV4MiniflareOptions } = (await import(
-      pathToFileURL(modulePath).href
-    )) as {
-      convertV4MiniflareOptions(options: Record<string, unknown>): Record<string, unknown>;
-      Miniflare: new (options: Record<string, unknown>) => Runtime;
-    };
     runtime = new Miniflare(
       convertV4MiniflareOptions({
         compatibilityDate: '2026-09-01',
@@ -120,7 +111,7 @@ export default { async fetch(request) {
           },
         ],
       }),
-    );
+    ) as unknown as Runtime;
   }, 30_000);
 
   afterAll(async () => {

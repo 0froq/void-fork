@@ -63,7 +63,7 @@ describe('platform Cloudflare authentication', () => {
     expect(runWrangler).not.toHaveBeenCalled();
   });
 
-  it('reads OAuth through the supported Wrangler command', async () => {
+  it('reads OAuth through the Cloudflare session command', async () => {
     await expect(
       readWranglerOAuthCredential(() => ({
         status: 0,
@@ -73,7 +73,7 @@ describe('platform Cloudflare authentication', () => {
     ).resolves.toEqual({ source: 'oauth', token: 'oauth-token' });
   });
 
-  it('enables keyring storage before browser login', async () => {
+  it('uses cf browser login when no session exists', async () => {
     const loginNotice = vi.spyOn(log, 'info').mockImplementation(() => {});
     const calls: Array<string> = [];
     let tokenAttempts = 0;
@@ -96,12 +96,7 @@ describe('platform Cloudflare authentication', () => {
     });
 
     expect(credential).toEqual({ source: 'oauth', token: 'browser-token' });
-    expect(calls).toEqual([
-      'auth keyring enable',
-      'auth token --json',
-      'login --use-keyring',
-      'auth token --json',
-    ]);
+    expect(calls).toEqual(['auth token --json', 'login', 'auth token --json']);
     expect(loginNotice).toHaveBeenCalledWith(
       'Opening Cloudflare login in your browser. Press Ctrl+C to cancel.',
     );
@@ -137,11 +132,7 @@ describe('platform Cloudflare authentication', () => {
         VOID_PLATFORM_GITHUB_CLIENT_SECRET: 'github-secret',
         VOID_PLATFORM_RECOVERY_KEY: 'recovery-secret',
       }),
-    ).toEqual({
-      CLOUDFLARE_AUTH_USE_KEYRING: 'true',
-      PATH: '/bin',
-      WRANGLER_LOG_SANITIZE: 'true',
-    });
+    ).toEqual({ PATH: '/bin' });
   });
 });
 
@@ -161,13 +152,13 @@ describe('platform authentication during input', () => {
       runWrangler,
     });
     expect(readInput).toHaveBeenCalledOnce();
-    expect(runWrangler.mock.calls).toEqual([[['auth', 'keyring', 'enable'], true]]);
-    check.resolve(success);
+    expect(runWrangler.mock.calls).toEqual([[['auth', 'token', '--json'], true]]);
+    check.resolve(oauth);
     await expect(result).resolves.toEqual({
       input: 'team',
       credential: { source: 'oauth', token: 'browser-token' },
     });
-    expect(runWrangler.mock.calls).toHaveLength(2);
+    expect(runWrangler.mock.calls).toHaveLength(1);
   });
 
   it('waits for the name before opening browser login', async () => {
@@ -175,7 +166,6 @@ describe('platform authentication during input', () => {
     const loginNotice = vi.spyOn(log, 'info').mockImplementation(() => {});
     const runWrangler = vi
       .fn()
-      .mockResolvedValueOnce(success)
       .mockResolvedValueOnce({ ...success, status: 1 })
       .mockResolvedValueOnce(success)
       .mockResolvedValueOnce(oauth);
@@ -183,7 +173,7 @@ describe('platform authentication during input', () => {
       interactive: true,
       runWrangler,
     });
-    await vi.waitFor(() => expect(runWrangler).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(runWrangler).toHaveBeenCalledTimes(1));
     expect(loginNotice).not.toHaveBeenCalled();
     input.resolve('team');
     await expect(result).resolves.toEqual({
@@ -191,9 +181,8 @@ describe('platform authentication during input', () => {
       credential: { source: 'oauth', token: 'browser-token' },
     });
     expect(runWrangler.mock.calls.map(([args]) => args.join(' '))).toEqual([
-      'auth keyring enable',
       'auth token --json',
-      'login --use-keyring',
+      'login',
       'auth token --json',
     ]);
     expect(loginNotice).toHaveBeenCalledOnce();

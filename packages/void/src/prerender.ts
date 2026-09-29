@@ -7,8 +7,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
 import { dirname, join, relative } from 'pathslash';
 import { getApiUrl, getProxyUrl, getToken, isStagingMode } from './cli/auth.ts';
 import { ensurePlatformProxyAccess } from './cli/cf-access.ts';
@@ -257,16 +255,11 @@ async function createCloudflarePrerenderRunner(options: {
     remoteMode,
   });
 
-  const wranglerUrl = import.meta.resolve('wrangler/package.json');
-  const require = createRequire(wranglerUrl);
-  const miniflarePath = require.resolve('miniflare');
-  // miniflare 5 (bundled with wrangler >= 4.131) only accepts its new multi-worker
+  // Miniflare 5 only accepts its new multi-worker
   // config shape; the flat single-worker options below are the v4 shape, which it
   // still exports a converter for. `@cloudflare/vite-plugin` 1.54 builds its own
   // Miniflare instances the same way (`new Miniflare(convertV4MiniflareOptions(...))`).
-  const { Miniflare, convertV4MiniflareOptions } = (await import(
-    pathToFileURL(miniflarePath).href
-  )) as {
+  const { Miniflare, convertV4MiniflareOptions } = (await import('miniflare')) as unknown as {
     Miniflare: new (options: Record<string, unknown>) => {
       dispatchFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
       dispose(): Promise<void>;

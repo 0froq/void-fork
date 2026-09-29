@@ -2946,7 +2946,7 @@ export default config;
       expect(mockSpawnSync).toHaveBeenCalledWith(
         process.execPath,
         expect.arrayContaining(['login']),
-        expect.objectContaining({ cwd: root, stdio: ['ignore', 'pipe', 'pipe'] }),
+        expect.objectContaining({ cwd: root, stdio: ['inherit', 'inherit', 'ignore'] }),
       );
       expect(mockNote).toHaveBeenCalledWith(
         expect.stringContaining('Run `void connect --platform cloudflare`'),
@@ -3025,7 +3025,7 @@ export default config;
       expect(mockSpawnSync).toHaveBeenCalledWith(
         process.execPath,
         expect.arrayContaining(['login']),
-        expect.objectContaining({ cwd: root, stdio: ['ignore', 'pipe', 'pipe'] }),
+        expect.objectContaining({ cwd: root, stdio: ['inherit', 'inherit', 'ignore'] }),
       );
       const accountPrompt = mockSelect.mock.calls.find(
         ([options]) => options.message === 'Choose a Cloudflare account:',

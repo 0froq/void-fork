@@ -9274,7 +9274,7 @@ describe('assertWranglerUploaderUnchanged', () => {
   it('fails closed when the hash changed across the build', () => {
     const result = assertWranglerUploaderUnchanged('abc123', 'xyz789');
     expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/modified the wrangler uploader/);
+    expect(result.reason).toMatch(/modified the Cloudflare uploader/);
   });
 
   it('fails closed when the pre-build hash is undefined (unverifiable binary)', () => {

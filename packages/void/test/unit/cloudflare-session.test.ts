@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { log } from '@clack/prompts';
@@ -27,15 +26,11 @@ const newSession = {
   accounts: [{ id: 'work-id', name: 'VoidZero' }],
 };
 type State = {
-  oldSession: typeof oldSession;
+  session?: typeof oldSession;
   nextLogin: typeof newSession;
-  plaintext?: typeof oldSession;
-  encrypted?: typeof oldSession;
-  keyringEnabled: boolean;
   commands: Array<Array<string>>;
   failLogin?: boolean;
   badWhoami?: boolean;
-  failKeyring?: boolean;
 };
 let root: string;
 let output: Array<string>;
@@ -46,16 +41,11 @@ const write = (state: State) =>
   writeFileSync(join(root, 'auth-fixture.json'), JSON.stringify(state));
 const pin =
   '{\n // Existing deployment target must not change on login.\n "account_id": "individual-id", "name": "existing-worker"\n}';
+
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'void-auth-session-'));
   fixture.cli = join(import.meta.dirname, '../fixtures/cloudflare-auth-cli.mjs');
-  write({
-    oldSession,
-    nextLogin: newSession,
-    plaintext: oldSession,
-    keyringEnabled: false,
-    commands: [],
-  });
+  write({ session: oldSession, nextLogin: newSession, commands: [] });
   writeFileSync(join(root, 'wrangler.jsonc'), pin);
   for (const key of [
     'CLOUDFLARE_API_TOKEN',
@@ -66,7 +56,6 @@ beforeEach(() => {
     'CF_EMAIL',
     'CLOUDFLARE_ACCOUNT_ID',
     'CF_ACCOUNT_ID',
-    'CLOUDFLARE_AUTH_USE_KEYRING',
   ]) {
     vi.stubEnv(key, '');
   }
@@ -81,6 +70,7 @@ beforeEach(() => {
     });
   }
 });
+
 afterEach(() => {
   for (const [stream, descriptor] of [
     [process.stdin, stdinTty],
@@ -114,14 +104,6 @@ describe('Cloudflare session switching through the bundled CLI runner', () => {
     expect(output.join('\n')).not.toContain('Signed in to Cloudflare');
   });
 
-  it('stops before browser login if persistent secure storage cannot be enabled', async () => {
-    write({ ...read(), failKeyring: true });
-    await expect(runCloudflareCommand(root, { subcommand: 'login' })).rejects.toThrow(
-      'secure Cloudflare credential storage',
-    );
-    expect(read().commands.some((args) => args[0] === 'login')).toBe(false);
-  });
-
   it('rejects a global API key pair without printing either value', async () => {
     vi.stubEnv('CF_API_KEY', 'synthetic-global-key');
     vi.stubEnv('CLOUDFLARE_EMAIL', 'credential-email@example.test');
@@ -135,10 +117,9 @@ describe('Cloudflare session switching through the bundled CLI runner', () => {
     expect(read().commands).toEqual([]);
   });
 
-  it('explicit login replaces an old encrypted session and reports the new identity without retargeting', async () => {
-    write({ ...read(), encrypted: oldSession, plaintext: newSession });
+  it('explicit login replaces the old session without retargeting the project', async () => {
     await runCloudflareCommand(root, { subcommand: 'login' });
-    expect(read().encrypted?.email).toBe(newSession.email);
+    expect(read().session?.email).toBe(newSession.email);
     expect(output.join('\n')).toContain(newSession.email);
     expect(output.join('\n')).toContain('OAuth Token');
     expect(output.join('\n')).toContain('work-id');
@@ -147,7 +128,7 @@ describe('Cloudflare session switching through the bundled CLI runner', () => {
   });
 
   it.each(['automatic authentication', 'status'])(
-    'adopting plaintext through %s persists secure storage for later tooling logins',
+    'reuses the existing cf session for %s',
     async (mode) => {
       if (mode === 'status') {
         await runCloudflareCommand(root, { subcommand: 'status' });
@@ -158,15 +139,8 @@ describe('Cloudflare session switching through the bundled CLI runner', () => {
           runWrangler: createBundledCloudflareAuthRunner(root),
         });
       }
-      expect(read().keyringEnabled).toBe(true);
       expect(read().commands.some((args) => args[0] === 'login')).toBe(false);
-      const env = { ...process.env };
-      delete env.CLOUDFLARE_AUTH_USE_KEYRING;
-      execFileSync(process.execPath, [fixture.cli, 'login'], { cwd: root, env });
-      output = [];
-      await runCloudflareCommand(root, { subcommand: 'status' });
-      expect(output.join('\n')).toContain(newSession.email);
-      expect(output.join('\n')).toContain('work-id');
+      expect(read().session).toEqual(oldSession);
     },
   );
 
@@ -177,29 +151,27 @@ describe('Cloudflare session switching through the bundled CLI runner', () => {
       const error = await runCloudflareCommand(root, { subcommand: 'login' }).catch(
         (error) => error as Error,
       );
-      expect(error).toBeInstanceOf(Error);
       expect(String(error)).toContain(name);
       expect(String(error)).not.toContain('synthetic-secret-never-print');
       expect(read().commands).toEqual([]);
     },
   );
 
-  it('does not announce success or discard the old session when browser login fails', async () => {
-    write({ ...read(), encrypted: oldSession, failLogin: true });
+  it('keeps the old session when browser login fails', async () => {
+    write({ ...read(), failLogin: true });
     await expect(runCloudflareCommand(root, { subcommand: 'login' })).rejects.toThrow(
       'did not complete',
     );
-    expect(read().encrypted).toEqual(oldSession);
+    expect(read().session).toEqual(oldSession);
     expect(output.join('\n')).not.toContain('Signed in to Cloudflare');
   });
 
-  it('status distinguishes token authentication and a pinned account from the user identity', async () => {
+  it('status distinguishes token authentication and the pinned account', async () => {
     vi.stubEnv('CLOUDFLARE_API_TOKEN', 'synthetic-secret-never-print');
     await runCloudflareCommand(root, { subcommand: 'status' });
     expect(output.join('\n')).toContain('User API Token');
     expect(output.join('\n')).toContain('CLOUDFLARE_API_TOKEN');
     expect(output.join('\n')).toContain('wrangler.jsonc');
     expect(output.join('\n')).not.toContain('synthetic-secret-never-print');
-    expect(read().keyringEnabled).toBe(false);
   });
 });

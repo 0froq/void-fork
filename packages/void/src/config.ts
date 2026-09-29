@@ -1,5 +1,4 @@
 import type { RewriteDestination } from 'void/routes';
-import type { Unstable_RawConfig } from 'wrangler';
 import type { DevRedirectRule, HeaderRule, RedirectRule } from './cli/types.ts';
 export type { RedirectRule };
 import {
@@ -19,7 +18,7 @@ export type RedirectDestination = string | { to: string; status?: 301 | 302 | 30
 /** Supported database dialects (internal representation). */
 export type DatabaseDialect = 'sqlite' | 'postgresql' | 'mysql';
 
-/** Curated wrangler fields that can be set via void.json. */
+/** Curated Worker fields accepted in the legacy void.json config. */
 export type WranglerConfig = {
   compatibility_date?: string;
   compatibility_flags?: Array<string>;
@@ -96,7 +95,64 @@ export type EmailConfig = {
 };
 
 /** Cloudflare Worker configuration passed through to the native deploy artifact. */
-export type CloudflareConfig = Unstable_RawConfig & Record<string, unknown>;
+type CloudflareField<T> = T & Record<string, unknown>;
+
+export type CloudflareConfig = Record<string, unknown> & {
+  account_id?: string;
+  name?: string;
+  main?: string;
+  compatibility_date?: string;
+  compatibility_flags?: Array<string>;
+  workers_dev?: boolean;
+  preview_urls?: boolean;
+  vars?: Record<string, unknown>;
+  routes?: Array<
+    string | CloudflareField<{ pattern: string; zone_name?: string; zone_id?: string }>
+  >;
+  route?: string | CloudflareField<{ pattern: string; zone_name?: string; zone_id?: string }>;
+  d1_databases?: Array<
+    CloudflareField<{
+      binding: string;
+      database_name?: string;
+      database_id?: string;
+      migrations_dir?: string;
+      migrations_table?: string;
+    }>
+  >;
+  kv_namespaces?: Array<CloudflareField<{ binding: string; id?: string; preview_id?: string }>>;
+  r2_buckets?: Array<
+    CloudflareField<{ binding: string; bucket_name?: string; preview_bucket_name?: string }>
+  >;
+  hyperdrive?: Array<CloudflareField<{ binding: string; id?: string }>>;
+  queues?: CloudflareField<{
+    producers?: Array<CloudflareField<{ binding: string; queue: string }>>;
+    consumers?: Array<
+      CloudflareField<{
+        queue: string;
+        max_batch_size?: number;
+        max_batch_timeout?: number;
+        max_retries?: number;
+        dead_letter_queue?: string;
+      }>
+    >;
+  }>;
+  assets?: CloudflareField<{
+    directory?: string;
+    binding?: string;
+    not_found_handling?: 'single-page-application' | '404-page' | 'none';
+    run_worker_first?: boolean | Array<string>;
+  }>;
+  triggers?: CloudflareField<{ crons?: Array<string> }>;
+  send_email?: Array<
+    CloudflareField<{
+      name: string;
+      destination_address?: string;
+      allowed_destination_addresses?: Array<string>;
+      allowed_sender_addresses?: Array<string>;
+    }>
+  >;
+  addresses?: Array<string>;
+};
 
 /** Shape of the Void project config. All fields optional. */
 export type VoidConfig = {
