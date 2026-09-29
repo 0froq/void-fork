@@ -12,7 +12,11 @@ import { isDeepStrictEqual } from 'node:util';
 import { intro, log, outro } from '@clack/prompts';
 import { parse, parseTree, type Node, type ParseError } from 'jsonc-parser';
 import { join } from 'pathslash';
-import { seedCloudflareConfig, VOID_LOCK_FILE } from '../cloudflare-config.ts';
+import {
+  seedCloudflareConfig,
+  stashCloudflareDeployPointer,
+  VOID_LOCK_FILE,
+} from '../cloudflare-config.ts';
 import { loadTypedVoidConfigFile, TYPED_CONFIG_FILE } from '../config-loader.ts';
 import { validateConfig } from '../config.ts';
 import {
@@ -89,6 +93,9 @@ export function migrateLegacyVoidConfig(root: string): boolean {
   const wranglerName = wranglerFiles[0];
   const typedPath = join(root, TYPED_CONFIG_FILE);
   if (!existsSync(legacyPath) && !wranglerName) {
+    if (existsSync(typedPath)) {
+      stashCloudflareDeployPointer(root);
+    }
     return false;
   }
   const frameworkPatches = planFrameworkConfigMigration(root);
@@ -184,6 +191,7 @@ export function migrateLegacyVoidConfig(root: string): boolean {
     if (wranglerName) {
       unlinkSync(join(root, wranglerName));
     }
+    stashCloudflareDeployPointer(root);
     return true;
   } finally {
     rmSync(temporaryPath, { force: true });

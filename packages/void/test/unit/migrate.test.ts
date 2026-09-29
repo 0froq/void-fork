@@ -100,4 +100,20 @@ describe('migrateLegacyVoidConfig', () => {
     expect(readFileSync(join(root, 'void.config.ts'), 'utf8')).toBe(typed);
     expect(readFileSync(join(root, 'astro.config.ts'), 'utf8')).toBe(adapter);
   });
+
+  it('removes an implicit deploy pointer left by a pre-migration build', () => {
+    setup('{}');
+    const pointerDir = join(root, '.wrangler', 'deploy');
+    mkdirSync(pointerDir, { recursive: true });
+    const pointer = '{"configPath":"../../dist/ssr/wrangler.json"}';
+    writeFileSync(join(pointerDir, 'config.json'), pointer);
+
+    expect(migrateLegacyVoidConfig(root)).toBe(true);
+    expect(existsSync(join(pointerDir, 'config.json'))).toBe(false);
+    expect(readFileSync(join(root, '.void', 'preview-deploy-config.json'), 'utf8')).toBe(pointer);
+
+    writeFileSync(join(pointerDir, 'config.json'), pointer);
+    expect(migrateLegacyVoidConfig(root)).toBe(false);
+    expect(existsSync(join(pointerDir, 'config.json'))).toBe(false);
+  });
 });
