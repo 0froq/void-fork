@@ -67,7 +67,13 @@ function copyBundle(
     const absolute = join(entry.parentPath, entry.name);
     if (entry.isSymbolicLink()) {
       const target = realpathSync(absolute);
-      if (!target.startsWith(`${realpathSync(source)}/`)) {
+      const targetRelative = relative(realpathSync(source), target).replace(/\\/g, '/');
+      if (
+        !targetRelative ||
+        targetRelative === '..' ||
+        targetRelative.startsWith('../') ||
+        isAbsolute(targetRelative)
+      ) {
         throw new Error('The built Worker contains a symlink outside its output directory.');
       }
     }
