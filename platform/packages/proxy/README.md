@@ -36,6 +36,12 @@ separate internal proof. Prerender JWTs are accepted only when their signed
 project claim exactly matches `projectId`; they are not valid at deployment or
 project-management APIs.
 
+The proxy bounds JSON bodies before authentication: control routes accept up to
+1 MiB, while `/ai/run`, `/ai/provider`, `/ai/toMarkdown`, `/kv/put`, and R2 put
+routes accept up to 8 MiB. Email sends retain their 8 MiB envelope limit and
+receipt verification accepts up to 2 KiB. A stalled body times out after five
+seconds; non-email routes return 413 for oversized bodies and 408 for timeouts.
+
 ## Endpoints
 
 ### AI

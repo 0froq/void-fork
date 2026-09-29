@@ -5,12 +5,12 @@ import { ai } from './ai.ts';
 import { asString, isProxyBody } from './body.ts';
 import { proxyCapabilityEnabled } from './capabilities.ts';
 import { d1 } from './d1.ts';
-import { readEmailRequestJson } from './email-request-body.ts';
 import { email } from './email.ts';
 import { guardHumanStream } from './human-stream.ts';
 import { kv } from './kv.ts';
 import { PLATFORM_DISABLED_KEY, PLATFORM_DISABLED_VALUE } from './platform-lifecycle.ts';
 import { r2 } from './r2.ts';
+import { readRequestJson, requestBodyMaxBytes, RequestBodyError } from './request-body.ts';
 import { verifyPrerenderAuthority, verifyProjectDeployAccess } from './resolve.ts';
 import { revalidate } from './revalidate.ts';
 import type { Env, JwtPayload, ProxyBody, ProxyEnv } from './types.ts';
@@ -92,7 +92,7 @@ async function hmacSign(data: string, secret: string): Promise<string> {
 app.post('/email/verify-receipt', async (context) => {
   let body: unknown;
   try {
-    body = await readEmailRequestJson(context.req.raw);
+    body = await readRequestJson(context.req.raw, 2 * 1024);
   } catch {
     return context.json({ valid: false }, 400);
   }
@@ -138,15 +138,17 @@ app.post('/*', async (context, next) => {
   let body: ProxyBody;
   try {
     // Five MiB of MIME expands to about seven MiB of base64, plus JSON metadata.
-    const json =
-      path === '/email' || path.startsWith('/email/')
-        ? await readEmailRequestJson(context.req.raw, 8 * 1024 * 1024)
-        : await context.req.json<unknown>();
+    const maxBytes =
+      path === '/email' || path.startsWith('/email/') ? 8 * 1024 * 1024 : requestBodyMaxBytes(path);
+    const json = await readRequestJson(context.req.raw, maxBytes);
     if (!isProxyBody(json)) {
       return context.json({ error: 'invalid JSON body' }, 400);
     }
     body = json;
-  } catch {
+  } catch (error) {
+    if (path !== '/email' && !path.startsWith('/email/') && error instanceof RequestBodyError) {
+      return context.json({ error: error.message }, error.status);
+    }
     return context.json({ error: 'invalid JSON body' }, 400);
   }
   context.set('body', body);

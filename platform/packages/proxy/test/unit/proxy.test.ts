@@ -1,8 +1,8 @@
 import { signEmailReceipt } from '@void/platform/email-protocol';
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vite-plus/test';
-import { readEmailRequestJson } from '../../src/email-request-body.ts';
 import worker from '../../src/index.ts';
 import { PLATFORM_DISABLED_KEY } from '../../src/platform-lifecycle.ts';
+import { readRequestJson } from '../../src/request-body.ts';
 
 const JWT_SECRET = 'test-secret-key';
 const EMAIL_SIGNING_SECRET = 'test-email-signing-key-independent';
@@ -286,6 +286,85 @@ describe('proxy worker', () => {
     });
   });
 
+  describe('non-email request body bounds', () => {
+    it('rejects an oversized declared body before reading or authenticating it', async () => {
+      const pull = vi.fn((controller: ReadableStreamDefaultController<Uint8Array>) => {
+        controller.enqueue(new TextEncoder().encode('{}'));
+        controller.close();
+      });
+      const cancel = vi.fn();
+      const request = new Request('https://proxy.void.cloud/ai/models', {
+        method: 'POST',
+        headers: { 'content-length': String(1024 * 1024 + 1) },
+        body: new ReadableStream({ pull, cancel }, { highWaterMark: 0 }),
+        duplex: 'half',
+      } as RequestInit);
+
+      const response = await worker.fetch(request, createEnv());
+      expect(response.status).toBe(413);
+      expect(pull).not.toHaveBeenCalled();
+      expect(cancel).toHaveBeenCalledOnce();
+    });
+
+    it('enforces the byte cap when Content-Length is missing', async () => {
+      const body = new TextEncoder().encode(JSON.stringify({ pad: 'x'.repeat(1024 * 1024) }));
+      const request = new Request('https://proxy.void.cloud/ai/models', {
+        method: 'POST',
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(body);
+            controller.close();
+          },
+        }),
+        duplex: 'half',
+      } as RequestInit);
+      expect(request.headers.get('content-length')).toBeNull();
+
+      const response = await worker.fetch(request, createEnv());
+      expect(response.status).toBe(413);
+    });
+
+    it('ends a stalled unauthenticated body at the read deadline', async () => {
+      vi.useFakeTimers();
+      let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+      let cancelled = false;
+      const request = new Request('https://proxy.void.cloud/ai/models', {
+        method: 'POST',
+        body: new ReadableStream({
+          start(value) {
+            controller = value;
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        duplex: 'half',
+      } as RequestInit);
+      let status: number | undefined;
+      const response = worker.fetch(request, createEnv()).then((value) => {
+        status = value.status;
+      });
+
+      try {
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(status).toBe(408);
+      } finally {
+        if (!cancelled) {
+          controller?.close();
+        }
+        await response;
+      }
+    });
+
+    it('allows a larger remote write body through to authentication', async () => {
+      const response = await worker.fetch(
+        post('/r2/put', { projectId: 'proj_1', aiToken: 'invalid', pad: 'x'.repeat(1024 * 1024) }),
+        createEnv(),
+      );
+      expect(response.status).toBe(403);
+    });
+  });
+
   describe('email receipt verification', () => {
     it('initiates cancellation without awaiting an uncooperative request stream', async () => {
       vi.useFakeTimers();
@@ -301,7 +380,7 @@ describe('proxy worker', () => {
         body,
         duplex: 'half',
       } as RequestInit);
-      const outcome = readEmailRequestJson(request).then(
+      const outcome = readRequestJson(request, 2 * 1024).then(
         () => 'resolved',
         (error: unknown) => error,
       );
