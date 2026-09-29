@@ -247,8 +247,10 @@ const _requestResourceKey = {};
 
 export const db = new Proxy({}, {
   get(_, prop) {
-    const instance = getRuntimeRequestResource(_requestResourceKey, () =>
-      createDb(requireRuntimeBinding(${JSON.stringify(d1BindingName)}))
+    const instance = getRuntimeRequestResource(
+      _requestResourceKey,
+      () => createDb(requireRuntimeBinding(${JSON.stringify(d1BindingName)})),
+      () => createPrimaryDb(requireRuntimeBinding(${JSON.stringify(d1BindingName)}))
     );
     return Reflect.get(instance, prop);
   },
@@ -256,6 +258,10 @@ export const db = new Proxy({}, {
 
 export function createDb(d1) {
   return drizzle(d1.withSession("first-unconstrained")${drizzleConfig});
+}
+
+function createPrimaryDb(d1) {
+  return drizzle(d1.withSession("first-primary")${drizzleConfig});
 }
 `;
       },

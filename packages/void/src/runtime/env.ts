@@ -25,9 +25,16 @@ type RuntimeRequestScope = {
 const runtimeRequestContext = new AsyncLocalStorage<RuntimeRequestScope>();
 
 /** @internal Reuse a resource only within the current runtime request. */
-export function getRuntimeRequestResource<T>(key: object, initialize: () => T): T {
+export function getRuntimeRequestResource<T>(
+  key: object,
+  initialize: () => T,
+  outsideScope?: () => T,
+): T {
   const scope = runtimeRequestContext.getStore();
   if (!scope) {
+    if (outsideScope) {
+      return outsideScope();
+    }
     throw new Error('env: Request-scoped resource is unavailable outside a runtime handler.');
   }
   if (scope.resources.has(key)) {

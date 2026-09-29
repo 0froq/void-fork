@@ -230,6 +230,31 @@ describe('drizzlePlugin db typing generation', () => {
     expect(state.clients[2]).toEqual({ constraint: 'first-unconstrained', owner: 'other' });
   });
 
+  it('uses a primary D1 session when a framework handler has no Void request scope', async () => {
+    const { module, state } = await loadExecutableDbModule('sqlite');
+    const previousEnv = (globalThis as Record<string, unknown>).__env__;
+    (globalThis as Record<string, unknown>).__env__ = {
+      DB: {
+        withSession(constraint: string) {
+          return { constraint };
+        },
+      },
+    };
+    try {
+      expect(module.db.instanceId).not.toBe(module.db.instanceId);
+      expect(state.clients).toEqual([
+        { constraint: 'first-primary' },
+        { constraint: 'first-primary' },
+      ]);
+    } finally {
+      if (previousEnv === undefined) {
+        delete (globalThis as Record<string, unknown>).__env__;
+      } else {
+        (globalThis as Record<string, unknown>).__env__ = previousEnv;
+      }
+    }
+  });
+
   it('keeps sqlite projects on the D1 internal db entry', () => {
     const root = createProjectRoot();
 

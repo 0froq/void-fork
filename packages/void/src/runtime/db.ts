@@ -50,6 +50,10 @@ export function createDb(d1: D1Database): DrizzleD1Database {
   return _drizzle(d1.withSession('first-unconstrained') as unknown as D1Database);
 }
 
+function createPrimaryDb(d1: D1Database): DrizzleD1Database {
+  return _drizzle(d1.withSession('first-primary') as unknown as D1Database);
+}
+
 const requestDbKey = {};
 
 /**
@@ -59,8 +63,12 @@ const requestDbKey = {};
  */
 export const db: DrizzleD1Database = new Proxy({} as DrizzleD1Database, {
   get(_, prop) {
-    const instance = getRuntimeRequestResource(requestDbKey, () =>
-      createDb(requireRuntimeBinding<D1Database>('DB')),
+    const instance = getRuntimeRequestResource(
+      requestDbKey,
+      () => createDb(requireRuntimeBinding<D1Database>('DB')),
+      // Framework adapters do not always enter Void's request scope. Without a
+      // shared session, each operation starts on primary to preserve fresh reads.
+      () => createPrimaryDb(requireRuntimeBinding<D1Database>('DB')),
     );
     return Reflect.get(instance, prop);
   },
