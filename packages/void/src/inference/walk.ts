@@ -25,7 +25,8 @@ const ENV_BINDING_RE = /\benv\s*\.\s*(DB|KV|STORAGE|QUEUE_\w+|AI|SANDBOX)\b/;
  * Infer which Cloudflare bindings a source file uses.
  *
  * Uses a tiered approach for performance:
- *   Tier 1: es-module-lexer to extract import sources (fast, asm.js, no init)
+ *   Tier 1: es-module-lexer to extract import sources (fast, asm.js, no init),
+ *           with a TSX parser fallback when the lexer cannot parse JSX
  *   Tier 2: Regex check for env.DB/KV/STORAGE patterns
  *   Tier 3: Full AST walk only when regex matches (to confirm member expressions)
  */
@@ -42,95 +43,91 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
     needsEmail: false,
   };
 
+  const moduleReferences: Array<{ source: string; statement: string }> = [];
+  let parsedProgram: AstProgram | undefined;
+
   // Tier 1: Fast import detection via es-module-lexer
   try {
     const [imports] = parse(code);
     for (const imp of imports) {
-      const source = imp.specifier;
-      if (!source) {
-        continue;
-      }
-
-      switch (source) {
-        case 'void/db':
-          result.needsD1 = true;
-          break;
-        case 'void/kv':
-          result.needsKV = true;
-          break;
-        case 'void/storage':
-          result.needsR2 = true;
-          break;
-        case 'void/auth':
-          result.needsAuth = true;
-          break;
-        case 'void/queues':
-          result.needsQueues = true;
-          break;
-        case 'void/ai':
-          result.needsAI = true;
-          break;
-        case 'void/sandbox':
-          result.needsSandbox = true;
-          break;
-        case 'void/email':
-          if (!isTypeOnlyImportStatement(code.slice(imp.importStart, imp.importEnd + 1))) {
-            result.needsEmail = true;
-          }
-          break;
-        case 'void/live':
-          if (!isTypeOnlyImportStatement(code.slice(imp.importStart, imp.importEnd + 1))) {
-            result.needsLive = true;
-          }
-          break;
-        case 'void/client':
-        case 'void/client/react':
-        case 'void/client/vue':
-        case 'void/client/svelte':
-        case 'void/client/solid': {
-          // Check if the `auth` specifier is imported (not just `fetch`)
-          const stmt = code.slice(imp.importStart, imp.importEnd + 1);
-          if (/\bauth\b/.test(stmt)) {
-            result.needsAuth = true;
-          }
-          break;
-        }
+      if (imp.specifier) {
+        moduleReferences.push({
+          source: imp.specifier,
+          statement: code.slice(imp.importStart, imp.importEnd + 1),
+        });
       }
     }
   } catch {
-    // es-module-lexer can't parse JSX/TSX — fall back to regex for void/* imports
-    if (/\bfrom\s+["']void\/db["']/.test(code)) {
-      result.needsD1 = true;
+    // JSX/TSX is not accepted by es-module-lexer. Parse it once instead of
+    // scanning across unrelated import statements with a multiline regex.
+    try {
+      parsedProgram = parseSync(filename, code).program as unknown as AstProgram;
+      for (const node of parsedProgram.body as Array<{
+        type: string;
+        start: number;
+        end: number;
+        source?: { value?: unknown };
+      }>) {
+        if (
+          (node.type === 'ImportDeclaration' ||
+            node.type === 'ExportNamedDeclaration' ||
+            node.type === 'ExportAllDeclaration') &&
+          typeof node.source?.value === 'string'
+        ) {
+          moduleReferences.push({
+            source: node.source.value,
+            statement: code.slice(node.start, node.end),
+          });
+        }
+      }
+    } catch {
+      // Invalid source cannot be safely inferred from import text alone.
     }
-    if (/\bfrom\s+["']void\/kv["']/.test(code)) {
-      result.needsKV = true;
+  }
+
+  for (const { source, statement } of moduleReferences) {
+    if (isTypeOnlyModuleStatement(statement)) {
+      continue;
     }
-    if (/\bfrom\s+["']void\/storage["']/.test(code)) {
-      result.needsR2 = true;
-    }
-    if (/\bfrom\s+["']void\/auth["']/.test(code)) {
-      result.needsAuth = true;
-    }
-    if (/\bfrom\s+["']void\/queue["']/.test(code)) {
-      result.needsQueues = true;
-    }
-    if (/\bfrom\s+["']void\/ai["']/.test(code)) {
-      result.needsAI = true;
-    }
-    if (/\bfrom\s+["']void\/sandbox["']/.test(code)) {
-      result.needsSandbox = true;
-    }
-    if (hasRuntimeImportFrom(code, 'void/email')) {
-      result.needsEmail = true;
-    }
-    if (hasRuntimeImportFrom(code, 'void/live')) {
-      result.needsLive = true;
-    }
-    if (
-      /\bfrom\s+["']void\/client(?:\/(?:react|vue|svelte|solid))?["']/.test(code) &&
-      /\bauth\b/.test(code)
-    ) {
-      result.needsAuth = true;
+    switch (source) {
+      case 'void/db':
+        result.needsD1 = true;
+        break;
+      case 'void/kv':
+        result.needsKV = true;
+        break;
+      case 'void/storage':
+        result.needsR2 = true;
+        break;
+      case 'void/auth':
+        result.needsAuth = true;
+        break;
+      case 'void/queues':
+        result.needsQueues = true;
+        break;
+      case 'void/ai':
+        result.needsAI = true;
+        break;
+      case 'void/sandbox':
+        result.needsSandbox = true;
+        break;
+      case 'void/email':
+        result.needsEmail = true;
+        break;
+      case 'void/live':
+        result.needsLive = true;
+        break;
+      case 'void/client':
+      case 'void/client/react':
+      case 'void/client/vue':
+      case 'void/client/svelte':
+      case 'void/client/solid': {
+        // Check if the `auth` specifier is imported (not just `fetch`)
+        if (/\bauth\b/.test(statement)) {
+          result.needsAuth = true;
+        }
+        break;
+      }
     }
   }
 
@@ -155,14 +152,14 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
   }
 
   // Tier 3: Full AST walk to confirm member expressions
-  let parsed: ReturnType<typeof parseSync>;
-  try {
-    parsed = parseSync(filename, code);
-  } catch {
-    return result;
+  let program = parsedProgram;
+  if (!program) {
+    try {
+      program = parseSync(filename, code).program as unknown as AstProgram;
+    } catch {
+      return result;
+    }
   }
-
-  const program = parsed.program as unknown as AstProgram;
 
   walk(program as unknown as Parameters<typeof walk>[0], {
     enter(node) {
@@ -216,8 +213,8 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
   return result;
 }
 
-function isTypeOnlyImportStatement(statement: string): boolean {
-  if (/^\s*import\s+type\b/.test(statement)) {
+function isTypeOnlyModuleStatement(statement: string): boolean {
+  if (/^\s*(?:import|export)\s+type\b/.test(statement)) {
     return true;
   }
 
@@ -228,7 +225,7 @@ function isTypeOnlyImportStatement(statement: string): boolean {
   }
 
   const beforeSpecifiers = statement.slice(0, specifierStart);
-  if (!/^\s*import\s*$/.test(beforeSpecifiers)) {
+  if (!/^\s*(?:import|export)\s*$/.test(beforeSpecifiers)) {
     return false;
   }
 
@@ -238,21 +235,6 @@ function isTypeOnlyImportStatement(statement: string): boolean {
     .map((specifier) => specifier.trim())
     .filter(Boolean);
   return specifiers.length > 0 && specifiers.every((specifier) => specifier.startsWith('type '));
-}
-
-function hasRuntimeImportFrom(code: string, source: string): boolean {
-  const escapedSource = source.replaceAll('/', '\\/');
-  const importRe = new RegExp(
-    `\\bimport\\s+(?:[\\s\\S]*?\\bfrom\\s+)?["']${escapedSource}["']\\s*;?`,
-    'g',
-  );
-  for (const match of code.matchAll(importRe)) {
-    const statement = match[0];
-    if (!isTypeOnlyImportStatement(statement)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 /**

@@ -267,6 +267,56 @@ describe('inferBindingsFromSource', () => {
     expect(result.needsD1).toBe(false);
   });
 
+  it.each([
+    ['void/db', 'needsD1'],
+    ['void/kv', 'needsKV'],
+    ['void/storage', 'needsR2'],
+    ['void/auth', 'needsAuth'],
+    ['void/queues', 'needsQueues'],
+    ['void/ai', 'needsAI'],
+    ['void/sandbox', 'needsSandbox'],
+  ] as const)('ignores type-only imports from %s', (source, binding) => {
+    const named = inferBindingsFromSource(`import type { Feature } from '${source}';`, 'types.ts');
+    const inline = inferBindingsFromSource(`import { type Feature } from '${source}';`, 'types.ts');
+    expect(named[binding]).toBe(false);
+    expect(inline[binding]).toBe(false);
+  });
+
+  it('ignores type-only AI imports in TSX while retaining value imports', () => {
+    const typeOnly = `
+      import type { AI } from 'void/ai';
+      export const View = () => <div>AI</div>;
+    `;
+    expect(() => parse(typeOnly)).toThrow();
+    expect(inferBindingsFromSource(typeOnly, 'View.tsx').needsAI).toBe(false);
+
+    const mixed = `
+      import { type AI, ai } from 'void/ai';
+      export const View = () => <div>{String(ai)}</div>;
+    `;
+    expect(inferBindingsFromSource(mixed, 'View.tsx').needsAI).toBe(true);
+  });
+
+  it('detects a runtime AI import after an unrelated type import in TSX', () => {
+    const code = `
+      import type { Props } from './types';
+      import { ai } from 'void/ai';
+      export const View = () => <div>{String(ai)}</div>;
+    `;
+    expect(() => parse(code)).toThrow();
+    expect(inferBindingsFromSource(code, 'View.tsx').needsAI).toBe(true);
+  });
+
+  it('ignores type-only AI re-exports but keeps runtime re-exports', () => {
+    expect(inferBindingsFromSource("export type { AI } from 'void/ai';", 'types.ts').needsAI).toBe(
+      false,
+    );
+    expect(inferBindingsFromSource("export { type AI } from 'void/ai';", 'types.ts').needsAI).toBe(
+      false,
+    );
+    expect(inferBindingsFromSource("export { ai } from 'void/ai';", 'index.ts').needsAI).toBe(true);
+  });
+
   it('detects c.env.AI access', () => {
     const code = `
       export const POST = defineHandler(async (c) => {
