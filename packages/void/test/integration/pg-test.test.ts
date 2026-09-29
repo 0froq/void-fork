@@ -5,7 +5,12 @@ import spawn from 'cross-spawn';
 import { join } from 'pathslash';
 import { createServer } from 'pglite-server';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
-import { getPort, waitForServer, killChild } from '../../../../test/integration-helpers.ts';
+import {
+  collectServerOutput,
+  getPort,
+  waitForServer,
+  killChild,
+} from '../../../../test/integration-helpers.ts';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const ENV_PATH = join(ROOT, 'playground/pg-test/.env');
@@ -78,9 +83,11 @@ describe('playground/pg-test', () => {
     devChild.stderr!.on('data', (chunk: Buffer) => {
       stderr += String(chunk);
     });
+    const serverOutput = collectServerOutput(devChild);
 
     await waitForServer(BASE, 30_000, {
       isAlive: () => devChild.exitCode === null && devChild.signalCode === null,
+      diagnostics: serverOutput,
     });
   });
 
