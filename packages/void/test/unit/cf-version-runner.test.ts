@@ -11,7 +11,11 @@ import {
   deployCloudflareVersionTriggers,
 } from '../../../deploy-cloudflare/src/version.ts';
 import { prepareCfBuildOutput } from '../../src/cli/cf-build-output.ts';
-import { createCfCommand, createCfVersionRunner } from '../../src/cli/cf-version-runner.ts';
+import {
+  createCfCommand,
+  createCfResourceVerifier,
+  createCfVersionRunner,
+} from '../../src/cli/cf-version-runner.ts';
 
 const roots: Array<string> = [];
 afterEach(() => {
@@ -167,6 +171,7 @@ it('treats a verified empty deployment list as missing but rejects malformed sta
       const runner = createCfVersionRunner({
         output: prepared,
         workerName: 'void-test',
+        verifyResources: async () => ({ status: 0, stdout: '', stderr: '' }),
         runCf: (args) => {
           calls.push(args);
           return args[1] === 'deployments'
@@ -311,6 +316,7 @@ it('preserves activation metadata and sorts cf version history for the existing 
     const runner = createCfVersionRunner({
       output: prepared,
       workerName: 'void-test',
+      verifyResources: async () => ({ status: 0, stdout: '', stderr: '' }),
       runCf: (args) => {
         calls.push(args);
         if (args[1] === 'deployments' && args[2] === 'list') {
@@ -423,6 +429,7 @@ it.each(['newest-first', 'oldest-first'] as const)(
       const runner = createCfVersionRunner({
         output: prepared,
         workerName: 'void-test',
+        verifyResources: async () => ({ status: 0, stdout: '', stderr: '' }),
         runCf: (args) => {
           const page = Number(args[args.indexOf('--page') + 1]);
           pages.push(page);
@@ -461,6 +468,7 @@ it('applies the immutable trigger snapshot through a private cf output copy', as
     const runner = createCfVersionRunner({
       output: prepared,
       workerName: 'void-test',
+      verifyResources: async () => ({ status: 0, stdout: '', stderr: '' }),
       runCf: (args, run) => {
         expect(args).toEqual(['workers', 'triggers', 'deploy', '--prebuilt']);
         privateDirectory = run.cwd;
@@ -501,6 +509,7 @@ it.each(['restore', 'remove'] as const)(
       const runner = createCfVersionRunner({
         output: prepared,
         workerName: 'void-test',
+        verifyResources: async () => ({ status: 0, stdout: '', stderr: '' }),
         runCf: (args, { cwd }) => {
           calls.push(args);
           const worker = JSON.parse(readFileSync(getWorkerConfigPath(cwd), 'utf8'));
@@ -564,6 +573,7 @@ it('uses cf for Queue triggers, consumer cleanup, and version binding reads', as
     const runner = createCfVersionRunner({
       output: prepared,
       workerName: 'void-test',
+      verifyResources: async () => ({ status: 0, stdout: '', stderr: '' }),
       runCf: (args) => {
         calls.push(args);
         if (args[0] === 'queues' && args[1] === 'list') {
@@ -629,6 +639,7 @@ it('accepts only the staged static assets directory already sealed into prebuilt
     const runner = createCfVersionRunner({
       output: prepared,
       workerName: 'void-test',
+      verifyResources: async () => ({ status: 0, stdout: '', stderr: '' }),
       runCf: (args) => {
         calls.push(args);
         return { status: 0, stdout: '', stderr: '' };
@@ -643,6 +654,106 @@ it('accepts only the staged static assets directory already sealed into prebuilt
       1,
     );
     expect(calls).toHaveLength(1);
+  } finally {
+    prepared.dispose();
+  }
+});
+
+it.each(['r2', 'queue'] as const)(
+  'refuses every prebuilt mutation when a %s binding does not exist',
+  async (missing) => {
+    const prepared = await output({
+      ...(missing === 'r2' ? { r2_buckets: [{ binding: 'BUCKET', bucket_name: 'bucket' }] } : {}),
+      ...(missing === 'queue'
+        ? { queues: { producers: [{ binding: 'QUEUE', queue: 'jobs' }] } }
+        : {}),
+    });
+    const triggerConfig = join(roots.at(-1)!, 'triggers.json');
+    writeFileSync(triggerConfig, JSON.stringify({ name: 'void-test', workers_dev: true }));
+    const cfCalls: Array<Array<string>> = [];
+    const runCf = (args: Array<string>) => {
+      cfCalls.push(args);
+      return { status: 1, stdout: '', stderr: 'Resource not found.' };
+    };
+    const verifier = createCfResourceVerifier({
+      configPath: join(roots.at(-1)!, 'dist', 'ssr', 'wrangler.json'),
+      runCf,
+      verifyCompatibilityRunner: () => true,
+      runWrangler: async () => ({ status: 1, stdout: '', stderr: 'Queue not found.' }),
+    });
+    try {
+      const runner = createCfVersionRunner({
+        output: prepared,
+        workerName: 'void-test',
+        runCf,
+        verifyResources: verifier,
+      });
+      expect(
+        (await runner(['versions', 'upload', '--name', 'void-test'], { capture: true })).status,
+      ).toBe(1);
+      expect((await runner(['deploy', '--name', 'void-test'], { capture: true })).status).toBe(1);
+      expect(
+        (
+          await runner(['triggers', 'deploy', '-c', triggerConfig, '--name', 'void-test'], {
+            capture: true,
+          })
+        ).status,
+      ).toBe(1);
+      expect(cfCalls.every((args) => args[0] === 'r2' && args[1] === 'buckets')).toBe(true);
+      expect(cfCalls).toHaveLength(missing === 'r2' ? 3 : 0);
+    } finally {
+      prepared.dispose();
+    }
+  },
+);
+
+it('uploads when existing R2 and Queue bindings are verified by exact identity', async () => {
+  const prepared = await output({
+    r2_buckets: [{ binding: 'BUCKET', bucket_name: 'bucket', jurisdiction: 'eu' }],
+    queues: { producers: [{ binding: 'QUEUE', queue: 'jobs' }] },
+  });
+  const cfCalls: Array<Array<string>> = [];
+  const queueCalls: Array<Array<string>> = [];
+  const runCf = (args: Array<string>) => {
+    cfCalls.push(args);
+    return {
+      status: 0,
+      stdout: args[0] === 'r2' ? JSON.stringify({ name: 'bucket' }) : '',
+      stderr: '',
+    };
+  };
+  try {
+    const runner = createCfVersionRunner({
+      output: prepared,
+      workerName: 'void-test',
+      runCf,
+      verifyResources: createCfResourceVerifier({
+        configPath: join(roots.at(-1)!, 'dist', 'ssr', 'wrangler.json'),
+        runCf,
+        verifyCompatibilityRunner: () => true,
+        runWrangler: async (args) => {
+          queueCalls.push(args);
+          return { status: 0, stdout: 'Queue Name: jobs\n', stderr: '' };
+        },
+      }),
+    });
+    expect(
+      (await runner(['versions', 'upload', '--name', 'void-test'], { capture: true })).status,
+    ).toBe(0);
+    expect(cfCalls).toEqual([
+      ['r2', 'buckets', 'get', 'bucket', '--cf-r2-jurisdiction', 'eu'],
+      ['workers', 'versions', 'create', '--prebuilt'],
+    ]);
+    expect(queueCalls).toEqual([
+      [
+        'queues',
+        'info',
+        'jobs',
+        '-c',
+        join(roots.at(-1)!, 'dist', 'ssr', 'wrangler.json'),
+        '--env=',
+      ],
+    ]);
   } finally {
     prepared.dispose();
   }

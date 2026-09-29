@@ -117,7 +117,11 @@ import { buildEnv, WRANGLER_AUTH_CREDENTIAL_ENV_VARS } from '../shared/untrusted
 import { validateSsrEntry } from '../ssr/entry.ts';
 import { getApiUrl, getToken, getTokenSource } from './auth.ts';
 import { prepareCfBuildOutput, prepareCfStaticBuildOutput } from './cf-build-output.ts';
-import { createCfCommand, createCfVersionRunner } from './cf-version-runner.ts';
+import {
+  createCfCommand,
+  createCfResourceVerifier,
+  createCfVersionRunner,
+} from './cf-version-runner.ts';
 import {
   isExpiredTokenError,
   PlatformClient,
@@ -5654,18 +5658,28 @@ export async function runCloudflareDeploy(
     log.error('deploy: cf could not prepare the built Worker for deployment.');
     return exit(1);
   }
-  const activationRunner = cfOutput
-    ? createCfVersionRunner({
-        output: cfOutput,
-        workerName,
-        runCf: createCfCommand({
-          accountId,
-          apiBaseUrl,
-          env: deployChildEnv,
-          verifyUploader: cfUploaderIsPinned,
-        }),
+  const cfCommand = cfOutput
+    ? createCfCommand({
+        accountId,
+        apiBaseUrl,
+        env: deployChildEnv,
+        verifyUploader: cfUploaderIsPinned,
       })
-    : runWrangler;
+    : null;
+  const activationRunner =
+    cfOutput && cfCommand
+      ? createCfVersionRunner({
+          output: cfOutput,
+          workerName,
+          runCf: cfCommand,
+          verifyResources: createCfResourceVerifier({
+            configPath: generatedConfigPath,
+            runCf: cfCommand,
+            runWrangler,
+            verifyCompatibilityRunner: assertUploaderStillPinned,
+          }),
+        })
+      : runWrangler;
   const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
     runWrangler: activationRunner,
     verifyUploader: cfOutput ? cfUploaderIsPinned : assertUploaderStillPinned,
@@ -6325,18 +6339,28 @@ async function runCloudflareStaticDeploy(
     log.error('deploy: cf could not prepare the static Worker for deployment.');
     return exit(1);
   }
-  const activationRunner = cfOutput
-    ? createCfVersionRunner({
-        output: cfOutput,
-        workerName,
-        runCf: createCfCommand({
-          accountId,
-          apiBaseUrl,
-          env: deployChildEnv,
-          verifyUploader: cfUploaderIsPinned,
-        }),
+  const cfCommand = cfOutput
+    ? createCfCommand({
+        accountId,
+        apiBaseUrl,
+        env: deployChildEnv,
+        verifyUploader: cfUploaderIsPinned,
       })
-    : runWrangler;
+    : null;
+  const activationRunner =
+    cfOutput && cfCommand
+      ? createCfVersionRunner({
+          output: cfOutput,
+          workerName,
+          runCf: cfCommand,
+          verifyResources: createCfResourceVerifier({
+            configPath: staticConfigPath,
+            runCf: cfCommand,
+            runWrangler,
+            verifyCompatibilityRunner: uploaderIsPinned,
+          }),
+        })
+      : runWrangler;
   const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
     runWrangler: activationRunner,
     verifyUploader: cfOutput ? cfUploaderIsPinned : uploaderIsPinned,

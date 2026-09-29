@@ -34,6 +34,134 @@ function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function safePositional(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    !value.startsWith('-') &&
+    ![...value].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  );
+}
+
+/** Prevent cf's prebuilt uploader from creating a resource as a side effect. */
+export function createCfResourceVerifier(options: {
+  configPath: string;
+  runCf: CfCommand;
+  runWrangler: CloudflareCommandRunner;
+  verifyCompatibilityRunner: () => boolean;
+}): (directory: string) => Promise<CloudflareCommandResult> {
+  return async (directory) => {
+    const worker = parseJson(readFileSync(getWorkerConfigPath(directory), 'utf8'));
+    if (!record(worker) || (worker.env !== undefined && !record(worker.env))) {
+      return failed('The Cloudflare Worker bindings were not readable.');
+    }
+    for (const [bindingName, value] of Object.entries(worker.env ?? {})) {
+      if (!record(value)) {
+        return failed(`Cloudflare binding ${bindingName} was not readable.`);
+      }
+      const identifier = (field: string) => (safePositional(value[field]) ? value[field] : null);
+      if (value.type === 'kv' || value.type === 'd1' || value.type === 'flagship') {
+        if (!identifier('id')) {
+          return failed(
+            `Cloudflare binding ${bindingName} has no ID; refusing automatic provisioning.`,
+          );
+        }
+        continue;
+      }
+      if (value.type === 'queue') {
+        const name = identifier('name');
+        if (!name) {
+          return failed(`Cloudflare Queue binding ${bindingName} has no name.`);
+        }
+        if (!options.verifyCompatibilityRunner()) {
+          return failed('The Cloudflare resource verifier changed during deployment.');
+        }
+        const found = await Promise.resolve(
+          options.runWrangler(['queues', 'info', name, '-c', options.configPath, '--env='], {
+            capture: true,
+          }),
+        );
+        if (
+          found.status !== 0 ||
+          found.signal ||
+          found.error ||
+          found.stdout.trim() !== `Queue Name: ${name}`
+        ) {
+          return failed(
+            `Cloudflare Queue ${name} is unavailable; refusing automatic provisioning.`,
+          );
+        }
+        continue;
+      }
+      const resource =
+        value.type === 'r2'
+          ? {
+              kind: 'R2 bucket',
+              field: 'name',
+              command: ['r2', 'buckets', 'get'],
+              response: 'name',
+            }
+          : value.type === 'dispatch-namespace'
+            ? {
+                kind: 'dispatch namespace',
+                field: 'namespace',
+                command: ['workers-for-platforms', 'dispatch-namespaces', 'get'],
+                response: 'namespace_name',
+              }
+            : value.type === 'ai-search-namespace'
+              ? {
+                  kind: 'AI Search namespace',
+                  field: 'namespace',
+                  command: ['ai-search', 'namespace', 'get'],
+                  response: 'name',
+                }
+              : value.type === 'agent-memory'
+                ? {
+                    kind: 'Agent Memory namespace',
+                    field: 'namespace',
+                    command: ['agent-memory', 'get-namespace'],
+                    response: 'name',
+                  }
+                : null;
+      if (!resource) {
+        continue;
+      }
+      const name = identifier(resource.field);
+      if (!name) {
+        return failed(`Cloudflare ${resource.kind} binding ${bindingName} has no name.`);
+      }
+      const jurisdiction = value.type === 'r2' ? value.jurisdiction : undefined;
+      if (jurisdiction !== undefined && !safePositional(jurisdiction)) {
+        return failed(`Cloudflare R2 binding ${bindingName} has an invalid jurisdiction.`);
+      }
+      const result = options.runCf(
+        [
+          ...resource.command,
+          name,
+          ...(jurisdiction ? ['--cf-r2-jurisdiction', jurisdiction] : []),
+        ],
+        { cwd: directory, capture: true },
+      );
+      const body = parseJson(result.stdout);
+      if (
+        result.status !== 0 ||
+        result.signal ||
+        result.error ||
+        !record(body) ||
+        body[resource.response] !== name
+      ) {
+        return failed(
+          `Cloudflare ${resource.kind} ${name} is unavailable; refusing automatic provisioning.`,
+        );
+      }
+    }
+    return { status: 0, stdout: '', stderr: '' };
+  };
+}
+
 /** Run the pinned package-local cf binary with Void's existing Cloudflare session. */
 export function createCfCommand(options: {
   accountId: string;
@@ -88,10 +216,18 @@ export function createCfVersionRunner(options: {
   output: CfBuildOutput;
   workerName: string;
   runCf: CfCommand;
+  verifyResources: (directory: string) => Promise<CloudflareCommandResult>;
 }): CloudflareCommandRunner {
   const { output, workerName, runCf } = options;
   const run = (args: Array<string>, capture: boolean, cwd = output.directory) =>
     runCf(args, { cwd, capture });
+  const verifyResources = async (directory: string) => {
+    try {
+      return await options.verifyResources(directory);
+    } catch {
+      return failed('Cloudflare resources could not be verified before upload.');
+    }
+  };
 
   return async (args, command) => {
     if (args[0] === 'deployments' && args[1] === 'status') {
@@ -217,6 +353,10 @@ export function createCfVersionRunner(options: {
       ) {
         return failed('The Cloudflare version upload target changed.');
       }
+      const verified = await verifyResources(output.directory);
+      if (verified.status !== 0 || verified.signal || verified.error) {
+        return verified;
+      }
       return run(
         [
           'workers',
@@ -288,6 +428,10 @@ export function createCfVersionRunner(options: {
         (args.includes('--assets') && flag(args, '--assets') !== output.assetsDirectory)
       ) {
         return failed('The Cloudflare bootstrap target changed.');
+      }
+      const verified = await verifyResources(output.directory);
+      if (verified.status !== 0 || verified.signal || verified.error) {
+        return verified;
       }
       return run(
         [
@@ -366,6 +510,10 @@ export function createCfVersionRunner(options: {
         }
         writeFileSync(workerPath, JSON.stringify(worker), { mode: 0o600 });
         await readBuildOutput(directory);
+        const verified = await verifyResources(directory);
+        if (verified.status !== 0 || verified.signal || verified.error) {
+          return verified;
+        }
         return run(['workers', 'triggers', 'deploy', '--prebuilt'], command.capture, directory);
       } finally {
         rmSync(directory, { recursive: true, force: true });
