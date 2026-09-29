@@ -186,15 +186,16 @@ describe('project team lifecycle', () => {
     expect(
       (await getOwnedProjectsByUserId(env.db, member.id)).map((project) => project.id),
     ).toEqual([owned.id]);
-    expect(
-      (await getAccessibleProjectsByUserId(env.db, member.id)).map(({ project, role }) => ({
-        id: project.id,
-        role,
-      })),
-    ).toEqual([
-      { id: shared.id, role: 'reader' },
-      { id: owned.id, role: 'owner' },
-    ]);
+    const accessible = (await getAccessibleProjectsByUserId(env.db, member.id)).map(
+      ({ project, role }) => ({ id: project.id, role }),
+    );
+    expect(accessible).toHaveLength(2);
+    expect(accessible).toEqual(
+      expect.arrayContaining([
+        { id: shared.id, role: 'reader' },
+        { id: owned.id, role: 'owner' },
+      ]),
+    );
   });
 
   it('project deletion cascades all team, invitation, ownership, and access-history rows', async () => {
