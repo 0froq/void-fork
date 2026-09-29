@@ -113,6 +113,7 @@ import {
   isSandboxEnabled,
   requiresSandboxPlatformImage,
   resolveSandboxConfig,
+  SANDBOX_MIGRATION_TAG,
 } from '../sandbox/config.ts';
 import { trustedCloudflareWorkerAccessHeaders } from '../shared/cf-access.ts';
 import { scanWranglerDotenvKeys } from '../shared/dotenv.ts';
@@ -310,6 +311,9 @@ import {
   writeWranglerPublishedTrafficSnapshot,
   bindingEntriesForField,
   FRIENDLY_BINDING_NAMES,
+  hasDurableObjectSqliteMigration,
+  LIVE_MIGRATION_TAG,
+  nextDurableObjectMigrationTag,
   type LiveBindingConfig,
   type ProvisionedWranglerPatch,
   type WranglerCompat,
@@ -1147,6 +1151,75 @@ export function reconstructExpectedContainers(
   return expected;
 }
 
+/** Reconstruct the Durable Object state emitted after the pre-build root config is synced. */
+export function reconstructExpectedDurableObjectState(
+  config: VoidConfig,
+  root: string,
+  rootConfig: Record<string, unknown>,
+  options: { needsSandbox: boolean; needsLive: boolean },
+): {
+  bindings: Array<Record<string, unknown>>;
+  migrations: Array<Record<string, unknown>>;
+} {
+  // classifyCloudflareDeployApp syncs WebSocket and authored Durable Object
+  // modules into the root config before this snapshot. The build starts with
+  // that same config, then may append its sandbox and live bindings.
+  const bindings = bindingEntriesForField('durable_objects', rootConfig.durable_objects).map(
+    ({ entry }) => entry,
+  );
+  const migrations: Array<Record<string, unknown>> = Array.isArray(rootConfig.migrations)
+    ? [...(rootConfig.migrations as Array<Record<string, unknown>>)]
+    : [];
+  const sandbox = options.needsSandbox ? resolveSandboxConfig(config, root) : undefined;
+  if (sandbox) {
+    if (!bindings.some((binding) => binding.name === sandbox.binding)) {
+      bindings.push({ name: sandbox.binding, class_name: sandbox.className });
+    }
+    if (
+      !migrations.some(
+        (migration) =>
+          migration.tag === SANDBOX_MIGRATION_TAG ||
+          (Array.isArray(migration.new_sqlite_classes) &&
+            migration.new_sqlite_classes.includes(sandbox.className)),
+      )
+    ) {
+      migrations.push({
+        tag: SANDBOX_MIGRATION_TAG,
+        new_sqlite_classes: [sandbox.className],
+      });
+    }
+  }
+
+  const paths = resolveProjectPaths(root, config);
+  const websocketRoutes = scanWebSocketRoutesSync(root, paths);
+  const durableObjects = scanDurableObjectModules(root);
+  const live = options.needsLive
+    ? resolveLiveBindingConfig(root, {
+        reservedBindings: [
+          ...websocketRoutes.map((route) => route.bindingName),
+          ...durableObjects.map((module) => module.bindingName),
+        ],
+        reservedClasses: [
+          ...websocketRoutes.map((route) => route.className),
+          ...durableObjects.map((module) => module.className),
+          sandbox?.className,
+        ],
+      })
+    : readExistingLiveBindingConfig(root);
+  if (live) {
+    if (!bindings.some((binding) => binding.name === live.bindingName)) {
+      bindings.push({ name: live.bindingName, class_name: live.className });
+    }
+    if (!hasDurableObjectSqliteMigration(migrations, live.className)) {
+      migrations.push({
+        tag: nextDurableObjectMigrationTag(migrations, LIVE_MIGRATION_TAG),
+        new_sqlite_classes: [live.className],
+      });
+    }
+  }
+  return { bindings, migrations };
+}
+
 /**
  * Deterministic sha256 over the wrangler uploader BUNDLE the credentialed deploy executes — the
  * resolved `wrangler-dist/cli.js` PLUS every sibling file in its directory. `cli.js` loads sibling
@@ -1729,6 +1802,10 @@ export function verifyGeneratedDeployConfig(
      * RETARGETED (e.g. a rewritten `image` pointing at an attacker's).
      */
     expectedContainers?: Array<Record<string, unknown>>;
+    /** Exact pre-build Durable Object bindings, including Void's sandbox and live additions. */
+    expectedDurableObjectBindings?: Array<Record<string, unknown>>;
+    /** Exact pre-build migration sequence, including Void's sandbox and live additions. */
+    expectedMigrations?: Array<Record<string, unknown>>;
     /**
      * The exact cron trigger schedules Void's build emits into `triggers.crons`, reconstructed
      * PRE-BUILD from the SAME `scanJobsSync` scan index.ts derives them from
@@ -2061,6 +2138,46 @@ export function verifyGeneratedDeployConfig(
     );
     if (!destructiveMigration.ok) {
       return destructiveMigration;
+    }
+  }
+  if (expected.expectedDurableObjectBindings) {
+    let emittedBindings: Array<Record<string, unknown>>;
+    try {
+      emittedBindings = bindingEntriesForField('durable_objects', generated.durable_objects).map(
+        ({ entry }) => entry,
+      );
+    } catch {
+      return {
+        ok: false,
+        reason: 'generated config durable_objects bindings could not be verified.',
+      };
+    }
+    const byName = (left: Record<string, unknown>, right: Record<string, unknown>) =>
+      String(left.name).localeCompare(String(right.name));
+    if (
+      !deepEqual(
+        [...emittedBindings].sort(byName),
+        [...expected.expectedDurableObjectBindings].sort(byName),
+      )
+    ) {
+      return {
+        ok: false,
+        reason:
+          'generated config durable_objects bindings differ from the pre-build binding set — refusing to deploy a binding the build added, removed, or retargeted.',
+      };
+    }
+  }
+  if (expected.expectedMigrations) {
+    if (generated.migrations !== undefined && !Array.isArray(generated.migrations)) {
+      return { ok: false, reason: 'generated config migrations could not be verified.' };
+    }
+    const emittedMigrations = Array.isArray(generated.migrations) ? generated.migrations : [];
+    if (!deepEqual(emittedMigrations, expected.expectedMigrations)) {
+      return {
+        ok: false,
+        reason:
+          'generated config migrations differ from the pre-build migration sequence — refusing to deploy a migration the build added, removed, or retargeted.',
+      };
     }
   }
   // (C) Containers — pin the emitted `containers` array against the set Void's build emits,
@@ -2616,6 +2733,8 @@ export async function computeDesiredCloudflareResources(
    * to pin the emitted `containers` array.
    */
   needsSandbox: boolean;
+  /** Whether the source imports void/live and the build may emit its Durable Object. */
+  needsLive: boolean;
   /**
    * The exact cron trigger schedules Void's build emits into `dist/ssr/wrangler.json`
    * `triggers.crons`, reconstructed PRE-BUILD from the SAME `scanJobsSync(root, paths.cronsDir)`
@@ -2804,6 +2923,7 @@ export async function computeDesiredCloudflareResources(
     // `isSandboxEnabled` alone would miss an import-only sandbox app (e.g. kitchen-sink) and the
     // container pin would then FALSE-POSITIVE a legitimate build.
     needsSandbox: isSandboxEnabled(voidConfig) || bindings.needsSandbox,
+    needsLive: bindings.needsLive === true,
   };
 }
 
@@ -4322,6 +4442,7 @@ export async function runCloudflareDeploy(
     needsAI,
     aiBindingName,
     needsSandbox,
+    needsLive,
     expectedCrons,
     needsEmail,
     emailHandlers,
@@ -4972,6 +5093,12 @@ export async function runCloudflareDeploy(
     preBuildRootConfig,
     needsSandbox,
   );
+  const expectedDurableObjectState = reconstructExpectedDurableObjectState(
+    voidConfig,
+    root,
+    preBuildRootConfig,
+    { needsSandbox, needsLive },
+  );
 
   // (The LOCAL migration gates run POST-build at step 8d, immediately before the remote
   // apply — not here — so they validate the exact files on disk AFTER the build. See step 8d.)
@@ -5445,6 +5572,8 @@ export async function runCloudflareDeploy(
       aiBindingName,
       authEnabled,
       expectedContainers,
+      expectedDurableObjectBindings: expectedDurableObjectState.bindings,
+      expectedMigrations: expectedDurableObjectState.migrations,
       expectedCrons,
     });
     if (!inheritance.ok) {
@@ -5632,6 +5761,8 @@ export async function runCloudflareDeploy(
     authEnabled,
     requiredSecretNames: schemaFacts.requiredKeys,
     expectedContainers,
+    expectedDurableObjectBindings: expectedDurableObjectState.bindings,
+    expectedMigrations: expectedDurableObjectState.migrations,
     expectedCrons,
   });
   if (!verification.ok) {

@@ -22,6 +22,7 @@ import {
   hashWranglerUploader,
   parseRootWranglerConfig,
   prepareCloudflareFrameworkArtifact,
+  reconstructExpectedDurableObjectState,
   runCloudflareDeploy,
   runWranglerAuthToken,
   snapshotBindingIdentities,
@@ -5123,6 +5124,147 @@ describe('verifyGeneratedDeployConfig', () => {
     expect(result.reason).toMatch(/ai binding/);
   });
 
+  // --- Complete Durable Object and migration pins ---
+
+  it('rejects a build-injected local Durable Object binding', () => {
+    const root = deployConfigProject({
+      account_id: 'acc123',
+      name: 'myapp',
+      durable_objects: { bindings: [{ name: 'INJECTED', class_name: 'InjectedObject' }] },
+    });
+    const result = verifyGeneratedDeployConfig(root, {
+      accountId: 'acc123',
+      workerName: 'myapp',
+      desired: { kvNamespaces: [], queues: [] },
+      passthroughRawFields: snapshotPassthroughRawFields({}),
+      expectedDurableObjectBindings: [],
+      expectedMigrations: [],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/durable_objects/);
+  });
+
+  it('rejects a build that drops a root Durable Object binding', () => {
+    const rootBinding = { name: 'ROOM', class_name: 'Room' };
+    const root = deployConfigProject({ account_id: 'acc123', name: 'myapp' });
+    const result = verifyGeneratedDeployConfig(root, {
+      accountId: 'acc123',
+      workerName: 'myapp',
+      desired: { kvNamespaces: [], queues: [] },
+      passthroughRawFields: snapshotPassthroughRawFields({
+        durable_objects: { bindings: [rootBinding] },
+      }),
+      expectedDurableObjectBindings: [rootBinding],
+      expectedMigrations: [],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/durable_objects/);
+  });
+
+  it('rejects a build-injected creation-only Durable Object migration', () => {
+    const root = deployConfigProject({
+      account_id: 'acc123',
+      name: 'myapp',
+      migrations: [{ tag: 'injected', new_sqlite_classes: ['InjectedObject'] }],
+    });
+    const result = verifyGeneratedDeployConfig(root, {
+      accountId: 'acc123',
+      workerName: 'myapp',
+      desired: { kvNamespaces: [], queues: [] },
+      passthroughRawFields: snapshotPassthroughRawFields({}),
+      expectedDurableObjectBindings: [],
+      expectedMigrations: [],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/migrations/);
+  });
+
+  it('rejects a build that retargets a root creation migration', () => {
+    const rootMigration = { tag: 'v1', new_sqlite_classes: ['Room'] };
+    const root = deployConfigProject({
+      account_id: 'acc123',
+      name: 'myapp',
+      migrations: [{ tag: 'v1', new_sqlite_classes: ['InjectedObject'] }],
+    });
+    const result = verifyGeneratedDeployConfig(root, {
+      accountId: 'acc123',
+      workerName: 'myapp',
+      desired: { kvNamespaces: [], queues: [] },
+      passthroughRawFields: snapshotPassthroughRawFields({ migrations: [rootMigration] }),
+      expectedDurableObjectBindings: [],
+      expectedMigrations: [rootMigration],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/migrations/);
+  });
+
+  it('accepts exactly the sandbox and live bindings and migrations reconstructed before build', () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'myapp' }),
+      'void.json': '{}',
+      'routes/index.ts': 'export const GET = () => new Response("ok");',
+    });
+    const state = reconstructExpectedDurableObjectState(
+      { sandbox: true },
+      root,
+      {},
+      {
+        needsSandbox: true,
+        needsLive: true,
+      },
+    );
+    expect(state.bindings).toEqual([
+      { name: 'SANDBOX', class_name: 'Sandbox' },
+      { name: 'VOID_LIVE', class_name: 'VoidLiveStreamDurableObject' },
+    ]);
+    expect(state.migrations).toEqual([
+      { tag: 'void-sandbox-v1', new_sqlite_classes: ['Sandbox'] },
+      { tag: 'live-v1', new_sqlite_classes: ['VoidLiveStreamDurableObject'] },
+    ]);
+    const emitted = deployConfigProject({
+      account_id: 'acc123',
+      name: 'myapp',
+      durable_objects: { bindings: state.bindings },
+      migrations: state.migrations,
+    });
+    expect(
+      verifyGeneratedDeployConfig(emitted, {
+        accountId: 'acc123',
+        workerName: 'myapp',
+        desired: { kvNamespaces: [], queues: [] },
+        passthroughRawFields: snapshotPassthroughRawFields({}),
+        expectedDurableObjectBindings: state.bindings,
+        expectedMigrations: state.migrations,
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it('preserves pre-build Durable Object bindings and migrations without duplicating sandbox state', () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'myapp' }),
+      'void.json': '{}',
+      'routes/index.ts': 'export const GET = () => new Response("ok");',
+    });
+    const rootConfig = {
+      durable_objects: {
+        bindings: [
+          { name: 'ROOM', class_name: 'Room' },
+          { name: 'SANDBOX', class_name: 'Sandbox' },
+        ],
+      },
+      migrations: [
+        { tag: 'room-v1', new_sqlite_classes: ['Room'] },
+        { tag: 'void-sandbox-v1', new_sqlite_classes: ['Sandbox'] },
+      ],
+    };
+    const state = reconstructExpectedDurableObjectState({ sandbox: true }, root, rootConfig, {
+      needsSandbox: true,
+      needsLive: false,
+    });
+    expect(state.bindings).toEqual(rootConfig.durable_objects.bindings);
+    expect(state.migrations).toEqual(rootConfig.migrations);
+  });
+
   // --- Destructive Durable Object migrations (a build-injected delete/rename/transfer) ---
 
   it('fails closed when the build injects a migration with deleted_classes absent from root', () => {
@@ -5602,10 +5744,10 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(false);
   });
 
-  it('passes a normal deploy whose artifact carries the full non-id binding set (ai/queues/DO/…)', async () => {
+  it('passes a normal deploy whose artifact carries supported non-id bindings', async () => {
     // No-regression at the full-flow level: the pinned DB id is unchanged AND the emitted artifact
-    // carries every non-id binding a real Class-A build emits. The completeness check must wave the
-    // ai/queues/DO/vars/empty-array bindings through and let the deploy proceed. The `queues/jobs.ts`
+    // carries the non-id bindings this source actually emits. The completeness check must wave the
+    // ai/queues/vars/empty-array bindings through and let the deploy proceed. The `queues/jobs.ts`
     // source makes the emitted `jobs` queue a Void-derived binding (desired ⊇ emitted), and the
     // `routes/ai.ts` source makes the pre-build inference report needsAI=true — the SAME signal that
     // authorizes the emitted `{binding:'AI'}` ai binding, exactly as a real AI-using build's does.
@@ -5624,6 +5766,8 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
         // reconstructed (empty) cron set matches the emitted (absent) one.
         writeEmittedDeployArtifact(root, {
           ...KITCHEN_SINK_NON_ID_BINDINGS,
+          durable_objects: undefined,
+          migrations: undefined,
           containers: undefined,
           triggers: undefined,
           ...EMITTED_D1,
@@ -5830,8 +5974,8 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(false);
   });
 
-  it('passes a normal deploy whose artifact carries Void’s own ai + local DO bindings', async () => {
-    // No-regression: the emitted `ai:{binding:'AI'}` and LOCAL DOs a real build emits must pass the
+  it('passes a normal deploy whose artifact carries Void’s own ai binding', async () => {
+    // No-regression: the emitted `ai:{binding:'AI'}` a real build emits must pass the
     // raw-field pins end-to-end. The `queues/jobs.ts` source makes `jobs` a Void-derived queue, and
     // the `routes/ai.ts` source makes the pre-build inference report needsAI=true — the SAME signal
     // that authorizes the emitted `{binding:'AI'}` ai binding.
@@ -5850,6 +5994,8 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
         // reconstructed (empty) cron set matches the emitted (absent) one.
         writeEmittedDeployArtifact(root, {
           ...KITCHEN_SINK_NON_ID_BINDINGS,
+          durable_objects: undefined,
+          migrations: undefined,
           containers: undefined,
           triggers: undefined,
           ...EMITTED_D1,
