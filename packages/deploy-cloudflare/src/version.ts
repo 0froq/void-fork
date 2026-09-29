@@ -197,6 +197,8 @@ export async function deployCloudflareVersionTriggers(options: {
   previousTriggerConfig?: CloudflareTriggerConfig;
   /** Wrangler skips an empty Custom Domain set, so the caller may publish it directly. */
   publishEmptyCustomDomains?: () => Promise<CloudflareCommandResult>;
+  /** cf skips an empty Cron Trigger set, so the caller may publish it directly. */
+  publishEmptyCrons?: () => Promise<CloudflareCommandResult>;
   manageRoutes?: boolean;
 }): Promise<CloudflareCommandResult> {
   if (options.triggerConfig.preserve) {
@@ -226,6 +228,12 @@ export async function deployCloudflareVersionTriggers(options: {
     );
     if (!isCleanCommandExit(deployed)) {
       return deployed;
+    }
+    if (options.triggerConfig.crons.length === 0 && options.publishEmptyCrons) {
+      const published = await options.publishEmptyCrons();
+      if (!isCleanCommandExit(published)) {
+        return published;
+      }
     }
     for (const queue of removedQueueConsumers(
       options.triggerConfig,
@@ -304,6 +312,7 @@ export async function stabilizeCloudflareVersionTriggers(options: {
   previousTriggerConfig?: CloudflareTriggerConfig;
   knownTriggerConfigs?: Readonly<Record<string, CloudflareTriggerConfig>>;
   publishEmptyCustomDomains?: () => Promise<CloudflareCommandResult>;
+  publishEmptyCrons?: () => Promise<CloudflareCommandResult>;
   manageRoutes?: boolean;
   attempts?: number;
 }): Promise<CloudflareTriggerStabilization> {
@@ -346,6 +355,7 @@ export async function stabilizeCloudflareVersionTriggers(options: {
       triggerConfig: activeTriggerConfig,
       previousTriggerConfig: cleanupBaseline,
       publishEmptyCustomDomains: options.publishEmptyCustomDomains,
+      publishEmptyCrons: options.publishEmptyCrons,
       manageRoutes: options.manageRoutes,
     });
     if (!isCleanCommandExit(triggers)) {
@@ -729,6 +739,7 @@ export type CloudflareVersionActivationOptions = {
   message: string;
   /** Direct empty-domain publisher for the Wrangler reconciliation gap. */
   publishEmptyCustomDomains?: () => Promise<CloudflareCommandResult>;
+  publishEmptyCrons?: () => Promise<CloudflareCommandResult>;
   /** Last successfully published traffic state, newer than immutable version annotations. */
   previousTrafficConfig?: CloudflareTrafficConfig;
   /** Explicitly Void-owned queue consumers retained for schema-1 cleanup and failed retries. */
@@ -1344,6 +1355,7 @@ async function activateCloudflareVersionWithSecretsFile(
     previousTriggerConfig,
     knownTriggerConfigs,
     publishEmptyCustomDomains: options.publishEmptyCustomDomains,
+    publishEmptyCrons: options.publishEmptyCrons,
   });
   if (!triggers.ok) {
     if (triggers.activeVersionId && triggers.activeVersionId !== versionId) {
@@ -1389,6 +1401,7 @@ async function activateCloudflareVersionWithSecretsFile(
         previousTriggerConfig,
         knownTriggerConfigs,
         publishEmptyCustomDomains: options.publishEmptyCustomDomains,
+        publishEmptyCrons: options.publishEmptyCrons,
       });
       return {
         ok: false,
@@ -1458,7 +1471,12 @@ async function activateCloudflareVersionWithSecretsFile(
 async function restorePreviousVersionAndTriggers(
   options: Pick<
     Parameters<typeof activateCloudflareVersion>[0],
-    'configPath' | 'runWrangler' | 'verifyUploader' | 'workerName' | 'publishEmptyCustomDomains'
+    | 'configPath'
+    | 'runWrangler'
+    | 'verifyUploader'
+    | 'workerName'
+    | 'publishEmptyCustomDomains'
+    | 'publishEmptyCrons'
   >,
   commonArgs: Array<string>,
   previousVersionId: string | null,
@@ -1510,6 +1528,7 @@ async function restorePreviousVersionAndTriggers(
     previousTriggerConfig: failedTriggerConfig,
     knownTriggerConfigs: { [previousVersionId]: targetTriggerConfig },
     publishEmptyCustomDomains: options.publishEmptyCustomDomains,
+    publishEmptyCrons: options.publishEmptyCrons,
   });
   return triggers.ok && triggers.targetOwnsTraffic ? 'succeeded' : 'failed';
 }

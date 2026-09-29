@@ -149,7 +149,10 @@ import {
   assertCloudflareLinkUnchanged,
   type CloudflareLink,
 } from './cloudflare-link.ts';
-import { createCloudflareEmptyDomainPublisher } from './cloudflare-operations.ts';
+import {
+  createCloudflareEmptyCronPublisher,
+  createCloudflareEmptyDomainPublisher,
+} from './cloudflare-operations.ts';
 import {
   rememberCloudflareWorkersDevSubdomain,
   resolveCloudflareWorkersDevSubdomain,
@@ -5738,6 +5741,13 @@ export async function runCloudflareDeploy(
       workerName,
       runWrangler,
     }),
+    publishEmptyCrons: createCloudflareEmptyCronPublisher({
+      accountId,
+      apiBaseUrl,
+      configPath: generatedConfigPath,
+      workerName,
+      runWrangler,
+    }),
     previousTrafficConfig: readWranglerPublishedTrafficSnapshot(configPath),
     queueConsumerCleanup,
     verifyInheritedSecrets: true,
@@ -6412,6 +6422,13 @@ async function runCloudflareStaticDeploy(
       ? workersDevSubdomain
       : undefined,
     publishEmptyCustomDomains: createCloudflareEmptyDomainPublisher({
+      accountId,
+      apiBaseUrl,
+      configPath: staticConfigPath,
+      workerName,
+      runWrangler,
+    }),
+    publishEmptyCrons: createCloudflareEmptyCronPublisher({
       accountId,
       apiBaseUrl,
       configPath: staticConfigPath,

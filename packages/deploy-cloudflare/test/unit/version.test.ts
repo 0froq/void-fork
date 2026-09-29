@@ -951,6 +951,34 @@ describe('Cloudflare version activation', () => {
     expect(publishEmptyCustomDomains).toHaveBeenCalledOnce();
   });
 
+  it('publishes an explicit empty Cron Trigger set and fails when Cloudflare rejects it', async () => {
+    const publishEmptyCrons = vi.fn(async () => ({ status: 1, stdout: '', stderr: 'rejected' }));
+    const result = await deployCloudflareVersionTriggers({
+      runWrangler: async () => ok(),
+      workerName: 'app',
+      triggerConfig: {
+        workers_dev: true,
+        preview_urls: true,
+        routes: [],
+        crons: [],
+        queueConsumers: [],
+        workflows: [],
+      },
+      previousTriggerConfig: {
+        workers_dev: true,
+        preview_urls: true,
+        routes: [],
+        crons: ['0 * * * *'],
+        queueConsumers: [],
+        workflows: [],
+      },
+      publishEmptyCrons,
+    });
+
+    expect(publishEmptyCrons).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ status: 1, stderr: 'rejected' });
+  });
+
   it('normalizes and extracts workers.dev account subdomains', () => {
     expect(normalizeWorkersDevSubdomain('Developer-Platform-Experience.workers.dev/')).toBe(
       'developer-platform-experience',

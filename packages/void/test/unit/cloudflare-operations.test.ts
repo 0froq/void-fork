@@ -347,7 +347,12 @@ describe('Cloudflare version operations', () => {
       ),
     ).rejects.toThrow(/traffic and triggers were restored to v2/);
     expect(runner.mock.calls.some(([args]) => args.includes('v2@100'))).toBe(true);
-    expect(runner.mock.calls.filter(([args]) => args[0] === 'triggers')).toHaveLength(2);
+    expect(
+      runner.mock.calls.filter(([args]) => args[0] === 'triggers' && args[1] === 'deploy'),
+    ).toHaveLength(2);
+    expect(
+      runner.mock.calls.filter(([args]) => args[0] === 'triggers' && args[1] === 'clear-crons'),
+    ).toHaveLength(1);
   });
 
   it('repairs triggers for a concurrent rollback that supersedes activation', async () => {

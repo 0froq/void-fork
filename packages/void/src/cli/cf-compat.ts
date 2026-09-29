@@ -46,10 +46,16 @@ function result(status: number, stdout = '', stderr = ''): Result {
   return { status, stdout, stderr };
 }
 
-function runCf(command: Array<string>, cwd = process.cwd()): Result {
+function runCf(command: Array<string>, cwd = process.cwd(), useLoginProfile = false): Result {
+  const env = cfEnvironment();
+  if (useLoginProfile) {
+    // Void's browser login uses cf's regular profile. Deploy's legacy Wrangler
+    // keyring pin must not switch the credential source while borrowing it.
+    delete env.CLOUDFLARE_AUTH_USE_KEYRING;
+  }
   const child = spawnSync(process.execPath, [cf, ...command], {
     cwd,
-    env: cfEnvironment(),
+    env,
     encoding: 'utf8',
     shell: false,
     windowsHide: true,
@@ -237,6 +243,45 @@ async function cloudflareApiGet(
   }
 }
 
+async function clearWorkerCronSchedules(worker: string): Promise<Result> {
+  const base = (
+    process.env.CLOUDFLARE_API_BASE_URL ?? 'https://api.cloudflare.com/client/v4'
+  ).replace(/\/$/, '');
+  const endpoint = `${base}/accounts/${encodeURIComponent(accountId())}/workers/scripts/${encodeURIComponent(worker)}/schedules`;
+  const proxy =
+    process.env.HTTP_PROXY ||
+    process.env.HTTPS_PROXY ||
+    process.env.http_proxy ||
+    process.env.https_proxy
+      ? new EnvHttpProxyAgent()
+      : null;
+  try {
+    const response = await httpFetch(endpoint, {
+      method: 'PUT',
+      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
+      body: '[]',
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
+      ...(proxy ? { dispatcher: proxy } : {}),
+    });
+    const body = object(await response.json());
+    const schedules = object(body.result).schedules;
+    if (
+      !response.ok ||
+      body.success !== true ||
+      !Array.isArray(schedules) ||
+      schedules.length !== 0
+    ) {
+      throw new Error(
+        `Cloudflare did not clear the Worker Cron Triggers (HTTP ${response.status}).`,
+      );
+    }
+    return result(0);
+  } finally {
+    await proxy?.close();
+  }
+}
+
 async function assertExistingProvisionableResources(
   directory: string,
   account: string,
@@ -352,7 +397,7 @@ function sessionCredential(): { type: 'oauth' | 'api_token'; token: string } | n
   if (token) {
     return { type: 'api_token', token };
   }
-  const identity = runCf(['auth', 'whoami']);
+  const identity = runCf(['auth', 'whoami'], process.cwd(), true);
   if (identity.status !== 0) {
     return null;
   }
@@ -967,6 +1012,14 @@ async function workerChanges(): Promise<Result> {
         directory,
       ),
     );
+  }
+  if (args[0] === 'triggers' && args[1] === 'clear-crons') {
+    const raw = config();
+    const name = workerName();
+    if (raw.name !== name || (raw.account_id !== undefined && raw.account_id !== accountId())) {
+      throw new Error('Cloudflare trigger target changed.');
+    }
+    return await clearWorkerCronSchedules(name);
   }
   if ((args[0] === 'versions' && args[1] === 'upload') || args[0] === 'deploy') {
     const raw = config();

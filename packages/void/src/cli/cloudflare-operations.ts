@@ -469,6 +469,7 @@ export async function activateCloudflareExistingVersion(
     previousTriggerConfig: currentTriggerConfig,
     knownTriggerConfigs,
     publishEmptyCustomDomains: createCloudflareEmptyDomainPublisher(context),
+    publishEmptyCrons: createCloudflareEmptyCronPublisher(context),
   });
   if (triggers.ok && triggers.targetOwnsTraffic) {
     writeWranglerPublishedTrafficSnapshot(context.configPath, {
@@ -511,6 +512,7 @@ export async function activateCloudflareExistingVersion(
       previousTriggerConfig: currentTriggerConfig,
       knownTriggerConfigs,
       publishEmptyCustomDomains: createCloudflareEmptyDomainPublisher(context),
+      publishEmptyCrons: createCloudflareEmptyCronPublisher(context),
     });
     throw new Error(
       repair.ok
@@ -542,6 +544,7 @@ export async function activateCloudflareExistingVersion(
       previousTriggerConfig: targetTriggerConfig,
       knownTriggerConfigs,
       publishEmptyCustomDomains: createCloudflareEmptyDomainPublisher(context),
+      publishEmptyCrons: createCloudflareEmptyCronPublisher(context),
     });
     if (!restoredTriggers.ok) {
       recoveryFailure = 'previous trigger synchronization failed';
@@ -724,6 +727,19 @@ export function createCloudflareEmptyDomainPublisher(
     try {
       await publishEmptyCloudflareCustomDomainSet(context);
       return { status: 0, stdout: '', stderr: '' };
+    } catch (error) {
+      return { status: 1, stdout: '', stderr: errorMessage(error), error: errorMessage(error) };
+    }
+  };
+}
+
+/** Publish an explicit empty Cron Trigger set through Void's pinned cf transport. */
+export function createCloudflareEmptyCronPublisher(
+  context: CloudflareOperationContext,
+): () => Promise<CloudflareOperationResult> {
+  return async () => {
+    try {
+      return await run(context, ['triggers', 'clear-crons', ...targetArgs(context)]);
     } catch (error) {
       return { status: 1, stdout: '', stderr: errorMessage(error), error: errorMessage(error) };
     }
