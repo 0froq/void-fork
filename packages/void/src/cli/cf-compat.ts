@@ -22,7 +22,12 @@ const args = process.argv.slice(2);
 
 function cfEnvironment(): NodeJS.ProcessEnv {
   // The pinned bin otherwise delegates to any cf installed by the project.
-  const env: NodeJS.ProcessEnv = { ...process.env, CF_DELEGATION: '1' };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    CF_DELEGATION: '1',
+    CF_SEND_TELEMETRY: 'false',
+    CF_NO_OSC_PROGRESS: '1',
+  };
   // cf uses Node's built-in fetch for API operations. Node does not consult
   // HTTP(S)_PROXY for fetch unless its environment proxy support is enabled.
   // Match the proxy handling of our direct API reads below.
@@ -48,6 +53,7 @@ function result(status: number, stdout = '', stderr = ''): Result {
 
 function runCf(command: Array<string>, cwd = process.cwd(), useLoginProfile = false): Result {
   const env = cfEnvironment();
+  env.CF_QUIET = '1';
   if (useLoginProfile) {
     // Void's browser login uses cf's regular profile. Deploy's legacy Wrangler
     // keyring pin must not switch the credential source while borrowing it.
@@ -70,9 +76,11 @@ function runCf(command: Array<string>, cwd = process.cwd(), useLoginProfile = fa
 }
 
 function runInteractiveCf(command: Array<string>): Result {
-  const child = spawnSync(process.execPath, [cf, ...command], {
+  const child = spawnSync(process.execPath, [cf, ...command, '--quiet'], {
     cwd: process.cwd(),
-    env: cfEnvironment(),
+    // cf's global quiet flag hides its banner; OAuth's browser URL and device
+    // code are still printed by the login handler for the user to verify.
+    env: { ...cfEnvironment(), CF_QUIET: '1' },
     shell: false,
     stdio: 'inherit',
     windowsHide: true,
