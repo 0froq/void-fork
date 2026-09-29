@@ -323,6 +323,33 @@ function auth(): Result {
   return result(1, '', 'Unsupported Cloudflare authentication operation.');
 }
 
+function listAllResourcePages(command: Array<string>, extraFlags: Array<string> = []): Result {
+  const pageSize = 100;
+  const entries: Array<unknown> = [];
+  for (let page = 1; page <= 100; page++) {
+    const listed = runCf([
+      ...command,
+      '--page',
+      String(page),
+      '--per-page',
+      String(pageSize),
+      ...extraFlags,
+    ]);
+    if (listed.status !== 0) {
+      return listed;
+    }
+    const items = parsedJson(listed.stdout);
+    if (!Array.isArray(items) || items.length > pageSize) {
+      throw new Error(`Cloudflare returned an invalid ${command.join(' ')} page.`);
+    }
+    entries.push(...items);
+    if (items.length < pageSize) {
+      return result(0, `${JSON.stringify(entries)}\n`);
+    }
+  }
+  throw new Error(`Cloudflare ${command.join(' ')} exceeded the supported page limit.`);
+}
+
 async function resources(): Promise<Result> {
   const [group, verb, third] = args;
   if (group === 'd1' && verb === 'execute' && third) {
@@ -368,21 +395,21 @@ async function resources(): Promise<Result> {
     return runCf(['containers', 'applications', 'list']);
   }
   if (group === 'd1' && verb === 'list') {
-    return runCf(['d1', 'list']);
+    return listAllResourcePages(['d1', 'list']);
   }
   if (group === 'd1' && verb === 'info' && third) {
-    const listed = cleanJson(['d1', 'list'], (value) => {
-      if (!Array.isArray(value)) {
-        throw new Error('D1 list was malformed.');
-      }
-      return value.find((item) => object(item).name === third) ?? null;
-    });
+    const listed = listAllResourcePages(['d1', 'list']);
     if (listed.status !== 0) {
       return listed;
     }
-    return listed.stdout.trim() === 'null'
+    const value = parsedJson(listed.stdout);
+    if (!Array.isArray(value)) {
+      throw new Error('D1 list was malformed.');
+    }
+    const selected = value.find((item) => object(item).name === third) ?? null;
+    return selected === null
       ? result(1, '', `D1 database ${JSON.stringify(third)} does not exist.`)
-      : listed;
+      : result(0, `${JSON.stringify(selected)}\n`);
   }
   if (group === 'd1' && verb === 'create' && third) {
     const created = runCf(['d1', 'create', '--name', third]);
@@ -400,7 +427,10 @@ async function resources(): Promise<Result> {
     return created;
   }
   if (group === 'kv' && verb === 'namespace' && third === 'list') {
-    return runCf(['kv', 'namespaces', 'list']);
+    return listAllResourcePages(
+      ['kv', 'namespaces', 'list'],
+      ['--order', 'id', '--direction', 'asc'],
+    );
   }
   if (group === 'kv' && verb === 'namespace' && third === 'create' && args[3]) {
     const created = runCf(['kv', 'namespaces', 'create', '--title', args[3]]);

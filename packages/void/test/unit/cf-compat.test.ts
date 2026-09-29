@@ -43,6 +43,72 @@ it('reports an absent cf session as authentication failure', async () => {
   }
 }, 30_000);
 
+it('discovers KV namespaces beyond the first cf API page', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'void-cf-kv-pages-'));
+  const requestedPages: Array<number> = [];
+  const namespaces = Array.from({ length: 100 }, (_, index) => ({
+    id: (index + 1).toString(16).padStart(32, '0'),
+    title: `other-${index}`,
+  }));
+  const target = { id: 'f'.repeat(32), title: 'existing-void-kv' };
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? '', 'http://127.0.0.1');
+    expect(url.pathname).toBe('/client/v4/accounts/test-account/storage/kv/namespaces');
+    expect(url.searchParams.get('per_page')).toBe('100');
+    expect(url.searchParams.get('order')).toBe('id');
+    expect(url.searchParams.get('direction')).toBe('asc');
+    const page = Number(url.searchParams.get('page'));
+    requestedPages.push(page);
+    response.setHeader('Content-Type', 'application/json');
+    response.end(
+      JSON.stringify({
+        success: true,
+        errors: [],
+        messages: [],
+        result: page === 1 ? namespaces : page === 2 ? [target] : [],
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const configPath = join(directory, 'wrangler.json');
+    writeFileSync(configPath, JSON.stringify({ account_id: 'test-account' }));
+    const [command, ...prefix] = resolveWranglerArgv(directory);
+    const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
+      (resolve) => {
+        execFile(
+          command!,
+          [...prefix, 'kv', 'namespace', 'list', '-c', configPath, '--env=', '--json'],
+          {
+            cwd: directory,
+            encoding: 'utf8',
+            timeout: 20_000,
+            env: {
+              PATH: process.env.PATH,
+              SYSTEMROOT: process.env.SYSTEMROOT,
+              WINDIR: process.env.WINDIR,
+              CI: 'true',
+              CF_API_TOKEN: 'synthetic-token',
+              CLOUDFLARE_ACCOUNT_ID: 'test-account',
+              CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`,
+            },
+          },
+          (error, stdout, stderr) => resolve({ status: error ? 1 : 0, stdout, stderr }),
+        );
+      },
+    );
+    expect(output.status, output.stderr).toBe(0);
+    expect(JSON.parse(output.stdout)).toEqual([...namespaces, target]);
+    expect(requestedPages).toEqual([1, 2]);
+  } finally {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeAllConnections();
+    });
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 30_000);
+
 it('uses pinned cf despite a project-local CLI and preserves D1 results and the CF token alias', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'void-cf-d1-contract-'));
   const requests: Array<{ method: string; path: string; authorization: string | undefined }> = [];
