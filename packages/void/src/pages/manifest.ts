@@ -70,10 +70,20 @@ export function generateComponentManifest(scan: PageScanResult, pagesDir: string
 
 function patternToRegex(pattern: string): string {
   const regexSource = pattern
-    .replace(/:[^/{}]+\{\.\+\}/g, '(.+)') // catch-all :path{.+} (before escaping)
-    .replace(/[.+?^${}()|[\]\\]/g, '\\$&') // escape regex-special characters
-    .replace(/\*/, '(.*)') // wildcard *
-    .replace(/:[^/]+/g, '([^/]+)') // dynamic :param
-    .replace(/\//g, '\\/'); // escape forward slashes
+    .split('/')
+    .map((segment) => {
+      if (segment === '*') {
+        return '(.*)';
+      }
+      if (/^:[^/{}]+\{\.\+\}$/.test(segment)) {
+        return '(.+)';
+      }
+      if (/^:[^/]+$/.test(segment)) {
+        return '([^/]+)';
+      }
+      return segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    })
+    .join('/')
+    .replace(/\//g, '\\/');
   return `/^${regexSource}$/`;
 }
