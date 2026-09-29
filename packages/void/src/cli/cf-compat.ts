@@ -285,10 +285,22 @@ function auth(): Result {
     return runCf(['auth', 'logout']);
   }
   if (args[0] === 'whoami') {
-    return cleanJson(['auth', 'whoami'], (value) => {
-      const identity = object(value);
-      return {
-        loggedIn: identity.authenticated === true && identity.tokenValid === true,
+    const called = runCf(['auth', 'whoami']);
+    if (called.status !== 0) {
+      return called;
+    }
+    const identity = object(parsedJson(called.stdout));
+    if (identity.authenticated !== true || identity.tokenValid !== true) {
+      return result(
+        1,
+        JSON.stringify({ loggedIn: false }),
+        'Cloudflare authentication is required.',
+      );
+    }
+    return result(
+      0,
+      JSON.stringify({
+        loggedIn: true,
         accounts: identity.accounts,
         email: identity.email,
         tokenPermissions: identity.scopes,
@@ -298,8 +310,9 @@ function auth(): Result {
             : String(identity.authSource).startsWith('OAuth token')
               ? 'OAuth Token'
               : 'API Token',
-      };
-    });
+      }),
+      called.stderr,
+    );
   }
   if (args[0] === 'auth' && args[1] === 'token') {
     const credential = sessionCredential();

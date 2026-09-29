@@ -8,6 +8,41 @@ import { join } from 'pathslash';
 import { expect, it } from 'vite-plus/test';
 import { resolveWranglerArgv } from '../../src/cli/preset.ts';
 
+it('reports an absent cf session as authentication failure', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'void-cf-no-auth-'));
+  try {
+    const [command, ...prefix] = resolveWranglerArgv(directory);
+    const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
+      (resolve) => {
+        execFile(
+          command!,
+          [...prefix, 'whoami', '--json'],
+          {
+            cwd: directory,
+            encoding: 'utf8',
+            timeout: 20_000,
+            env: {
+              PATH: process.env.PATH,
+              SYSTEMROOT: process.env.SYSTEMROOT,
+              WINDIR: process.env.WINDIR,
+              HOME: directory,
+              USERPROFILE: directory,
+              XDG_CONFIG_HOME: directory,
+              CI: 'true',
+            },
+          },
+          (error, stdout, stderr) => resolve({ status: error ? 1 : 0, stdout, stderr }),
+        );
+      },
+    );
+    expect(output.status, output.stdout).toBe(1);
+    expect(JSON.parse(output.stdout)).toEqual({ loggedIn: false });
+    expect(output.stderr).toContain('authentication is required');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 30_000);
+
 it('uses pinned cf despite a project-local CLI and preserves D1 results and the CF token alias', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'void-cf-d1-contract-'));
   const requests: Array<{ method: string; path: string; authorization: string | undefined }> = [];
