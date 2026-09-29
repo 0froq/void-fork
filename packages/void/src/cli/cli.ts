@@ -238,6 +238,17 @@ if (helpPath) {
       process.exit(1);
     });
   });
+} else if (command === 'migrate') {
+  if (args.length > 1) {
+    log.error('migrate: This command takes no arguments.');
+    process.exit(1);
+  }
+  import('./migrate.ts').then(({ runMigrateCommand }) => {
+    runMigrateCommand(process.cwd()).catch((err) => {
+      log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    });
+  });
 } else if (command === '-v' || command === '--version') {
   const version = JSON.parse(readFileSync(join(getPackageDir(), 'package.json'), 'utf-8')).version;
   console.log(version);
@@ -252,6 +263,7 @@ if (helpPath) {
       hint: '--agents | --tsconfig | --github | --git | --no-git',
       description: 'Set up void in a new or existing project',
     },
+    { name: 'migrate', description: 'Migrate legacy project configuration' },
     { name: 'connect', description: 'Connect to Cloudflare or a Void platform' },
     { name: 'deploy', description: 'Build and deploy, or link an existing Cloudflare Worker' },
     {
@@ -338,6 +350,11 @@ if (helpPath) {
       case 'init': {
         const { runInitCommand, parseInitArgs } = await import('./init.ts');
         await runInitCommand(root, parseInitArgs([]));
+        return;
+      }
+      case 'migrate': {
+        const { runMigrateCommand } = await import('./migrate.ts');
+        await runMigrateCommand(root);
         return;
       }
       case 'deploy': {

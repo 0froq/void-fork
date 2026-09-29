@@ -45,7 +45,7 @@ describe('readConfig', () => {
     const path = join(tmpDir, 'void.config.ts');
     writeFileSync(
       path,
-      `import { defineConfig } from '../../../src/config-entry.ts';\nexport default defineConfig({ worker: { compatibility_date: '2026-02-24' } } satisfies import('../../../src/config-entry.ts').VoidConfig);\n`,
+      `import { defineConfig } from 'void/config';\nexport default defineConfig({ worker: { compatibility_date: '2026-02-24' } } satisfies import('void/config').VoidConfig);\n`,
     );
     expect(readConfig(tmpDir).worker?.compatibility_date).toBe('2026-02-24');
     writeFileSync(path, `export default { worker: { compatibility_date: '2026-02-25' } };\n`);

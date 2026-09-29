@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { createJiti } from 'jiti';
 import { join } from 'pathslash';
 
@@ -6,6 +7,25 @@ export const LEGACY_CONFIG_FILE = 'void.json';
 export const TYPED_CONFIG_FILE = 'void.config.ts';
 
 export type LoadedVoidConfig = { source: string; value: unknown };
+
+/** Evaluate a TypeScript config without requiring Void to be installed in the target project. */
+export function loadTypedVoidConfigFile(path: string): unknown {
+  const sourceEntry = fileURLToPath(new URL('./config-entry.ts', import.meta.url));
+  const configEntry = existsSync(sourceEntry)
+    ? sourceEntry
+    : fileURLToPath(import.meta.resolve('void/config'));
+  const jiti = createJiti(import.meta.url, {
+    fsCache: false,
+    moduleCache: false,
+    interopDefault: false,
+    alias: { 'void/config': configEntry },
+  });
+  const module = jiti(path) as { default?: unknown };
+  if (!Object.hasOwn(module, 'default')) {
+    throw new Error('expected a default export');
+  }
+  return module.default;
+}
 
 /** Load project-authored configuration before runtime validation. */
 export function loadVoidConfig(root: string): LoadedVoidConfig | null {
@@ -24,16 +44,7 @@ export function loadVoidConfig(root: string): LoadedVoidConfig | null {
 
   if (hasTyped) {
     try {
-      const jiti = createJiti(import.meta.url, {
-        fsCache: false,
-        moduleCache: false,
-        interopDefault: false,
-      });
-      const module = jiti(typedPath) as { default?: unknown };
-      if (!Object.hasOwn(module, 'default')) {
-        throw new Error('expected a default export');
-      }
-      return { source: TYPED_CONFIG_FILE, value: module.default };
+      return { source: TYPED_CONFIG_FILE, value: loadTypedVoidConfigFile(typedPath) };
     } catch (error) {
       throw new Error(
         `config: Could not load ${TYPED_CONFIG_FILE}: ${error instanceof Error ? error.message : String(error)}`,

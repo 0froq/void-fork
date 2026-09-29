@@ -149,6 +149,11 @@ const HELP_TREE: HelpTree = {
       { command: 'void init --github', description: 'Scaffold the GitHub Actions deploy workflow' },
     ],
   },
+  migrate: {
+    summary: 'Move legacy Void project settings into void.config.ts.',
+    usage: ['void migrate'],
+    examples: [{ command: 'void migrate', description: 'Convert void.json to void.config.ts' }],
+  },
   deploy: {
     summary:
       'Build and deploy. Offers to link an existing Cloudflare Worker when no destination is configured.',
@@ -1238,6 +1243,8 @@ export function printGlobalHelp(): void {
     [
       globalCommandLine(['init'], 'void init'),
       ...globalOptionLines(['init']),
+      '',
+      globalCommandLine(['migrate'], 'void migrate'),
       '',
       globalCommandLine(['connect'], 'void connect [url]'),
       ...globalOptionLines(['connect']),

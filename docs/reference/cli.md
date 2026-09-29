@@ -48,6 +48,7 @@ Use this page as a command reference. If you are setting up a project for the fi
 | `void email disallow <address>`   | Remove a recipient from the allowlist                                         |
 | `void email domain`               | Send and receive at your own domain on a Cloudflare zone                      |
 | `void init`                       | Setup wizard for new or existing projects                                     |
+| `void migrate`                    | Convert legacy `void.json` into `void.config.ts`                              |
 
 ## Binary Invocation
 
@@ -74,6 +75,10 @@ void <group> help <command>
 Use `void --help` for the command list. For a specific command, try `void deploy --help` or `void db execute --help`. Help runs without signing in, validating the project, or making network requests.
 
 ## Setup
+
+### `void migrate`
+
+`void migrate` converts `void.json` into a typed `void.config.ts` and keeps a copy of the original file under `.void/config-migration/`. Review and commit the new config. If both config files already exist with different settings, resolve them before retrying.
 
 ### `void init`
 
