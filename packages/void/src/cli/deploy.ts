@@ -117,6 +117,8 @@ import { CLOUDFLARE_DEPLOY_BUILD_ENV, resolveRemoteMode } from '../shared/env.ts
 import { buildEnv, WRANGLER_AUTH_CREDENTIAL_ENV_VARS } from '../shared/untrusted-env.ts';
 import { validateSsrEntry } from '../ssr/entry.ts';
 import { getApiUrl, getToken, getTokenSource } from './auth.ts';
+import { prepareCfBuildOutput } from './cf-build-output.ts';
+import { createCfCommand, createCfVersionRunner } from './cf-version-runner.ts';
 import {
   isExpiredTokenError,
   PlatformClient,
@@ -1155,6 +1157,34 @@ export function hashWranglerUploader(
     return undefined;
   }
   return hashDirectoryContents(dirname(entry));
+}
+
+/** Pin cf and the two libraries that construct its private prebuilt input before project code runs. */
+function hashCfUploader(): string | undefined {
+  try {
+    const hash = createHash('sha256');
+    for (const name of ['cf', '@cloudflare/config', '@cloudflare/build-output-utils']) {
+      let path = dirname(fileURLToPath(import.meta.resolve(name)));
+      while (!existsSync(join(path, 'package.json'))) {
+        const parent = dirname(path);
+        if (parent === path) {
+          return undefined;
+        }
+        path = parent;
+      }
+      const contents = hashDirectoryContents(path);
+      if (!contents) {
+        return undefined;
+      }
+      hash.update(name);
+      hash.update('\0');
+      hash.update(contents);
+      hash.update('\0');
+    }
+    return hash.digest('hex');
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -4330,6 +4360,15 @@ export async function runCloudflareDeploy(
   // same baseline so project code can never swap the executable under the session.
   const hashUploader = deps.hashWranglerUploader ?? hashWranglerUploader;
   const wranglerUploaderHashBefore = hashUploader(root);
+  const cfUploaderHashBefore =
+    deps.activateVersion || deps.runWrangler ? undefined : hashCfUploader();
+  const cfUploaderIsPinned = (): boolean => {
+    const matched = cfUploaderHashBefore !== undefined && cfUploaderHashBefore === hashCfUploader();
+    if (!matched) {
+      log.error('deploy: refusing to run a changed cf uploader with Cloudflare credentials.');
+    }
+    return matched;
+  };
   const assertUploaderStillPinned = (): boolean => {
     const check = assertWranglerUploaderUnchanged(wranglerUploaderHashBefore, hashUploader(root));
     if (check.ok) {
@@ -5588,21 +5627,73 @@ export async function runCloudflareDeploy(
     assertCloudflareLinkUnchanged(root, pinnedHandoffLink);
   }
   const candidateReceipt = pinnedHandoffLink?.candidateReceipt;
-  const activationRunner = preBuildRootConfig.compliance_region
-    ? runWrangler
-    : createCloudflareMetadataRunner({
-        runWrangler,
-        accountId,
-        apiBaseUrl,
-        workerName,
-        configPath: generatedConfigPath,
-        fetch: deps.metadataFetch,
-        verifyUploader: assertUploaderStillPinned,
-        getToken: () => runWranglerAuthToken(runWrangler, generatedConfigPath),
-      });
+  let cfOutput = null;
+  let cfToken: string | null = null;
+  if (
+    cfUploaderHashBefore &&
+    !existingWorker &&
+    !needsSandbox &&
+    !preBuildRootConfig.compliance_region &&
+    apiBaseUrl === 'https://api.cloudflare.com/client/v4' &&
+    queueConsumerCleanup.length === 0 &&
+    cfUploaderIsPinned()
+  ) {
+    try {
+      cfOutput = await prepareCfBuildOutput(dirname(generatedConfigPath), accountId);
+      if (cfOutput) {
+        cfToken = await runWranglerAuthToken(runWrangler, generatedConfigPath);
+      }
+    } catch {
+      cfOutput?.dispose();
+      cfOutput = null;
+    }
+  }
+  if (cfOutput && !cfToken) {
+    cfOutput.dispose();
+    cfOutput = null;
+  }
+  const usingCf = cfOutput !== null && cfToken !== null;
+  const activationRunner =
+    cfOutput && cfToken
+      ? createCloudflareMetadataRunner({
+          runWrangler: createCfVersionRunner({
+            output: cfOutput,
+            workerName,
+            legacyReadAndTriggers: (args, command) =>
+              assertUploaderStillPinned()
+                ? runWrangler(args, command)
+                : { status: 1, stdout: '', stderr: 'The Cloudflare uploader changed.' },
+            runCf: createCfCommand({
+              accountId,
+              apiBaseUrl,
+              token: cfToken,
+              env: deployChildEnv,
+              verifyUploader: cfUploaderIsPinned,
+            }),
+          }),
+          accountId,
+          apiBaseUrl,
+          workerName,
+          configPath: generatedConfigPath,
+          fetch: deps.metadataFetch,
+          verifyUploader: cfUploaderIsPinned,
+          getToken: async () => cfToken,
+        })
+      : preBuildRootConfig.compliance_region
+        ? runWrangler
+        : createCloudflareMetadataRunner({
+            runWrangler,
+            accountId,
+            apiBaseUrl,
+            workerName,
+            configPath: generatedConfigPath,
+            fetch: deps.metadataFetch,
+            verifyUploader: assertUploaderStillPinned,
+            getToken: () => runWranglerAuthToken(runWrangler, generatedConfigPath),
+          });
   const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
     runWrangler: activationRunner,
-    verifyUploader: assertUploaderStillPinned,
+    verifyUploader: usingCf ? cfUploaderIsPinned : assertUploaderStillPinned,
     workerName,
     configPath: generatedConfigPath,
     preserveTriggers: existingWorker !== null,
@@ -5652,7 +5743,7 @@ export async function runCloudflareDeploy(
     previousTrafficConfig: readWranglerPublishedTrafficSnapshot(configPath),
     queueConsumerCleanup,
     verifyInheritedSecrets: true,
-  });
+  }).finally(() => cfOutput?.dispose());
   if (!execution.ok) {
     await reportCloudflareActivationFailure(
       cliLog,
