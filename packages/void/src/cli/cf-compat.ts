@@ -104,7 +104,7 @@ async function withBuildOutput(
       throw new Error('Could not prepare the Cloudflare Worker build output.');
     }
     try {
-      await assertExistingProvisionableResources(output.directory, raw, accountId);
+      await assertExistingProvisionableResources(output.directory, accountId);
       return action(output.directory);
     } finally {
       output.dispose();
@@ -239,7 +239,6 @@ async function cloudflareApiGet(
 
 async function assertExistingProvisionableResources(
   directory: string,
-  raw: Json,
   account: string,
 ): Promise<void> {
   // cf 1.0.0-beta.5 turns on Wrangler's automatic provisioning for every
@@ -264,10 +263,7 @@ async function assertExistingProvisionableResources(
       identifier('id');
     } else if (binding.type === 'r2') {
       const name = identifier('name');
-      const source = Array.isArray(raw.r2_buckets)
-        ? raw.r2_buckets.map(object).find((entry) => entry.binding === bindingName)
-        : undefined;
-      const jurisdiction = source?.jurisdiction;
+      const jurisdiction = binding.jurisdiction;
       if (jurisdiction !== undefined && typeof jurisdiction !== 'string') {
         throw new Error(`Cloudflare R2 binding ${bindingName} has an invalid jurisdiction.`);
       }

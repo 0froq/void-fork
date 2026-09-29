@@ -416,9 +416,13 @@ it('stops a prebuilt platform upload before cf can create a missing R2 bucket', 
 it('allows a prebuilt platform upload when named resources already exist', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'void-cf-platform-resource-preflight-'));
   const requests: Array<string> = [];
+  const jurisdictions: Array<string | undefined> = [];
   const api = createServer((request, response) => {
     const path = request.url ?? '';
     requests.push(`${request.method} ${path}`);
+    if (path.includes('/r2/buckets/')) {
+      jurisdictions.push(request.headers['cf-r2-jurisdiction'] as string | undefined);
+    }
     response.setHeader('Content-Type', 'application/json');
     response.end(
       JSON.stringify({
@@ -446,7 +450,7 @@ it('allows a prebuilt platform upload when named resources already exist', async
         compatibility_date: '2026-09-29',
         main: 'index.js',
         no_bundle: true,
-        r2_buckets: [{ binding: 'ASSETS', bucket_name: 'existing-bucket' }],
+        r2_buckets: [{ binding: 'ASSETS', bucket_name: 'existing-bucket', jurisdiction: 'eu' }],
         queues: { producers: [{ binding: 'JOBS', queue: 'existing-queue' }] },
         dispatch_namespaces: [{ binding: 'DISPATCH', namespace: 'existing-namespace' }],
       }),
@@ -482,6 +486,7 @@ it('allows a prebuilt platform upload when named resources already exist', async
       'GET /client/v4/accounts/test-account/workers/dispatch/namespaces/existing-namespace',
       'GET /client/v4/accounts/test-account/queues?page=1',
     ]);
+    expect(jurisdictions).toEqual(['eu']);
   } finally {
     await new Promise<void>((resolve) => {
       api.close(() => resolve());
