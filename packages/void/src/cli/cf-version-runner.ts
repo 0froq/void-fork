@@ -61,6 +61,9 @@ export function createCfCommand(options: {
       shell: false,
       windowsHide: true,
       encoding: 'utf8',
+      // Version lists contain the full Worker records. Ten sizable bundles can
+      // exceed Node's 1 MiB spawnSync default before activation can inspect them.
+      maxBuffer: 256 * 1024 * 1024,
       stdio: run.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
     });
     return {
@@ -105,21 +108,86 @@ export function createCfVersionRunner(options: {
     }
 
     if (args[0] === 'versions' && args[1] === 'list') {
-      const result = run(['workers', 'versions', 'list', '--worker-id', workerName], true);
-      if (result.status !== 0) {
-        return result;
+      const pageSize = 10;
+      const readPage = (page: number) => {
+        const result = run(
+          [
+            'workers',
+            'versions',
+            'list',
+            '--worker-id',
+            workerName,
+            '--per-page',
+            String(pageSize),
+            '--page',
+            String(page),
+          ],
+          true,
+        );
+        const body = parseJson(result.stdout);
+        return {
+          result,
+          versions:
+            Array.isArray(body) &&
+            body.length <= pageSize &&
+            body.every(
+              (item) =>
+                record(item) && typeof item.id === 'string' && Number.isSafeInteger(item.number),
+            ) &&
+            new Set(body.map((item) => item.number)).size === body.length
+              ? body
+              : null,
+        };
+      };
+      const first = readPage(1);
+      if (first.result.status !== 0) {
+        return first.result;
       }
-      const body = parseJson(result.stdout);
-      if (
-        !Array.isArray(body) ||
-        !body.every((item) => record(item) && typeof item.number === 'number')
-      ) {
+      if (!first.versions) {
         return failed('The Cloudflare Worker version list was not readable.');
       }
+      const versions = [...first.versions];
+      if (versions.length === pageSize) {
+        const second = readPage(2);
+        if (second.result.status !== 0 || !second.versions) {
+          return failed('The Cloudflare Worker version history was not readable.');
+        }
+        if (second.versions.length > 0) {
+          const firstNumbers = versions.map((item) => item.number as number);
+          const secondNumbers = second.versions.map((item) => item.number as number);
+          if (Math.min(...secondNumbers) > Math.max(...firstNumbers)) {
+            versions.push(...second.versions);
+            let last = Math.max(...secondNumbers);
+            for (let page = 3; page <= 1000 && second.versions.length === pageSize; page++) {
+              const next = readPage(page);
+              if (next.result.status !== 0 || !next.versions) {
+                return failed('The Cloudflare Worker version history was not readable.');
+              }
+              if (next.versions.length === 0) {
+                break;
+              }
+              const numbers = next.versions.map((item) => item.number as number);
+              if (Math.min(...numbers) <= last) {
+                return failed('The Cloudflare Worker version history changed during inspection.');
+              }
+              versions.push(...next.versions);
+              last = Math.max(...numbers);
+              if (next.versions.length < pageSize) {
+                break;
+              }
+              if (page === 1000) {
+                return failed('The Cloudflare Worker version history is too large to verify.');
+              }
+            }
+          } else if (Math.max(...secondNumbers) >= Math.min(...firstNumbers)) {
+            return failed('The Cloudflare Worker version history changed during inspection.');
+          }
+        }
+      }
       return {
-        ...result,
+        ...first.result,
         stdout: JSON.stringify(
-          body.sort((a, b) => (a.number as number) - (b.number as number)).slice(-10),
+          versions.sort((a, b) => (a.number as number) - (b.number as number)).slice(-10),
         ),
       };
     }

@@ -100,6 +100,65 @@ it('preserves real cf provider codes so a missing Worker can reach its first upl
   }
 });
 
+it('captures a version list larger than Node’s default child-process buffer', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'void-cf-large-version-list-'));
+  roots.push(root);
+  const version = {
+    id: '00000000-0000-0000-0000-000000000001',
+    number: 1,
+    modules: [{ name: 'index.js', content_base64: 'a'.repeat(2 * 1024 * 1024) }],
+  };
+  const server = createServer((request, response) => {
+    request.resume();
+    response.writeHead(200, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ success: true, errors: [], result: [version] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const apiBaseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`;
+    const script = `
+      import { createCfCommand } from ${JSON.stringify(new URL('../../src/cli/cf-version-runner.ts', import.meta.url).href)};
+      const command = createCfCommand({
+        accountId: 'test-account', apiBaseUrl: ${JSON.stringify(apiBaseUrl)},
+        env: () => process.env, verifyUploader: () => true,
+      });
+      const result = command(
+        ['workers', 'versions', 'list', '--worker-id', 'large-worker', '--per-page', '10'],
+        { cwd: ${JSON.stringify(root)}, capture: true },
+      );
+      console.log(JSON.stringify({ status: result.status, length: result.stdout.length, error: result.error }));
+    `;
+    const stdout = await new Promise<string>((resolve, reject) => {
+      execFile(
+        process.execPath,
+        ['--input-type=module', '-e', script],
+        {
+          cwd: root,
+          timeout: 20_000,
+          env: {
+            PATH: process.env.PATH,
+            SYSTEMROOT: process.env.SYSTEMROOT,
+            WINDIR: process.env.WINDIR,
+            TMP: process.env.TMP,
+            TEMP: process.env.TEMP,
+            CI: 'true',
+            CLOUDFLARE_API_TOKEN: 'synthetic-token',
+            CLOUDFLARE_ACCOUNT_ID: 'test-account',
+            CLOUDFLARE_API_BASE_URL: apiBaseUrl,
+          },
+        },
+        (error, stdout, stderr) => (error ? reject(new Error(stderr)) : resolve(stdout)),
+      );
+    });
+    expect(JSON.parse(stdout)).toEqual({ status: 0, length: expect.any(Number), error: null });
+    expect((JSON.parse(stdout) as { length: number }).length).toBeGreaterThan(1024 * 1024);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
 it('treats a verified empty deployment list as missing but rejects malformed status', async () => {
   const prepared = await output();
   try {
@@ -223,6 +282,17 @@ it('preserves activation metadata and sorts cf version history for the existing 
       'one',
       'two',
     ]);
+    expect(calls.at(-1)).toEqual([
+      'workers',
+      'versions',
+      'list',
+      '--worker-id',
+      'void-test',
+      '--per-page',
+      '10',
+      '--page',
+      '1',
+    ]);
     await runner(
       [
         'versions',
@@ -269,6 +339,41 @@ it('preserves activation metadata and sorts cf version history for the existing 
     prepared.dispose();
   }
 });
+
+it.each(['newest-first', 'oldest-first'] as const)(
+  'reads the actual latest ten versions when cf pages %s',
+  async (order) => {
+    const prepared = await output();
+    try {
+      const history = Array.from({ length: 25 }, (_, index) => ({
+        id: `version-${index + 1}`,
+        number: index + 1,
+      }));
+      const ordered = order === 'newest-first' ? history.reverse() : history;
+      const pages: Array<number> = [];
+      const runner = createCfVersionRunner({
+        output: prepared,
+        workerName: 'void-test',
+        runCf: (args) => {
+          const page = Number(args[args.indexOf('--page') + 1]);
+          pages.push(page);
+          return {
+            status: 0,
+            stdout: JSON.stringify(ordered.slice((page - 1) * 10, page * 10)),
+            stderr: '',
+          };
+        },
+      });
+      const result = await runner(['versions', 'list', '--name', 'void-test'], { capture: true });
+      expect(JSON.parse(result.stdout).map((item: { number: number }) => item.number)).toEqual(
+        Array.from({ length: 10 }, (_, index) => index + 16),
+      );
+      expect(pages).toEqual(order === 'newest-first' ? [1, 2] : [1, 2, 3]);
+    } finally {
+      prepared.dispose();
+    }
+  },
+);
 
 it('applies the immutable trigger snapshot through a private cf output copy', async () => {
   const prepared = await output();
