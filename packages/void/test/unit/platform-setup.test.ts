@@ -56,8 +56,10 @@ describe('platform credential setup links', () => {
       runtime: './build output',
       yes: true,
     });
+    const quotedName =
+      process.platform === 'win32' ? "'Team''s Platform'" : "'Team'\\''s Platform'";
     expect(command).toBe(
-      "void-dev platform install --name team --account account --display-name 'Team'\\''s Platform' --application-domain apps.example.com --zone example.com --dedicated-zone --control-plane-domain api.example.com --auth-config './auth config.json' --runtime './build output' --yes",
+      `void-dev platform install --name team --account account --display-name ${quotedName} --application-domain apps.example.com --zone example.com --dedicated-zone --control-plane-domain api.example.com --auth-config './auth config.json' --runtime './build output' --yes`,
     );
   });
 
