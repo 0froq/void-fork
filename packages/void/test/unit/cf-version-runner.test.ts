@@ -1,7 +1,11 @@
+import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'pathslash';
 import { afterEach, expect, it } from 'vite-plus/test';
+import { activateCloudflareVersion } from '../../../deploy-cloudflare/src/version.ts';
 import { prepareCfBuildOutput } from '../../src/cli/cf-build-output.ts';
 import { createCfCommand, createCfVersionRunner } from '../../src/cli/cf-version-runner.ts';
 
@@ -9,6 +13,118 @@ const roots: Array<string> = [];
 afterEach(() => {
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it('preserves real cf provider codes so a missing Worker can reach its first upload', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'void-cf-missing-worker-'));
+  roots.push(root);
+  const requests: Array<string> = [];
+  const server = createServer((request, response) => {
+    requests.push(request.url ?? '');
+    request.resume();
+    response.writeHead(404, { 'Content-Type': 'application/json' });
+    response.end(
+      JSON.stringify({
+        success: false,
+        errors: [{ code: 10007, message: 'The given script does not exist.' }],
+        result: null,
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const apiBaseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`;
+    const script = `
+      import { createCfCommand } from ${JSON.stringify(new URL('../../src/cli/cf-version-runner.ts', import.meta.url).href)};
+      const command = createCfCommand({
+        accountId: 'test-account', apiBaseUrl: ${JSON.stringify(apiBaseUrl)},
+        env: () => process.env, verifyUploader: () => true,
+      });
+      console.log(JSON.stringify(command(
+        ['workers', 'deployments', 'list', '--worker', 'missing-worker'],
+        { cwd: ${JSON.stringify(root)}, capture: true },
+      )));
+    `;
+    const stdout = await new Promise<string>((resolve, reject) => {
+      execFile(
+        process.execPath,
+        ['--input-type=module', '-e', script],
+        {
+          cwd: root,
+          timeout: 20_000,
+          env: {
+            PATH: process.env.PATH,
+            SYSTEMROOT: process.env.SYSTEMROOT,
+            WINDIR: process.env.WINDIR,
+            TMP: process.env.TMP,
+            TEMP: process.env.TEMP,
+            CI: 'true',
+            CLOUDFLARE_API_TOKEN: 'synthetic-token',
+            CLOUDFLARE_ACCOUNT_ID: 'test-account',
+            CLOUDFLARE_API_BASE_URL: apiBaseUrl,
+          },
+        },
+        (error, stdout, stderr) => (error ? reject(new Error(stderr)) : resolve(stdout)),
+      );
+    });
+    const missing = JSON.parse(stdout);
+    expect(missing.status).toBe(1);
+    expect(missing.stderr).toContain('[code: 10007]');
+    expect(requests).toEqual([
+      '/client/v4/accounts/test-account/workers/scripts/missing-worker/deployments',
+    ]);
+    const operations: Array<string> = [];
+    const result = await activateCloudflareVersion({
+      workerName: 'missing-worker',
+      message: 'review',
+      verifyUploader: () => true,
+      verifyInheritedSecrets: true,
+      runWrangler: (args) => {
+        operations.push(args.slice(0, 2).join(' '));
+        return args[1] === 'upload'
+          ? { status: 1, stdout: '', stderr: 'Test stopped before uploading.' }
+          : missing;
+      },
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'upload-failed' });
+    expect(operations).toEqual(['deployments status', 'versions list', 'versions upload']);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+it('treats a verified empty deployment list as missing but rejects malformed status', async () => {
+  const prepared = await output();
+  try {
+    for (const body of [{ deployments: [] }, {}]) {
+      const calls: Array<Array<string>> = [];
+      const runner = createCfVersionRunner({
+        output: prepared,
+        workerName: 'void-test',
+        runCf: (args) => {
+          calls.push(args);
+          return args[1] === 'deployments'
+            ? { status: 0, stdout: JSON.stringify(body), stderr: '' }
+            : { status: 1, stdout: '', stderr: 'Test stopped before uploading.' };
+        },
+      });
+      const result = await activateCloudflareVersion({
+        workerName: 'void-test',
+        message: 'review',
+        verifyUploader: () => true,
+        runWrangler: runner,
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        reason: 'deployments' in body ? 'upload-failed' : 'status-failed',
+      });
+      expect(calls).toHaveLength('deployments' in body ? 2 : 1);
+    }
+  } finally {
+    prepared.dispose();
   }
 });
 

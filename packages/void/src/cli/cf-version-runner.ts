@@ -66,7 +66,8 @@ export function createCfCommand(options: {
     return {
       status: typeof result.status === 'number' ? result.status : 1,
       stdout: result.stdout ?? '',
-      stderr: result.stderr ?? '',
+      // Keep the activation protocol's provider-code parsing across CLI renderers.
+      stderr: (result.stderr ?? '').replace(/\[(\d{4,})\]/g, '[code: $1]'),
       signal: result.signal ?? null,
       error: result.error?.message ?? null,
     };
@@ -94,8 +95,11 @@ export function createCfVersionRunner(options: {
       }
       const body = parseJson(result.stdout);
       const deployments = record(body) ? body.deployments : undefined;
+      if (Array.isArray(deployments) && deployments.length === 0) {
+        return failed('The Cloudflare Worker has no deployments.');
+      }
       if (!Array.isArray(deployments) || !record(deployments[0])) {
-        return failed('The Cloudflare Worker has no readable deployment.');
+        return failed('The Cloudflare Worker deployment was not readable.');
       }
       return { ...result, stdout: JSON.stringify(deployments[0]) };
     }
