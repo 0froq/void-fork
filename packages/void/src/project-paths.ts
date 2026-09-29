@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { isAbsolute, join, normalize, relative } from 'pathslash';
+import { loadVoidConfig } from './config-loader.ts';
 import type { VoidConfig } from './config.ts';
 
 const SOURCE_CONVENTION_DIRECTORIES = [
@@ -122,20 +123,7 @@ export function readProjectPaths(root: string): ProjectPaths {
 }
 
 function readSourceDirConfig(root: string): Pick<VoidConfig, 'sourceDir'> {
-  let raw: string;
-  try {
-    raw = readFileSync(join(root, 'void.json'), 'utf-8');
-  } catch {
-    return {};
-  }
-
-  let config: unknown;
-  try {
-    config = JSON.parse(raw);
-  } catch {
-    return {};
-  }
-
+  const config = loadVoidConfig(root)?.value;
   if (typeof config !== 'object' || config === null || Array.isArray(config)) {
     return {};
   }

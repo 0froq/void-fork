@@ -50,6 +50,11 @@
       "require": "./dist/index.mjs"
     },
     "./schema.json": "./schema.json",
+    "./config": {
+      "types": "./dist/config-entry.d.mts",
+      "import": "./dist/config-entry.mjs",
+      "require": "./dist/config-entry.mjs"
+    },
     "./database-provider": {
       "types": "./dist/database-provider.d.mts",
       "import": "./dist/database-provider.mjs",
@@ -340,6 +345,7 @@
     "es-module-lexer": "^3.0.2",
     "hono": "^4.13.7",
     "ignore": "^7.0.9",
+    "jiti": "^2.7.0",
     "jsonc-parser": "3.3.1",
     "minimatch": "^10.2.6",
     "mysql2": "3.24.4",

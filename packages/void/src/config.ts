@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'pathslash';
 import type { RewriteDestination } from 'void/routes';
 import type { DevRedirectRule, HeaderRule, RedirectRule } from './cli/types.ts';
 export type { RedirectRule };
@@ -8,6 +6,7 @@ import {
   isVoidAuthProvider,
   type VoidAuthProvider,
 } from './auth/providers.ts';
+import { loadVoidConfig } from './config-loader.ts';
 import type { HeadConfig } from './pages/head.ts';
 import { validateSourceDir } from './project-paths.ts';
 import { MimeError, parseAddress } from './runtime/email/mime.ts';
@@ -357,26 +356,25 @@ const MIGRATION_ERRORS: Record<string, string> = {
   revalidate: '"revalidate" has moved to "routing.revalidate"',
 };
 
-/**
- * Read and validate the `void.json` config file from the project root.
- * Returns an empty config object if no file exists.
- */
+/** Read and validate the project's typed config, with legacy JSON compatibility. */
 export function readConfig(root: string): VoidConfig {
-  const filePath = join(root, CONFIG_FILE);
-  let raw: string;
-  try {
-    raw = readFileSync(filePath, 'utf-8');
-  } catch {
-    return {};
-  }
+  const loaded = loadVoidConfig(root);
+  return loaded ? validateConfig(loaded.value, loaded.source) : {};
+}
 
-  let config: unknown;
+/** Runtime validation also applies to TypeScript configs, whose types may be bypassed. */
+export function validateConfig(config: unknown, source: string = CONFIG_FILE): VoidConfig {
   try {
-    config = JSON.parse(raw);
-  } catch {
-    throw new Error(`config: Invalid JSON in ${CONFIG_FILE}.`);
+    return validateConfigObject(config);
+  } catch (error) {
+    if (source !== CONFIG_FILE && error instanceof Error) {
+      throw new Error(error.message.replaceAll(CONFIG_FILE, source), { cause: error });
+    }
+    throw error;
   }
+}
 
+function validateConfigObject(config: unknown): VoidConfig {
   if (typeof config !== 'object' || config === null || Array.isArray(config)) {
     throw new Error(`config: ${CONFIG_FILE} must be a JSON object.`);
   }

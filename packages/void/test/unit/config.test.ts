@@ -40,6 +40,33 @@ function cleanup() {
 }
 
 describe('readConfig', () => {
+  it('loads and re-reads a typed Void config', () => {
+    setup();
+    const path = join(tmpDir, 'void.config.ts');
+    writeFileSync(
+      path,
+      `import { defineConfig } from '../../../src/config-entry.ts';\nexport default defineConfig({ worker: { compatibility_date: '2026-02-24' } } satisfies import('../../../src/config-entry.ts').VoidConfig);\n`,
+    );
+    expect(readConfig(tmpDir).worker?.compatibility_date).toBe('2026-02-24');
+    writeFileSync(path, `export default { worker: { compatibility_date: '2026-02-25' } };\n`);
+    expect(readConfig(tmpDir).worker?.compatibility_date).toBe('2026-02-25');
+    cleanup();
+  });
+
+  it('rejects ambiguous typed and JSON config files', () => {
+    setup('{}');
+    writeFileSync(join(tmpDir, 'void.config.ts'), 'export default {};\n');
+    expect(() => readConfig(tmpDir)).toThrow('Found both void.config.ts and void.json');
+    cleanup();
+  });
+
+  it('validates typed config values at runtime', () => {
+    setup();
+    writeFileSync(join(tmpDir, 'void.config.ts'), 'export default { routing: { isr: 1 } };\n');
+    expect(() => readConfig(tmpDir)).toThrow('"routing.isr" in void.config.ts must be a boolean');
+    cleanup();
+  });
+
   it.each([true, false])('accepts routing.isr: %s', (isr) => {
     setup(JSON.stringify({ routing: { isr } }));
     expect(readConfig(tmpDir).routing?.isr).toBe(isr);
