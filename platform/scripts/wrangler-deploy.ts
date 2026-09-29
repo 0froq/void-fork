@@ -1,11 +1,12 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 const EMAIL_SIGNING_SECRET = 'EMAIL_SIGNING_SECRET';
+const DASHBOARD_DIRECTORY = fileURLToPath(new URL('../packages/dashboard', import.meta.url));
 const EMAIL_WORKER_DIRECTORIES = new Set(
   ['api', 'email-gateway', 'proxy'].map((name) =>
     fileURLToPath(new URL(`../packages/${name}`, import.meta.url)),
@@ -101,7 +102,31 @@ if (values.build === true) {
 
 let secretsDirectory: string | undefined;
 try {
-  const deployArgs = ['deploy', ...wranglerArgs];
+  let deployArgs = ['deploy', ...wranglerArgs];
+  if (process.cwd() === DASHBOARD_DIRECTORY) {
+    const generatedConfig = join('dist', 'ssr', 'wrangler.json');
+    const built = JSON.parse(readFileSync(generatedConfig, 'utf8')) as {
+      targetEnvironment?: string;
+      name?: string;
+    };
+    if (built.targetEnvironment !== env || !built.name) {
+      throw new Error(`Dashboard build does not target the ${env} environment.`);
+    }
+    const withoutEnvironment = wranglerArgs.filter(
+      (arg, index) =>
+        arg !== '--env' &&
+        arg !== '-e' &&
+        !(index > 0 && ['--env', '-e'].includes(wranglerArgs[index - 1])) &&
+        !arg.startsWith('--env='),
+    );
+    deployArgs = [
+      'deploy',
+      ...withoutEnvironment,
+      '--config',
+      generatedConfig,
+      '--autoconfig=false',
+    ];
+  }
   if (emailSigningSecret) {
     secretsDirectory = mkdtempSync(join(tmpdir(), 'void-platform-secrets-'));
     const secretsPath = join(secretsDirectory, 'secrets.json');
