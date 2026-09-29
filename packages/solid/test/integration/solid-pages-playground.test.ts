@@ -5,7 +5,12 @@ import { join } from 'pathslash';
 import { chromium, type Browser, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { waitForIslandsHydrated } from '../../../../test/browser-helpers.ts';
-import { getPort, waitForServer, killChild } from '../../../../test/integration-helpers.ts';
+import {
+  collectServerOutput,
+  getPort,
+  waitForServer,
+  killChild,
+} from '../../../../test/integration-helpers.ts';
 import { registerSharedClientTests } from '../../../../test/pages-client-contract.ts';
 import { defineSharedIslandTests } from '../../../../test/pages-island-contract.ts';
 
@@ -166,7 +171,7 @@ function registerClientTests(getBase: () => string) {
 
 describe('solid-pages client (dev)', () => {
   let child: ReturnType<typeof spawn>;
-  let stderr = '';
+  let serverOutput = () => '';
 
   beforeAll(async () => {
     DEV_PORT = await getPort();
@@ -194,19 +199,22 @@ describe('solid-pages client (dev)', () => {
       },
     );
 
-    child.stderr!.on('data', (chunk: Buffer) => {
-      stderr += String(chunk);
-    });
+    serverOutput = collectServerOutput(child);
 
-    await waitForServer(DEV_BASE, 20_000);
+    await waitForServer(DEV_BASE, 45_000, {
+      expectStatus: 200,
+      expectBody: '__VOID_PAGE_DATA__',
+      isAlive: () => child.exitCode === null && child.signalCode === null,
+      diagnostics: serverOutput,
+    });
   });
 
   afterAll(async () => {
     if (child) {
       await killChild(child);
     }
-    if (stderr.includes('error when starting dev server')) {
-      throw new Error(stderr);
+    if (serverOutput().includes('error when starting dev server')) {
+      throw new Error(serverOutput());
     }
   });
 
