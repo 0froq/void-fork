@@ -56,7 +56,11 @@ import {
 } from '../asset-routing.ts';
 import { findVoidAuthConfig } from '../auth/config.ts';
 import type { VoidAuthMigrationSchema } from '../auth/drizzle.ts';
-import { materializeCloudflareConfig, stashCloudflareDeployPointer } from '../cloudflare-config.ts';
+import {
+  materializeCloudflareConfig,
+  MATERIALIZED_CLOUDFLARE_FILE,
+  stashCloudflareDeployPointer,
+} from '../cloudflare-config.ts';
 import { findEnvFile } from '../codegen/env-types.ts';
 import {
   readConfig,
@@ -2719,10 +2723,17 @@ export async function computeDesiredCloudflareResources(
   if (bindings.needsR2) {
     const binding = bindingNames?.r2 ?? 'STORAGE';
     const storedName = readStoredResourceName(config, 'r2_buckets', binding, 'bucket_name');
+    // Only a generated binding in a typed project uses `default` as a local
+    // placeholder. In an authored root config, or an explicit typed Cloudflare
+    // binding, it is a valid bucket name and must keep its identity.
+    const generatedDefault =
+      storedName === 'default' &&
+      basename(configPath) === MATERIALIZED_CLOUDFLARE_FILE &&
+      !voidConfig.cloudflare?.r2_buckets?.some(
+        (entry) => entry.binding === binding && entry.bucket_name === 'default',
+      );
     const bucketName =
-      storedName && storedName !== 'default'
-        ? storedName
-        : suffixedResourceName(workerName, 'storage');
+      storedName && !generatedDefault ? storedName : suffixedResourceName(workerName, 'storage');
     desired.r2 = { binding, bucketName };
     reasons.set(binding, 'app uses env.STORAGE (R2)');
   }

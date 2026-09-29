@@ -78,7 +78,7 @@ export interface ProvisionDriftResult {
  * identifier — the SAME predicate the provisioner's read-first uses:
  *   - D1 `database_id` is a real UUID ({@link isRealD1Id}, not `'local'`);
  *   - KV `id` is a real 32-hex ({@link isRealKvId}, not `'local'`);
- *   - R2 `bucket_name` names a real bucket ({@link isRealStoredR2BucketName}, not `'default'`);
+ *   - R2 `bucket_name` names a real bucket ({@link isRealStoredR2BucketName});
  *   - Hyperdrive `id` is a real 32-hex ({@link isRealHyperdriveId}).
  *
  * Queues are NAME-bearing (no id in the config), so they are NOT part of this
@@ -116,7 +116,7 @@ export function checkCloudflareProvisionDrift(
   if (desired.r2) {
     if (
       !isProvisioned('r2_buckets', desired.r2.binding, (e) =>
-        isRealStoredR2BucketName(e.bucket_name),
+        isRealStoredR2BucketName(e.bucket_name, desired.r2?.bucketName),
       )
     ) {
       missing.push({ binding: desired.r2.binding, kind: 'r2', name: desired.r2.bucketName });
@@ -327,12 +327,17 @@ function isValidR2BucketNameFormat(value: unknown): value is string {
 }
 /**
  * A STORED R2 `bucket_name` that names a REAL bucket, i.e. any non-empty string
- * that is not R2's own placeholder (`default`). `local` IS a real name here. Grammar is
+ * other than the placeholder (`default`), unless `default` itself is desired.
+ * `local` IS a real name here. Grammar is
  * deliberately not required: a grammar-invalid stored name that contradicts the desired
  * bucket must still fail closed as a contradiction, never be silently rewritten.
  */
-function isRealStoredR2BucketName(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value !== R2_BUCKET_NAME_PLACEHOLDER;
+function isRealStoredR2BucketName(value: unknown, desiredName?: string): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    (value !== R2_BUCKET_NAME_PLACEHOLDER || value === desiredName)
+  );
 }
 
 const defaultLogger: ProvisionLogger = {
@@ -4633,7 +4638,7 @@ async function provisionCloudflareResourcesLocked(
     // (the shared check that also rejected `local` let it bypass this contradiction
     // gate and be silently rewritten).
     const storedBucketName = entry?.bucket_name;
-    if (entry && isRealStoredR2BucketName(storedBucketName)) {
+    if (entry && isRealStoredR2BucketName(storedBucketName, bucketName)) {
       if (storedBucketName !== bucketName) {
         throw new Error(
           `provision: R2 binding ${JSON.stringify(binding)} in "${configPath}" stores ` +

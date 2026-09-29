@@ -5302,6 +5302,19 @@ describe('provisionCloudflareResources — read-first stored-name identity', () 
     expect(calls.some((c) => isCall(c, 'r2', 'bucket', 'create'))).toBe(true);
     expect(result.resources[0].action).toBe('created');
   });
+
+  it('R2: a desired bucket named default reuses the matching stored bucket', async () => {
+    setup(JSON.stringify({ r2_buckets: [{ binding: 'STORAGE', bucket_name: 'default' }] }));
+    const { run, calls } = makeRunner([]);
+    const result = await provisionCloudflareResources(
+      tmpDir,
+      wranglerPath,
+      { ...emptyDesired, r2: { binding: 'STORAGE', bucketName: 'default' } },
+      { runWrangler: run, log: silentLog },
+    );
+    expect(result.resources[0]).toMatchObject({ kind: 'r2', name: 'default', action: 'reused' });
+    expect(calls).toEqual([]);
+  });
 });
 
 describe('provisionCloudflareResources — per-resource placeholder rules', () => {
@@ -7754,6 +7767,15 @@ describe('checkCloudflareProvisionDrift — id-drift vs the committed wrangler c
       queues: [],
     });
     expect(missing.map((m) => m.kind).sort()).toEqual(['d1', 'kv', 'r2']);
+  });
+
+  it('accepts a stored R2 bucket named default when that is the desired bucket', () => {
+    setup(JSON.stringify({ r2_buckets: [{ binding: 'STORAGE', bucket_name: 'default' }] }));
+    const { missing } = checkCloudflareProvisionDrift(wranglerPath, {
+      ...emptyDesired,
+      r2: { binding: 'STORAGE', bucketName: 'default' },
+    });
+    expect(missing).toEqual([]);
   });
 
   it('reports NO drift when every desired resource has a real id', () => {

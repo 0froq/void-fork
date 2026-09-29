@@ -1343,6 +1343,47 @@ describe('computeDesiredCloudflareResources — desired set from source', () => 
     expect(desired.hyperdrive).toBeUndefined();
   });
 
+  it('keeps an explicitly configured R2 bucket named default', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'myapp' }),
+      'void.json': '{}',
+      'routes/index.ts': `export const GET = (c) => c.env.STORAGE.get('item');`,
+      'wrangler.jsonc': JSON.stringify({
+        r2_buckets: [{ binding: 'STORAGE', bucket_name: 'default' }],
+      }),
+    });
+    const { desired } = await computeDesiredCloudflareResources(
+      root,
+      readConfig(root),
+      join(root, 'wrangler.jsonc'),
+    );
+    expect(desired.r2).toEqual({ binding: 'STORAGE', bucketName: 'default' });
+  });
+
+  it('distinguishes an authored default bucket from a generated typed-config placeholder', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'myapp' }),
+      'void.json': '{}',
+      'routes/index.ts': `export const GET = (c) => c.env.STORAGE.get('item');`,
+      '.void-wrangler.jsonc': JSON.stringify({
+        r2_buckets: [{ binding: 'STORAGE', bucket_name: 'default' }],
+      }),
+    });
+    const configPath = join(root, '.void-wrangler.jsonc');
+    const generated = await computeDesiredCloudflareResources(root, readConfig(root), configPath);
+    expect(generated.desired.r2?.bucketName).toBe('myapp-storage');
+
+    const authored = await computeDesiredCloudflareResources(
+      root,
+      {
+        ...readConfig(root),
+        cloudflare: { r2_buckets: [{ binding: 'STORAGE', bucket_name: 'default' }] },
+      },
+      configPath,
+    );
+    expect(authored.desired.r2?.bucketName).toBe('default');
+  });
+
   it('desires Hyperdrive (not D1) for a PostgreSQL app', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'pgapp' }),
