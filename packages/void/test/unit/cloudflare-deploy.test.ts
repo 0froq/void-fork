@@ -1163,8 +1163,9 @@ describe('ensureCloudflareAuthSecret', () => {
       },
     });
 
-    expect(result).toEqual({ created: true, workerWasMissing: true });
-    expect(call).toBe(3);
+    expect(result).toMatchObject({ created: true, workerWasMissing: true });
+    expect(result.candidateSecret).toMatch(/^[0-9a-f]{64}$/);
+    expect(call).toBe(1);
   });
 
   it('fails closed when secret creation fails without surfacing the generated value', async () => {

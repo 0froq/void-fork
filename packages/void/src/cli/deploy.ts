@@ -4087,7 +4087,7 @@ export async function ensureCloudflareAuthSecret(options: {
   workerName: string;
   runWrangler: DeployWranglerRun;
   beforeWranglerRun?: () => boolean;
-}): Promise<{ created: boolean; workerWasMissing?: true }> {
+}): Promise<{ created: boolean; workerWasMissing?: true; candidateSecret?: string }> {
   let workerWasMissing = false;
   const beforeRun = (): void => {
     if (options.beforeWranglerRun && !options.beforeWranglerRun()) {
@@ -4129,6 +4129,11 @@ export async function ensureCloudflareAuthSecret(options: {
   }
 
   const secret = randomBytes(32).toString('hex');
+  if (workerWasMissing) {
+    // cf uploads secrets with the initial Worker version. The API's standalone
+    // secret endpoints reject a Worker that has not been created yet.
+    return { created: true, workerWasMissing: true, candidateSecret: secret };
+  }
   beforeRun();
   let put: DeployWranglerRunResult;
   try {
@@ -5374,6 +5379,7 @@ export async function runCloudflareDeploy(
   // activator needs this proof to distinguish that placeholder from an existing application when
   // Cloudflare requires a one-time ordinary deploy for initial Durable Object migrations.
   let workerWasMissingBeforeSecretProvisioning = false;
+  let initialAuthSecret: string | undefined;
 
   // 8e. Persistent Better Auth secret — after every local/build-derived gate,
   // but before the first remote migration or worker upload. Existing secrets
@@ -5418,6 +5424,7 @@ export async function runCloudflareDeploy(
         beforeWranglerRun: assertUploaderStillPinned,
       });
       workerWasMissingBeforeSecretProvisioning ||= authSecret.workerWasMissing === true;
+      initialAuthSecret = authSecret.candidateSecret;
       cliLog.info('cloudflare_auth_secret_ready', { created: authSecret.created });
     } catch (error) {
       if (error instanceof CloudflareAuthSecretError && error.reason === 'uploader-changed') {
@@ -5701,6 +5708,9 @@ export async function runCloudflareDeploy(
     previousTrafficConfig: readWranglerPublishedTrafficSnapshot(configPath),
     queueConsumerCleanup,
     verifyInheritedSecrets: true,
+    ...(initialAuthSecret
+      ? { candidateSecrets: { [BETTER_AUTH_SECRET_NAME]: initialAuthSecret } }
+      : {}),
   }).finally(() => cfOutput?.dispose());
   if (!execution.ok) {
     await reportCloudflareActivationFailure(
