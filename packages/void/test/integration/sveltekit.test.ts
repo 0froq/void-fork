@@ -1,4 +1,3 @@
-import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import spawn from 'cross-spawn';
 import { join } from 'pathslash';
@@ -10,21 +9,6 @@ const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const PLAYGROUND = 'playground/sveltekit';
 let DEV_PORT: number;
 let DEV_BASE: string;
-
-describe('playground/sveltekit build', () => {
-  beforeAll(() => {
-    const pg = join(ROOT, PLAYGROUND);
-    rmSync(join(pg, '.svelte-kit'), { recursive: true, force: true });
-    rmSync(join(pg, '.void'), { recursive: true, force: true });
-    rmSync(join(pg, 'wrangler.jsonc'), { force: true });
-    execSync(`vp run --filter ./${PLAYGROUND} build`, { cwd: ROOT, stdio: 'pipe' });
-  });
-
-  it('produces expected build artifacts', () => {
-    const workerEntry = join(ROOT, `${PLAYGROUND}/.svelte-kit/cloudflare/_worker.js`);
-    expect(existsSync(workerEntry)).toBe(true);
-  });
-});
 
 describe('playground/sveltekit dev', () => {
   let child: ReturnType<typeof spawn>;

@@ -1,5 +1,3 @@
-import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
 import spawn from 'cross-spawn';
 import { join } from 'pathslash';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
@@ -9,39 +7,6 @@ const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const PLAYGROUND = 'playground/react-router';
 let DEV_PORT: number;
 let DEV_BASE: string;
-
-describe('playground/react-router build', () => {
-  beforeAll(() => {
-    const pg = join(ROOT, PLAYGROUND);
-    rmSync(join(pg, 'build'), { recursive: true, force: true });
-    rmSync(join(pg, '.void'), { recursive: true, force: true });
-    rmSync(join(pg, '.wrangler'), { recursive: true, force: true });
-    rmSync(join(pg, '.react-router'), { recursive: true, force: true });
-    execSync(`vp run --filter ./${PLAYGROUND} build`, { cwd: ROOT, stdio: 'pipe' });
-  });
-
-  it('produces expected build artifacts', () => {
-    const workerEntry = join(ROOT, `${PLAYGROUND}/build/server/index.js`);
-    expect(existsSync(workerEntry)).toBe(true);
-
-    const clientDir = join(ROOT, `${PLAYGROUND}/build/client`);
-    expect(existsSync(clientDir)).toBe(true);
-  });
-
-  it('generates wrangler.json with inferred bindings', () => {
-    const wranglerConfig = JSON.parse(
-      readFileSync(join(ROOT, `${PLAYGROUND}/build/server/wrangler.json`), 'utf-8'),
-    ) as {
-      d1_databases?: Array<{ binding: string }>;
-      kv_namespaces?: Array<{ binding: string }>;
-      assets?: { directory?: string };
-    };
-
-    expect(wranglerConfig.d1_databases?.some((b) => b.binding === 'DB')).toBe(true);
-    expect(wranglerConfig.kv_namespaces?.some((b) => b.binding === 'KV')).toBe(true);
-    expect(wranglerConfig.assets?.directory).toBe('../client');
-  });
-});
 
 describe('playground/react-router dev', { retry: 2 }, () => {
   let child: ReturnType<typeof spawn>;

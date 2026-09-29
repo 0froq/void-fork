@@ -53,7 +53,7 @@ export default defineConfig({
       },
       'test:all': {
         command:
-          'vp fmt --check && vp lint && vp run build:all && vp run lint:platform && vp run check && vp test run',
+          'vp fmt --check && vp lint && vp run build:all && node test/check-playground-build-artifacts.mjs && vp run lint:platform && vp run check && vp test run',
         // `vp run` passes ONLY the env vars a task declares to that task — not the full environment.
         // Without this, the gated live Cloudflare e2e's credentials never reach `vp test run`, so it
         // skips even when the CI job injects them. `untrackedEnv` forwards them without folding them

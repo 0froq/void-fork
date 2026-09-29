@@ -15,40 +15,11 @@ const CONFIG_FILES = [
   'wrangler.jsonc',
   'wrangler.json',
 ];
-const CLEAN_ENV_KEYS = [
-  'APPDATA',
-  'ComSpec',
-  'HOME',
-  'LOCALAPPDATA',
-  'PATHEXT',
-  'PNPM_HOME',
-  'SystemDrive',
-  'SystemRoot',
-  'TEMP',
-  'TMP',
-  'USERPROFILE',
-] as const;
 const configSnapshot = new Map<string, string | undefined>();
 
 function removeWranglerConfig(root: string) {
   rmSync(join(root, 'wrangler.jsonc'), { force: true });
   rmSync(join(root, 'wrangler.json'), { force: true });
-}
-
-function getCleanEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path');
-  if (pathKey && process.env[pathKey]) {
-    env[pathKey] = process.env[pathKey];
-  }
-
-  for (const key of CLEAN_ENV_KEYS) {
-    if (process.env[key]) {
-      env[key] = process.env[key];
-    }
-  }
-
-  return env;
 }
 
 beforeAll(() => {
@@ -67,37 +38,6 @@ afterAll(() => {
       writeFileSync(filePath, contents);
     }
   }
-});
-
-describe('playground/analog build', () => {
-  beforeAll(() => {
-    const pg = PLAYGROUND_ROOT;
-    rmSync(join(pg, 'dist'), { recursive: true, force: true });
-    rmSync(join(pg, '.void'), { recursive: true, force: true });
-    rmSync(join(pg, '.wrangler'), { recursive: true, force: true });
-    removeWranglerConfig(pg);
-    // Angular's compiler conflicts with vitest's Node.js module hooks.
-    // Use a clean child environment while letting cross-spawn resolve vp.cmd on Windows.
-    const result = spawn.sync('vp', ['run', '--filter', `./${PLAYGROUND}`, 'build'], {
-      cwd: ROOT,
-      stdio: 'pipe',
-      env: getCleanEnv(),
-    });
-    if (result.status !== 0) {
-      const output = [result.error?.message, result.stderr?.toString(), result.stdout?.toString()]
-        .filter(Boolean)
-        .join('\n');
-      throw new Error(`Build failed (exit ${result.status ?? result.signal}):\n${output}`);
-    }
-  });
-
-  it('produces expected build artifacts', () => {
-    const serverEntry = join(ROOT, `${PLAYGROUND}/dist/analog/server/index.mjs`);
-    expect(existsSync(serverEntry)).toBe(true);
-
-    const clientDir = join(ROOT, `${PLAYGROUND}/dist/analog/public`);
-    expect(existsSync(clientDir)).toBe(true);
-  });
 });
 
 describe('playground/analog dev', () => {

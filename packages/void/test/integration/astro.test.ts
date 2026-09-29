@@ -1,4 +1,3 @@
-import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import spawn from 'cross-spawn';
 import { join } from 'pathslash';
@@ -9,11 +8,6 @@ const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const PLAYGROUND = 'playground/astro';
 let DEV_PORT: number;
 let DEV_BASE: string;
-
-function removeWranglerConfig(root: string) {
-  rmSync(join(root, 'wrangler.jsonc'), { force: true });
-  rmSync(join(root, 'wrangler.json'), { force: true });
-}
 
 function readWranglerConfig(root: string): {
   compatibility_flags?: Array<string>;
@@ -27,21 +21,6 @@ function readWranglerConfig(root: string): {
     kv_namespaces?: Array<{ binding: string }>;
   };
 }
-
-describe('playground/astro build', () => {
-  beforeAll(() => {
-    const pg = join(ROOT, PLAYGROUND);
-    rmSync(join(pg, 'dist'), { recursive: true, force: true });
-    rmSync(join(pg, '.void'), { recursive: true, force: true });
-    removeWranglerConfig(pg);
-    execSync(`vp run --filter ./${PLAYGROUND} build`, { cwd: ROOT, stdio: 'pipe' });
-  });
-
-  it('produces expected build artifacts', () => {
-    const workerEntry = join(ROOT, `${PLAYGROUND}/dist/server/entry.mjs`);
-    expect(existsSync(workerEntry)).toBe(true);
-  });
-});
 
 describe('playground/astro dev', () => {
   let child: ReturnType<typeof spawn>;
@@ -96,9 +75,7 @@ describe('playground/astro dev', () => {
     rmSync(join(pg, '.void'), { recursive: true, force: true });
     rmSync(join(pg, '.wrangler'), { recursive: true, force: true });
 
-    // The build suite above already synced inferred bindings into the generated config. Start dev
-    // once with that real generated config instead of booting only to generate it, stopping, and
-    // booting again. The assertions below still cover both config sync and runtime bindings.
+    // Dev must generate the inferred binding config itself in a fresh CI checkout.
     await startDev();
   });
 

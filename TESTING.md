@@ -45,6 +45,9 @@ CI builds and typechecks every playground once per OS in a dedicated required jo
 shards build the public packages and then only the fixtures their tests use; they do not depend
 on generated output from another job. The `done` check requires both the tests and build/type
 checks. Linux and Windows coverage and the credentialed live-deploy gate are unchanged.
+The build job runs `test/check-playground-build-artifacts.mjs` after `build:all` to verify the
+metaframework worker entries and inferred bindings. Their dev-server integration suites do not
+repeat those production builds. `vpr test:all` runs the same artifact check locally.
 
 Integration sharding uses [measured duration estimates](test/integration-timings.ts), rather than
 filename hashes. [The sequencer](test/sequencer.ts) packs the longest files first and starts costly

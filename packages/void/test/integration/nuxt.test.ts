@@ -1,4 +1,3 @@
-import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import spawn from 'cross-spawn';
 import { join } from 'pathslash';
@@ -15,25 +14,6 @@ function removeWranglerConfig(root: string) {
   rmSync(join(root, 'wrangler.jsonc'), { force: true });
   rmSync(join(root, 'wrangler.json'), { force: true });
 }
-
-describe('playground/nuxt build', () => {
-  beforeAll(() => {
-    const pg = join(ROOT, PLAYGROUND);
-    rmSync(join(pg, '.output'), { recursive: true, force: true });
-    rmSync(join(pg, '.nuxt'), { recursive: true, force: true });
-    rmSync(join(pg, '.void'), { recursive: true, force: true });
-    removeWranglerConfig(pg);
-    execSync(`vp run --filter ./${PLAYGROUND} build`, { cwd: ROOT, stdio: 'pipe' });
-  });
-
-  it('produces expected build artifacts', () => {
-    const serverEntry = join(ROOT, `${PLAYGROUND}/.output/server/index.mjs`);
-    expect(existsSync(serverEntry)).toBe(true);
-
-    const publicDir = join(ROOT, `${PLAYGROUND}/.output/public`);
-    expect(existsSync(publicDir)).toBe(true);
-  });
-});
 
 describe(
   'playground/nuxt dev',
