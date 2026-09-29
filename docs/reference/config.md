@@ -6,9 +6,9 @@ outline: deep
 
 ## Config File Format
 
-Use this page as the exact reference for `void.config.ts`. If you are still learning how the pieces fit together, start in the guide first and come back here when you need field-by-field details.
+Use `void.config.ts` to configure your app. For a guided introduction, start with [What is Void?](../guide/).
 
-Project configuration lives in a typed `void.config.ts` at the project root. Import `defineConfig` from `void/config`; all fields are optional. `void init` creates this file, and `void init`, `void deploy`, or `void migrate` converts existing `void.json` and root Wrangler JSON/JSONC files. Void saves the originals under `.void/config-migration/`. Commit `void.config.ts` and `void.lock.json` when Void creates the lock file. You can edit the typed config at any time; the lock records Cloudflare resource IDs and migration history that Void resolves for you.
+Put `void.config.ts` at the project root and import `defineConfig` from `void/config`. All fields are optional. `void init`, `void deploy`, and `void migrate` can convert older Void and Cloudflare JSON config files, saving backups under `.void/config-migration/`. Commit `void.config.ts` and `void.lock.json` when Void creates the lock; it records resource IDs and migration history.
 
 ```ts
 // void.config.ts
@@ -253,7 +253,7 @@ Enable and configure Cloudflare Sandboxes for Void apps. Importing from `void/sa
 | `instanceType`      | `string` | `lite` on Void deploy                |
 | `maxInstances`      | `number` | `20` on Void deploy                  |
 
-Sandbox support currently applies to Void apps on the Cloudflare target. Native deployment requires [Workers Paid](https://dash.cloudflare.com/?to=/:account/workers/plans) because Cloudflare Containers are unavailable on Workers Free. `void deploy --platform cloudflare` verifies Containers access before provisioning resources or building the app and explains how to fix a missing plan or API-token permission. Managed deployment checks the platform account and runtime token only when a Sandbox app is deployed; the token needs Account / Containers: Edit and Account / Cloudchamber: Edit. Apps that do not import `void/sandbox` or configure `sandbox` emit no Container and perform no entitlement check. The default registry image is pinned to the installed `@cloudflare/sandbox` version, so local and native Cloudflare deploys run the same container as Void Platform. If `sandbox.image` is a custom local Dockerfile path, set `sandbox.platformImage` to the pushed image that the platform should run.
+Sandbox is available to Void apps on the Cloudflare target and requires [Workers Paid](https://dash.cloudflare.com/?to=/:account/workers/plans) and Containers access. Void checks access before provisioning or building. For a managed platform, its runtime token needs Account / Containers: Edit and Account / Cloudchamber: Edit. Apps without Sandbox use neither Containers nor an entitlement check. The default image matches the installed `@cloudflare/sandbox` version. If `sandbox.image` points to a local Dockerfile, set `sandbox.platformImage` to the pushed image for the platform.
 
 ### `target`
 
@@ -316,7 +316,7 @@ Void writes a generated Cloudflare config for its tooling and records provisione
 
 If you need to remove a value that Void previously generated, remove it from the `resolved` object in `void.lock.json`. Void refreshes the generated Cloudflare file on the next command. Put ongoing custom settings in `cloudflare` in `void.config.ts`.
 
-`worker.limits.cpu_ms` caps Workers CPU time per request, in milliseconds. It must be an integer between 1 and 300000 (Cloudflare's hard maximum, 5 minutes). A deploy that requests more than your account plan's ceiling fails with an error naming both the requested value and the plan maximum. Only a rollback clamps: rolling back to a deployment whose configured limit now exceeds your plan applies the plan ceiling instead of failing. If your plan changes so that a previously valid value now exceeds the ceiling, deploys keep failing until you lower `cpu_ms` in `void.config.ts`. On the direct Cloudflare path, the value is written into the generated `dist/ssr/wrangler.json` as `limits.cpu_ms` and enforced by Cloudflare directly. The Void plan ceiling does not apply there, but your Cloudflare account's own CPU-time allowance still does: the Workers Free plan caps CPU at 10 ms per request, and the Workers Paid plan allows up to 300000 ms. A value above what your Cloudflare account permits is constrained or rejected by Cloudflare, not by Void.
+`worker.limits.cpu_ms` sets the CPU time limit per request, from 1 to 300000 ms. On a Void platform, deploy fails if the limit exceeds the account plan; lower it in `void.config.ts` before retrying. Rollback instead caps the old limit at the current plan ceiling. On direct deploys, [Cloudflare enforces the value](https://developers.cloudflare.com/workers/platform/limits/#cpu-time): Workers Free allows up to 10 ms and Workers Paid up to 300000 ms per request.
 
 ```json
 {
@@ -493,9 +493,9 @@ Each binding accepts `true` (use default name), `false` (disable), or a string (
 | `ai`      | `AI`            | `Ai`          | `"ai": "MY_AI"`          |
 | `email`   | —               | —             | Boolean only             |
 
-Custom resource binding names flow through deploy manifests, Cloudflare config generation, remote binding proxying, internal migrations, and generated runtime helpers such as `void/db`, `void/kv`, and `void/storage`. Custom AI names apply to generated Cloudflare configuration and `void/ai` runtime resolution for direct Cloudflare builds; managed Workers AI continues to use Void's service proxy.
+Custom binding names work with `void/db`, `void/kv`, and `void/storage` during development and deployment. Custom AI names also work with `void/ai` on direct Cloudflare deploys; managed Workers AI uses the platform's proxy.
 
-`email` is a feature switch rather than a Cloudflare binding, so it has no binding name or type. On the platform, outbound mail is sent through the Void proxy, which owns the `send_email` binding — none is written into your worker; on your own Cloudflare account, `void deploy --platform cloudflare` records a `send_email` binding named `SEND_EMAIL` in `void.lock.json` once email is set up (see [`email.from`](#email)). Set it to `true` to turn the [email integration](../guide/email.md) on — which registers the `void dev` inbox — even when no scanned file imports `void/email`, or `false` to turn it off.
+`email` is a boolean feature switch. Set it to `true` to enable [email](../guide/email.md) and the `void dev` inbox without an import from `void/email`, or `false` to disable them. On a Void platform, sending uses the platform proxy. Direct Cloudflare setup records a `SEND_EMAIL` binding in `void.lock.json`; see [`email.from`](#email).
 
 #### `inference.build`
 
