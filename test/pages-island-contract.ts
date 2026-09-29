@@ -6,17 +6,27 @@ import { waitForIslandsHydrated } from './browser-helpers.ts';
 export function defineSharedIslandTests(
   getBase: () => string,
   getBrowser: () => Browser,
-  waitForValidation: (page: Page) => Promise<unknown> = (page) =>
-    page.waitForFunction(() => document.body?.textContent?.includes('Title is required')),
+  options: {
+    waitForValidation?: (page: Page) => Promise<unknown>;
+    coverage?: 'smoke' | 'full';
+  } = {},
 ): void {
   describe.concurrent('shared island behavior', () =>
-    registerIslandTests(getBase, getBrowser, waitForValidation));
+    registerIslandTests(
+      getBase,
+      getBrowser,
+      options.waitForValidation ??
+        ((page) =>
+          page.waitForFunction(() => document.body?.textContent?.includes('Title is required'))),
+      options.coverage ?? 'full',
+    ));
 }
 
 function registerIslandTests(
   getBase: () => string,
   getBrowser: () => Browser,
   waitForValidation: (page: Page) => Promise<unknown>,
+  coverage: 'smoke' | 'full',
 ) {
   let BASE: string;
   beforeAll(() => {
@@ -63,6 +73,12 @@ function registerIslandTests(
       await page.context().close();
     }
   });
+
+  // The dev island check exercises loading and hydration as well as browser
+  // interaction. The remaining scenarios run against each production build.
+  if (coverage === 'smoke') {
+    return;
+  }
 
   it('island form: validation errors display', async () => {
     const page = await newPage();

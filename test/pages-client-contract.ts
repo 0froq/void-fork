@@ -8,15 +8,17 @@ type TestWindow = Window & {
   __preventedNavigate?: boolean;
 };
 
-/** Run the same browser contract against every adapter and both dev/preview servers. */
+/** Run the full browser contract in preview and a representative navigation in dev. */
 export function registerSharedClientTests({
   getBase,
   newPage,
   waitForHydration,
+  coverage = 'full',
 }: {
   getBase: () => string;
   newPage: () => Promise<Page>;
   waitForHydration: (page: Page) => Promise<void>;
+  coverage?: 'smoke' | 'full';
 }): void {
   let BASE: string;
   beforeAll(() => {
@@ -52,6 +54,12 @@ export function registerSharedClientTests({
       await page.context().close();
     }
   });
+
+  // Dev mode has its own SSR/protocol and HMR checks in each adapter suite. The
+  // full client behavior matrix runs once against the production preview build.
+  if (coverage === 'smoke') {
+    return;
+  }
 
   it('SPA navigation: users → user detail', async () => {
     const page = await newPage();

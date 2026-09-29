@@ -65,12 +65,15 @@ async function waitForViteHmr(page: Page) {
   });
 }
 
-function defineClientTests(getBase: () => string) {
-  describe.concurrent('shared client behavior', () => registerClientTests(getBase));
+function defineClientTests(getBase: () => string, coverage: 'smoke' | 'full' = 'full') {
+  describe.concurrent('shared client behavior', () => registerClientTests(getBase, coverage));
 }
 
-function registerClientTests(getBase: () => string) {
-  registerSharedClientTests({ getBase, newPage, waitForHydration });
+function registerClientTests(getBase: () => string, coverage: 'smoke' | 'full') {
+  registerSharedClientTests({ getBase, newPage, waitForHydration, coverage });
+  if (coverage === 'smoke') {
+    return;
+  }
 
   let BASE: string;
   beforeAll(() => {
@@ -471,10 +474,11 @@ describe('vue-pages client (dev)', () => {
     expect(deferredHtml).toContain('"count":42');
   });
 
-  defineClientTests(() => DEV_BASE);
+  defineClientTests(() => DEV_BASE, 'smoke');
   defineSharedIslandTests(
     () => DEV_BASE,
     () => browser,
+    { coverage: 'smoke' },
   );
 
   it(

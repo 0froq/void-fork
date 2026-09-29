@@ -52,8 +52,10 @@ fixtures early. Estimates affect scheduling only: new files receive a fallback e
 membership tests ensure every discovered file appears exactly once. Refresh the estimates when
 the suite's costs change materially. Seeded file shuffling remains available for isolation checks.
 
-The four adapter suites share their client and island test definitions in `test/`, while retaining
-each framework's own dev, preview, SSR, hydration, and HMR execution. Before integrations start,
+The four adapter suites share their client and island test definitions in `test/`. Each runs the
+full browser behavior contract against its production preview build, plus a dev-mode navigation,
+island hydration/interaction smoke check, SSR/protocol assertions, and HMR checks. This keeps both
+runtime modes covered without repeating the full browser matrix. Before integrations start,
 their sources are snapshotted so another test cloning a fixture cannot capture an in-flight HMR
 edit. Dependencies stay linked to the installed workspace, and snapshots are removed afterward.
 
