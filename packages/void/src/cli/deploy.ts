@@ -116,7 +116,11 @@ import { CLOUDFLARE_DEPLOY_BUILD_ENV, resolveRemoteMode } from '../shared/env.ts
 import { buildEnv, WRANGLER_AUTH_CREDENTIAL_ENV_VARS } from '../shared/untrusted-env.ts';
 import { validateSsrEntry } from '../ssr/entry.ts';
 import { getApiUrl, getToken, getTokenSource } from './auth.ts';
-import { prepareCfBuildOutput, prepareCfStaticBuildOutput } from './cf-build-output.ts';
+import {
+  prepareCfBuildOutput,
+  prepareCfFrameworkBuildOutput,
+  prepareCfStaticBuildOutput,
+} from './cf-build-output.ts';
 import {
   createCfCommand,
   createCfResourceVerifier,
@@ -5381,9 +5385,17 @@ export async function runCloudflareDeploy(
   const generatedConfigPath = (
     deps.resolveGeneratedConfigPath ?? resolveGeneratedDeployConfigPathDefault
   )(root);
+  const prepareBuildOutput = () =>
+    frameworkPreset?.cloudflareArtifact === 'worker-output'
+      ? prepareCfFrameworkBuildOutput({
+          projectRoot: root,
+          configPath: generatedConfigPath,
+          accountId,
+        })
+      : prepareCfBuildOutput(dirname(generatedConfigPath), accountId);
   if (!deps.activateVersion && !deps.runWrangler) {
     // Validate the exact upload format before changing a remote database or secret.
-    const preflight = await prepareCfBuildOutput(dirname(generatedConfigPath), accountId);
+    const preflight = await prepareBuildOutput();
     if (!preflight) {
       log.error('deploy: cf could not prepare the built Worker for deployment.');
       return exit(1);
@@ -5650,10 +5662,7 @@ export async function runCloudflareDeploy(
   if (!deps.activateVersion && !deps.runWrangler && !cfUploaderIsPinned()) {
     return exit(1);
   }
-  const cfOutput =
-    deps.activateVersion || deps.runWrangler
-      ? null
-      : await prepareCfBuildOutput(dirname(generatedConfigPath), accountId);
+  const cfOutput = deps.activateVersion || deps.runWrangler ? null : await prepareBuildOutput();
   if (!cfOutput && !deps.activateVersion && !deps.runWrangler) {
     log.error('deploy: cf could not prepare the built Worker for deployment.');
     return exit(1);

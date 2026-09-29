@@ -11,13 +11,17 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { readBuildOutput } from '@cloudflare/build-output-utils';
+import { getWorkerAssetsDir, readBuildOutput } from '@cloudflare/build-output-utils';
 import { cloudflare } from '@cloudflare/vite-plugin';
 import { renderCloudflareStaticEntry } from '@void/deploy-cloudflare';
 import { dirname, join } from 'pathslash';
 import { createBuilder } from 'vite';
 import { afterEach, expect, it } from 'vite-plus/test';
-import { prepareCfBuildOutput, prepareCfStaticBuildOutput } from '../../src/cli/cf-build-output.ts';
+import {
+  prepareCfBuildOutput,
+  prepareCfFrameworkBuildOutput,
+  prepareCfStaticBuildOutput,
+} from '../../src/cli/cf-build-output.ts';
 
 const roots: Array<string> = [];
 afterEach(() => {
@@ -173,6 +177,65 @@ it('produces deployable cf build output without changing the authored project', 
   }
   expect(existsSync(prepared.directory)).toBe(false);
   expect(existsSync(join(output, 'wrangler.json'))).toBe(true);
+});
+
+it('bundles framework Worker output while honoring its public asset exclusions', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'void-cf-framework-output-test-'));
+  roots.push(root);
+  const output = join(root, 'framework');
+  mkdirSync(output);
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }));
+  writeFileSync(
+    join(root, 'wrangler.json'),
+    JSON.stringify({
+      name: 'void-framework-test',
+      account_id: 'account-id',
+      main: 'framework/_worker.js',
+      compatibility_date: '2026-09-29',
+      assets: { directory: 'framework', binding: 'ASSETS', run_worker_first: true },
+    }),
+  );
+  writeFileSync(
+    join(output, '_worker.js'),
+    "import app from './__original.js'; export default app;\n",
+  );
+  writeFileSync(
+    join(output, '__original.js'),
+    'export default { fetch() { return new Response("ok") } };\n',
+  );
+  writeFileSync(join(output, 'index.html'), '<h1>public</h1>');
+  writeFileSync(join(output, '.assetsignore'), '_worker.js\n__original.js\n');
+
+  const prepared = await prepareCfFrameworkBuildOutput({
+    projectRoot: root,
+    configPath: join(root, 'wrangler.json'),
+    accountId: 'account-id',
+  });
+  expect(prepared).not.toBeNull();
+  if (!prepared) {
+    return;
+  }
+  try {
+    const built = await readBuildOutput(prepared.directory);
+    expect(built.workers.default.config.manifest?.mainModule).toBe('index.js');
+    const assets = getWorkerAssetsDir(prepared.directory);
+    expect(readFileSync(join(assets, 'index.html'), 'utf8')).toContain('public');
+    expect(existsSync(join(assets, '_worker.js'))).toBe(false);
+    expect(existsSync(join(assets, '__original.js'))).toBe(false);
+    expect(existsSync(join(assets, '.assetsignore'))).toBe(false);
+    const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
+    const dryRun = spawnSync(
+      process.execPath,
+      [cf, 'workers', 'versions', 'create', '--prebuilt', '--dry-run'],
+      {
+        cwd: prepared.directory,
+        encoding: 'utf8',
+      },
+    );
+    expect(dryRun.status, `${dryRun.stdout}\n${dryRun.stderr}`).toBe(0);
+  } finally {
+    prepared.dispose();
+  }
 });
 
 it('preserves worker settings that the previous bridge dropped', async () => {
