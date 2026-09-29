@@ -71,24 +71,92 @@ it('produces deployable cf build output without changing the authored project', 
   expect(existsSync(join(output, 'wrangler.json'))).toBe(true);
 });
 
-it('keeps unsupported configuration on the existing deploy path', async () => {
+it('preserves worker settings that the previous bridge dropped', async () => {
   const output = worker({
     name: 'void-test',
     compatibility_date: '2026-09-29',
     main: 'index.js',
     limits: { cpu_ms: 100 },
+    placement: { mode: 'smart' },
   });
-  expect(await prepareCfBuildOutput(output, 'account-id')).toBeNull();
+  const prepared = await prepareCfBuildOutput(output, 'account-id');
+  expect(prepared).not.toBeNull();
+  if (!prepared) {
+    return;
+  }
+  try {
+    const built = await readBuildOutput(prepared.directory);
+    expect(built.workers.default.config.limits).toEqual({ cpuMs: 100 });
+    expect(built.workers.default.config.placement).toEqual({ mode: 'smart' });
+  } finally {
+    prepared.dispose();
+  }
 });
 
-it('falls back when the generated bundle contains a symlink that would be omitted', async () => {
+it('copies an internal symlinked Worker module into the prebuilt artifact', async () => {
   const output = worker({
     name: 'void-test',
     compatibility_date: '2026-09-29',
     main: 'index.js',
   });
   symlinkSync('index.js', join(output, 'chunk.js'));
-  expect(await prepareCfBuildOutput(output, 'account-id')).toBeNull();
+  const prepared = await prepareCfBuildOutput(output, 'account-id');
+  expect(prepared).not.toBeNull();
+  if (!prepared) {
+    return;
+  }
+  try {
+    expect(
+      existsSync(join(prepared.directory, '.cloudflare/output/v0/workers/default/bundle/chunk.js')),
+    ).toBe(true);
+  } finally {
+    prepared.dispose();
+  }
+});
+
+it('keeps Durable Objects, Queue triggers, and Containers in cf prebuilt output', async () => {
+  const output = worker({
+    name: 'void-test',
+    compatibility_date: '2026-09-29',
+    main: 'index.js',
+    durable_objects: { bindings: [{ name: 'COUNTER', class_name: 'Counter' }] },
+    migrations: [{ tag: 'v1', new_sqlite_classes: ['Counter'] }],
+    containers: [
+      { name: 'counter-container', class_name: 'Counter', image: 'docker.io/example/counter:1' },
+    ],
+    queues: {
+      producers: [{ binding: 'JOBS', queue: 'jobs' }],
+      consumers: [{ queue: 'jobs', max_batch_size: 10 }],
+    },
+  });
+  const prepared = await prepareCfBuildOutput(output, 'account-id');
+  expect(prepared).not.toBeNull();
+  if (!prepared) {
+    return;
+  }
+  try {
+    const built = await readBuildOutput(prepared.directory);
+    expect(built.workers.default.config.exports?.Counter).toEqual(
+      expect.objectContaining({ type: 'durable-object', storage: 'sqlite' }),
+    );
+    expect(built.workers.default.config.env?.COUNTER).toEqual({
+      type: 'unsafe:durable_object_namespace',
+      class_name: 'Counter',
+    });
+    expect(built.workers.default.config.triggers).toContainEqual(
+      expect.objectContaining({ type: 'queue', name: 'jobs' }),
+    );
+    expect(built.containers).toHaveLength(1);
+    const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
+    const dryRun = spawnSync(
+      process.execPath,
+      [cf, 'workers', 'versions', 'create', '--prebuilt', '--dry-run'],
+      { cwd: prepared.directory, encoding: 'utf8' },
+    );
+    expect(dryRun.status, `${dryRun.stdout}\n${dryRun.stderr}`).toBe(0);
+  } finally {
+    prepared.dispose();
+  }
 });
 
 it('bundles a generated static Worker and staged assets into prebuilt cf output', async () => {
