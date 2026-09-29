@@ -152,12 +152,16 @@ function applyWorkflows(raw: JsonObject, worker: JsonObject): void {
     if (Object.hasOwn(exports, workflow.class_name)) {
       throw new Error(`Duplicate Worker export ${workflow.class_name}.`);
     }
+    const schedules =
+      Array.isArray(workflow.schedules) && workflow.schedules.length === 0
+        ? undefined
+        : workflow.schedules;
     exports[workflow.class_name] = {
       type: 'workflow',
       name: workflow.name,
       ...(workflow.limits !== undefined ? { limits: workflow.limits } : {}),
       ...(workflow.concurrency !== undefined ? { concurrency: workflow.concurrency } : {}),
-      ...(workflow.schedules !== undefined ? { schedules: workflow.schedules } : {}),
+      ...(schedules !== undefined ? { schedules } : {}),
       ...(retention
         ? {
             defaultRetention: {

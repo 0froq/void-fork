@@ -1,11 +1,15 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
+import { getWorkerConfigPath } from '@cloudflare/build-output-utils';
 import { join } from 'pathslash';
 import { afterEach, expect, it } from 'vite-plus/test';
-import { activateCloudflareVersion } from '../../../deploy-cloudflare/src/version.ts';
+import {
+  activateCloudflareVersion,
+  deployCloudflareVersionTriggers,
+} from '../../../deploy-cloudflare/src/version.ts';
 import { prepareCfBuildOutput } from '../../src/cli/cf-build-output.ts';
 import { createCfCommand, createCfVersionRunner } from '../../src/cli/cf-version-runner.ts';
 
@@ -128,7 +132,7 @@ it('treats a verified empty deployment list as missing but rejects malformed sta
   }
 });
 
-async function output() {
+async function output(config: Record<string, unknown> = {}) {
   const root = mkdtempSync(join(tmpdir(), 'void-cf-runner-test-'));
   roots.push(root);
   const worker = join(root, 'dist', 'ssr');
@@ -141,6 +145,7 @@ async function output() {
       compatibility_date: '2026-09-29',
       main: 'index.js',
       workers_dev: true,
+      ...config,
     }),
   );
   const prepared = await prepareCfBuildOutput(worker, 'account-id');
@@ -300,6 +305,78 @@ it('applies the immutable trigger snapshot through a private cf output copy', as
     prepared.dispose();
   }
 });
+
+it.each(['restore', 'remove'] as const)(
+  'replays workflow exports and schedules when triggers %s the previous workflow state',
+  async (operation) => {
+    const workflow = {
+      binding: 'JOB',
+      name: 'void-job',
+      class_name: 'Job',
+      schedules: ['0 * * * *'],
+    };
+    const prepared = await output({
+      vars: { FIXED: 'value' },
+      durable_objects: { bindings: [{ name: 'STATE', class_name: 'State' }] },
+      migrations: [{ tag: 'v1', new_sqlite_classes: ['State'] }],
+      workflows: operation === 'restore' ? [workflow] : [],
+    });
+    const desiredWorkflow = { ...workflow, schedules: ['30 * * * *'], concurrency: { limit: 2 } };
+    try {
+      const calls: Array<Array<string>> = [];
+      const runner = createCfVersionRunner({
+        output: prepared,
+        workerName: 'void-test',
+        runCf: (args, { cwd }) => {
+          calls.push(args);
+          const worker = JSON.parse(readFileSync(getWorkerConfigPath(cwd), 'utf8'));
+          expect(worker.exports.Job).toEqual({
+            type: 'workflow',
+            name: 'void-job',
+            ...(operation === 'restore'
+              ? { schedules: ['30 * * * *'], concurrency: { limit: 2 } }
+              : {}),
+          });
+          expect(worker.env.JOB).toMatchObject({
+            type: 'workflow',
+            name: 'void-job',
+            worker: 'void-test',
+            exportName: 'Job',
+          });
+          expect(worker.exports.State).toMatchObject({ type: 'durable-object', storage: 'sqlite' });
+          expect(worker.env.STATE).toMatchObject({ type: 'durable-object' });
+          expect(worker.env.FIXED).toEqual({ type: 'text', value: 'value' });
+          return { status: 0, stdout: '', stderr: '' };
+        },
+      });
+      const base = {
+        workers_dev: true,
+        preview_urls: true,
+        routes: [],
+        crons: [],
+        queueConsumers: [],
+      };
+      const result = await deployCloudflareVersionTriggers({
+        workerName: 'void-test',
+        configPath: join(roots.at(-1)!, 'dist', 'ssr', 'wrangler.json'),
+        runWrangler: runner,
+        triggerConfig: {
+          ...base,
+          workflows: operation === 'restore' ? [desiredWorkflow] : [],
+        },
+        previousTriggerConfig: { ...base, workflows: [workflow] },
+      });
+      expect(result.status).toBe(0);
+      expect(calls).toEqual([['workers', 'triggers', 'deploy', '--prebuilt']]);
+      const original = JSON.parse(readFileSync(getWorkerConfigPath(prepared.directory), 'utf8'));
+      expect(original.exports.Job?.schedules).toEqual(
+        operation === 'restore' ? ['0 * * * *'] : undefined,
+      );
+    } finally {
+      prepared.dispose();
+    }
+  },
+);
 
 it('uses cf for Queue triggers, consumer cleanup, and version binding reads', async () => {
   const prepared = await output();

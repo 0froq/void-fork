@@ -270,6 +270,20 @@ export function createCfVersionRunner(options: {
             ? previous.filter((trigger) => record(trigger) && trigger.type === 'email')
             : []),
         ];
+        // Workflow schedules and settings live on exports, outside `triggers`.
+        // Replay the snapshot even during compensation or removal, when the
+        // candidate's workflow declarations describe the version being left.
+        for (const field of ['env', 'exports'] as const) {
+          const previous = record(worker[field]) ? worker[field] : {};
+          worker[field] = {
+            ...Object.fromEntries(
+              Object.entries(previous).filter(
+                ([, value]) => !record(value) || value.type !== 'workflow',
+              ),
+            ),
+            ...migrated[field],
+          };
+        }
         if (!preserveRoutes) {
           worker.domains = migrated.domains ?? [];
         }
