@@ -1,10 +1,20 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { readBuildOutput } from '@cloudflare/build-output-utils';
+import { cloudflare } from '@cloudflare/vite-plugin';
 import { renderCloudflareStaticEntry } from '@void/deploy-cloudflare';
 import { dirname, join } from 'pathslash';
+import { createBuilder } from 'vite';
 import { afterEach, expect, it } from 'vite-plus/test';
 import { prepareCfBuildOutput, prepareCfStaticBuildOutput } from '../../src/cli/cf-build-output.ts';
 
@@ -27,6 +37,91 @@ function worker(config: Record<string, unknown>): string {
   writeFileSync(join(output, 'wrangler.json'), JSON.stringify(config));
   return output;
 }
+
+it('preserves additional module types from a real Cloudflare Vite build', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'void-cf-additional-modules-'));
+  roots.push(root);
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }));
+  const configPath = join(root, 'wrangler.json');
+  writeFileSync(
+    configPath,
+    JSON.stringify({
+      name: 'void-additional-modules',
+      main: 'index.js',
+      compatibility_date: '2026-09-29',
+    }),
+  );
+  const assets = {
+    'message.txt': 'hello',
+    'page.html': '<p>hello</p>',
+    'query.sql': 'SELECT 1',
+    'bytes.bin': Buffer.from([1, 2, 3]),
+    'module.wasm': Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]),
+  };
+  for (const [name, contents] of Object.entries(assets)) {
+    writeFileSync(join(root, name), contents);
+  }
+  writeFileSync(
+    join(root, 'index.js'),
+    `import message from './message.txt';
+import page from './page.html';
+import query from './query.sql';
+import bytes from './bytes.bin';
+import wasm from './module.wasm';
+export default { fetch() {
+  return Response.json({ message, page, query, bytes: Array.from(new Uint8Array(bytes)), imports: WebAssembly.Module.imports(wasm) });
+} };`,
+  );
+  const builder = await createBuilder({
+    root,
+    configFile: false,
+    logLevel: 'silent',
+    plugins: [cloudflare({ configPath })],
+    build: { sourcemap: true },
+  });
+  await builder.buildApp();
+  const output = join(root, 'dist', 'void_additional_modules');
+  const prepared = await prepareCfBuildOutput(output, 'account-id');
+  expect(prepared).not.toBeNull();
+  if (!prepared) {
+    return;
+  }
+  try {
+    const built = await readBuildOutput(prepared.directory);
+    const manifest = built.workers.default.config.manifest!;
+    expect(manifest.type).toBe('complete');
+    expect(manifest.modules['index.js']).toEqual({ type: 'esm' });
+    expect(manifest.modules['index.js.map']).toEqual({ type: 'sourcemap' });
+    for (const [name, type] of Object.entries({
+      message: 'text',
+      page: 'text',
+      query: 'text',
+      bytes: 'data',
+      module: 'wasm',
+    })) {
+      const moduleName = Object.keys(manifest.modules).find((path) =>
+        path.startsWith(`assets/${name}-`),
+      );
+      expect(moduleName).toBeDefined();
+      expect(manifest.modules[moduleName!]).toEqual({ type });
+      expect(
+        readFileSync(
+          join(prepared.directory, '.cloudflare/output/v0/workers/default/bundle', moduleName!),
+        ),
+      ).toEqual(readFileSync(join(output, moduleName!)));
+    }
+    expect(manifest.modules['.vite/manifest.json']).toBeUndefined();
+    const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
+    const dryRun = spawnSync(
+      process.execPath,
+      [cf, 'workers', 'versions', 'create', '--prebuilt', '--dry-run'],
+      { cwd: prepared.directory, encoding: 'utf8' },
+    );
+    expect(dryRun.status, `${dryRun.stdout}\n${dryRun.stderr}`).toBe(0);
+  } finally {
+    prepared.dispose();
+  }
+});
 
 it('produces deployable cf build output without changing the authored project', async () => {
   const output = worker({
@@ -203,6 +298,8 @@ it('copies an internal symlinked Worker module into the prebuilt artifact', asyn
     return;
   }
   try {
+    const built = await readBuildOutput(prepared.directory);
+    expect(built.workers.default.config.manifest?.modules['chunk.js']).toEqual({ type: 'esm' });
     expect(
       existsSync(join(prepared.directory, '.cloudflare/output/v0/workers/default/bundle/chunk.js')),
     ).toBe(true);

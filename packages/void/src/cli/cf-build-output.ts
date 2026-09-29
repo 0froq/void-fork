@@ -20,7 +20,7 @@ import {
   writeRootConfig,
   writeWorkerConfig,
 } from '@cloudflare/build-output-utils';
-import { OutputContainerSchema } from '@cloudflare/config';
+import { type ModuleType, OutputContainerSchema } from '@cloudflare/config';
 import { basename, dirname, extname, join, relative, resolve } from 'pathslash';
 import { build } from 'vite';
 import { migrateBuiltWranglerConfig } from './cf-config-migrate.ts';
@@ -39,7 +39,26 @@ function object(value: unknown): JsonObject | null {
     : null;
 }
 
-function copyBundle(source: string, destination: string): boolean {
+// Match the additional modules emitted by the Cloudflare Vite plugin. A complete
+// manifest keeps cf from treating text, binary, and Wasm imports as JavaScript.
+const moduleTypes: Record<string, ModuleType> = {
+  '.js': 'esm',
+  '.mjs': 'esm',
+  '.cjs': 'cjs',
+  '.wasm': 'wasm',
+  '.bin': 'data',
+  '.txt': 'text',
+  '.html': 'text',
+  '.sql': 'text',
+  '.json': 'json',
+  '.map': 'sourcemap',
+};
+
+function copyBundle(
+  source: string,
+  destination: string,
+): Record<string, { type: ModuleType }> | null {
+  const modules: Record<string, { type: ModuleType }> = {};
   for (const entry of readdirSync(source, { recursive: true, withFileTypes: true })) {
     if (!entry.isFile() && !entry.isSymbolicLink()) {
       continue;
@@ -59,9 +78,9 @@ function copyBundle(source: string, destination: string): boolean {
     ) {
       continue;
     }
-    const extension = extname(entry.name);
-    if (!['.js', '.mjs', '.map'].includes(extension)) {
-      return false;
+    const type = moduleTypes[extname(entry.name).toLowerCase()];
+    if (!type) {
+      return null;
     }
     const destinationPath = join(destination, name);
     mkdirSync(dirname(destinationPath), { recursive: true });
@@ -70,8 +89,9 @@ function copyBundle(source: string, destination: string): boolean {
     } else {
       cpSync(absolute, destinationPath);
     }
+    modules[name] = { type };
   }
-  return true;
+  return modules;
 }
 
 /** Create a private cf Build Output tree from Void's verified Vite artifact. */
@@ -106,7 +126,8 @@ export async function prepareCfBuildOutput(
   try {
     const bundle = getWorkerBundleDir(directory);
     mkdirSync(bundle, { recursive: true });
-    if (!copyBundle(source, bundle)) {
+    const modules = copyBundle(source, bundle);
+    if (!modules) {
       rmSync(directory, { recursive: true, force: true });
       return null;
     }
@@ -114,7 +135,7 @@ export async function prepareCfBuildOutput(
     await writeWorkerConfig({
       root: directory,
       config: config.worker,
-      manifest: { type: 'partial', mainModule: main, modules: {} },
+      manifest: { type: 'complete', mainModule: main, modules },
     });
     for (const container of config.containers ?? []) {
       await writeContainerConfig({
