@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { connect, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
+import type { Duplex } from 'node:stream';
 import { getWorkerConfigPath } from '@cloudflare/build-output-utils';
 import { join } from 'pathslash';
 import { afterEach, expect, it } from 'vite-plus/test';
@@ -244,8 +245,11 @@ it('uses the configured HTTP proxy for direct cf activation reads', async () => 
   const root = mkdtempSync(join(tmpdir(), 'void-cf-proxy-read-'));
   roots.push(root);
   const requests: Array<string> = [];
-  const proxy = createServer((request, response) => {
-    requests.push(request.url ?? '');
+  const respond = (
+    request: import('node:http').IncomingMessage,
+    response: import('node:http').ServerResponse,
+  ) => {
+    requests.push(new URL(request.url ?? '/', 'http://cf-proxy-test.invalid').href);
     request.resume();
     response.writeHead(200, { 'Content-Type': 'application/json' });
     response.end(
@@ -255,8 +259,28 @@ it('uses the configured HTTP proxy for direct cf activation reads', async () => 
         result: [{ id: '00000000-0000-0000-0000-000000000001', number: 1 }],
       }),
     );
+  };
+  const api = createServer(respond);
+  const proxy = createServer(respond);
+  const tunnels = new Set<Duplex>();
+  proxy.on('connect', (_request, socket, head) => {
+    const upstream = connect((api.address() as AddressInfo).port, '127.0.0.1', () => {
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      if (head.length) {
+        upstream.write(head);
+      }
+      socket.pipe(upstream).pipe(socket);
+    });
+    tunnels.add(socket);
+    tunnels.add(upstream);
+    socket.on('close', () => tunnels.delete(socket));
+    upstream.on('close', () => tunnels.delete(upstream));
+    upstream.on('error', () => socket.destroy());
   });
-  await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+  await Promise.all([
+    new Promise<void>((resolve) => api.listen(0, '127.0.0.1', resolve)),
+    new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve)),
+  ]);
   try {
     const proxyUrl = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`;
     const apiBaseUrl = 'http://cf-proxy-test.invalid/client/v4';
@@ -293,7 +317,8 @@ it('uses the configured HTTP proxy for direct cf activation reads', async () => 
             CLOUDFLARE_API_BASE_URL: apiBaseUrl,
           },
         },
-        (error, stdout, stderr) => (error ? reject(new Error(stderr)) : resolve(stdout)),
+        (error, stdout, stderr) =>
+          error ? reject(new Error(`${error.message}\n${stderr}`)) : resolve(stdout),
       );
     });
     const result = JSON.parse(stdout) as { status: number; stdout: string };
@@ -303,8 +328,17 @@ it('uses the configured HTTP proxy for direct cf activation reads', async () => 
       'http://cf-proxy-test.invalid/client/v4/accounts/test-account/workers/workers/proxy-worker/versions',
     ]);
   } finally {
-    await new Promise<void>((resolve, reject) =>
-      proxy.close((error) => (error ? reject(error) : resolve())),
+    for (const tunnel of tunnels) {
+      tunnel.destroy();
+    }
+    await Promise.all(
+      [api, proxy].map(
+        (server) =>
+          new Promise<void>((resolve, reject) => {
+            server.close((error) => (error ? reject(error) : resolve()));
+            server.closeAllConnections();
+          }),
+      ),
     );
   }
 }, 30_000);
