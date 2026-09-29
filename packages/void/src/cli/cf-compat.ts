@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'jsonc-parser';
 import { dirname, join, resolve } from 'pathslash';
+import { EnvHttpProxyAgent, fetch as httpFetch } from 'undici';
 import { prepareCfBuildOutput } from './cf-build-output.ts';
 
 type Result = { status: number; stdout: string; stderr: string };
@@ -195,20 +196,32 @@ async function readVersionResources(worker: string, versionId: string): Promise<
   }
   const base = process.env.CLOUDFLARE_API_BASE_URL ?? 'https://api.cloudflare.com/client/v4';
   const url = `${base.replace(/\/$/, '')}/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(worker)}/versions/${encodeURIComponent(versionId)}`;
-  const response = await fetch(url, {
-    headers: apiHeaders(),
-    redirect: 'error',
-    signal: AbortSignal.timeout(30_000),
-  });
-  const body = object(await response.json());
-  if (!response.ok || body.success !== true) {
-    throw new Error('Cloudflare did not return Worker version resources.');
+  const proxy =
+    process.env.HTTP_PROXY ||
+    process.env.HTTPS_PROXY ||
+    process.env.http_proxy ||
+    process.env.https_proxy
+      ? new EnvHttpProxyAgent()
+      : null;
+  try {
+    const response = await httpFetch(url, {
+      headers: apiHeaders(),
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
+      ...(proxy ? { dispatcher: proxy } : {}),
+    });
+    const body = object(await response.json());
+    if (!response.ok || body.success !== true) {
+      throw new Error('Cloudflare did not return Worker version resources.');
+    }
+    const resources = object(object(body.result).resources);
+    if (!Array.isArray(resources.bindings) || !resources.script || !resources.script_runtime) {
+      throw new Error('Cloudflare Worker version resources were incomplete.');
+    }
+    return resources;
+  } finally {
+    await proxy?.close();
   }
-  const resources = object(object(body.result).resources);
-  if (!Array.isArray(resources.bindings) || !resources.script || !resources.script_runtime) {
-    throw new Error('Cloudflare Worker version resources were incomplete.');
-  }
-  return resources;
 }
 
 function apiHeaders(): Record<string, string> {
