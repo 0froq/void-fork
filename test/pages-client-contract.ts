@@ -25,14 +25,45 @@ export function registerSharedClientTests({
     BASE = getBase();
   });
 
-  it('SPA navigation: home → users', async () => {
+  if (coverage === 'smoke') {
+    it('SPA navigation: home → users', async () => {
+      const page = await newPage();
+
+      try {
+        await page.goto(BASE + '/');
+        await waitForHydration(page);
+
+        // Set a marker to detect if a full page reload happens
+        await page.evaluate(() => {
+          (window as TestWindow).__SPA_MARKER = true;
+        });
+
+        await page.click('a[href="/users"]');
+        await page.waitForFunction(() =>
+          document.querySelector('h1')?.textContent?.includes('Users'),
+        );
+
+        expect(page.url()).toBe(BASE + '/users');
+        expect(await page.evaluate(() => (window as TestWindow).__SPA_MARKER)).toBe(true);
+
+        const text = await page.textContent('body');
+        expect(text).toContain('Alice');
+        expect(text).toContain('Bob');
+      } finally {
+        await page.context().close();
+      }
+    });
+    return;
+  }
+
+  // The longer journey also covers both forward navigation steps and their
+  // rendered data, so separate list/detail browser contexts add no coverage.
+  it('browser back/forward navigation', async () => {
     const page = await newPage();
 
     try {
       await page.goto(BASE + '/');
       await waitForHydration(page);
-
-      // Set a marker to detect if a full page reload happens
       await page.evaluate(() => {
         (window as TestWindow).__SPA_MARKER = true;
       });
@@ -41,63 +72,16 @@ export function registerSharedClientTests({
       await page.waitForFunction(() =>
         document.querySelector('h1')?.textContent?.includes('Users'),
       );
-
       expect(page.url()).toBe(BASE + '/users');
-
-      const marker = await page.evaluate(() => (window as TestWindow).__SPA_MARKER);
-      expect(marker).toBe(true);
-
-      const text = await page.textContent('body');
-      expect(text).toContain('Alice');
-      expect(text).toContain('Bob');
-    } finally {
-      await page.context().close();
-    }
-  });
-
-  // Dev mode has its own SSR/protocol and HMR checks in each adapter suite. The
-  // full client behavior matrix runs once against the production preview build.
-  if (coverage === 'smoke') {
-    return;
-  }
-
-  it('SPA navigation: users → user detail', async () => {
-    const page = await newPage();
-
-    try {
-      await page.goto(BASE + '/users');
-      await waitForHydration(page);
+      expect(await page.evaluate(() => (window as TestWindow).__SPA_MARKER)).toBe(true);
+      expect(await page.textContent('body')).toContain('Bob');
 
       await page.click('a[href="/users/1"]');
       await page.waitForFunction(() =>
         document.querySelector('h1')?.textContent?.includes('Alice'),
       );
-
       expect(page.url()).toBe(BASE + '/users/1');
-
-      const text = await page.textContent('body');
-      expect(text).toContain('alice@example.com');
-    } finally {
-      await page.context().close();
-    }
-  });
-
-  it('browser back/forward navigation', async () => {
-    const page = await newPage();
-
-    try {
-      await page.goto(BASE + '/');
-      await waitForHydration(page);
-
-      await page.click('a[href="/users"]');
-      await page.waitForFunction(() =>
-        document.querySelector('h1')?.textContent?.includes('Users'),
-      );
-
-      await page.click('a[href="/users/1"]');
-      await page.waitForFunction(() =>
-        document.querySelector('h1')?.textContent?.includes('Alice'),
-      );
+      expect(await page.textContent('body')).toContain('alice@example.com');
 
       await page.goBack();
       await page.waitForFunction(() =>
@@ -144,32 +128,7 @@ export function registerSharedClientTests({
     }
   });
 
-  it.sequential('form submission adds user', async () => {
-    const page = await newPage();
-    const id = crypto.randomUUID();
-    const name = `Browser Charlie ${id}`;
-
-    try {
-      await page.goto(BASE + '/users');
-      await waitForHydration(page);
-
-      await page.fill('input:near(:text("Name:"))', name);
-      await page.fill('input:near(:text("Email:"))', `charlie-${id}@example.com`);
-
-      await page.click('button[type="submit"]');
-      await page.waitForFunction((value) => document.body?.textContent?.includes(value), name);
-
-      const text = await page.textContent('body');
-      expect(text).toContain(name);
-      expect(text).not.toContain('Name is required');
-      expect(text).not.toContain('Email is required');
-      expect(page.url()).toBe(BASE + '/users');
-    } finally {
-      await page.context().close();
-    }
-  });
-
-  it.sequential('navigate to newly added user detail', async () => {
+  it.sequential('form submission adds a user and navigates to its detail', async () => {
     const page = await newPage();
     const id = crypto.randomUUID();
     const name = `Browser Dana ${id}`;
@@ -184,6 +143,10 @@ export function registerSharedClientTests({
       await page.fill('input:near(:text("Email:"))', email);
       await page.click('button[type="submit"]');
       await page.waitForFunction((value) => document.body?.textContent?.includes(value), name);
+      const submittedText = await page.textContent('body');
+      expect(submittedText).not.toContain('Name is required');
+      expect(submittedText).not.toContain('Email is required');
+      expect(page.url()).toBe(BASE + '/users');
 
       // Click the link to the newly added user's detail page
       await page.getByRole('link', { name, exact: true }).click();

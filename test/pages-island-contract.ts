@@ -40,20 +40,7 @@ function registerIslandTests(
     return page;
   }
 
-  it('island hydration: data-hydrated appears after load', async () => {
-    const page = await newPage();
-    try {
-      await page.goto(BASE + '/blog');
-      // This helper asserts the minimum count and every hydration marker in
-      // one browser evaluation. Re-reading the same markers adds no coverage
-      // and can race a Vite reload between the two browser round trips.
-      await waitForIslandsHydrated(page, 2);
-    } finally {
-      await page.context().close();
-    }
-  });
-
-  it('island interaction: counter increments on click', async () => {
+  it('island hydration and interaction: counter increments on click', async () => {
     const page = await newPage();
     try {
       await page.goto(BASE + '/blog');
