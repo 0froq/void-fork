@@ -362,6 +362,9 @@ export default defineConfig({
           sequence: { groupOrder: 2 },
           pool: 'threads',
           maxWorkers,
+          // Windows unit tests that import the plugin or spawn a CLI can exceed Vitest's
+          // 5-second default under CI load. Keep the faster default on other platforms.
+          ...(process.platform === 'win32' ? { testTimeout: 20_000 } : {}),
         },
       },
       {
