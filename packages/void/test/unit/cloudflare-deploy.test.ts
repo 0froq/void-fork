@@ -230,6 +230,15 @@ describe('Cloudflare activation diagnostics', () => {
     ).toContain('did not invoke the changed Wrangler binary');
   });
 
+  it('explains the account default-deny case when first-deploy readiness is blocked', () => {
+    const message = formatCloudflareActivationError({
+      ok: false,
+      reason: 'bootstrap-readiness-access-denied',
+    });
+    expect(message).toContain('error 1050');
+    expect(message).toContain('create an Access application');
+  });
+
   it('distinguishes opaque trigger recovery from a first deployment', () => {
     const opaque = formatCloudflareActivationError({
       ok: false,

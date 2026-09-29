@@ -5895,6 +5895,7 @@ export function formatCloudflareActivationError(
         'deploy: Cloudflare Access blocked the uploaded Worker Version readiness probe.',
         'For CI, set CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET to an admitted service token.',
         'For a local deploy, set CF_ACCESS_TOKEN to a short-lived user JWT from cloudflared.',
+        'If the response is error 1050, create an Access application for this hostname; a token alone cannot bypass account default-deny.',
         `Then retry. ${formatCloudflareReadinessRestoration(result)}`,
       ].join('\n');
     case 'bootstrap-failed':
@@ -5915,6 +5916,7 @@ export function formatCloudflareActivationError(
         'deploy: Cloudflare Access blocked the first Worker deployment readiness probe.',
         'For CI, set CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET to an admitted service token;',
         'for a local deploy, set CF_ACCESS_TOKEN to a short-lived user JWT from cloudflared.',
+        'If the response is error 1050, create an Access application for this hostname; a token alone cannot bypass account default-deny.',
         'Then retry. Cloudflare requires the first deployment to be non-versioned, so the new',
         'Worker is already active behind Access.',
       ].join('\n');
