@@ -15,7 +15,10 @@ import {
   snapshotPassthroughRawFields,
   verifyGeneratedDeployConfig,
 } from '../../src/cli/deploy.ts';
+import { materializeCloudflareConfig } from '../../src/cloudflare-config.ts';
+import { renderVoidConfig } from '../../src/config-write.ts';
 import { readConfig } from '../../src/config.ts';
+import { CLOUDFLARE_DEPLOY_BUILD_ENV } from '../../src/shared/env.ts';
 
 // Real-build FP-safety lock for `void deploy --backend cloudflare`. The 600+ unit tests drive
 // `runCloudflareDeploy` with a STUBBED `vite build` and HAND-WRITTEN emitted configs, so nothing
@@ -39,7 +42,7 @@ let emittedPath = '';
 
 // Real-SHAPED ids the guard treats as genuine (`isRealD1Id` UUID / `isRealKvId` 32-hex). Because
 // Provisioning writes real ids into the root config before the build, and the build
-// merges the root config into the emitted artifact, an overlaid root `wrangler.jsonc` carrying
+// merges the root config into the emitted artifact, an overlaid `cloudflare` config carrying
 // these ids yields an emitted artifact whose id-bearing bindings match the pinned snapshot — the
 // exact clean-deploy condition the guard authorizes.
 const ACCOUNT_ID = '0123456789abcdef0123456789abcdef';
@@ -50,9 +53,9 @@ const REAL_ISR_CACHE_ID = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
 const OTHER_D1_ID = '11111111-2222-3333-4444-555555555555';
 const R2_BUCKET_NAME = 'void-kitchen-sink-storage';
 
-// The overlaid root config. kitchen-sink ships NO root wrangler config (it relies on void.json +
-// inference), so the test writes one declaring `account_id`, `name`, and real-shaped ids for every
-// id-bearing binding the source uses, then removes it on teardown.
+// The overlaid Cloudflare config. kitchen-sink ships no authored Cloudflare bindings (it relies on void.config.ts +
+// inference), so the test declares `account_id`, `name`, and real-shaped ids for every
+// id-bearing binding the source uses, then removes the isolated playground on teardown.
 const OVERLAY_WRANGLER = {
   name: WORKER_NAME,
   account_id: ACCOUNT_ID,
@@ -79,7 +82,7 @@ let buildOutput = '';
 let pristineEmitted: Record<string, unknown> = {};
 let expectedPayload: ExpectedPayload;
 
-// Snapshot guard: only touch/restore `wrangler.jsonc` if we actually reached the snapshot step, so
+// Snapshot guard: only touch/restore the generated Cloudflare config if we actually reached the snapshot step, so
 // an early beforeAll failure never deletes a developer-local file the hook never saw.
 let wranglerSnapshotTaken = false;
 let wranglerOriginal: string | undefined;
@@ -113,14 +116,21 @@ describe('playground/kitchen-sink --backend cloudflare real-build deploy guard',
   beforeAll(async () => {
     playground = createIsolatedPlayground(ROOT, SOURCE_PLAYGROUND);
     pg = playground.root;
-    configPath = join(pg, 'wrangler.jsonc');
+    const typedPath = join(pg, 'void.config.ts');
+    writeFileSync(
+      typedPath,
+      renderVoidConfig({
+        ...readConfig(pg),
+        cloudflare: OVERLAY_WRANGLER,
+      }),
+    );
+    configPath = materializeCloudflareConfig(pg);
     emittedPath = join(pg, 'dist', 'ssr', 'wrangler.json');
 
     // Snapshot BEFORE any other filesystem work.
     wranglerOriginal = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : undefined;
     wranglerSnapshotTaken = true;
 
-    writeFileSync(configPath, `${JSON.stringify(OVERLAY_WRANGLER, null, 2)}\n`);
     // Fresh build inputs: drop the previous dist + the stale CF-plugin deploy pointer so the guard
     // trusts only a pointer this build wrote.
     rmSync(join(pg, 'dist'), { recursive: true, force: true });
@@ -152,6 +162,7 @@ describe('playground/kitchen-sink --backend cloudflare real-build deploy guard',
       cwd: pg,
       encoding: 'utf8',
       maxBuffer: 10 * 1024 * 1024,
+      env: { ...process.env, [CLOUDFLARE_DEPLOY_BUILD_ENV]: '1' },
     });
     buildStatus = result.status;
     buildOutput = `${result.stdout ?? ''}${result.stderr ?? ''}`;

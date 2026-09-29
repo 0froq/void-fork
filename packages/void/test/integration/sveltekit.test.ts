@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import spawn from 'cross-spawn';
 import { join } from 'pathslash';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
@@ -11,18 +11,12 @@ const PLAYGROUND = 'playground/sveltekit';
 let DEV_PORT: number;
 let DEV_BASE: string;
 
-const MINIMAL_WRANGLER = JSON.stringify(
-  { name: 'playground-sveltekit', compatibility_date: '2026-02-24' },
-  null,
-  2,
-);
-
 describe('playground/sveltekit build', () => {
   beforeAll(() => {
     const pg = join(ROOT, PLAYGROUND);
     rmSync(join(pg, '.svelte-kit'), { recursive: true, force: true });
     rmSync(join(pg, '.void'), { recursive: true, force: true });
-    writeFileSync(join(pg, 'wrangler.jsonc'), MINIMAL_WRANGLER);
+    rmSync(join(pg, 'wrangler.jsonc'), { force: true });
     execSync(`vp run --filter ./${PLAYGROUND} build`, { cwd: ROOT, stdio: 'pipe' });
   });
 
@@ -40,7 +34,7 @@ describe('playground/sveltekit dev', () => {
     const pg = join(ROOT, PLAYGROUND);
     rmSync(join(pg, '.void'), { recursive: true, force: true });
     rmSync(join(pg, '.wrangler'), { recursive: true, force: true });
-    writeFileSync(join(pg, 'wrangler.jsonc'), MINIMAL_WRANGLER);
+    rmSync(join(pg, 'wrangler.jsonc'), { force: true });
 
     DEV_PORT = await getPort();
     DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
@@ -93,9 +87,9 @@ describe('playground/sveltekit dev', () => {
     }
   });
 
-  it('syncs wrangler.jsonc with inferred bindings', () => {
+  it('syncs the generated Cloudflare config with inferred bindings', () => {
     const wranglerConfig = JSON.parse(
-      readFileSync(join(ROOT, `${PLAYGROUND}/wrangler.jsonc`), 'utf-8'),
+      readFileSync(join(ROOT, `${PLAYGROUND}/.void-wrangler.jsonc`), 'utf-8'),
     ) as {
       d1_databases?: Array<{ binding: string }>;
       kv_namespaces?: Array<{ binding: string }>;
@@ -103,6 +97,7 @@ describe('playground/sveltekit dev', () => {
 
     expect(wranglerConfig.d1_databases?.some((b) => b.binding === 'DB')).toBe(true);
     expect(wranglerConfig.kv_namespaces?.some((b) => b.binding === 'KV')).toBe(true);
+    expect(existsSync(join(ROOT, `${PLAYGROUND}/wrangler.jsonc`))).toBe(false);
   });
 
   it('renders home page with SSR', async () => {

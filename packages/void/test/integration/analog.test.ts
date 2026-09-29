@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import spawn from 'cross-spawn';
+import { parse } from 'jsonc-parser';
 import { join } from 'pathslash';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { getPort, waitForServer, killChild } from '../../../../test/integration-helpers.ts';
@@ -7,7 +8,13 @@ import { getPort, waitForServer, killChild } from '../../../../test/integration-
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const PLAYGROUND = 'playground/analog';
 const PLAYGROUND_ROOT = join(ROOT, PLAYGROUND);
-const CONFIG_FILES = ['void.json', 'wrangler.jsonc', 'wrangler.json'];
+const CONFIG_FILES = [
+  'void.config.ts',
+  'void.lock.json',
+  '.void-wrangler.jsonc',
+  'wrangler.jsonc',
+  'wrangler.json',
+];
 const CLEAN_ENV_KEYS = [
   'APPDATA',
   'ComSpec',
@@ -142,9 +149,9 @@ describe('playground/analog dev', () => {
     }
   });
 
-  it('syncs wrangler.jsonc with bindings from void.json', () => {
-    const wranglerConfig = JSON.parse(
-      readFileSync(join(ROOT, `${PLAYGROUND}/wrangler.jsonc`), 'utf-8'),
+  it('syncs the generated Cloudflare config with bindings from void.config.ts', () => {
+    const wranglerConfig = parse(
+      readFileSync(join(ROOT, `${PLAYGROUND}/.void-wrangler.jsonc`), 'utf-8'),
     ) as {
       d1_databases?: Array<{ binding: string }>;
       kv_namespaces?: Array<{ binding: string }>;
@@ -152,5 +159,6 @@ describe('playground/analog dev', () => {
 
     expect(wranglerConfig.d1_databases?.some((b) => b.binding === 'DB')).toBe(true);
     expect(wranglerConfig.kv_namespaces?.some((b) => b.binding === 'KV')).toBe(true);
+    expect(existsSync(join(ROOT, `${PLAYGROUND}/wrangler.jsonc`))).toBe(false);
   });
 });

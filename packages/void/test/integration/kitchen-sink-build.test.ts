@@ -108,7 +108,7 @@ describe('playground/kitchen-sink build', () => {
     // kitchen-sink imports `void/ai` at request time, so the build infers
     // `needsAI` and injects the Workers AI binding on `command === 'build'`.
     expect(wranglerConfig.ai).toEqual({ binding: 'AI' });
-    // `ai.gateway` in playground/kitchen-sink/void.json becomes the runtime var
+    // `ai.gateway` in playground/kitchen-sink/void.config.ts becomes the runtime var
     // read by the P3 direct backend.
     const vars = (wranglerConfig.vars ?? {}) as Record<string, unknown>;
     expect(vars.__VOID_AI_GATEWAY).toBe('kitchen-sink-gw');

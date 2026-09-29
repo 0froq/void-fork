@@ -98,9 +98,9 @@ describe(
       }
     });
 
-    it('syncs wrangler.jsonc with bindings from void.json', () => {
+    it('syncs the generated Cloudflare config with bindings from void.config.ts', () => {
       const wranglerConfig = JSON.parse(
-        readFileSync(join(ROOT, `${PLAYGROUND}/wrangler.jsonc`), 'utf-8'),
+        readFileSync(join(ROOT, `${PLAYGROUND}/.void-wrangler.jsonc`), 'utf-8'),
       ) as {
         d1_databases?: Array<{ binding: string }>;
         kv_namespaces?: Array<{ binding: string }>;
@@ -108,6 +108,7 @@ describe(
 
       expect(wranglerConfig.d1_databases?.some((b) => b.binding === 'DB')).toBe(true);
       expect(wranglerConfig.kv_namespaces?.some((b) => b.binding === 'KV')).toBe(true);
+      expect(existsSync(join(ROOT, `${PLAYGROUND}/wrangler.jsonc`))).toBe(false);
     });
 
     it('renders home page with SSR', async () => {

@@ -10,6 +10,8 @@ import {
   type IsolatedPlayground,
   waitForServer,
 } from '../../../../test/integration-helpers.ts';
+import { renderVoidConfig } from '../../src/config-write.ts';
+import { readConfig } from '../../src/config.ts';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const SOURCE_PLAYGROUND = 'playground/spa';
@@ -23,7 +25,6 @@ let publicDir = '';
 let protectedAsset = '';
 let edgeHeaderAsset = '';
 let edgeRedirectAsset = '';
-let wranglerConfig = '';
 let voidConfig = '';
 let dist = '';
 const AUTH_HEADER = 'Basic Z3Vlc3Q6d2VkZGluZw==';
@@ -43,37 +44,37 @@ const documentRouteSource = `export const GET = () =>
   });
 `;
 
-const staleWranglerSource = `{
-  "assets": {
-    "binding": "ASSETS",
-    "not_found_handling": "none",
-    "run_worker_first": ["/", "/*.html"]
-  }
-}
-`;
+const staleCloudflareAssets = {
+  binding: 'ASSETS',
+  not_found_handling: 'none',
+  run_worker_first: ['/', '/*.html'],
+} as const;
 
 let child: ReturnType<typeof spawn> | undefined;
 let stderr = '';
-let previousWrangler: string | undefined;
 let previousVoidConfig: string | undefined;
 let middlewareBackedUp = false;
 let publicDirCreated = false;
 
-function saveWranglerConfig(): void {
-  previousWrangler = existsSync(wranglerConfig) ? readFileSync(wranglerConfig, 'utf-8') : undefined;
-}
-
-function restoreWranglerConfig(): void {
-  if (previousWrangler === undefined) {
-    rmSync(wranglerConfig, { force: true });
-  } else {
-    writeFileSync(wranglerConfig, previousWrangler);
-  }
-  previousWrangler = undefined;
-}
-
 function saveVoidConfig(): void {
   previousVoidConfig = readFileSync(voidConfig, 'utf-8');
+}
+
+function writeStaleCloudflareConfig(): void {
+  const config = readConfig(playground.root);
+  writeFileSync(
+    voidConfig,
+    renderVoidConfig({
+      ...config,
+      cloudflare: {
+        ...config.cloudflare,
+        assets: {
+          ...staleCloudflareAssets,
+          run_worker_first: [...staleCloudflareAssets.run_worker_first],
+        },
+      },
+    }),
+  );
 }
 
 function restoreVoidConfig(): void {
@@ -183,8 +184,7 @@ beforeAll(() => {
   protectedAsset = join(publicDir, 'void-basic-auth-regression.txt');
   edgeHeaderAsset = join(publicDir, 'void-native-header-regression.txt');
   edgeRedirectAsset = join(publicDir, 'void-native-redirect-regression.txt');
-  wranglerConfig = join(playground.root, 'wrangler.jsonc');
-  voidConfig = join(playground.root, 'void.json');
+  voidConfig = join(playground.root, 'void.config.ts');
   dist = join(playground.root, 'dist');
 });
 
@@ -207,7 +207,6 @@ afterEach(async () => {
     rmSync(publicDir, { recursive: true, force: true });
     publicDirCreated = false;
   }
-  restoreWranglerConfig();
   restoreVoidConfig();
   if (
     stderr.includes('error when starting dev server') ||
@@ -219,9 +218,9 @@ afterEach(async () => {
 
 describe('SPA asset routing policy', () => {
   it('keeps API-only projects on static SPA fallback while routing API requests to the worker', () => {
-    saveWranglerConfig();
+    saveVoidConfig();
     disableMiddlewareDir();
-    writeFileSync(wranglerConfig, staleWranglerSource);
+    writeStaleCloudflareConfig();
     rmSync(dist, { recursive: true, force: true });
 
     execSync('vp build', { cwd: playground.root, stdio: 'pipe' });
@@ -232,23 +231,22 @@ describe('SPA asset routing policy', () => {
   });
 
   it('applies native production routing rules before existing static assets', async () => {
-    saveWranglerConfig();
     saveVoidConfig();
     disableMiddlewareDir();
-    writeFileSync(wranglerConfig, staleWranglerSource);
+    writeStaleCloudflareConfig();
     mkdirSync(publicDir, { recursive: true });
     writeFileSync(edgeHeaderAsset, 'header asset');
     writeFileSync(edgeRedirectAsset, 'redirect asset must not win');
-    const config = JSON.parse(previousVoidConfig!) as Record<string, unknown>;
-    config.routing = {
+    const config = readConfig(playground.root);
+    const routing = {
       headers: {
         '/void-native-header-regression.txt': ['X-Void-Native-Rule: applied'],
       },
       redirects: {
-        '/void-native-redirect-regression.txt': { to: '/redirect-target', status: 302 },
+        '/void-native-redirect-regression.txt': { to: '/redirect-target', status: 302 as const },
       },
     };
-    writeFileSync(voidConfig, `${JSON.stringify(config, null, 2)}\n`);
+    writeFileSync(voidConfig, renderVoidConfig({ ...config, routing }));
     rmSync(dist, { recursive: true, force: true });
     const buildEnv = { ...process.env };
     delete buildEnv.VOID_DEPLOY_PROJECT_ID;
@@ -275,9 +273,9 @@ describe('SPA asset routing policy', () => {
   });
 
   it('routes document routes through the worker before SPA fallback HTML', async () => {
-    saveWranglerConfig();
+    saveVoidConfig();
     disableMiddlewareDir();
-    writeFileSync(wranglerConfig, staleWranglerSource);
+    writeStaleCloudflareConfig();
     writeFileSync(documentRoute, documentRouteSource);
 
     const base = await startSpaDevServer();
@@ -290,9 +288,9 @@ describe('SPA asset routing policy', () => {
   });
 
   it('runs middleware before serving SPA fallback HTML on nested navigations', async () => {
-    saveWranglerConfig();
+    saveVoidConfig();
     writeFileSync(authMiddleware, middlewareSource);
-    writeFileSync(wranglerConfig, staleWranglerSource);
+    writeStaleCloudflareConfig();
     writeProtectedAsset();
 
     const base = await startSpaDevServer();

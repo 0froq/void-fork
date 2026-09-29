@@ -20,9 +20,7 @@ function readWranglerConfig(root: string): {
   d1_databases?: Array<{ binding: string }>;
   kv_namespaces?: Array<{ binding: string }>;
 } {
-  const jsoncPath = join(root, 'wrangler.jsonc');
-  const jsonPath = join(root, 'wrangler.json');
-  const configPath = existsSync(jsoncPath) ? jsoncPath : jsonPath;
+  const configPath = join(root, '.void-wrangler.jsonc');
   return JSON.parse(readFileSync(configPath, 'utf-8')) as {
     compatibility_flags?: Array<string>;
     d1_databases?: Array<{ binding: string }>;
@@ -98,7 +96,7 @@ describe('playground/astro dev', () => {
     rmSync(join(pg, '.void'), { recursive: true, force: true });
     rmSync(join(pg, '.wrangler'), { recursive: true, force: true });
 
-    // The build suite above already synced the inferred bindings into wrangler.jsonc. Start dev
+    // The build suite above already synced inferred bindings into the generated config. Start dev
     // once with that real generated config instead of booting only to generate it, stopping, and
     // booting again. The assertions below still cover both config sync and runtime bindings.
     await startDev();
@@ -116,6 +114,7 @@ describe('playground/astro dev', () => {
     expect(wranglerConfig.compatibility_flags?.includes('nodejs_als')).toBe(true);
     expect(wranglerConfig.d1_databases?.some((b) => b.binding === 'DB')).toBe(true);
     expect(wranglerConfig.kv_namespaces?.some((b) => b.binding === 'KV')).toBe(true);
+    expect(existsSync(join(ROOT, `${PLAYGROUND}/wrangler.jsonc`))).toBe(false);
   });
 
   it('renders home page with SSR', async () => {

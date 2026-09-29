@@ -291,7 +291,7 @@ describe('runFullDeploy emits manifest.pages (Void pages app, end-to-end)', () =
     // survive into the real deploy manifest with its exact TTL.
     expect(pages).toContainEqual({ pattern: '/isr', revalidate: 60 });
 
-    // The object `routing.revalidate` in the fixture void.json is NOT baked into
+    // The object `routing.revalidate` in the fixture void.config.ts is NOT baked into
     // per-page TTLs — a REAL build must emit the 3-state table + the RAW object
     // config as `manifest.pathRevalidate` (this is the producer half of the
     // cross-repo contract dispatch consumes; a manually-constructed manifest

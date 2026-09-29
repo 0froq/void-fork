@@ -3,6 +3,8 @@ import spawn from 'cross-spawn';
 import { join } from 'pathslash';
 import { describe, expect, it } from 'vite-plus/test';
 import { createIsolatedPlayground } from '../../../../test/integration-helpers.ts';
+import { renderVoidConfig } from '../../src/config-write.ts';
+import { readConfig } from '../../src/config.ts';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 
@@ -10,14 +12,20 @@ describe('explicit ISR policy in real builds', () => {
   it.each(['server', 'static'])('disables ISR while preserving %s output', (output) => {
     const playground = createIsolatedPlayground(ROOT, 'playground/markdown-blog');
     try {
-      const configPath = join(playground.root, 'void.json');
-      const config = JSON.parse(readFileSync(configPath, 'utf8'));
-      config.output = output;
-      config.routing = { ...config.routing, isr: false };
-      writeFileSync(configPath, JSON.stringify(config));
+      const configPath = join(playground.root, 'void.config.ts');
+      const config = readConfig(playground.root);
       writeFileSync(
-        join(playground.root, 'wrangler.jsonc'),
-        JSON.stringify({ name: 'isr-policy-test', compatibility_date: '2026-02-24' }),
+        configPath,
+        renderVoidConfig({
+          ...config,
+          output: output as 'server' | 'static',
+          routing: { ...config.routing, isr: false },
+          cloudflare: {
+            ...config.cloudflare,
+            name: 'isr-policy-test',
+            compatibility_date: '2026-02-24',
+          },
+        }),
       );
       const build = spawn.sync(
         'vp',

@@ -3,6 +3,8 @@ import spawn from 'cross-spawn';
 import { join } from 'pathslash';
 import { describe, expect, it } from 'vite-plus/test';
 import { createIsolatedPlayground } from '../../../../test/integration-helpers.ts';
+import { renderVoidConfig } from '../../src/config-write.ts';
+import { readConfig } from '../../src/config.ts';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 
@@ -19,19 +21,19 @@ describe('Cloudflare compatibility flags in real builds', () => {
   ])('emits each flag once for %j', ({ rootFlags, voidFlags, expected }) => {
     const playground = createIsolatedPlayground(ROOT, 'playground/ssr');
     try {
-      const configPath = join(playground.root, 'wrangler.jsonc');
-      const rootConfig = JSON.stringify({
-        name: 'compatibility-test',
-        compatibility_date: '2026-02-24',
-        compatibility_flags: rootFlags,
+      const configPath = join(playground.root, 'void.config.ts');
+      const config = readConfig(playground.root);
+      const rootConfig = renderVoidConfig({
+        ...config,
+        worker: { ...config.worker, ...(voidFlags ? { compatibility_flags: voidFlags } : {}) },
+        cloudflare: {
+          ...config.cloudflare,
+          name: 'compatibility-test',
+          compatibility_date: '2026-02-24',
+          compatibility_flags: rootFlags,
+        },
       });
       writeFileSync(configPath, rootConfig);
-      if (voidFlags) {
-        const voidPath = join(playground.root, 'void.json');
-        const config = JSON.parse(readFileSync(voidPath, 'utf8'));
-        config.worker.compatibility_flags = voidFlags;
-        writeFileSync(voidPath, JSON.stringify(config));
-      }
 
       // Build the isolated fixture directly: parallel tests add and remove other
       // playgrounds, which can race with workspace package-graph discovery.

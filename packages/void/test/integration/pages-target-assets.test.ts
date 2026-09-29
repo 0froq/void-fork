@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import spawn from 'cross-spawn';
 import { join } from 'pathslash';
 import { chromium } from 'playwright';
@@ -11,6 +11,8 @@ import {
   waitForServer,
   type IsolatedPlayground,
 } from '../../../../test/integration-helpers.ts';
+import { renderVoidConfig } from '../../src/config-write.ts';
+import { readConfig } from '../../src/config.ts';
 
 const repository = join(import.meta.dirname, '..', '..', '..', '..');
 const targets = [
@@ -33,8 +35,11 @@ for (const { target, command, args } of targets) {
       // same drive. A junction into the Windows system temp directory breaks them.
       playground = createIsolatedPlayground(repository, 'playground/node-app');
       root = playground.root;
-      const config = JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'));
-      writeFileSync(join(root, 'void.json'), JSON.stringify({ ...config, target }));
+      const config = readConfig(root);
+      writeFileSync(
+        join(root, 'void.config.ts'),
+        renderVoidConfig({ ...config, target: target as 'node' | 'bun' | 'deno' }),
+      );
       writeFileSync(
         join(root, 'pages/index.tsx'),
         `

@@ -4,6 +4,8 @@ import { createServer, type Server } from 'node:http';
 import { extname, isAbsolute, join, relative, resolve } from 'pathslash';
 import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
+import { renderVoidConfig } from '../../src/config-write.ts';
+import { readConfig } from '../../src/config.ts';
 import { collectPrerenderPathsNode } from '../../src/prerender.ts';
 
 declare global {
@@ -17,23 +19,10 @@ type NavElement = HTMLElement & { __STAMP?: number };
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const PLAYGROUND = 'playground/node-static';
 const DIST = join(ROOT, PLAYGROUND, 'dist');
-const VOID_CONFIG = join(ROOT, PLAYGROUND, 'void.json');
+const VOID_CONFIG = join(ROOT, PLAYGROUND, 'void.config.ts');
 
 let staticServer: Server | undefined;
 let staticBase: string;
-
-const redirectConfig = `{
-  "$schema": "../../packages/void/schema.json",
-  "target": "node",
-  "output": "static",
-  "routing": {
-    "redirects": {
-      "/legacy": "/about",
-      "/external-legacy": "https://example.com/external"
-    }
-  }
-}
-`;
 
 function contentType(filePath: string): string {
   switch (extname(filePath)) {
@@ -304,7 +293,18 @@ describe('playground/node-static redirects (target: node, output: static)', () =
 
   beforeAll(async () => {
     originalConfig = readFileSync(VOID_CONFIG, 'utf-8');
-    writeFileSync(VOID_CONFIG, redirectConfig);
+    writeFileSync(
+      VOID_CONFIG,
+      renderVoidConfig({
+        ...readConfig(join(ROOT, PLAYGROUND)),
+        routing: {
+          redirects: {
+            '/legacy': '/about',
+            '/external-legacy': 'https://example.com/external',
+          },
+        },
+      }),
+    );
 
     const pg = join(ROOT, PLAYGROUND);
     rmSync(join(pg, 'dist'), { recursive: true, force: true });
