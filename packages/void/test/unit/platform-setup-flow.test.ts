@@ -243,6 +243,27 @@ async function interruptedInstall() {
 }
 
 describe('platform credential onboarding', () => {
+  it('prints a command to install a fresh read-only plan without saving a draft', async () => {
+    await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'void platform install --name test-setup --account account --display-name Test --workers-dev',
+      ),
+    );
+    expect(console.log).toHaveBeenCalledWith('Choose the same login methods when prompted.\n');
+    expect(listInstallationManifests()).toEqual([]);
+  });
+
+  it('prints the checkpoint command when previewing an interrupted install', async () => {
+    const interrupted = await interruptedInstall();
+    await runPlatformLifecycleCommand(
+      parsePlatformArgs(['install', '--plan', '--resume', '--name', interrupted.id]),
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining(`void platform install --resume --name ${interrupted.id}`),
+    );
+  });
+
   it('offers an interrupted install after credential collection and reads its database state', async () => {
     const interrupted = await interruptedInstall();
     await runPlatformLifecycleCommand(parsePlatformArgs(['install', '--plan']));

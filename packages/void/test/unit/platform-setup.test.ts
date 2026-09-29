@@ -2,6 +2,7 @@ import { createPlatformDeploymentManifest } from '@void/platform';
 import { describe, it, expect, vi } from 'vite-plus/test';
 import type { PlatformInstallPlan } from '../../src/cli/platform-plan.ts';
 import {
+  formatPlatformInstallCommand,
   formatPlatformSetupPlan,
   openPlatformSetupPage,
   platformSetupPages,
@@ -40,6 +41,26 @@ function plan(domain = ''): PlatformInstallPlan {
   };
 }
 describe('platform credential setup links', () => {
+  it('keeps planned domain, authentication, and runtime choices in a copyable command', () => {
+    const command = formatPlatformInstallCommand({
+      commandName: 'void-dev',
+      accountId: 'account',
+      installationSlug: 'team',
+      displayName: "Team's Platform",
+      applicationDomain: 'apps.example.com',
+      zoneName: 'example.com',
+      controlPlaneDomain: 'api.example.com',
+      dedicatedZone: true,
+      workersDev: false,
+      authConfig: './auth config.json',
+      runtime: './build output',
+      yes: true,
+    });
+    expect(command).toBe(
+      "void-dev platform install --name team --account account --display-name 'Team'\\''s Platform' --application-domain apps.example.com --zone example.com --dedicated-zone --control-plane-domain api.example.com --auth-config './auth config.json' --runtime './build output' --yes",
+    );
+  });
+
   it('provides concise database and key guidance with live website links', () => {
     const database = platformSetupFieldHelp('databaseUrl')!;
     expect(database.placeholder).toBe('postgresql://user:pw@…/database');

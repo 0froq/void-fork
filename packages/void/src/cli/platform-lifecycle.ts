@@ -54,6 +54,7 @@ import {
   savePlatformSetupDraft,
 } from './platform-setup-draft.ts';
 import {
+  formatPlatformInstallCommand,
   formatPlatformSetupPlan,
   openPlatformSetupPage,
   platformSetupPages,
@@ -543,6 +544,28 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     note(formatPlatformRuntime(runtime), 'Platform runtime');
     if (args.plan) {
       console.log(formatPlatformSetupPlan(plan));
+      console.log(
+        `\n${existing ? 'To resume this installation later:' : 'To install with these settings later:'}\n${formatPlatformInstallCommand(
+          {
+            commandName: cliCommandName(),
+            accountId,
+            installationSlug,
+            displayName,
+            applicationDomain,
+            zoneName,
+            controlPlaneDomain,
+            dedicatedZone,
+            workersDev,
+            authConfig: args.authConfig,
+            runtime: args.runtime,
+            ...(existing ? { resumeId: existing.id } : {}),
+            yes: args.yes || process.stdin.isTTY !== true,
+          },
+        )}\n`,
+      );
+      if (!existing && !args.authConfig && process.stdin.isTTY) {
+        console.log('Choose the same login methods when prompted.\n');
+      }
       outro('No Cloudflare or local installation state was changed.');
       return;
     }

@@ -184,6 +184,61 @@ export function formatPlatformSetupPlan(plan: PlatformInstallPlan): string {
   ].join('\n');
 }
 
+export function formatPlatformInstallCommand(options: {
+  commandName: 'void' | 'void-dev';
+  accountId: string;
+  installationSlug: string;
+  displayName: string;
+  applicationDomain: string;
+  zoneName: string;
+  controlPlaneDomain: string;
+  dedicatedZone: boolean;
+  workersDev: boolean;
+  authConfig?: string;
+  runtime: string;
+  resumeId?: string;
+  yes: boolean;
+}): string {
+  const quote = (value: string) => {
+    if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) {
+      return value;
+    }
+    return process.platform === 'win32'
+      ? `'${value.replaceAll("'", "''")}'`
+      : `'${value.replaceAll("'", "'\\''")}'`;
+  };
+  const parts = [options.commandName, 'platform', 'install'];
+  const flag = (name: string, value: string) => {
+    if (value) {
+      parts.push(name, quote(value));
+    }
+  };
+  if (options.resumeId) {
+    parts.push('--resume');
+    flag('--name', options.resumeId);
+  } else {
+    flag('--name', options.installationSlug);
+    flag('--account', options.accountId);
+    flag('--display-name', options.displayName);
+    if (options.workersDev) {
+      parts.push('--workers-dev');
+    } else {
+      flag('--application-domain', options.applicationDomain);
+      flag('--zone', options.zoneName);
+      if (options.dedicatedZone) {
+        parts.push('--dedicated-zone');
+      }
+    }
+    flag('--control-plane-domain', options.controlPlaneDomain);
+  }
+  flag('--auth-config', options.authConfig ?? '');
+  flag('--runtime', options.runtime);
+  if (options.yes) {
+    parts.push('--yes');
+  }
+  return parts.join(' ');
+}
+
 export function openPlatformSetupPage(
   page: PlatformSetupPage,
   dependencies: { interactive?: boolean; open?: (url: string) => void } = {},
