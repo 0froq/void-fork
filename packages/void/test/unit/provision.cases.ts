@@ -36,6 +36,7 @@ import {
   type RunWrangler,
   type RunWranglerResult,
 } from '../../src/cli/provision.ts';
+import { materializeCloudflareConfig } from '../../src/cloudflare-config.ts';
 import { getProvisionTestShard, type ProvisionTestShard } from './provision-test-shard.ts';
 
 const activeTestShard = getProvisionTestShard();
@@ -687,6 +688,42 @@ describe('provisionCloudflareResources — D1 discovery gate + strict validation
 });
 
 describe('provisionCloudflareResources — KV', () => {
+  it('retains a created namespace when typed config is materialized again', async () => {
+    setup('{}');
+    rmSync(wranglerPath);
+    writeFileSync(
+      join(tmpDir, 'void.config.ts'),
+      `export default { cloudflare: { name: 'app', account_id: '${AMBIENT_ACCOUNT}' } };\n`,
+    );
+    const generatedPath = materializeCloudflareConfig(tmpDir);
+    const namespaceId = hex32('newkv');
+    const { run } = makeRunner([
+      { match: /^kv namespace list/, reply: () => ok('[]') },
+      {
+        match: /^kv namespace create /,
+        reply: () => {
+          simulateUpdateConfig('kv_namespaces', { binding: 'KV', id: namespaceId }, generatedPath);
+          return ok();
+        },
+      },
+    ]);
+
+    await provisionCloudflareResources(
+      tmpDir,
+      generatedPath,
+      { ...emptyDesired, kvNamespaces: [{ binding: 'KV', title: 'app-kv' }] },
+      { runWrangler: run, log: silentLog },
+    );
+
+    const lock = JSON.parse(readFileSync(join(tmpDir, 'void.lock.json'), 'utf8')) as {
+      resolved: { kv_namespaces: Array<{ binding: string; id: string }> };
+    };
+    expect(lock.resolved.kv_namespaces).toEqual([{ binding: 'KV', id: namespaceId }]);
+    materializeCloudflareConfig(tmpDir);
+    const generated = parseJsoncRaw(readFileSync(generatedPath, 'utf8')) as Record<string, unknown>;
+    expect(generated.kv_namespaces).toEqual([{ binding: 'KV', id: namespaceId }]);
+  });
+
   it('adopts when the namespace list shows a title match (writes id, no create)', async () => {
     setup(JSON.stringify({ kv_namespaces: [{ binding: 'KV', id: 'local' }] }));
     const { run, calls } = makeRunner([

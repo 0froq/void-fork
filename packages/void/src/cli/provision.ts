@@ -20,6 +20,7 @@ import { types as utilTypes } from 'node:util';
 import { parse, type ParseError } from 'jsonc-parser';
 import { basename, dirname, join, normalize, resolve } from 'pathslash';
 import lockfile from 'proper-lockfile';
+import { MATERIALIZED_CLOUDFLARE_FILE, persistCloudflareConfig } from '../cloudflare-config.ts';
 import { voidLog, voidWarn } from '../log.ts';
 import { scanWranglerDotenvKeys } from '../shared/dotenv.ts';
 import { resolveWranglerArgv } from './preset.ts';
@@ -4188,6 +4189,11 @@ async function provisionCloudflareResourcesLocked(
   const write = (
     patch: Parameters<typeof writeProvisionedWranglerConfig>[1],
   ): WriteProvisionedWranglerResult => writeProvisionedWranglerConfig(root, patch, { configPath });
+  const persistCreatedConfig = (): void => {
+    if (basename(configPath) === MATERIALIZED_CLOUDFLARE_FILE) {
+      persistCloudflareConfig(dirname(configPath));
+    }
+  };
 
   // Any resource to ensure implies remote work (list/info/create/REST).
   const hasRemoteWork =
@@ -4487,6 +4493,7 @@ async function provisionCloudflareResourcesLocked(
             binding,
             name,
           );
+          persistCreatedConfig();
           const res = write({ d1MigrationsDir: { binding, dir: migrationsDir } });
           assertD1MigrationsDirApplied(res, binding, configPath);
           resources.push({ kind: 'd1', binding, name, action: 'created' });
@@ -4607,6 +4614,7 @@ async function provisionCloudflareResourcesLocked(
         binding,
         title,
       );
+      persistCreatedConfig();
       resources.push({ kind: 'kv', binding, name: title, action: 'created' });
     }
   }
@@ -4718,6 +4726,7 @@ async function provisionCloudflareResourcesLocked(
             );
           }
         }
+        persistCreatedConfig();
         resources.push({ kind: 'r2', binding, name: bucketName, action: 'created' });
       } else {
         // A non-zero that is NOT the confirmed not-found signal (auth/metrics/
@@ -4855,6 +4864,7 @@ async function provisionCloudflareResourcesLocked(
           binding,
           name,
         );
+        persistCreatedConfig();
         resources.push({ kind: 'hyperdrive', binding, name, action: 'created' });
       }
     }
