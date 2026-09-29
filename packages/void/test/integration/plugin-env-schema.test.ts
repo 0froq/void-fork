@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { resolveConfig } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { envClientFoldPlugin } from '../../src/plugin-env-client-fold.ts';

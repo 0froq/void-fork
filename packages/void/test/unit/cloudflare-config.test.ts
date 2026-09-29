@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'pathslash';
+import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { writeProvisionedWranglerConfig } from '../../src/cli/wrangler.ts';
 import {
@@ -39,7 +40,7 @@ describe('materializeCloudflareConfig', () => {
       'export default { cloudflare: { name: "app", vars: { FOO: "bar" }, limits: { cpu_ms: 50 } } };\n',
     );
     const path = materializeCloudflareConfig(root);
-    expect(path).toBe(join(root, '.void-wrangler.jsonc'));
+    expect(path).toBe(toSlash(join(root, '.void-wrangler.jsonc')));
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({
       name: 'app',
       vars: { FOO: 'bar' },

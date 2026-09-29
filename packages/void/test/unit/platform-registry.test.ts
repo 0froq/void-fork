@@ -1,11 +1,11 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
   setInstallationEndpoints,
 } from '@void/platform';
-import { join } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 import {
   acquirePlatformLifecycleLock,

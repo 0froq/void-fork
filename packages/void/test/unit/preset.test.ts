@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process';
 import { chmodSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join, resolve } from 'pathslash';
+import { join, resolve } from 'node:path';
+import { toSlash } from 'pathslash';
 import { describe, expect, it, beforeEach, afterEach } from 'vite-plus/test';
 import {
   detectPreset,
@@ -46,7 +47,7 @@ describe('detectPreset', () => {
     const result = detectPreset(root, { dir: 'public' });
     expect(result).toEqual({
       buildCommand: null,
-      outputDir: resolve(root, 'public'),
+      outputDir: toSlash(resolve(root, 'public')),
       appType: 'static',
     });
   });
@@ -56,7 +57,7 @@ describe('detectPreset', () => {
     const result = detectPreset(root, { dir: 'build', spa: true });
     expect(result).toEqual({
       buildCommand: null,
-      outputDir: resolve(root, 'build'),
+      outputDir: toSlash(resolve(root, 'build')),
       appType: 'spa',
     });
   });
@@ -69,7 +70,7 @@ describe('detectPreset', () => {
     const result = detectPreset(root);
     expect(result).toEqual({
       buildCommand: 'vitepress build',
-      outputDir: resolve(root, '.vitepress/dist'),
+      outputDir: toSlash(resolve(root, '.vitepress/dist')),
       appType: 'static',
     });
   });
@@ -82,7 +83,7 @@ describe('detectPreset', () => {
     const result = detectPreset(root);
     expect(result).toEqual({
       buildCommand: 'vitepress build docs',
-      outputDir: resolve(root, 'docs/.vitepress/dist'),
+      outputDir: toSlash(resolve(root, 'docs/.vitepress/dist')),
       appType: 'static',
     });
   });
@@ -94,7 +95,7 @@ describe('detectPreset', () => {
     const result = detectPreset(root);
     expect(result).toEqual({
       buildCommand: 'docusaurus build',
-      outputDir: resolve(root, 'build'),
+      outputDir: toSlash(resolve(root, 'build')),
       appType: 'static',
     });
   });
@@ -151,7 +152,7 @@ describe('detectPreset', () => {
     const result = detectPreset(root);
     expect(result).toEqual({
       buildCommand: 'vite build',
-      outputDir: resolve(root, 'dist'),
+      outputDir: toSlash(resolve(root, 'dist')),
       appType: 'spa',
     });
   });
@@ -167,7 +168,7 @@ describe('detectPreset', () => {
     const result = detectPreset(root);
     expect(result).toEqual({
       buildCommand: 'pnpm build',
-      outputDir: resolve(root, 'dist'),
+      outputDir: toSlash(resolve(root, 'dist')),
       appType: 'spa',
     });
   });
@@ -179,7 +180,7 @@ describe('detectPreset', () => {
     const result = detectPreset(root);
     expect(result).toEqual({
       buildCommand: 'vp build',
-      outputDir: resolve(root, 'dist'),
+      outputDir: toSlash(resolve(root, 'dist')),
       appType: 'spa',
     });
   });
@@ -191,7 +192,7 @@ describe('detectPreset', () => {
     const result = detectPreset(root);
     expect(result).toEqual({
       buildCommand: null,
-      outputDir: resolve(root, 'dist'),
+      outputDir: toSlash(resolve(root, 'dist')),
       appType: 'static',
     });
   });
@@ -264,7 +265,7 @@ describe('detectPreset — strictBackend', () => {
     const root = setupProject({ pkg: vitepressPkg, dirs: ['.vitepress'] });
     expect(detectPreset(root, { strictBackend: true })).toEqual({
       buildCommand: 'vitepress build',
-      outputDir: resolve(root, '.vitepress/dist'),
+      outputDir: toSlash(resolve(root, '.vitepress/dist')),
       appType: 'static',
     });
   });
@@ -273,7 +274,7 @@ describe('detectPreset — strictBackend', () => {
     const root = setupProject({ pkg: vitepressPkg, dirs: ['.vitepress', 'routes'] });
     expect(detectPreset(root)).toEqual({
       buildCommand: 'vitepress build',
-      outputDir: resolve(root, '.vitepress/dist'),
+      outputDir: toSlash(resolve(root, '.vitepress/dist')),
       appType: 'static',
     });
   });
@@ -284,7 +285,7 @@ describe('detectPreset — strictBackend', () => {
     // and `resolveStaticDeployPreset` never passes strictBackend on that path.
     expect(detectPreset(root, { dir: '.vitepress/dist', strictBackend: true })).toEqual({
       buildCommand: null,
-      outputDir: resolve(root, '.vitepress/dist'),
+      outputDir: toSlash(resolve(root, '.vitepress/dist')),
       appType: 'static',
     });
   });
@@ -355,7 +356,7 @@ describe('project Vite commands', () => {
     });
 
     expect(resolveProjectCommand(root, 'vite build')).toBe(
-      `${join(root, 'node_modules', '.bin', 'vp')} build`,
+      `${toSlash(join(root, 'node_modules', '.bin', 'vp'))} build`,
     );
   });
 
@@ -377,7 +378,7 @@ describe('resolveProjectCommand with Wrangler', () => {
     });
 
     expect(resolveProjectCommand(root, 'wrangler deploy')).toBe(
-      `${join(root, 'node_modules', '.bin', 'wrangler')} deploy`,
+      `${toSlash(join(root, 'node_modules', '.bin', 'wrangler'))} deploy`,
     );
   });
 
@@ -388,7 +389,7 @@ describe('resolveProjectCommand with Wrangler', () => {
     });
 
     expect(resolveProjectCommand(root, 'wrangler d1 create foo --binding DB --update-config')).toBe(
-      `${join(root, 'node_modules', '.bin', 'wrangler')} d1 create foo --binding DB --update-config`,
+      `${toSlash(join(root, 'node_modules', '.bin', 'wrangler'))} d1 create foo --binding DB --update-config`,
     );
   });
 

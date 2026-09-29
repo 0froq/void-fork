@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 
 const CLI_ENTRY = join(import.meta.dirname, '..', '..', 'dist', 'cli', 'cli.mjs');

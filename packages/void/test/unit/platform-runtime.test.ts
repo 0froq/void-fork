@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   getPlatformRuntimeDirectory,
   parsePlatformRuntimeManifest,
@@ -9,7 +10,6 @@ import {
   resolvePlatformRuntime,
 } from '@void/platform/installer';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
-import { join } from 'pathslash';
 import { describe, expect, it } from 'vite-plus/test';
 import { loadPlatformRuntime } from '../../src/cli/platform-installer.ts';
 

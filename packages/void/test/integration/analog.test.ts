@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import spawn from 'cross-spawn';
 import { parse } from 'jsonc-parser';
-import { join } from 'pathslash';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { getPort, waitForServer, killChild } from '../../../../test/integration-helpers.ts';
 

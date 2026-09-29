@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { join } from 'pathslash';
 import { describe, expect, it } from 'vite-plus/test';
 import {
   buildMime,

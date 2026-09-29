@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { describe, expect, it } from 'vite-plus/test';
 import {
   collectInferredEntries,
@@ -136,7 +137,7 @@ describe('maybeScaffoldEnvTs', () => {
       ].join('\n'),
     );
     const result = maybeScaffoldEnvTs(root);
-    expect(result.written).toBe(join(root, 'env.ts'));
+    expect(result.written).toBe(toSlash(join(root, 'env.ts')));
     const body = readFileSync(join(root, 'env.ts'), 'utf-8');
     expect(body).toContain('STRIPE_KEY: string(),');
     expect(body).toContain('PORT: number(),');

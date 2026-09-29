@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import spawn from 'cross-spawn';
-import { join } from 'pathslash';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { collectBrowserDiagnostics } from '../../../../test/browser-helpers.ts';
 import { getPort, waitForServer, killChild } from '../../../../test/integration-helpers.ts';

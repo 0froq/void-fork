@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { log } from '@clack/prompts';
 import { parseCloudflareVersionMessage } from '@void/deploy-cloudflare';
-import { dirname, join } from 'pathslash';
+import { toSlash } from 'pathslash';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { activateCloudflareVersion as activateCloudflareVersionPrimitive } from '../../../deploy-cloudflare/src/index.ts';
 import { readCloudflareLink } from '../../src/cli/cloudflare-link.ts';
@@ -1103,7 +1104,7 @@ describe('ensureCloudflareAuthSecret', () => {
       'list',
       '--format=json',
       '-c',
-      join(root, 'wrangler.jsonc'),
+      toSlash(join(root, 'wrangler.jsonc')),
       '--env=',
     ]);
   });
@@ -1591,7 +1592,7 @@ describe('runCloudflareDeploy — PostgreSQL checked-in migrations', () => {
     await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(applied).toEqual([
-      { dir: join(root, 'db', 'migrations'), url: 'postgresql://prod.example/app' },
+      { dir: toSlash(join(root, 'db', 'migrations')), url: 'postgresql://prod.example/app' },
     ]);
     expect(trace.indexOf('migrate-gate')).toBeLessThan(trace.indexOf('postgres-migrate'));
     expect(trace.indexOf('postgres-migrate')).toBeLessThan(trace.indexOf('wrangler:deploy'));
@@ -2005,7 +2006,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(readFileSync(join(root, '.void/deploy/cloudflare/static-edge.mjs'), 'utf-8')).toContain(
       'void/edge',
     );
-    expect(wranglerArgs.at(-1)).toContain(join(root, '.void/deploy/cloudflare/assets'));
+    expect(wranglerArgs.at(-1)).toContain(toSlash(join(root, '.void/deploy/cloudflare/assets')));
   });
 
   it('preserves canonical Worker configuration when deploying static assets', async () => {
@@ -2857,7 +2858,7 @@ describe('runCloudflareDeploy — resource provisioning', () => {
       'myapp-db',
       '--remote',
       '-c',
-      join(root, 'wrangler.jsonc'),
+      toSlash(join(root, 'wrangler.jsonc')),
       '--env=',
     ]);
     // the post-apply pending verification lists remote migrations for the same target
@@ -2868,7 +2869,7 @@ describe('runCloudflareDeploy — resource provisioning', () => {
       'myapp-db',
       '--remote',
       '-c',
-      join(root, 'wrangler.jsonc'),
+      toSlash(join(root, 'wrangler.jsonc')),
       '--env=',
     ]);
     // Upload and trigger synchronization use the exact generated config that was
@@ -2876,7 +2877,7 @@ describe('runCloudflareDeploy — resource provisioning', () => {
     expect(wranglerArgs.find((a) => a[0] === 'deploy')).toEqual([
       'deploy',
       '-c',
-      join(root, 'dist/ssr/wrangler.json'),
+      toSlash(join(root, 'dist/ssr/wrangler.json')),
       '--env=',
       '--experimental-provision=false',
       '--experimental-auto-create=false',
@@ -3283,7 +3284,7 @@ describe('runCloudflareDeploy — pre-build queue existence probe', () => {
       'info',
       'jobs',
       '-c',
-      join(root, 'wrangler.jsonc'),
+      toSlash(join(root, 'wrangler.jsonc')),
       '--env=',
     ]);
     // The probe runs at step 4 — ahead of the build and everything downstream of it.
@@ -3454,7 +3455,7 @@ describe('runCloudflareDeploy — pre-build queue name validation', () => {
       'info',
       'jobs',
       '-c',
-      join(root, 'wrangler.jsonc'),
+      toSlash(join(root, 'wrangler.jsonc')),
       '--env=',
     ]);
     expect(trace.indexOf('wrangler:queues')).toBeLessThan(trace.indexOf('build'));
@@ -3471,7 +3472,7 @@ describe('runCloudflareDeploy — pre-build queue name validation', () => {
       'info',
       'order-notifications',
       '-c',
-      join(root, 'wrangler.jsonc'),
+      toSlash(join(root, 'wrangler.jsonc')),
       '--env=',
     ]);
     expect(trace.indexOf('wrangler:queues')).toBeLessThan(trace.indexOf('build'));
@@ -3787,7 +3788,7 @@ describe('runCloudflareDeploy — D1 migrate targets the unique validated entry'
       'myapp-db',
       '--remote',
       '-c',
-      join(root, 'wrangler.jsonc'),
+      toSlash(join(root, 'wrangler.jsonc')),
       '--env=',
     ]);
     expect(trace).toContain('wrangler:deploy');
@@ -3817,7 +3818,7 @@ describe('runCloudflareDeploy — wrangler implicit provisioning disabled on dep
     expect(wranglerArgs.find((a) => a[0] === 'deploy')).toEqual([
       'deploy',
       '-c',
-      join(root, 'dist/ssr/wrangler.json'),
+      toSlash(join(root, 'dist/ssr/wrangler.json')),
       '--env=',
       '--experimental-provision=false',
       '--experimental-auto-create=false',

@@ -8,8 +8,8 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { join } from 'pathslash';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { generateValidatedSqliteMigrations } from '../../src/drizzle/generate.ts';
 import { collectMigrations } from '../../src/migrations/collect.ts';

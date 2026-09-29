@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { join } from 'pathslash';
 import { build } from 'vite';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vite-plus/test';
 import { compileRouteTable, compileWorkerEntry } from '../../src/router/compile.ts';

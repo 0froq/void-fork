@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import type { PlatformClient, ProjectResponse } from '../../src/cli/client.ts';
 import {
@@ -121,7 +122,7 @@ describe('resolveDistDir', () => {
     tempDirs.push(root);
     mkdirSync(join(root, 'dist'), { recursive: true });
 
-    expect(resolveDistDir(root)).toBe(join(root, 'dist'));
+    expect(resolveDistDir(root)).toBe(toSlash(join(root, 'dist')));
   });
 
   it('returns dist/ for tanstack-start preset', () => {
@@ -129,7 +130,9 @@ describe('resolveDistDir', () => {
     tempDirs.push(root);
     mkdirSync(join(root, 'dist'), { recursive: true });
 
-    expect(resolveDistDir(root, FRAMEWORK_PRESETS['tanstack-start'])).toBe(join(root, 'dist'));
+    expect(resolveDistDir(root, FRAMEWORK_PRESETS['tanstack-start'])).toBe(
+      toSlash(join(root, 'dist')),
+    );
   });
 
   it('returns build/ for react-router preset', () => {
@@ -137,7 +140,9 @@ describe('resolveDistDir', () => {
     tempDirs.push(root);
     mkdirSync(join(root, 'build'), { recursive: true });
 
-    expect(resolveDistDir(root, FRAMEWORK_PRESETS['react-router'])).toBe(join(root, 'build'));
+    expect(resolveDistDir(root, FRAMEWORK_PRESETS['react-router'])).toBe(
+      toSlash(join(root, 'build')),
+    );
   });
 
   it('throws with framework-specific message when build dir missing', () => {
@@ -487,7 +492,7 @@ describe('resolveStaticDeployPreset', () => {
 
     expect(resolveStaticDeployPreset(root, {}, { dir: 'public' })).toEqual({
       buildCommand: null,
-      outputDir: join(root, 'public'),
+      outputDir: toSlash(join(root, 'public')),
       appType: 'static',
     });
   });
@@ -502,7 +507,7 @@ describe('resolveStaticDeployPreset', () => {
 
     expect(resolveStaticDeployPreset(root, { inference: { appType: 'static' } })).toEqual({
       buildCommand: null,
-      outputDir: join(root, 'dist'),
+      outputDir: toSlash(join(root, 'dist')),
       appType: 'static',
     });
   });

@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { renderPrerenderPaths } from '../../src/prerender-render.ts';
 import { compileAssetFallbackHelper } from '../../src/router/compile.ts';

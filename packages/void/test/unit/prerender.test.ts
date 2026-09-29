@@ -1,6 +1,6 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'pathslash';
+import { dirname, join, relative } from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { getMiniflareDatabasePath, openSqliteDatabase } from '../../src/migrations/runner.ts';
 import {

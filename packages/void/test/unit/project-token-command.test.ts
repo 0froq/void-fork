@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { runProjectTokenCommand } from '../../src/cli/project-token.ts';
 

@@ -203,6 +203,34 @@ export default defineConfig({
         },
       },
       {
+        files: ['**/test/**/*.{js,jsx,ts,tsx,mjs,cjs}'],
+        rules: {
+          // Tests must derive expected paths independently of production's
+          // forward-slash wrapper, including on Windows.
+          'no-restricted-imports': [
+            'error',
+            {
+              paths: [
+                {
+                  name: 'pathslash',
+                  importNames: [
+                    'dirname',
+                    'extname',
+                    'isAbsolute',
+                    'join',
+                    'normalize',
+                    'relative',
+                    'resolve',
+                  ],
+                  message:
+                    'Use node:path for filesystem paths in tests; reserve pathslash for toSlash.',
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
         files: ['playground/vinext-app/.next/**/*.ts'],
         rules: {
           '@typescript-eslint/array-type': 'off',

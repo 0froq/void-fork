@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 import { readConfig } from '../../src/config.ts';
 import {
@@ -34,69 +35,69 @@ describe('project path resolution', () => {
     const paths = resolveProjectPaths(root, {});
     expect(paths.sourceDir).toBe('');
     expect(paths.sourceRoot).toBe(root);
-    expect(paths.routesDir).toBe(join(root, 'routes'));
-    expect(paths.pagesDir).toBe(join(root, 'pages'));
-    expect(paths.middlewareDir).toBe(join(root, 'middleware'));
-    expect(paths.cronsDir).toBe(join(root, 'crons'));
-    expect(paths.queuesDir).toBe(join(root, 'queues'));
-    expect(paths.dbDir).toBe(join(root, 'db'));
-    expect(paths.migrationsDir).toBe(join(root, 'db', 'migrations'));
-    expect(paths.schemaFile).toBe(join(root, 'db', 'schema.ts'));
-    expect(paths.ssrDir).toBe(join(root, 'src'));
+    expect(paths.routesDir).toBe(toSlash(join(root, 'routes')));
+    expect(paths.pagesDir).toBe(toSlash(join(root, 'pages')));
+    expect(paths.middlewareDir).toBe(toSlash(join(root, 'middleware')));
+    expect(paths.cronsDir).toBe(toSlash(join(root, 'crons')));
+    expect(paths.queuesDir).toBe(toSlash(join(root, 'queues')));
+    expect(paths.dbDir).toBe(toSlash(join(root, 'db')));
+    expect(paths.migrationsDir).toBe(toSlash(join(root, 'db', 'migrations')));
+    expect(paths.schemaFile).toBe(toSlash(join(root, 'db', 'schema.ts')));
+    expect(paths.ssrDir).toBe(toSlash(join(root, 'src')));
     expect(paths.sourceRelative('db/migrations')).toBe('db/migrations');
   });
 
   it('moves Void source conventions under sourceDir', () => {
     const paths = resolveProjectPaths(root, { sourceDir: 'src' });
     expect(paths.sourceDir).toBe('src');
-    expect(paths.sourceRoot).toBe(join(root, 'src'));
-    expect(paths.routesDir).toBe(join(root, 'src', 'routes'));
-    expect(paths.pagesDir).toBe(join(root, 'src', 'pages'));
-    expect(paths.middlewareDir).toBe(join(root, 'src', 'middleware'));
-    expect(paths.cronsDir).toBe(join(root, 'src', 'crons'));
-    expect(paths.queuesDir).toBe(join(root, 'src', 'queues'));
-    expect(paths.dbDir).toBe(join(root, 'src', 'db'));
-    expect(paths.migrationsDir).toBe(join(root, 'src', 'db', 'migrations'));
-    expect(paths.schemaFile).toBe(join(root, 'src', 'db', 'schema.ts'));
-    expect(paths.ssrDir).toBe(join(root, 'src'));
+    expect(paths.sourceRoot).toBe(toSlash(join(root, 'src')));
+    expect(paths.routesDir).toBe(toSlash(join(root, 'src', 'routes')));
+    expect(paths.pagesDir).toBe(toSlash(join(root, 'src', 'pages')));
+    expect(paths.middlewareDir).toBe(toSlash(join(root, 'src', 'middleware')));
+    expect(paths.cronsDir).toBe(toSlash(join(root, 'src', 'crons')));
+    expect(paths.queuesDir).toBe(toSlash(join(root, 'src', 'queues')));
+    expect(paths.dbDir).toBe(toSlash(join(root, 'src', 'db')));
+    expect(paths.migrationsDir).toBe(toSlash(join(root, 'src', 'db', 'migrations')));
+    expect(paths.schemaFile).toBe(toSlash(join(root, 'src', 'db', 'schema.ts')));
+    expect(paths.ssrDir).toBe(toSlash(join(root, 'src')));
     expect(paths.sourceRelative('db/migrations')).toBe('src/db/migrations');
   });
 
   it('supports arbitrary nested source directories', () => {
     const paths = resolveProjectPaths(root, { sourceDir: 'app/server' });
-    expect(paths.routesDir).toBe(join(root, 'app', 'server', 'routes'));
-    expect(paths.pagesDir).toBe(join(root, 'app', 'server', 'pages'));
-    expect(paths.schemaDir).toBe(join(root, 'app', 'server', 'db', 'schema'));
+    expect(paths.routesDir).toBe(toSlash(join(root, 'app', 'server', 'routes')));
+    expect(paths.pagesDir).toBe(toSlash(join(root, 'app', 'server', 'pages')));
+    expect(paths.schemaDir).toBe(toSlash(join(root, 'app', 'server', 'db', 'schema')));
     expect(paths.sourceRelative('routes/api')).toBe('app/server/routes/api');
   });
 
   it('reads sourceDir from root void.json', () => {
     writeConfig({ sourceDir: 'src' });
-    expect(readProjectPaths(root).pagesDir).toBe(join(root, 'src', 'pages'));
-    expect(resolvePagesDir(root)).toBe(join(root, 'src', 'pages'));
+    expect(readProjectPaths(root).pagesDir).toBe(toSlash(join(root, 'src', 'pages')));
+    expect(resolvePagesDir(root)).toBe(toSlash(join(root, 'src', 'pages')));
   });
 
   it('keeps env.ts back compat candidates when sourceDir is omitted', () => {
     const paths = resolveProjectPaths(root, {});
     expect(paths.envFileCandidates).toEqual([
-      join(root, 'env.ts'),
-      join(root, 'env.mts'),
-      join(root, 'env.js'),
-      join(root, 'env.mjs'),
-      join(root, 'src', 'env.ts'),
-      join(root, 'src', 'env.mts'),
-      join(root, 'src', 'env.js'),
-      join(root, 'src', 'env.mjs'),
+      toSlash(join(root, 'env.ts')),
+      toSlash(join(root, 'env.mts')),
+      toSlash(join(root, 'env.js')),
+      toSlash(join(root, 'env.mjs')),
+      toSlash(join(root, 'src', 'env.ts')),
+      toSlash(join(root, 'src', 'env.mts')),
+      toSlash(join(root, 'src', 'env.js')),
+      toSlash(join(root, 'src', 'env.mjs')),
     ]);
   });
 
   it('uses only sourceDir env.ts candidates when sourceDir is configured', () => {
     const paths = resolveProjectPaths(root, { sourceDir: 'app' });
     expect(paths.envFileCandidates).toEqual([
-      join(root, 'app', 'env.ts'),
-      join(root, 'app', 'env.mts'),
-      join(root, 'app', 'env.js'),
-      join(root, 'app', 'env.mjs'),
+      toSlash(join(root, 'app', 'env.ts')),
+      toSlash(join(root, 'app', 'env.mts')),
+      toSlash(join(root, 'app', 'env.js')),
+      toSlash(join(root, 'app', 'env.mjs')),
     ]);
   });
 

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import spawn from 'cross-spawn';
-import { join } from 'pathslash';
 import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import {

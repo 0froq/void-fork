@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { VOID_PNPM_ALLOWED_BUILDS, writePnpmBuildPolicy } from '../../src/pm.ts';
 

@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { log } from '@clack/prompts';
-import { join } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { runCloudflareAuthCommand } from '../../src/cli/cloudflare-auth.ts';
 import { resolvePlatformCloudflareCredentialWithInput } from '../../src/cli/platform-auth.ts';

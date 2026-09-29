@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { describe, it, expect, beforeEach, afterEach } from 'vite-plus/test';
 import { discoverSchema, schemaSpecifier } from '../../src/drizzle/discover.ts';
 
@@ -20,7 +21,7 @@ describe('discoverSchema', () => {
     mkdirSync(join(root, 'db'), { recursive: true });
     writeFileSync(join(root, 'db/schema.ts'), 'export const users = {};');
     const result = discoverSchema(root);
-    expect(result).toEqual({ type: 'file', path: join(root, 'db/schema.ts') });
+    expect(result).toEqual({ type: 'file', path: toSlash(join(root, 'db/schema.ts')) });
   });
 
   it('finds db/schema/ directory', () => {
@@ -30,7 +31,7 @@ describe('discoverSchema', () => {
     const result = discoverSchema(root);
     expect(result).toEqual({
       type: 'directory',
-      path: join(root, 'db/schema'),
+      path: toSlash(join(root, 'db/schema')),
     });
   });
 
@@ -39,7 +40,7 @@ describe('discoverSchema', () => {
     writeFileSync(join(root, 'db/schema.ts'), 'export const users = {};');
     writeFileSync(join(root, 'db/schema/users.ts'), 'export const users = {};');
     const result = discoverSchema(root);
-    expect(result).toEqual({ type: 'file', path: join(root, 'db/schema.ts') });
+    expect(result).toEqual({ type: 'file', path: toSlash(join(root, 'db/schema.ts')) });
   });
 
   it('returns null when no schema found', () => {
@@ -53,7 +54,7 @@ describe('discoverSchema', () => {
     writeFileSync(join(root, 'src', 'db', 'schema.ts'), 'export const users = {};');
 
     const result = discoverSchema(root);
-    expect(result).toEqual({ type: 'file', path: join(root, 'src', 'db', 'schema.ts') });
+    expect(result).toEqual({ type: 'file', path: toSlash(join(root, 'src', 'db', 'schema.ts')) });
     expect(schemaSpecifier(result!, root)).toBe('./src/db/schema.ts');
   });
 

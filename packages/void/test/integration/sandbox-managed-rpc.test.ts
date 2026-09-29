@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
-import { join } from 'pathslash';
 import { build } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 

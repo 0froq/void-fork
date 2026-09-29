@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 
 const PACKAGE_ROOT = join(import.meta.dirname, '..', '..');

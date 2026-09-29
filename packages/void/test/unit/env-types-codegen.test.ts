@@ -1,6 +1,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { describe, it, expect } from 'vite-plus/test';
 import { generateEnvTypes, findEnvFile } from '../../src/codegen/env-types.ts';
 
@@ -35,7 +36,7 @@ describe('findEnvFile', () => {
       writeFileSync(join(r, 'env.ts'), 'export default {};');
     });
     try {
-      expect(findEnvFile(root)).toBe(join(root, 'env.ts'));
+      expect(findEnvFile(root)).toBe(toSlash(join(root, 'env.ts')));
     } finally {
       cleanup();
     }
@@ -47,7 +48,7 @@ describe('findEnvFile', () => {
       writeFileSync(join(r, 'env.js'), '');
     });
     try {
-      expect(findEnvFile(root)).toBe(join(root, 'env.ts'));
+      expect(findEnvFile(root)).toBe(toSlash(join(root, 'env.ts')));
     } finally {
       cleanup();
     }
@@ -59,7 +60,7 @@ describe('findEnvFile', () => {
       writeFileSync(join(r, 'src', 'env.ts'), 'export default {};');
     });
     try {
-      expect(findEnvFile(root)).toBe(join(root, 'src', 'env.ts'));
+      expect(findEnvFile(root)).toBe(toSlash(join(root, 'src', 'env.ts')));
     } finally {
       cleanup();
     }
@@ -72,7 +73,7 @@ describe('findEnvFile', () => {
       writeFileSync(join(r, 'src', 'env.ts'), '');
     });
     try {
-      expect(findEnvFile(root)).toBe(join(root, 'env.ts'));
+      expect(findEnvFile(root)).toBe(toSlash(join(root, 'env.ts')));
     } finally {
       cleanup();
     }

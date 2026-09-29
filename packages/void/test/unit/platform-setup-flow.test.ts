@@ -1,8 +1,8 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { log } from '@clack/prompts';
 import { createPlatformDeploymentManifest, transitionInstallation } from '@void/platform';
-import { join } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
 import {

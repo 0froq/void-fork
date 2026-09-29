@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 vi.mock('@clack/prompts', () => ({

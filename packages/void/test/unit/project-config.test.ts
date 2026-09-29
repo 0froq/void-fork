@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { getApiUrl, getProxyUrl, getSiteDomain } from '../../src/cli/auth.ts';
 import { savePlatformConnection } from '../../src/cli/platform-registry.ts';

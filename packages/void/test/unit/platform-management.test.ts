@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
@@ -14,7 +15,6 @@ import {
   type PlatformInstallationManifest,
   type ResourceOwnership,
 } from '@void/platform';
-import { join } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 import {
   disablePlatform,

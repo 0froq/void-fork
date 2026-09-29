@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { scanDurableObjectModules } from '../../src/durable/scan.ts';
 
@@ -21,7 +22,7 @@ describe('scanDurableObjectModules', () => {
 
     expect(scanDurableObjectModules(root)).toEqual([
       {
-        filePath: join(root, 'durable-objects', 'shopping-cart.ts'),
+        filePath: toSlash(join(root, 'durable-objects', 'shopping-cart.ts')),
         bindingName: 'SHOPPING_CART',
         className: 'ShoppingCartDurableObject',
         migrationTag: 'void-durable-shopping-cart-v1',

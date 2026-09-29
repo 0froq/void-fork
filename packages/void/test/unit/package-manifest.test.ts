@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vite-plus/test';
 
 type PackageJson = {

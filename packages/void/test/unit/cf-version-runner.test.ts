@@ -3,9 +3,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createServer } from 'node:http';
 import { connect, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { getWorkerConfigPath } from '@cloudflare/build-output-utils';
-import { join } from 'pathslash';
+import { toSlash } from 'pathslash';
 import { afterEach, expect, it } from 'vite-plus/test';
 import {
   activateCloudflareVersion,
@@ -799,7 +800,7 @@ it('uploads when existing R2 and Queue bindings are verified by exact identity',
         'info',
         'jobs',
         '-c',
-        join(roots.at(-1)!, 'dist', 'ssr', 'wrangler.json'),
+        toSlash(join(roots.at(-1)!, 'dist', 'ssr', 'wrangler.json')),
         '--env=',
       ],
     ]);

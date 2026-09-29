@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import spawn from 'cross-spawn';
-import { join } from 'pathslash';
 import {
   afterAll,
   afterEach,

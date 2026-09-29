@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { canRewriteVoidProjectConfig, writeVoidProjectConfig } from '../../src/config-write.ts';
 import { readConfig } from '../../src/config.ts';

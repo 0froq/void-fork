@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import spawn from 'cross-spawn';
-import { join } from 'pathslash';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vite-plus/test';
 import {
   createIsolatedPlayground,

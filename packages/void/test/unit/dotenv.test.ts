@@ -1,6 +1,6 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vite-plus/test';
 import {
   expandDotenv,

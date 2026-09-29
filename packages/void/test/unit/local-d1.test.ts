@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
-import { dirname, join } from 'pathslash';
+import { toSlash } from 'pathslash';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { getLocalD1Target } from '../../src/cli/db.ts';
 import { voidPlugin } from '../../src/index.ts';
@@ -57,7 +58,7 @@ describe('local D1 identity', () => {
     expect(resolveLocalD1Target(root)).toMatchObject({
       bindingName: 'DB',
       databaseId: 'local',
-      persistRoot: join(root, '.void'),
+      persistRoot: toSlash(join(root, '.void')),
     });
   });
 
@@ -151,7 +152,7 @@ describe('local D1 identity', () => {
     expect(cliTarget).toMatchObject({
       bindingName: 'APP_DATABASE',
       databaseId: 'preview-app-id',
-      persistRoot: join(root, '.void'),
+      persistRoot: toSlash(join(root, '.void')),
     });
     expect(existsSync(cliTarget.databasePath)).toBe(true);
     expect(await getApplicationTables(cliTarget.databasePath)).toContain('users');

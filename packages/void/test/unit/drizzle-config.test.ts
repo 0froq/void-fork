@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { describe, it, expect, beforeEach, afterEach } from 'vite-plus/test';
 import { writeDrizzleConfig } from '../../src/drizzle/config.ts';
 
@@ -20,7 +21,7 @@ describe('writeDrizzleConfig', () => {
 
   it('writes a valid JSON config to .void/', () => {
     const configPath = writeDrizzleConfig(root, '/tmp/test.sqlite');
-    expect(configPath).toBe(join(root, '.void', 'drizzle.config.json'));
+    expect(configPath).toBe(toSlash(join(root, '.void', 'drizzle.config.json')));
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(config.dialect).toBe('sqlite');
     expect(config.schema).toBe('./db/schema.ts');

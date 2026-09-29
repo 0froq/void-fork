@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
 import type { PlatformCloudflareClient } from '../../src/cli/platform-cloudflare.ts';

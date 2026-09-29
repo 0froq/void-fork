@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { parsePlatformDeploymentManifest } from '@void/platform';
-import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
   hostedPlatformForApiUrl,

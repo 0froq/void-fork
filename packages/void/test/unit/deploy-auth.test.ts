@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { buildEnv, runDeploy } from '../../src/cli/deploy.ts';
 
@@ -603,7 +604,9 @@ describe('buildEnv — local node_modules/.bin on PATH', () => {
     const root = mkdtempSync(join(tmpdir(), 'void-build-env-'));
     try {
       const childPath = readPath(buildEnv(undefined, { localBinRoot: root }));
-      expect(childPath?.startsWith(join(root, 'node_modules', '.bin') + DELIMITER)).toBe(true);
+      expect(childPath?.startsWith(toSlash(join(root, 'node_modules', '.bin')) + DELIMITER)).toBe(
+        true,
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -615,7 +618,7 @@ describe('buildEnv — local node_modules/.bin on PATH', () => {
       withInheritedPath(`/usr/bin${DELIMITER}/bin`, () => {
         const childPath = readPath(buildEnv(undefined, { localBinRoot: root }));
         expect(childPath).toBe(
-          `${join(root, 'node_modules', '.bin')}${DELIMITER}/usr/bin${DELIMITER}/bin`,
+          `${toSlash(join(root, 'node_modules', '.bin'))}${DELIMITER}/usr/bin${DELIMITER}/bin`,
         );
       });
     } finally {
@@ -628,7 +631,7 @@ describe('buildEnv — local node_modules/.bin on PATH', () => {
     try {
       withInheritedPath('/usr/bin', () => {
         const childPath = readPath(buildEnv(undefined, { localBinRoot: root }));
-        const binDir = join(root, 'node_modules', '.bin');
+        const binDir = toSlash(join(root, 'node_modules', '.bin'));
         expect(childPath).toBe(`${binDir}${DELIMITER}/usr/bin`);
         // Guard against the classic `:`-everywhere bug: on Windows a `:` would
         // make the whole variable one unusable entry (`C:\...` already has a `:`).
@@ -644,7 +647,7 @@ describe('buildEnv — local node_modules/.bin on PATH', () => {
     try {
       withInheritedPath(undefined, () => {
         expect(readPath(buildEnv(undefined, { localBinRoot: root }))).toBe(
-          join(root, 'node_modules', '.bin'),
+          toSlash(join(root, 'node_modules', '.bin')),
         );
       });
     } finally {
@@ -660,7 +663,9 @@ describe('buildEnv — local node_modules/.bin on PATH', () => {
       const childEnv = buildEnv({ VOID_DEPLOY_PROJECT_ID: 'proj_1' }, { localBinRoot: root });
       expect(childEnv.CF_ACCESS_CLIENT_ID).toBeUndefined();
       expect(childEnv.VOID_DEPLOY_PROJECT_ID).toBe('proj_1');
-      expect(readPath(childEnv)?.startsWith(join(root, 'node_modules', '.bin'))).toBe(true);
+      expect(readPath(childEnv)?.startsWith(toSlash(join(root, 'node_modules', '.bin')))).toBe(
+        true,
+      );
     } finally {
       if (savedId === undefined) {
         delete process.env.CF_ACCESS_CLIENT_ID;

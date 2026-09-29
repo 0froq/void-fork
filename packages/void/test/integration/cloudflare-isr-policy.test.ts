@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import spawn from 'cross-spawn';
-import { join } from 'pathslash';
 import { describe, expect, it } from 'vite-plus/test';
 import { createIsolatedPlayground } from '../../../../test/integration-helpers.ts';
 import { renderVoidConfig } from '../../src/config-write.ts';

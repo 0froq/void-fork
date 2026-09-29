@@ -1,6 +1,6 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { approvedCloudflareIsrBinding, chooseCloudflareIsr } from '../../src/cli/cloudflare-isr.ts';
 import { readConfig } from '../../src/config.ts';

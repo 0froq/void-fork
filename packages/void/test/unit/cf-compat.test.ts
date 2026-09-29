@@ -4,8 +4,8 @@ import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { join } from 'pathslash';
 import { expect, it } from 'vite-plus/test';
 import { resolveWranglerArgv } from '../../src/cli/preset.ts';
 

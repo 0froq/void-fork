@@ -10,11 +10,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getWorkerAssetsDir, readBuildOutput } from '@cloudflare/build-output-utils';
 import { cloudflare } from '@cloudflare/vite-plugin';
 import { renderCloudflareStaticEntry } from '@void/deploy-cloudflare';
-import { dirname, join } from 'pathslash';
 import { createBuilder } from 'vite';
 import { afterEach, expect, it } from 'vite-plus/test';
 import {

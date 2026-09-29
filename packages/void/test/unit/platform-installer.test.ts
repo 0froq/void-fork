@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { encodeCloudflareVersionMessage } from '@void/deploy-cloudflare';
 import {
   createApplicationRoutes,
@@ -25,7 +26,7 @@ import {
   resolvePlatformRuntime,
   type PlatformRuntimeDatabaseManifest,
 } from '@void/platform/installer';
-import { join } from 'pathslash';
+import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   hyperdriveOriginConfigHash,
@@ -425,7 +426,7 @@ describe('platform installer', () => {
           expect(api.secrets).not.toHaveProperty('GITHUB_CLIENT_SECRET');
           expect(api.config.vars).toHaveProperty('PLATFORM_AUTH_DATABASE_UNCACHED', 'true');
           expect(api.config.assets).toEqual({
-            directory: join(getPlatformRuntimeDirectory(), 'api', 'assets'),
+            directory: toSlash(join(getPlatformRuntimeDirectory(), 'api', 'assets')),
           });
           return { setupPending: true, expiresAt: new Date(Date.now() + 1_800_000).toISOString() };
         },

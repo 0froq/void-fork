@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join, normalize } from 'node:path';
 import spawn from 'cross-spawn';
-import { join, normalize } from 'pathslash';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import {
   createIsolatedPlayground,

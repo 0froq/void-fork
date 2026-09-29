@@ -7,8 +7,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { join } from 'pathslash';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { hasDeploySchemaDrift } from '../../src/cli/deploy.ts';
 import { generateStarterMigration } from '../../src/cli/init.ts';

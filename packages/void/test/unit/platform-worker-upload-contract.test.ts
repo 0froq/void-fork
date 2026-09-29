@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { expect, it } from 'vite-plus/test';
 import { withConditionalPlatformWorkerCreate } from '../../src/cli/platform-installer.ts';
 import { resolveWranglerArgv } from '../../src/cli/preset.ts';

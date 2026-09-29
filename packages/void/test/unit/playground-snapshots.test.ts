@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
 import { createIsolatedPlayground } from '../../../../test/integration-helpers.ts';
 

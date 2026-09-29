@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { migrateLegacyVoidConfig } from '../../src/cli/migrate.ts';
 import { readConfig } from '../../src/config.ts';

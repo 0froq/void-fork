@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { describe, expect, it, beforeEach, afterEach } from 'vite-plus/test';
 import { scanRoutePatternsSync, scanRoutes } from '../../src/router/scan.ts';
 import { scanWebSocketRoutesSync } from '../../src/router/websocket.ts';

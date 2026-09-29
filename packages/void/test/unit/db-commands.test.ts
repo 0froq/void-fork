@@ -8,7 +8,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vite-plus/test';
 
 const mockExecFileSync = vi.hoisted(() => vi.fn());
@@ -165,7 +166,7 @@ describe('getLocalD1Target', () => {
       writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: { void: '*' } }));
 
       const { getLocalD1Target } = await import('../../src/cli/db.ts');
-      expect(getLocalD1Target(root).persistRoot).toBe(join(root, '.void'));
+      expect(getLocalD1Target(root).persistRoot).toBe(toSlash(join(root, '.void')));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -180,7 +181,7 @@ describe('getLocalD1Target', () => {
       );
 
       const { getLocalD1Target } = await import('../../src/cli/db.ts');
-      expect(getLocalD1Target(root).persistRoot).toBe(join(root, '.wrangler', 'state'));
+      expect(getLocalD1Target(root).persistRoot).toBe(toSlash(join(root, '.wrangler', 'state')));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -273,10 +274,10 @@ describe('void db drizzle-kit subprocesses', () => {
     const [command, args, options] = mockExecFileSync.mock.calls[0];
     expect(command).toBe(process.execPath);
     expect(args).toEqual([
-      expect.stringContaining(join('drizzle-kit', 'bin.cjs')),
+      expect.stringContaining(toSlash(join('drizzle-kit', 'bin.cjs'))),
       'generate',
       '--config',
-      join(root, '.void', 'drizzle.config.json'),
+      toSlash(join(root, '.void', 'drizzle.config.json')),
     ]);
     expect(options).toEqual({ cwd: root, stdio: 'inherit' });
   });

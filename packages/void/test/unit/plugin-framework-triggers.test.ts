@@ -8,7 +8,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   analogDevTriggerInjectPlugin,
@@ -85,9 +86,11 @@ describe('frameworkTriggersPlugin', () => {
     const generated = readFileSync(frameworkTriggersDispatchPath(root), 'utf-8');
     expect(generated).toContain('@ts-nocheck');
     expect(generated).toContain(`__DEV_TRIGGER_TOKEN = "dev-token-test"`);
-    expect(generated).toContain(`from ${JSON.stringify(join(root, 'crons', 'a.ts'))}`);
-    expect(generated).toContain(`from ${JSON.stringify(join(root, 'crons', 'b.ts'))}`);
-    expect(generated).toContain(`from ${JSON.stringify(join(root, 'queues', 'emails.ts'))}`);
+    expect(generated).toContain(`from ${JSON.stringify(toSlash(join(root, 'crons', 'a.ts')))}`);
+    expect(generated).toContain(`from ${JSON.stringify(toSlash(join(root, 'crons', 'b.ts')))}`);
+    expect(generated).toContain(
+      `from ${JSON.stringify(toSlash(join(root, 'queues', 'emails.ts')))}`,
+    );
     expect(generated).toContain('"0 * * * *"');
     expect(generated).toContain('export async function handleDevTrigger');
   });

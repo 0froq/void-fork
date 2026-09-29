@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { describe, it, expect } from 'vite-plus/test';
 import { collectMigrations } from '../../src/migrations/collect.ts';
 

@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { describe, it, expect, afterEach } from 'vite-plus/test';
 import { parseHeadersFile } from '../../src/cli/headers.ts';
 

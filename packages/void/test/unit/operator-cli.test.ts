@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { hasHelpPage } from '../../src/cli/help.ts';
 import { operatorCommands, parseOperatorArgs } from '../../src/cli/operator-args.ts';

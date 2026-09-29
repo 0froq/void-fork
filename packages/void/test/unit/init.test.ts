@@ -9,7 +9,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   detectProjectState,
@@ -1102,7 +1103,7 @@ describe('buildDrizzleKitSpawnEnv leaf-managed gate', () => {
 
       const env = buildDrizzleKitSpawnEnv(sub);
       expect(env.NODE_OPTIONS).toBeDefined();
-      expect(env.NODE_OPTIONS).toContain(JSON.stringify(join(outer, '.pnp.cjs')));
+      expect(env.NODE_OPTIONS).toContain(JSON.stringify(toSlash(join(outer, '.pnp.cjs'))));
     } finally {
       if (savedNodeOptions === undefined) {
         delete process.env.NODE_OPTIONS;
@@ -1130,7 +1131,7 @@ describe('buildDrizzleKitSpawnEnv leaf-managed gate', () => {
       const env = buildDrizzleKitSpawnEnv(root);
       expect(env.NODE_OPTIONS).toBeDefined();
       expect(env.NODE_OPTIONS).toContain('--require');
-      expect(env.NODE_OPTIONS).toContain(JSON.stringify(join(root, '.pnp.cjs')));
+      expect(env.NODE_OPTIONS).toContain(JSON.stringify(toSlash(join(root, '.pnp.cjs'))));
     } finally {
       if (savedNodeOptions === undefined) {
         delete process.env.NODE_OPTIONS;
@@ -1160,7 +1161,7 @@ describe('buildDrizzleKitSpawnEnv leaf-managed gate', () => {
 
       const env = buildDrizzleKitSpawnEnv(sub);
       expect(env.NODE_OPTIONS).toBeDefined();
-      expect(env.NODE_OPTIONS).toContain(JSON.stringify(join(outer, '.pnp.cjs')));
+      expect(env.NODE_OPTIONS).toContain(JSON.stringify(toSlash(join(outer, '.pnp.cjs'))));
     } finally {
       if (savedNodeOptions === undefined) {
         delete process.env.NODE_OPTIONS;
@@ -3943,7 +3944,9 @@ export default config;
       expect(spawnOptions.env).toBeDefined();
       expect(typeof spawnOptions.env!.NODE_OPTIONS).toBe('string');
       expect(spawnOptions.env!.NODE_OPTIONS).toContain('--require');
-      expect(spawnOptions.env!.NODE_OPTIONS).toContain(JSON.stringify(join(root, '.pnp.cjs')));
+      expect(spawnOptions.env!.NODE_OPTIONS).toContain(
+        JSON.stringify(toSlash(join(root, '.pnp.cjs'))),
+      );
 
       // The round 32 "Yarn PnP" skip note MUST NOT have been emitted —
       // we run the migration inline now.

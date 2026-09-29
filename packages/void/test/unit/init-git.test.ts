@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { cancel, confirm, log } from '@clack/prompts';
-import { join } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { initialCommitCommand, setupGit } from '../../src/cli/init-git.ts';
 

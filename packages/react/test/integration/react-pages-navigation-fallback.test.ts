@@ -1,4 +1,4 @@
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import { chromium, type Browser } from 'playwright';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, expect, it } from 'vite-plus/test';

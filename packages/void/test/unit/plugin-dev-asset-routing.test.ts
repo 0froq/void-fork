@@ -1,6 +1,6 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathslash';
+import { join } from 'node:path';
 import type { Plugin } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 

@@ -16,9 +16,9 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
+import { join } from 'node:path';
 import { types as nodeUtilTypes } from 'node:util';
 import { parse as parseJsoncRaw } from 'jsonc-parser';
-import { join } from 'pathslash';
 import { afterEach, beforeEach, describe as vitestDescribe, expect, it } from 'vite-plus/test';
 import {
   acquireProvisionLock,

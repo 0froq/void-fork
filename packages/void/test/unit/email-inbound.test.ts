@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { join } from 'pathslash';
+import { toSlash } from 'pathslash';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   EMAIL_MAX_RESPONSE_BYTES,
@@ -2081,7 +2082,7 @@ describe('reply threading survives a hostile inbound header', () => {
     // short ids. Measured before the bound: 156 ms, 55 MB of heap, then
     // `MimeError: message size 10777129 bytes exceeds Cloudflare limit`.
     const inboundModule = pathToFileURL(
-      join(import.meta.dirname, '../../src/runtime/email/inbound.ts'),
+      toSlash(join(import.meta.dirname, '../../src/runtime/email/inbound.ts')),
     ).href;
     const child = `
       const { buildReplyMessage, createMessageProxy } = await import(process.argv[1]);
@@ -2379,7 +2380,7 @@ describe('reply subject survives a hostile inbound header', () => {
   // so the pin runs the reply in a child with the isolate's cap.
   it('replies to a 10 MiB single Q-encoded word inside a 128 MB heap', () => {
     const inboundModule = pathToFileURL(
-      join(import.meta.dirname, '../../src/runtime/email/inbound.ts'),
+      toSlash(join(import.meta.dirname, '../../src/runtime/email/inbound.ts')),
     ).href;
     const child = `
       const { buildReplyMessage, createMessageProxy } = await import(process.argv[1]);

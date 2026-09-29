@@ -8,8 +8,8 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { join, relative } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { generateVoidAuthDrizzleSchema } from '../../src/auth/drizzle.ts';
 import { hasDeploySchemaDrift, validateAuthMigrationSchema } from '../../src/cli/deploy.ts';

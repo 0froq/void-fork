@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
@@ -13,7 +14,6 @@ import {
   type InstallationResourceKind,
   type PlatformInstallationManifest,
 } from '@void/platform';
-import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { hyperdriveOriginConfigHash } from '../../src/cli/platform-cloudflare.ts';
 import { REMOTE_INSTALLATION_MANIFEST_KEY } from '../../src/cli/platform-installer.ts';

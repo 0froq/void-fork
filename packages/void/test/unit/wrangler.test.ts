@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { parse as parseJsoncRaw, type ParseError } from 'jsonc-parser';
-import { join } from 'pathslash';
+import { toSlash } from 'pathslash';
 import { describe, it, expect, afterEach } from 'vite-plus/test';
 import {
   acknowledgeWranglerManagedQueueRemovals,
@@ -870,7 +871,7 @@ describe('writeProvisionedWranglerConfig', () => {
 
     expect(result.modified).toBe(true);
     expect(result.d1MigrationsDirSkipped).toBe(false);
-    expect(result.configPath).toBe(join(tmpDir, 'wrangler.jsonc'));
+    expect(result.configPath).toBe(toSlash(join(tmpDir, 'wrangler.jsonc')));
 
     const raw = readRaw('wrangler.jsonc');
     // Crux: comments must survive the write.
@@ -1003,7 +1004,7 @@ describe('writeProvisionedWranglerConfig', () => {
   it('operates on wrangler.json when wrangler.jsonc is absent', () => {
     setup('wrangler.json', '{ "name": "json-app" }');
     const result = writeProvisionedWranglerConfig(tmpDir, { accountId: 'acc-1' });
-    expect(result.configPath).toBe(join(tmpDir, 'wrangler.json'));
+    expect(result.configPath).toBe(toSlash(join(tmpDir, 'wrangler.json')));
     expect(parseRaw('wrangler.json').account_id).toBe('acc-1');
   });
 
@@ -1011,7 +1012,7 @@ describe('writeProvisionedWranglerConfig', () => {
     setup('wrangler.jsonc', '{ "name": "jsonc-app" }');
     writeFileSync(join(tmpDir, 'wrangler.json'), '{ "name": "json-app" }');
     const result = writeProvisionedWranglerConfig(tmpDir, { accountId: 'acc-2' });
-    expect(result.configPath).toBe(join(tmpDir, 'wrangler.jsonc'));
+    expect(result.configPath).toBe(toSlash(join(tmpDir, 'wrangler.jsonc')));
     expect(parseRaw('wrangler.jsonc').account_id).toBe('acc-2');
     // The wrangler.json is left untouched.
     expect(parseRaw('wrangler.json').account_id).toBeUndefined();
@@ -1024,7 +1025,7 @@ describe('writeProvisionedWranglerConfig', () => {
       accountId: 'acc-new',
       name: 'brand-new',
     });
-    expect(result.configPath).toBe(join(tmpDir, 'wrangler.jsonc'));
+    expect(result.configPath).toBe(toSlash(join(tmpDir, 'wrangler.jsonc')));
     expect(result.modified).toBe(true);
     const parsed = parseRaw('wrangler.jsonc');
     expect(parsed.account_id).toBe('acc-new');
