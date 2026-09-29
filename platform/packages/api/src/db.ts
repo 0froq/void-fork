@@ -3302,7 +3302,13 @@ export async function searchProjects(
     .leftJoin(users, eq(projects.user_id, users.id))
     .leftJoin(lastDeploy, eq(projects.id, lastDeploy.project_id))
     .where(
-      or(ilike(projects.slug, pattern), ilike(users.login, pattern), ilike(projects.id, pattern)),
+      or(
+        ilike(projects.slug, pattern),
+        ilike(users.login, pattern),
+        ilike(projects.id, pattern),
+        ilike(projects.type, pattern),
+        ilike(lastDeploy.last_deploy_status, pattern),
+      ),
     )
     .orderBy(desc(projects.created_at))
     .limit(50);
@@ -3331,6 +3337,7 @@ export async function searchDeployments(
         ilike(deployments.commit, pattern),
         ilike(deployments.source, pattern),
         ilike(deployments.cli_version, pattern),
+        ilike(deployments.error_message, pattern),
       ),
     )
     .orderBy(desc(deployments.created_at))

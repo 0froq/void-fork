@@ -9,7 +9,7 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@astryxdesign/core/Table';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRequest, useView } from 'react-fate';
 import { UsersPageView, usersPageRequest } from '../../fate/views.ts';
 import { type AdminPageProps } from '../page-utils.ts';
@@ -17,7 +17,6 @@ import { formatDateTime } from './format.ts';
 import { Layout } from './Layout.tsx';
 import { Pagination } from './Pagination.tsx';
 import { SearchForm } from './SearchForm.tsx';
-import { type SearchSuggestion } from './SearchTypeahead.tsx';
 
 export function UsersListPage({ path, platformName, username }: AdminPageProps) {
   const { usersPage: ref } = useRequest(usersPageRequest(path), { mode: 'stale-while-revalidate' });
@@ -28,31 +27,26 @@ export function UsersListPage({ path, platformName, username }: AdminPageProps) 
   const { users, search, page, totalPages, tz } = pageData;
   const [filter, setFilter] = useState(search ?? '');
   useEffect(() => setFilter(search ?? ''), [search]);
-  const visibleUsers = users.filter((user) =>
-    [user.login, user.email, user.id].some((value) =>
-      value?.toLowerCase().includes(filter.toLowerCase()),
-    ),
-  );
-  const suggestions = useMemo<ReadonlyArray<SearchSuggestion>>(
-    () =>
-      users.map((user) => ({
-        id: user.id,
-        label: user.login,
-        keywords: [user.email, user.id],
-        description: [user.email, user.id].filter(Boolean).join(' · '),
-      })),
-    [users],
-  );
+  const selectedUser = users.find((user) => user.id === search);
   return (
     <Layout platformName={platformName} title="Users" username={username}>
       <h1>Users</h1>
       <SearchForm
         action="/admin/users"
+        kind="users"
         label="Search users"
         value={filter}
         onChange={setFilter}
-        suggestions={suggestions}
         initialValue={search}
+        initialSelection={
+          selectedUser
+            ? {
+                id: selectedUser.id,
+                label: selectedUser.login,
+                description: [selectedUser.email, selectedUser.id].filter(Boolean).join(' · '),
+              }
+            : undefined
+        }
         showClear={Boolean(search)}
       />
       <Table hasHover>
@@ -69,7 +63,7 @@ export function UsersListPage({ path, platformName, username }: AdminPageProps) 
           </TableRow>
         </TableHeader>
         <TableBody>
-          {visibleUsers.map((user) => (
+          {users.map((user) => (
             <TableRow key={user.id}>
               <TableCell>
                 <a href={`/admin/users/${user.id}`}>{user.login}</a>
@@ -94,7 +88,7 @@ export function UsersListPage({ path, platformName, username }: AdminPageProps) 
           ))}
         </TableBody>
       </Table>
-      {visibleUsers.length === 0 && (
+      {users.length === 0 && (
         <p>
           <em>No users found.</em>
         </p>

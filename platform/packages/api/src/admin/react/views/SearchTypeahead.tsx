@@ -4,6 +4,7 @@ import {
   Typeahead,
   TypeaheadItem,
   type SearchableItem,
+  type SearchSource,
 } from '@astryxdesign/core/Typeahead';
 import { useMemo, useState } from 'react';
 
@@ -18,54 +19,46 @@ type SearchItem = SearchableItem<{
   keywords: ReadonlyArray<string>;
   description?: string;
 }>;
+const noSuggestions: ReadonlyArray<string | SearchSuggestion | null | undefined> = [];
 
 export function SearchTypeahead({
   label,
   onChange,
-  suggestions,
+  suggestions = noSuggestions,
+  remoteSearch,
   initialValue = '',
+  initialSelection,
   width = 320,
 }: {
   label: string;
   onChange: (value: string) => void;
-  suggestions: ReadonlyArray<string | SearchSuggestion | null | undefined>;
+  suggestions?: ReadonlyArray<string | SearchSuggestion | null | undefined>;
+  remoteSearch?: (query: string) => Promise<ReadonlyArray<SearchSuggestion>>;
   initialValue?: string;
+  initialSelection?: SearchSuggestion;
   width?: number;
 }) {
   const items = useMemo(() => {
-    const byId = new Map<string, SearchItem>();
-    for (const suggestion of suggestions) {
-      if (!suggestion) {
-        continue;
-      }
-      const item: SearchItem =
-        typeof suggestion === 'string'
-          ? { id: suggestion, label: suggestion, auxiliaryData: { keywords: [] } }
-          : {
-              id: suggestion.id,
-              label: suggestion.label,
-              auxiliaryData: {
-                keywords:
-                  suggestion.keywords?.filter((value): value is string => Boolean(value)) ?? [],
-                description: suggestion.description,
-              },
-            };
-      if (item.id && item.label) {
-        byId.set(item.id, item);
-      }
-    }
-    return [...byId.values()];
+    return searchItems(suggestions);
   }, [suggestions]);
-  const source = useMemo(
+  const source = useMemo<SearchSource<SearchItem>>(
     () =>
-      createStaticSource(items, {
-        keywords: (item: SearchItem) => item.auxiliaryData?.keywords ?? [],
-      }),
-    [items],
+      remoteSearch
+        ? {
+            bootstrap: () => [],
+            search: async (query: string) => searchItems(await remoteSearch(query)),
+          }
+        : createStaticSource(items, {
+            keywords: (item: SearchItem) => item.auxiliaryData?.keywords ?? [],
+          }),
+    [items, remoteSearch],
   );
   const [selected, setSelected] = useState<SearchItem | null>(() =>
     initialValue
-      ? (items.find((item) => item.id === initialValue) ?? {
+      ? (items.find((item) => item.id === initialValue) ??
+        (initialSelection?.id === initialValue
+          ? searchItems([initialSelection])[0]
+          : undefined) ?? {
           id: initialValue,
           label: initialValue,
         })
@@ -90,10 +83,38 @@ export function SearchTypeahead({
         setSelected(null);
         onChange(query);
       }}
-      hasEntriesOnFocus
-      debounceMs={0}
+      hasEntriesOnFocus={!remoteSearch}
+      minQueryLength={remoteSearch ? 2 : 1}
+      debounceMs={remoteSearch ? 200 : 0}
       width={width}
-      emptySearchResultsText="No suggestions. Search for any text."
+      emptySearchResultsText={
+        remoteSearch ? 'No matching results.' : 'No suggestions. Search for any text.'
+      }
     />
   );
+}
+
+function searchItems(suggestions: ReadonlyArray<string | SearchSuggestion | null | undefined>) {
+  const byId = new Map<string, SearchItem>();
+  for (const suggestion of suggestions) {
+    if (!suggestion) {
+      continue;
+    }
+    const item: SearchItem =
+      typeof suggestion === 'string'
+        ? { id: suggestion, label: suggestion, auxiliaryData: { keywords: [] } }
+        : {
+            id: suggestion.id,
+            label: suggestion.label,
+            auxiliaryData: {
+              keywords:
+                suggestion.keywords?.filter((value): value is string => Boolean(value)) ?? [],
+              description: suggestion.description,
+            },
+          };
+    if (item.id && item.label) {
+      byId.set(item.id, item);
+    }
+  }
+  return [...byId.values()];
 }

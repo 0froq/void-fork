@@ -160,6 +160,77 @@ describe('auth middleware', () => {
     };
     expect(invalidBody.results[0]).toMatchObject({ ok: false, error: { code: 'BAD_REQUEST' } });
   });
+
+  test('Fate searches find users, projects, and deployments beyond the current page', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'search-admin',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    const targetUser = await createTestUser(env.db, 'offpage-user');
+    await env.db
+      .update(users)
+      .set({ created_at: '2020-01-01 00:00:00' })
+      .where(eq(users.id, targetUser.id));
+    const targetProject = await createTestProject(env.db, targetUser.id, 'offpage-project');
+    await env.db
+      .update(projects)
+      .set({ created_at: '2020-01-01 00:00:00' })
+      .where(eq(projects.id, targetProject.id));
+    const deploymentProject = await createTestProject(
+      env.db,
+      admin.id,
+      'offpage-deployment-project',
+    );
+    const targetDeployment = await createTestDeployment(env.db, deploymentProject.id, 'live');
+    await env.db
+      .update(deployments)
+      .set({ created_at: '2020-01-01 00:00:00' })
+      .where(eq(deployments.id, targetDeployment.id));
+    for (let index = 0; index < 20; index++) {
+      await createTestUser(env.db, `filler-user-${index}`);
+      await createTestProject(env.db, admin.id, `filler-project-${index}`);
+      await createTestDeployment(env.db, deploymentProject.id, 'live');
+    }
+
+    const ids = async (name: string, path: string, field: string) => {
+      const response = await req(
+        '/admin/fate',
+        admin.adminJwt,
+        fateQuery(name, path, ['id', field]),
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        results: Array<{ ok: boolean; data?: Record<string, Array<{ id: string }>> }>;
+      };
+      expect(body.results[0]?.ok).toBe(true);
+      return body.results[0]?.data?.[field]?.map((row) => row.id) ?? [];
+    };
+
+    expect(await ids('usersPage', '/admin/users', 'users')).not.toContain(targetUser.id);
+    expect(await ids('usersPage', '/admin/users?search=offpage-user', 'users')).toContain(
+      targetUser.id,
+    );
+    expect(await ids('projectsPage', '/admin/projects', 'projects')).not.toContain(
+      targetProject.id,
+    );
+    expect(
+      await ids('projectsPage', '/admin/projects?search=offpage-project', 'projects'),
+    ).toContain(targetProject.id);
+    expect(await ids('deploymentsPage', '/admin/deployments', 'deployments')).not.toContain(
+      targetDeployment.id,
+    );
+    expect(
+      await ids(
+        'deploymentsPage',
+        '/admin/deployments?search=offpage-deployment-project',
+        'deployments',
+      ),
+    ).toContain(targetDeployment.id);
+  });
   test('redirects to /admin/login without cookie', async () => {
     const res = await req('/admin/');
     expect(res.status).toBe(302);
