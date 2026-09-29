@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { toSlash } from 'pathslash';
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vite-plus/test';
 import { runGenCommand, formatTimestamp } from '../../src/cli/gen.ts';
 
@@ -1836,7 +1837,7 @@ describe('gen migration', () => {
       expect(env!.NODE_OPTIONS).toContain('--require');
       // Path is JSON.stringify-quoted so spaces in the project path are
       // handled by Node's NODE_OPTIONS parser.
-      expect(env!.NODE_OPTIONS).toContain(JSON.stringify(pnpCjsPath));
+      expect(env!.NODE_OPTIONS).toContain(JSON.stringify(toSlash(pnpCjsPath)));
       // Without a `.pnp.loader.mjs` on disk, no loader flag is injected.
       expect(env!.NODE_OPTIONS).not.toContain('--experimental-loader');
     });
@@ -1858,7 +1859,7 @@ describe('gen migration', () => {
       expect(env).toBeDefined();
       expect(typeof env!.NODE_OPTIONS).toBe('string');
       expect(env!.NODE_OPTIONS).toContain('--require');
-      expect(env!.NODE_OPTIONS).toContain(JSON.stringify(pnpCjsPath));
+      expect(env!.NODE_OPTIONS).toContain(JSON.stringify(toSlash(pnpCjsPath)));
       expect(env!.NODE_OPTIONS).toContain('--experimental-loader');
       // The loader flag must be a file:// URL (Node requires a URL here,
       // not a plain path). `pathToFileURL` produces the documented form.
@@ -1903,7 +1904,7 @@ describe('gen migration', () => {
       // Injected PnP flag comes first so `--require` runs before any
       // user-registered requires/loaders.
       expect(env!.NODE_OPTIONS!.startsWith('--require ')).toBe(true);
-      expect(env!.NODE_OPTIONS).toContain(JSON.stringify(pnpCjsPath));
+      expect(env!.NODE_OPTIONS).toContain(JSON.stringify(toSlash(pnpCjsPath)));
       // And the pre-existing user value is still there.
       expect(env!.NODE_OPTIONS).toContain('--max-old-space-size=4096');
     });
@@ -1979,7 +1980,7 @@ describe('gen migration', () => {
       expect(env!.NODE_OPTIONS).toContain('--require');
       // The helper must have found the ancestor `.pnp.cjs`, not
       // anything inside the project directory.
-      expect(env!.NODE_OPTIONS).toContain(JSON.stringify(pnpCjsPath));
+      expect(env!.NODE_OPTIONS).toContain(JSON.stringify(toSlash(pnpCjsPath)));
     });
   });
 });

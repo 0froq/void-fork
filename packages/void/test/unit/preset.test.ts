@@ -445,7 +445,7 @@ describe('resolveProjectCommand shell safety (project root with spaces)', () => 
     expect(cmd).not.toBe(`${binPath} deploy`);
     expect(cmd.endsWith(' deploy')).toBe(true);
     if (process.platform === 'win32') {
-      expect(cmd).toBe(`"${binPath}" deploy`);
+      expect(cmd).toBe(`"${toSlash(binPath)}" deploy`);
     } else {
       // POSIX single-quote wrap, embedded `'` escaped as '\''.
       expect(cmd).toBe(`'${binPath.replace(/'/g, "'\\''")}' deploy`);

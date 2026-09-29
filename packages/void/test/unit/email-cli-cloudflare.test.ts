@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { log } from '@clack/prompts';
+import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   SENDING_FREE_PLAN_HINT,
@@ -337,12 +338,12 @@ describe('void email setup --platform cloudflare', () => {
 
     // Every wrangler child carries the deploy's config pin; the writes come after the reads.
     expect(calls.map((c) => c.args)).toEqual([
-      ['whoami', '--json', '-c', configPath, '--env='],
-      ['email', 'routing', 'settings', 'mail.acme.com', '-c', configPath, '--env='],
-      ['email', 'routing', 'settings', 'acme.com', '-c', configPath, '--env='],
-      ['email', 'routing', 'rules', 'list', 'acme.com', '-c', configPath, '--env='],
-      ['email', 'sending', 'settings', 'mail.acme.com', '-c', configPath, '--env='],
-      ['email', 'sending', 'enable', 'mail.acme.com', '-c', configPath, '--env='],
+      ['whoami', '--json', '-c', toSlash(configPath), '--env='],
+      ['email', 'routing', 'settings', 'mail.acme.com', '-c', toSlash(configPath), '--env='],
+      ['email', 'routing', 'settings', 'acme.com', '-c', toSlash(configPath), '--env='],
+      ['email', 'routing', 'rules', 'list', 'acme.com', '-c', toSlash(configPath), '--env='],
+      ['email', 'sending', 'settings', 'mail.acme.com', '-c', toSlash(configPath), '--env='],
+      ['email', 'sending', 'enable', 'mail.acme.com', '-c', toSlash(configPath), '--env='],
     ]);
     expect(calls.every((c) => c.capture)).toBe(true);
     expect(fetchCalls.map((c) => `${c.method} ${c.url.slice(c.url.indexOf('/zones'))}`)).toEqual([

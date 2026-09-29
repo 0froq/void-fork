@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, normalize } from 'node:path';
 import spawn from 'cross-spawn';
+import { toSlash } from 'pathslash';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import {
   createIsolatedPlayground,
@@ -194,7 +195,7 @@ describe('playground/kitchen-sink --backend cloudflare real-build deploy guard',
     // (`..\..\dist\ssr\wrangler.json` on Windows). The guard that consumes it resolves through
     // pathslash, which normalizes backslashes, so compare the normalized form rather than pinning
     // a POSIX literal that only holds on one platform.
-    expect(normalize(pointer.configPath ?? '')).toBe('../../dist/ssr/wrangler.json');
+    expect(toSlash(normalize(pointer.configPath ?? ''))).toBe('../../dist/ssr/wrangler.json');
   });
 
   it('merges the pinned account, worker name, and real binding ids into the emitted artifact', () => {

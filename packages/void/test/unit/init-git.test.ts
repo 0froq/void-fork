@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cancel, confirm, log } from '@clack/prompts';
+import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { initialCommitCommand, setupGit } from '../../src/cli/init-git.ts';
 
@@ -138,7 +139,7 @@ describe('initial commit hint', () => {
   it('targets the created subfolder, quoting shell metacharacters', () => {
     const child = join(root, "app's $name `value`");
     const argument =
-      process.platform === 'win32' ? `"${child}"` : `'${child.replaceAll("'", "'\\''")}'`;
+      process.platform === 'win32' ? `"${toSlash(child)}"` : `'${child.replaceAll("'", "'\\''")}'`;
     const git = `git -C ${argument}`;
     expect(initialCommitCommand(child)).toBe(
       `${git} add -A && ${git} commit -m "chore: initial commit"`,

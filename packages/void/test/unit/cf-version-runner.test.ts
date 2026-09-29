@@ -6,7 +6,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { getWorkerConfigPath } from '@cloudflare/build-output-utils';
-import { toSlash } from 'pathslash';
 import { afterEach, expect, it } from 'vite-plus/test';
 import {
   activateCloudflareVersion,
@@ -800,7 +799,7 @@ it('uploads when existing R2 and Queue bindings are verified by exact identity',
         'info',
         'jobs',
         '-c',
-        toSlash(join(roots.at(-1)!, 'dist', 'ssr', 'wrangler.json')),
+        join(roots.at(-1)!, 'dist', 'ssr', 'wrangler.json'),
         '--env=',
       ],
     ]);

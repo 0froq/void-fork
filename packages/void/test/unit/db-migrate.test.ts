@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
+import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 const mockIntro = vi.fn();
@@ -183,7 +184,7 @@ describe('void db migrate', () => {
     await runDbCommand(root, { action: 'migrate' });
 
     expect(mockRunMigrations).toHaveBeenCalledWith(
-      join(root, 'db', 'migrations'),
+      toSlash(join(root, 'db', 'migrations')),
       join(tmpdir(), 'void-db-migrate.sqlite'),
     );
     expect(mockLog.success).toHaveBeenCalledWith('Applied 1 migration(s).');
@@ -232,7 +233,7 @@ describe('void db migrate', () => {
 
     expect(mockGetPgAppliedMigrations).toHaveBeenCalledWith(process.env.DATABASE_URL);
     expect(mockRunPgMigrations).toHaveBeenCalledWith(
-      join(root, 'db', 'migrations'),
+      toSlash(join(root, 'db', 'migrations')),
       process.env.DATABASE_URL,
     );
     expect(mockLog.success).toHaveBeenCalledWith('Applied 1 migration(s) to remote database.');
@@ -250,7 +251,7 @@ describe('void db migrate', () => {
 
     expect(mockGetMySqlAppliedMigrations).toHaveBeenCalledWith(process.env.DATABASE_URL);
     expect(mockRunMySqlMigrations).toHaveBeenCalledWith(
-      join(root, 'db', 'migrations'),
+      toSlash(join(root, 'db', 'migrations')),
       process.env.DATABASE_URL,
     );
     expect(mockLog.success).toHaveBeenCalledWith('Applied 1 migration(s) to remote database.');

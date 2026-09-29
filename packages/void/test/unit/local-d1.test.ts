@@ -222,7 +222,7 @@ describe('local D1 identity', () => {
     await runGeneratedMigrationPlugin(voidPlugin({ persistTo: 'state/miniflare' }));
 
     const cliTarget = getLocalD1Target(root);
-    expect(cliTarget.persistRoot).toBe(customPersistRoot);
+    expect(cliTarget.persistRoot).toBe(toSlash(customPersistRoot));
     expect(existsSync(cliTarget.databasePath)).toBe(true);
     expect(await getApplicationTables(cliTarget.databasePath)).toContain('users');
 

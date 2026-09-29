@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { getWorkerAssetsDir, readBuildOutput } from '@cloudflare/build-output-utils';
 import { cloudflare } from '@cloudflare/vite-plugin';
 import { renderCloudflareStaticEntry } from '@void/deploy-cloudflare';
+import { toSlash } from 'pathslash';
 import { createBuilder } from 'vite';
 import { afterEach, expect, it } from 'vite-plus/test';
 import {
@@ -486,7 +487,7 @@ it('bundles a generated static Worker and staged assets into prebuilt cf output'
     const built = await readBuildOutput(prepared.directory);
     expect(built.workers.default.config.manifest?.mainModule).toBe('index.js');
     expect(built.workers.default.assetsDir).toBeDefined();
-    expect(prepared.assetsDirectory).toBe(assets);
+    expect(prepared.assetsDirectory).toBe(toSlash(assets));
     const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
     const dryRun = spawnSync(process.execPath, [cf, 'deploy', '--prebuilt', '--dry-run'], {
       cwd: prepared.directory,

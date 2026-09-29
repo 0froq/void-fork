@@ -1729,7 +1729,7 @@ describe('isScaffoldableEmptyProject', () => {
         'pnpm',
         ['install', '--no-frozen-lockfile'],
         expect.objectContaining({
-          cwd: appRoot,
+          cwd: toSlash(appRoot),
           stdio: 'inherit',
           shell: process.platform === 'win32',
         }),
@@ -2941,7 +2941,12 @@ export default config;
       });
       expect(mockSpawnSync).toHaveBeenCalledWith(
         process.execPath,
-        expect.arrayContaining(['whoami', '--json', '-c', join(root, '.void-wrangler.jsonc')]),
+        expect.arrayContaining([
+          'whoami',
+          '--json',
+          '-c',
+          toSlash(join(root, '.void-wrangler.jsonc')),
+        ]),
         expect.objectContaining({ cwd: root, stdio: ['ignore', 'pipe', 'pipe'] }),
       );
       expect(mockSpawnSync).toHaveBeenCalledWith(
@@ -4646,7 +4651,7 @@ export default config;
       const body = String(matching[0][0]);
       expect(body).toMatch(/Scaffolded the Pages starter/);
       expect(body).toMatch(/void db generate/);
-      expect(body).toContain(wsroot);
+      expect(body).toContain(toSlash(wsroot));
     } finally {
       rmSync(wsroot, { recursive: true, force: true });
     }

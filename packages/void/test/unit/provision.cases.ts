@@ -19,6 +19,7 @@ import {
 import { join } from 'node:path';
 import { types as nodeUtilTypes } from 'node:util';
 import { parse as parseJsoncRaw } from 'jsonc-parser';
+import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe as vitestDescribe, expect, it } from 'vite-plus/test';
 import {
   acquireProvisionLock,
@@ -83,7 +84,7 @@ function describe(name: string, factory: () => void): void {
 const passthruFs = { mkdir, stat, utimes, rmdir, realpath, rmdirSync };
 
 const tmpDir = join(import.meta.dirname, `.tmp-provision-test-${activeTestShard}`);
-const wranglerPath = join(tmpDir, 'wrangler.jsonc');
+const wranglerPath = toSlash(join(tmpDir, 'wrangler.jsonc'));
 
 function setup(content: string): void {
   rmSync(tmpDir, { recursive: true, force: true });
@@ -434,7 +435,7 @@ describe('provisionCloudflareResources — argv injection safety', () => {
         'DB',
         '--update-config',
         '-c',
-        spacedPath,
+        toSlash(spacedPath),
         '--env=',
       ]);
       expect(result.resources[0].action).toBe('created');
@@ -502,7 +503,7 @@ describe('provisionCloudflareResources — config discovery (fail closed, single
       { ...emptyDesired, kvNamespaces: [{ binding: 'KV', title: 'myapp-kv' }] },
       { runWrangler: run, log: silentLog },
     );
-    expect(result.configPath).toBe(jsonPath);
+    expect(result.configPath).toBe(toSlash(jsonPath));
     // The adopted id landed in the passed file (wrangler.json) — NOT split into .jsonc.
     const jsonAfter = parseJsoncRaw(readFileSync(jsonPath, 'utf-8')) as Record<string, unknown>;
     expect((jsonAfter.kv_namespaces as Array<Record<string, unknown>>)[0].id).toBe(hex32('kv'));
@@ -3315,12 +3316,12 @@ describe('provisionCloudflareResources — absolute config path', () => {
       { runWrangler: run, log: silentLog },
     );
     // Returned + threaded config path is the absolute resolution against root.
-    expect(result.configPath).toBe(abs);
+    expect(result.configPath).toBe(toSlash(abs));
     expect(calls.length).toBeGreaterThan(0);
     for (const argv of calls) {
       const i = argv.indexOf('-c');
       expect(i).toBeGreaterThanOrEqual(0);
-      expect(argv[i + 1]).toBe(abs); // wrangler `-c` is the SAME absolute file
+      expect(argv[i + 1]).toBe(toSlash(abs)); // wrangler `-c` is the SAME absolute file
     }
     // The adopted id landed in root/wrangler.jsonc — the file Node read from too.
     const after = parseJsoncRaw(readFileSync(abs, 'utf-8')) as Record<string, unknown>;

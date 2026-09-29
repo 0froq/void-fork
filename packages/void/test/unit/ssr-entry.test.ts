@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { describe, expect, it, afterEach } from 'vite-plus/test';
 import { getSsrServerEntryPath, hasSsrEntry, validateSsrEntry } from '../../src/ssr/entry.ts';
 
@@ -41,7 +42,7 @@ describe('ssr entry helpers', () => {
     );
 
     expect(hasSsrEntry(root)).toBe(true);
-    expect(validateSsrEntry(root)).toBe(file);
+    expect(validateSsrEntry(root)).toBe(toSlash(file));
   });
 
   it('supports tsx ssr entry files', () => {
@@ -54,7 +55,7 @@ describe('ssr entry helpers', () => {
     );
 
     expect(hasSsrEntry(root)).toBe(true);
-    expect(validateSsrEntry(root)).toBe(file);
+    expect(validateSsrEntry(root)).toBe(toSlash(file));
   });
 
   it('supports default defineRender export', () => {
@@ -67,7 +68,7 @@ describe('ssr entry helpers', () => {
     );
 
     expect(hasSsrEntry(root)).toBe(true);
-    expect(validateSsrEntry(root)).toBe(file);
+    expect(validateSsrEntry(root)).toBe(toSlash(file));
   });
 
   it('throws when both ts and tsx ssr entries exist', () => {

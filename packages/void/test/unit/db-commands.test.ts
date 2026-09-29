@@ -368,7 +368,7 @@ describe('void db drizzle-kit subprocesses', () => {
     await runDbCommand(root, { action: 'push' });
 
     expect(mockGetMiniflareDatabasePath).toHaveBeenCalledWith(
-      join(root, '.wrangler', 'state'),
+      toSlash(join(root, '.wrangler', 'state')),
       'local',
     );
   });

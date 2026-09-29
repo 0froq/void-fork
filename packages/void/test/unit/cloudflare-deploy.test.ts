@@ -1104,7 +1104,7 @@ describe('ensureCloudflareAuthSecret', () => {
       'list',
       '--format=json',
       '-c',
-      toSlash(join(root, 'wrangler.jsonc')),
+      join(root, 'wrangler.jsonc'),
       '--env=',
     ]);
   });
@@ -2193,7 +2193,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
 
     expect(exitCalls).toEqual([]);
     expect(trace).toEqual(['wrangler:whoami', 'static-build', 'wrangler:deploy']);
-    expect(wranglerArgs.at(-1)).toContain(generatedStaticConfig(root));
+    expect(wranglerArgs.at(-1)).toContain(toSlash(generatedStaticConfig(root)));
   });
 
   it('scrubs stale managed markers from a native static build', async () => {
@@ -2370,7 +2370,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(readFileSync(join(stagedAssets, 'index.html'), 'utf-8')).toBe('<h1>Static</h1>');
     expect(existsSync(join(stagedAssets, '_headers'))).toBe(false);
     expect(existsSync(join(stagedAssets, '_redirects'))).toBe(false);
-    expect(wranglerArgs.at(-1)).toContain(stagedAssets);
+    expect(wranglerArgs.at(-1)).toContain(toSlash(stagedAssets));
   });
 
   it('rejects a bare project with no Void backend files (positive full-Void assertion)', async () => {
@@ -2697,7 +2697,7 @@ describe('runCloudflareDeploy — preflight', () => {
       'list',
       '--json',
       '-c',
-      join(root, 'wrangler.jsonc'),
+      toSlash(join(root, 'wrangler.jsonc')),
       '--env=',
     ]);
     expect(trace.indexOf('wrangler:whoami')).toBeLessThan(trace.indexOf('wrangler:containers'));
@@ -2904,7 +2904,7 @@ describe('runCloudflareDeploy — resource provisioning', () => {
     expect(wranglerArgs.find((a) => a[0] === 'deploy')).toEqual([
       'deploy',
       '-c',
-      toSlash(join(root, 'dist/ssr/wrangler.json')),
+      join(root, 'dist/ssr/wrangler.json'),
       '--env=',
       '--experimental-provision=false',
       '--experimental-auto-create=false',
@@ -3865,7 +3865,7 @@ describe('runCloudflareDeploy — wrangler implicit provisioning disabled on dep
     expect(wranglerArgs.find((a) => a[0] === 'deploy')).toEqual([
       'deploy',
       '-c',
-      toSlash(join(root, 'dist/ssr/wrangler.json')),
+      join(root, 'dist/ssr/wrangler.json'),
       '--env=',
       '--experimental-provision=false',
       '--experimental-auto-create=false',
@@ -9797,7 +9797,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
 
   const configArgs = (root: string): Array<string> => [
     '-c',
-    join(root, 'wrangler.jsonc'),
+    toSlash(join(root, 'wrangler.jsonc')),
     '--env=',
   ];
 
