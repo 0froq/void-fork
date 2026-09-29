@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import {
   detectProjectState,
   ensureVoidDependency,
+  ensureVoidWorkerCompatibilityDate,
   ensureVoidPlatformConnection,
   extractPnpmWorkspacePackages,
   generateStarterMigration,
@@ -44,6 +45,21 @@ const mockListProjects = vi.fn();
 const mockCreateProject = vi.fn();
 const mockDiscoverPlatform = vi.fn();
 let platformRegistryDirectory: string;
+
+it('pins compatibility date in the lock without rewriting authored TypeScript', () => {
+  const root = mkdtempSync(join(tmpdir(), 'void-init-authored-config-'));
+  const source =
+    "import { defineConfig } from 'void/config';\nexport default defineConfig({ remote: process.env.REMOTE === '1' });\n";
+  try {
+    writeFileSync(join(root, 'void.config.ts'), source);
+    ensureVoidWorkerCompatibilityDate(root);
+    expect(readFileSync(join(root, 'void.config.ts'), 'utf8')).toBe(source);
+    const lock = JSON.parse(readFileSync(join(root, 'void.lock.json'), 'utf8'));
+    expect(lock.resolved.compatibility_date).toBe(LATEST_KNOWN_COMPAT_DATE);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 describe('init Git arguments', () => {
   it('keeps Git optional and honors the last positive or negative flag', () => {

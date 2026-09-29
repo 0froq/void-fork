@@ -105,6 +105,11 @@ function isGeneratedStaticConfig(source: string): boolean {
   );
 }
 
+export function canRewriteVoidProjectConfig(root: string): boolean {
+  const path = join(root, TYPED_CONFIG_FILE);
+  return !existsSync(path) || isGeneratedStaticConfig(readFileSync(path, 'utf8'));
+}
+
 /** Update CLI-owned static config without silently rewriting authored TypeScript. */
 export function writeVoidProjectConfig(root: string, config: VoidConfig): void {
   validateConfig(config, TYPED_CONFIG_FILE);

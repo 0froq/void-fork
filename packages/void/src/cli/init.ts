@@ -19,7 +19,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'pathslas
 import { materializeCloudflareConfig } from '../cloudflare-config.ts';
 import { createProjectTsconfig, ensureProjectTsconfig } from '../codegen/project-tsconfig.ts';
 import { TYPED_CONFIG_FILE } from '../config-loader.ts';
-import { writeVoidProjectConfig } from '../config-write.ts';
+import { canRewriteVoidProjectConfig, writeVoidProjectConfig } from '../config-write.ts';
 import { getDatabaseDialect, readConfig, type DatabaseDialect } from '../config.ts';
 import { writeDrizzleConfig } from '../drizzle/config.ts';
 import { detectFramework, type DetectedFramework } from '../plugin-inference.ts';
@@ -1612,7 +1612,7 @@ function writeVoidConfig(root: string, config: Record<string, unknown>): void {
   writeVoidProjectConfig(root, config);
 }
 
-function ensureVoidWorkerCompatibilityDate(root: string): void {
+export function ensureVoidWorkerCompatibilityDate(root: string): void {
   const config = readConfig(root) as Record<string, unknown>;
 
   if (typeof config.target === 'string' && config.target !== 'cloudflare') {
@@ -1625,6 +1625,11 @@ function ensureVoidWorkerCompatibilityDate(root: string): void {
   }
 
   const compatibilityDate = readProjectWranglerCompatDate(root) ?? LATEST_KNOWN_COMPAT_DATE;
+  if (!canRewriteVoidProjectConfig(root)) {
+    writeProvisionedWranglerConfig(root, { compatibilityDate });
+    log.success('Pinned worker compatibility_date in void.lock.json');
+    return;
+  }
   config.worker = {
     ...worker,
     compatibility_date: compatibilityDate,

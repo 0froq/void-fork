@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
-import { writeVoidProjectConfig } from '../../src/config-write.ts';
+import { canRewriteVoidProjectConfig, writeVoidProjectConfig } from '../../src/config-write.ts';
 import { readConfig } from '../../src/config.ts';
 
 const root = join(import.meta.dirname, '.tmp-config-write-test');
@@ -37,6 +37,7 @@ describe('writeVoidProjectConfig', () => {
     );
     const original = readFileSync(join(root, 'void.config.ts'), 'utf8');
     expect(() => writeVoidProjectConfig(root, { remote: false })).toThrow('authored TypeScript');
+    expect(canRewriteVoidProjectConfig(root)).toBe(false);
     expect(readFileSync(join(root, 'void.config.ts'), 'utf8')).toBe(original);
 
     setup(
