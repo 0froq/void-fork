@@ -25,6 +25,7 @@ export { ACTIVE_BUILD_STATUSES } from './build-status.ts';
 import { lockAuthSettings } from './auth/configuration.ts';
 import { lockEmailPolicy } from './email/admission.ts';
 import { generateId } from './id.ts';
+import { getProjectQueueName } from './naming.ts';
 import { requireProjectCapability } from './project-access.ts';
 import * as schema from './schema.ts';
 import {
@@ -37,6 +38,7 @@ import {
   projectAccessEvents,
   deployments,
   projectSecrets,
+  projectCleanupJobs,
   resources,
   domains,
   emailDestinations,
@@ -2929,6 +2931,48 @@ export async function deleteProject(db: Db, id: string): Promise<void> {
   await db.delete(projects).where(eq(projects.id, id));
 }
 
+export type ProjectCleanupJobInput = typeof projectCleanupJobs.$inferInsert;
+
+export function cleanupJobsForResource(
+  projectId: string,
+  resource: Resource,
+): Array<ProjectCleanupJobInput> {
+  if (resource.type === 'container') {
+    return [];
+  }
+  const jobs: Array<ProjectCleanupJobInput> = [
+    {
+      target: `cf-resource:${projectId}:${resource.type}:${resource.cf_id}`,
+      project_id: projectId,
+      kind: 'cf-resource',
+      payload: { type: resource.type, cfId: resource.cf_id },
+    },
+  ];
+  if (resource.type === 'queue') {
+    const key = `queue:${getProjectQueueName(projectId, resource.binding_name)}`;
+    jobs.push({
+      target: `routing-key:${projectId}:${key}`,
+      project_id: projectId,
+      kind: 'routing-key',
+      payload: { key },
+    });
+  }
+  return jobs;
+}
+
+export async function enqueueProjectCleanupJobs(
+  db: DbOrTx,
+  jobs: ReadonlyArray<ProjectCleanupJobInput>,
+): Promise<void> {
+  if (jobs.length === 0) {
+    return;
+  }
+  await db
+    .insert(projectCleanupJobs)
+    .values([...jobs])
+    .onConflictDoNothing();
+}
+
 /**
  * Cascade-delete a project and everything that references it. Returns:
  *  - `cancelledBuilds`: the in-flight builds terminalized here, so the caller can
@@ -2947,6 +2991,7 @@ export async function deleteProject(db: Db, id: string): Promise<void> {
 export async function deleteProjectCascade(
   db: Db,
   projectId: string,
+  processedResourceCfIds: ReadonlySet<string> = new Set(),
 ): Promise<{
   cancelledBuilds: ReadonlyArray<{
     id: string;
@@ -2984,6 +3029,15 @@ export async function deleteProjectCascade(
       .delete(resources)
       .where(eq(resources.project_id, projectId))
       .returning();
+    // Record resources that appeared after the pre-cascade cleanup snapshot in
+    // the same transaction that removes their only durable handles. A failed
+    // provider delete after COMMIT can then be retried by the scheduled worker.
+    await enqueueProjectCleanupJobs(
+      txDb,
+      deletedResources
+        .filter((resource) => !processedResourceCfIds.has(resource.cf_id))
+        .flatMap((resource) => cleanupJobsForResource(projectId, resource)),
+    );
     await tx.delete(projectSecrets).where(eq(projectSecrets.project_id, projectId));
     // builds reference both projects and deployments with ON DELETE NO ACTION,
     // so they must be removed before the deployments delete below (otherwise the

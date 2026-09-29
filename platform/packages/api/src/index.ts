@@ -73,6 +73,7 @@ import {
 } from './platform-identity.ts';
 import { processPlatformQueue } from './platform-queue.ts';
 import { tryActivateDomain } from './provisioning/activate-domain.ts';
+import { reconcileProjectCleanupJobs } from './provisioning/cleanup.ts';
 import {
   CloudflareApiError,
   deleteCustomHostname,
@@ -544,6 +545,10 @@ async function scheduled(
   }
   const db = createDb(env.HYPERDRIVE.connectionString);
   const capabilities = getPlatformCapabilities(env);
+
+  await reconcileProjectCleanupJobs(db, env).catch((error) =>
+    console.error('[scheduled] project cleanup retry failed:', error),
+  );
 
   if (capabilities.email) {
     await reconcileEmailDestinationCleanups(db, {

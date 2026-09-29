@@ -529,6 +529,7 @@ export async function teardownEnv(): Promise<void> {
 }
 
 export async function clearTables(db: Db): Promise<void> {
+  await db.delete(schema.projectCleanupJobs);
   for (const table of [
     schema.emailDestinationCleanups,
     schema.emailOperationSteps,

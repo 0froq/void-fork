@@ -380,6 +380,15 @@ export function stubCustomerCf(
       return fail('scriptDelete') ?? cfSuccess({});
     }
 
+    // Project teardown also deletes deployment Workers in the platform's
+    // dispatch namespace. These email tests never create one.
+    if (
+      method === 'DELETE' &&
+      /\/accounts\/[^/]+\/workers\/dispatch\/namespaces\/[^/]+\/scripts\/[^/]+$/.test(path)
+    ) {
+      return new Response(null, { status: 404 });
+    }
+
     throw new Error(`Unmocked customer fetch: ${method} ${url}`);
   });
 

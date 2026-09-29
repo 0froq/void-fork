@@ -1,4 +1,16 @@
-import { sql as drizzleSql, and, desc, eq, isNotNull, isNull, ne, notInArray } from 'drizzle-orm';
+import {
+  sql as drizzleSql,
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  ne,
+  notInArray,
+} from 'drizzle-orm';
 import type { Context } from 'hono';
 import { deleteProjectAssets, deleteWorkerBundle } from '../assets.ts';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
@@ -7,6 +19,8 @@ import {
   TERMINAL_DEPLOYMENT_STATUSES,
   type Db,
   deleteProjectCascade,
+  cleanupJobsForResource,
+  enqueueProjectCleanupJobs,
   deleteProjectEmailDestinations,
   getAllProjectDeployments,
   getActiveDeployment,
@@ -15,6 +29,7 @@ import {
   getProjectResources,
   getUser,
   terminateBuildsForProject,
+  type ProjectCleanupJobInput,
 } from '../db.ts';
 import { drainProjectEmailAdmissions } from '../email/admission.ts';
 import { emailDomainRoutes, emailZoneConnections } from '../email/connection-schema.ts';
@@ -30,12 +45,14 @@ import {
 import { requireProjectCapability } from '../project-access.ts';
 import {
   deployments as deploymentsTable,
+  projectCleanupJobs,
   projectOwnershipPeriods,
   projects as projectsTable,
 } from '../schema.ts';
 import { getCurrentBillingPeriodStart } from '../tiers.ts';
 import type { Build, DeployManifest, Project, ProjectOwnershipPeriod, Resource } from '../types.ts';
 import {
+  CloudflareApiError,
   deleteCustomHostname,
   deleteD1Database,
   deleteHyperdrive,
@@ -75,6 +92,112 @@ function deleteCloudflareResource(
       resourceType satisfies never;
       throw new Error(`Unsupported resource type: ${resourceType}`);
   }
+}
+
+function cleanupJob(
+  projectId: string,
+  kind: ProjectCleanupJobInput['kind'],
+  target: string,
+  payload: Record<string, string>,
+): ProjectCleanupJobInput {
+  return { project_id: projectId, kind, target: `${kind}:${projectId}:${target}`, payload };
+}
+
+function jobValue(job: ProjectCleanupJobInput, key: string): string {
+  const value = job.payload[key];
+  if (!value) {
+    throw new Error(`Project cleanup job ${job.target} is missing ${key}`);
+  }
+  return value;
+}
+
+async function ignoreMissingProviderObject(operation: () => Promise<void>): Promise<void> {
+  try {
+    await operation();
+  } catch (error) {
+    if (error instanceof CloudflareApiError && error.status === 404) {
+      return;
+    }
+    throw error;
+  }
+}
+
+async function executeCleanupJob(
+  env: ApiEnv['Bindings'],
+  job: ProjectCleanupJobInput,
+): Promise<void> {
+  switch (job.kind) {
+    case 'cf-resource':
+      await ignoreMissingProviderObject(() =>
+        deleteCloudflareResource(env.CF_ACCOUNT_ID, env.CF_API_TOKEN, {
+          type: jobValue(job, 'type') as Resource['type'],
+          cf_id: jobValue(job, 'cfId'),
+        }),
+      );
+      return;
+    case 'worker': {
+      const namespace = jobValue(job, 'namespace');
+      const name = jobValue(job, 'name');
+      const response = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${namespace}/scripts/${name}`,
+        { method: 'DELETE', headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` } },
+      );
+      if (!response.ok && response.status !== 404) {
+        throw new Error(`Worker delete returned HTTP ${response.status}: ${await response.text()}`);
+      }
+      void response.body?.cancel().catch(() => {});
+      return;
+    }
+    case 'worker-bundle':
+      await deleteWorkerBundle(
+        env.STATIC_ASSETS_R2,
+        jobValue(job, 'projectId'),
+        jobValue(job, 'deploymentId'),
+      );
+      return;
+    case 'project-assets':
+      await deleteProjectAssets(env.STATIC_ASSETS_R2, jobValue(job, 'projectId'));
+      return;
+    case 'routing-key':
+      await env.ROUTING.delete(jobValue(job, 'key'));
+      return;
+    case 'cron':
+      await clearCronScheduler(env, jobValue(job, 'projectId'));
+      return;
+    case 'custom-hostname':
+      await ignoreMissingProviderObject(() =>
+        deleteCustomHostname(
+          jobValue(job, 'zoneId'),
+          env.CF_API_TOKEN,
+          jobValue(job, 'hostnameId'),
+        ),
+      );
+      return;
+  }
+}
+
+async function runCleanupBatch(
+  env: ApiEnv['Bindings'],
+  jobs: ReadonlyArray<ProjectCleanupJobInput>,
+): Promise<{ warnings: Array<string>; failed: Array<ProjectCleanupJobInput> }> {
+  const warnings: Array<string> = [];
+  const failed: Array<ProjectCleanupJobInput> = [];
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(5, jobs.length) }, async () => {
+      while (next < jobs.length) {
+        const job = jobs[next++]!;
+        try {
+          await executeCleanupJob(env, job);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          warnings.push(`Failed to delete ${job.target}: ${message}`);
+          failed.push(job);
+        }
+      }
+    }),
+  );
+  return { warnings, failed };
 }
 
 /**
@@ -204,10 +327,10 @@ function parseDeploymentManifest(raw: string | null): DeployManifest | null {
 }
 
 /**
- * Best-effort CF cleanup. Failures here become warnings but DO NOT block the
- * DB cascade. These resources are either independently re-derivable (KV
- * routing entries, deployment-scoped worker scripts) or come with their own
- * recovery story (D1 / KV / R2 retention via CF account-level cleanup).
+ * Delete external resources and persist failed operations before the project
+ * cascade. Names that another project can claim (the slug route, domain routes,
+ * and legacy Worker name) must succeed first so a later retry cannot erase a
+ * replacement project's state.
  */
 async function cleanupBestEffortResources(
   context: Context<ApiEnv>,
@@ -215,8 +338,10 @@ async function cleanupBestEffortResources(
   project: Pick<Project, 'slug'>,
 ): Promise<{ warnings: ReadonlyArray<string>; cleanedCfIds: ReadonlySet<string> }> {
   const warnings: Array<string> = [];
-  const warn = (msg: string) => (err: unknown) => {
+  const failedJobs: Array<ProjectCleanupJobInput> = [];
+  const warn = (msg: string, job: ProjectCleanupJobInput) => (err: unknown) => {
     warnings.push(`${msg}: ${err instanceof Error ? err.message : String(err)}`);
+    failedJobs.push(job);
   };
   // cf_ids whose CF object this sweep attempted to delete, so the post-cascade
   // race-window cleanup can skip them (it only needs the rows created AFTER the
@@ -239,33 +364,42 @@ async function cleanupBestEffortResources(
 
   // Delete user-facing worker scripts before queue resources so CF no longer
   // sees queue bindings in attached Workers.
-  await Promise.all(
+  const workerResult = await runCleanupBatch(
+    context.env,
     Array.from(workerNames, (workerName) =>
-      fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${context.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`,
-        { method: 'DELETE', headers: { Authorization: `Bearer ${context.env.CF_API_TOKEN}` } },
-      )
-        .then(async (cfRes) => {
-          if (!cfRes.ok && cfRes.status !== 404) {
-            warnings.push(`Failed to delete worker ${workerName}: ${await cfRes.text()}`);
-          }
-        })
-        .catch(warn(`Failed to delete worker ${workerName}`)),
+      cleanupJob(projectId, 'worker', `${dispatchNamespace}:${workerName}`, {
+        namespace: dispatchNamespace,
+        name: workerName,
+      }),
     ),
   );
+  warnings.push(...workerResult.warnings);
+  failedJobs.push(...workerResult.failed);
+  // The legacy script name is derived only from the reusable project slug.
+  // Keep that slug reserved until its deletion succeeds; a later project with
+  // the same slug must never be touched by this project's scheduled retry.
+  if (
+    workerResult.failed.some((job) => job.payload.name === getLegacyProjectWorkerName(project.slug))
+  ) {
+    throw new Error('Could not remove the legacy project Worker; retry project deletion.');
+  }
 
   // Delete R2 worker bundle objects under `worker-bundles/{projectId}/{deploymentId}/...`
   // for every deployment. Without this, project teardown leaves these objects
   // permanently orphaned in STATIC_ASSETS_R2 (the cascade only drops DB rows).
   // `deleteWorkerBundle` is idempotent — listing returns no objects for deploys
   // that never stored a bundle, so we don't need to gate on `bundle_stored`.
-  await Promise.all(
+  const bundleResult = await runCleanupBatch(
+    context.env,
     projectDeployments.map((deployment) =>
-      deleteWorkerBundle(context.env.STATIC_ASSETS_R2, projectId, deployment.id).catch(
-        warn(`Failed to delete worker bundle for deployment ${deployment.id}`),
-      ),
+      cleanupJob(projectId, 'worker-bundle', `${projectId}:${deployment.id}`, {
+        projectId,
+        deploymentId: deployment.id,
+      }),
     ),
   );
+  warnings.push(...bundleResult.warnings);
+  failedJobs.push(...bundleResult.failed);
 
   // Delete R2 static-asset objects under `assets/{projectId}/...`. The retention
   // cleanup loop only walks hashes referenced by retained manifests, so any
@@ -274,10 +408,13 @@ async function cleanupBestEffortResources(
   // are durable orphans without this sweep. Best-effort: failures here become
   // warnings — the surrounding teardown still cascades the DB rows.
   await deleteProjectAssets(context.env.STATIC_ASSETS_R2, projectId).catch(
-    warn(`Failed to delete static assets for project ${projectId}`),
+    warn(
+      `Failed to delete static assets for project ${projectId}`,
+      cleanupJob(projectId, 'project-assets', projectId, { projectId }),
+    ),
   );
 
-  const cleanup: Array<Promise<void>> = [];
+  const cleanup: Array<ProjectCleanupJobInput> = [];
 
   // Best-effort CF resource cleanup (D1, KV, R2, Queue, Hyperdrive — user-
   // provisioned resources). Container resources were handled as critical above.
@@ -286,32 +423,21 @@ async function cleanupBestEffortResources(
       continue;
     }
     cleanedCfIds.add(resource.cf_id);
-    const del = deleteCloudflareResource(
-      context.env.CF_ACCOUNT_ID,
-      context.env.CF_API_TOKEN,
-      resource,
+    cleanup.push(
+      ...cleanupJobsForResource(projectId, resource).filter((job) => job.kind === 'cf-resource'),
     );
-    cleanup.push(del.catch(warn(`Failed to delete ${resource.type} resource ${resource.cf_id}`)));
   }
 
   // Clear cron scheduler DO unconditionally — /clear is idempotent
   // (deleteAll + deleteAlarm). KV `hasCrons` is omitted when false and
   // missing on older entries; the PG manifest is the authoritative source,
   // and unconditional clear avoids a stale-KV gate.
-  cleanup.push(
-    clearCronScheduler(context.env, projectId).catch(
-      warn(`Failed to clear cron scheduler for project ${projectId}`),
-    ),
-  );
+  cleanup.push(cleanupJob(projectId, 'cron', projectId, { projectId }));
 
   // KV routing entry
+  cleanup.push(cleanupJob(projectId, 'routing-key', project.slug, { key: project.slug }));
   cleanup.push(
-    context.env.ROUTING.delete(project.slug).catch(warn('Failed to delete routing entry')),
-  );
-  cleanup.push(
-    context.env.ROUTING.delete(`ai-block:${projectId}`).catch(
-      warn('Failed to delete AI block entry'),
-    ),
+    cleanupJob(projectId, 'routing-key', `ai-block:${projectId}`, { key: `ai-block:${projectId}` }),
   );
 
   // NOTE: `projectAccountKey(projectId)` (`project:{projectId}`) is intentionally
@@ -322,29 +448,46 @@ async function cleanupBestEffortResources(
   // Queue routing KV entries
   for (const q of resources.filter((r) => r.type === 'queue')) {
     cleanup.push(
-      context.env.ROUTING.delete(`queue:${getProjectQueueName(projectId, q.binding_name)}`).catch(
-        warn('Failed to delete queue routing entry'),
-      ),
+      ...cleanupJobsForResource(projectId, q).filter((job) => job.kind === 'routing-key'),
     );
   }
 
   // Custom hostnames from CF + KV
   for (const domain of projectDomains) {
     cleanup.push(
-      deleteCustomHostname(
-        context.env.CF_ZONE_ID,
-        context.env.CF_API_TOKEN,
-        domain.cf_hostname_id,
-      ).catch(warn(`Failed to delete custom hostname ${domain.hostname}`)),
-    );
-    cleanup.push(
-      context.env.ROUTING.delete(`domain:${domain.hostname}`).catch(
-        warn('Failed to delete domain routing entry'),
+      cleanupJob(
+        projectId,
+        'custom-hostname',
+        `${context.env.CF_ZONE_ID}:${domain.cf_hostname_id}`,
+        {
+          zoneId: context.env.CF_ZONE_ID,
+          hostnameId: domain.cf_hostname_id,
+        },
       ),
+      cleanupJob(projectId, 'routing-key', `domain:${domain.hostname}`, {
+        key: `domain:${domain.hostname}`,
+      }),
     );
   }
 
-  await Promise.all(cleanup);
+  const remaining = await runCleanupBatch(context.env, cleanup);
+  warnings.push(...remaining.warnings);
+  failedJobs.push(...remaining.failed);
+  // Slug and custom-domain routing names can be claimed by another project
+  // after cascade. A failed delete of either must keep the old project row and
+  // its unique name reserved for a safe retry.
+  if (
+    remaining.failed.some(
+      (job) =>
+        job.kind === 'routing-key' &&
+        (job.payload.key === project.slug || job.payload.key?.startsWith('domain:')),
+    )
+  ) {
+    throw new Error('Could not remove project routing; retry project deletion.');
+  }
+  // The project and resource rows still exist here. If writing the retry
+  // record fails, abort teardown rather than erase the only recovery handles.
+  await enqueueProjectCleanupJobs(context.get('db'), failedJobs);
   return { warnings, cleanedCfIds };
 }
 
@@ -566,11 +709,12 @@ export class ProjectOperationInProgressError extends Error {
  * route (`POST/PUT /:id/database`) or a deploy (`provisionBindings`) that inserted
  * a `resources` row AFTER `cleanupBestEffortResources` took its one-time snapshot
  * but before the cascade — so the CF object was never deleted, yet its only
- * durable handle (the row) is now gone. `deleteProjectCascade` returns the
- * COMPLETE set of committed resources (its FOR UPDATE conflicts with the INSERT's
- * FK FOR KEY SHARE), so this catches every such straggler. Containers are excluded
+ * durable handle (the row) is now gone. `deleteProjectCascade` atomically writes
+ * cleanup jobs for the COMPLETE set of missed resources before COMMIT (its FOR
+ * UPDATE conflicts with the INSERT's FK FOR KEY SHARE), so failures remain
+ * retryable. Containers are excluded
  * — they have their own deterministic-name double-sweep in
- * `cleanupCriticalResources`. Best-effort: failures become warnings. Normally a
+ * `cleanupCriticalResources`. Failures become warnings backed by jobs. Normally a
  * no-op (no concurrent create → every row was in the snapshot). See design-doc 0067.
  */
 async function cleanupRaceWindowResourceOrphans(
@@ -579,31 +723,74 @@ async function cleanupRaceWindowResourceOrphans(
   deletedResources: ReadonlyArray<Resource>,
   cleanedCfIds: ReadonlySet<string>,
 ): Promise<ReadonlyArray<string>> {
-  const warnings: Array<string> = [];
-  const warn = (msg: string) => (err: unknown) => {
-    warnings.push(`${msg}: ${err instanceof Error ? err.message : String(err)}`);
-  };
   const orphans = deletedResources.filter(
     (r) => r.type !== 'container' && !cleanedCfIds.has(r.cf_id),
   );
+  const jobs = orphans.flatMap((resource) => cleanupJobsForResource(projectId, resource));
+  const result = await runCleanupBatch(context.env, jobs);
+  const failedTargets = new Set(result.failed.map((job) => job.target));
+  const completedTargets = jobs
+    .filter((job) => !failedTargets.has(job.target))
+    .map((job) => job.target);
+  if (completedTargets.length > 0) {
+    await context
+      .get('db')
+      .delete(projectCleanupJobs)
+      .where(inArray(projectCleanupJobs.target, completedTargets))
+      .catch((error) => console.error('[project-cleanup] completed job delete failed:', error));
+  }
+  // Failed jobs were committed atomically with the project cascade and remain
+  // in the ledger for scheduled retries after the project row is gone.
+  return result.warnings;
+}
+
+/** Retry bounded remote cleanup work after a teardown attempt. */
+export async function reconcileProjectCleanupJobs(db: Db, env: ApiEnv['Bindings']): Promise<void> {
+  const due = await db
+    .select()
+    .from(projectCleanupJobs)
+    .where(lte(projectCleanupJobs.next_attempt_at, drizzleSql`now()`))
+    .orderBy(asc(projectCleanupJobs.created_at), asc(projectCleanupJobs.target))
+    .limit(50);
+  let next = 0;
   await Promise.all(
-    orphans.flatMap((r) => {
-      const tasks = [
-        deleteCloudflareResource(context.env.CF_ACCOUNT_ID, context.env.CF_API_TOKEN, r).catch(
-          warn(`Failed to delete race-window ${r.type} resource ${r.cf_id}`),
-        ),
-      ];
-      if (r.type === 'queue') {
-        tasks.push(
-          context.env.ROUTING.delete(
-            `queue:${getProjectQueueName(projectId, r.binding_name)}`,
-          ).catch(warn(`Failed to delete race-window queue routing entry for ${r.cf_id}`)),
-        );
+    Array.from({ length: Math.min(5, due.length) }, async () => {
+      while (next < due.length) {
+        const job = due[next++]!;
+        // A later invocation can observe the same due snapshot. Claim without
+        // holding a database transaction open across provider I/O.
+        const claimed = await db
+          .update(projectCleanupJobs)
+          .set({
+            attempts: drizzleSql`${projectCleanupJobs.attempts} + 1`,
+            next_attempt_at: new Date(Date.now() + 15 * 60_000).toISOString(),
+          })
+          .where(
+            and(
+              eq(projectCleanupJobs.target, job.target),
+              lte(projectCleanupJobs.next_attempt_at, drizzleSql`now()`),
+            ),
+          )
+          .returning({ target: projectCleanupJobs.target });
+        if (claimed.length === 0) {
+          continue;
+        }
+        try {
+          await executeCleanupJob(env, job);
+          await db.delete(projectCleanupJobs).where(eq(projectCleanupJobs.target, job.target));
+        } catch (error) {
+          const message = (error instanceof Error ? error.message : String(error))
+            .replaceAll(env.CF_API_TOKEN, '[redacted]')
+            .slice(0, 500);
+          await db
+            .update(projectCleanupJobs)
+            .set({ last_error: message })
+            .where(eq(projectCleanupJobs.target, job.target));
+          console.warn(`[project-cleanup] retry failed for ${job.target}: ${message}`);
+        }
       }
-      return tasks;
     }),
   );
-  return warnings;
 }
 
 /**
@@ -617,14 +804,15 @@ async function cleanupRaceWindowResourceOrphans(
  *   2. Run critical CF cleanup (container apps + per-deploy container
  *      orphan recovery). Throws on non-404 failure; the caller should surface
  *      a 5xx and the DB row remains, allowing retry.
- *   3. Run best-effort CF cleanup (D1, KV, R2, queues, hyperdrive, custom
- *      hostnames, routing entries, deployment workers). Failures become
- *      warnings.
+ *   3. Delete CF resources (D1, KV, R2, queues, Hyperdrive, custom hostnames,
+ *      routing entries, deployment Workers). Persist failed operations for
+ *      scheduled retry; keep reusable names reserved if their deletion fails.
  *   4. Cascade-delete the project from the DB (terminalize any build that raced
  *      in after step 1 → domains → resources → secrets → builds → deployments →
  *      project), then best-effort stop the container DOs of any such late build
  *      and delete the CF object behind any resource that raced the step-3
  *      snapshot (a provisioning route / deploy that inserted a row after it).
+ *      The cascade records those race-window cleanup jobs atomically.
  *
  * This is the ONLY caller of `cleanupCriticalResources`,
  * `cleanupBestEffortResources`, and `deleteProjectCascade` for the project-
@@ -688,6 +876,7 @@ export async function teardownProject(
   const { cancelledBuilds, deletedResources } = await deleteProjectCascade(
     context.get('db'),
     projectId,
+    cleanedCfIds,
   );
   await cancelContainerBuildDos(context.env, cancelledBuilds, 'project deleted');
   // Close the orphan-on-concurrent-create window: delete the CF object behind any

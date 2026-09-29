@@ -529,6 +529,34 @@ export const deployments = pgTable(
   ],
 );
 
+// External project resources can outlive a deleted project when a provider
+// deletion fails. These jobs deliberately have no project FK: the project row
+// and its resource handles are removed after jobs have been recorded.
+export const projectCleanupJobs = pgTable(
+  'project_cleanup_jobs',
+  {
+    target: text('target').primaryKey(),
+    project_id: text('project_id').notNull(),
+    kind: text('kind')
+      .notNull()
+      .$type<
+        | 'cf-resource'
+        | 'worker'
+        | 'worker-bundle'
+        | 'project-assets'
+        | 'routing-key'
+        | 'cron'
+        | 'custom-hostname'
+      >(),
+    payload: jsonb('payload').notNull().$type<Record<string, string>>(),
+    attempts: integer('attempts').notNull().default(0),
+    last_error: text('last_error'),
+    next_attempt_at: timestamp('next_attempt_at', { mode: 'string' }).notNull().defaultNow(),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+  },
+  (table) => [index('project_cleanup_jobs_due').on(table.next_attempt_at, table.created_at)],
+);
+
 // ---------------------------------------------------------------------------
 // project_secrets
 // ---------------------------------------------------------------------------

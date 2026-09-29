@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import {
   describe,
   it,
@@ -11,7 +11,7 @@ import {
 } from 'vite-plus/test';
 import { createBuild } from '../../src/db.ts';
 import * as db from '../../src/db.ts';
-import app from '../../src/index.ts';
+import app, { FAST_CRON, scheduled } from '../../src/index.ts';
 import * as projectAccess from '../../src/project-access.ts';
 import {
   resources,
@@ -33,6 +33,7 @@ import {
   mockCfApi,
   cfError,
   cfSuccess,
+  createMockExecutionContext,
   skipOrphanSweepDelay,
   type TestEnv,
 } from './helpers.ts';
@@ -457,7 +458,45 @@ describe('DELETE /projects/:id', () => {
     expect(remaining).toHaveLength(0);
   });
 
-  it('returns warnings on CF resource deletion failure', async () => {
+  it('retries a failed race-window resource deletion after the cascade', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'race-retry-app');
+    await addResource(project.id, 'd1', 'd1-race-retry', 'DB');
+    vi.spyOn(db, 'getProjectResources').mockResolvedValue([]);
+    let deletionAttempts = 0;
+    mockCfApi({
+      deleteD1: () =>
+        ++deletionAttempts === 1 ? cfError('temporary race-window failure', 500) : cfSuccess(null),
+    });
+
+    const response = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(await db.getProject(env.db, project.id)).toBeNull();
+    expect(deletionAttempts).toBe(1);
+    const pending = await env.db.execute<{ target: string }>(sql`
+      SELECT target FROM project_cleanup_jobs WHERE target = ${`cf-resource:${project.id}:d1:d1-race-retry`}
+    `);
+    expect(pending.rows).toEqual([{ target: `cf-resource:${project.id}:d1:d1-race-retry` }]);
+
+    await scheduled(
+      { cron: FAST_CRON, scheduledTime: Date.now() } as ScheduledController,
+      env as unknown as Parameters<typeof scheduled>[1],
+      createMockExecutionContext(),
+    );
+    expect(deletionAttempts).toBe(2);
+    const finished = await env.db.execute<{ target: string }>(sql`
+      SELECT target FROM project_cleanup_jobs WHERE target = ${`cf-resource:${project.id}:d1:d1-race-retry`}
+    `);
+    expect(finished.rows).toEqual([]);
+  });
+
+  it('treats an already-deleted CF resource as successfully cleaned up', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'warn-app');
     mockCfApi({
@@ -476,13 +515,94 @@ describe('DELETE /projects/:id', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean; warnings?: Array<string> };
     expect(body.ok).toBe(true);
-    expect(body.warnings).toBeDefined();
-    expect(body.warnings!.length).toBeGreaterThan(0);
-    expect(body.warnings![0]).toContain('d1');
+    expect(body.warnings).toBeUndefined();
 
-    // Project should still be deleted from DB despite warnings
+    // Retrying a partially completed teardown must not get stuck on a 404.
     const [dbProject] = await env.db.select().from(projects).where(eq(projects.id, project.id));
     expect(dbProject).toBeUndefined();
+  });
+
+  it('retains a durable retry for failed CF cleanup after the project is deleted', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'retry-remote-cleanup');
+    await addResource(project.id, 'd1', 'd1-retry-cleanup', 'DB');
+    let deletionAttempts = 0;
+    mockCfApi({
+      deleteD1: () =>
+        ++deletionAttempts === 1 ? cfError('temporary D1 failure', 500) : cfSuccess(null),
+    });
+
+    const response = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(await db.getProject(env.db, project.id)).toBeNull();
+
+    const pending = await env.db.execute<{ kind: string; target: string }>(sql`
+      SELECT kind, target FROM project_cleanup_jobs
+      WHERE target = ${`cf-resource:${project.id}:d1:d1-retry-cleanup`}
+    `);
+    expect(pending.rows).toEqual([
+      { kind: 'cf-resource', target: `cf-resource:${project.id}:d1:d1-retry-cleanup` },
+    ]);
+
+    await scheduled(
+      { cron: FAST_CRON, scheduledTime: Date.now() } as ScheduledController,
+      env as unknown as Parameters<typeof scheduled>[1],
+      createMockExecutionContext(),
+    );
+    expect(deletionAttempts).toBe(2);
+    const finished = await env.db.execute<{ target: string }>(sql`
+      SELECT target FROM project_cleanup_jobs
+      WHERE target = ${`cf-resource:${project.id}:d1:d1-retry-cleanup`}
+    `);
+    expect(finished.rows).toEqual([]);
+  });
+
+  it('keeps a reusable slug reserved when its route cannot be removed', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'reusable-route');
+    await env.ROUTING.put(project.slug, JSON.stringify({ projectId: project.id }));
+    mockCfApi();
+    const deleteRoute = env.ROUTING.delete.bind(env.ROUTING);
+    const routeDelete = vi.spyOn(env.ROUTING, 'delete').mockImplementation(async (key) => {
+      if (key === project.slug) {
+        throw new Error('temporary KV failure');
+      }
+      return deleteRoute(key);
+    });
+    const request = () =>
+      app.fetch(
+        new Request(`http://localhost/projects/${project.id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${user.jwt}` },
+        }),
+        env,
+      );
+
+    expect((await request()).status).toBe(500);
+    expect(await db.getProject(env.db, project.id)).toMatchObject({ status: 'deleting' });
+    const pending = await env.db.execute<{ target: string }>(sql`
+      SELECT target FROM project_cleanup_jobs
+      WHERE target = ${`routing-key:${project.id}:${project.slug}`}
+    `);
+    expect(pending.rows).toEqual([]);
+
+    routeDelete.mockRestore();
+    expect((await request()).status).toBe(200);
+    expect(await db.getProject(env.db, project.id)).toBeNull();
+    const replacement = await createTestProject(env.db, user.id, project.slug);
+    await env.ROUTING.put(project.slug, JSON.stringify({ projectId: replacement.id }));
+    await scheduled(
+      { cron: FAST_CRON, scheduledTime: Date.now() } as ScheduledController,
+      env as unknown as Parameters<typeof scheduled>[1],
+      createMockExecutionContext(),
+    );
+    expect(await env.ROUTING.get(project.slug)).toBe(JSON.stringify({ projectId: replacement.id }));
   });
 
   it('does not warn when worker 404s (static project)', async () => {

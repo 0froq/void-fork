@@ -21,9 +21,9 @@ app.delete('/:id', async (context) => {
   // `teardownProject` handles the FOR UPDATE lock, status='deleting' flip,
   // bulk deployment cancellation, critical CF cleanup (container apps from
   // `resources` rows + per-deploy container orphan recovery by deterministic
-  // name — fatal on failure), best-effort CF cleanup (D1, KV, R2, queues,
-  // hyperdrive, custom hostnames, routing entries — warnings), and the DB
-  // cascade. Critical-cleanup failure throws and surfaces as a 5xx.
+  // name — fatal on failure), durable retries for failed external cleanup,
+  // and the DB cascade. A failed reusable-name cleanup keeps the project row
+  // reserved and surfaces a 5xx so the delete can be retried safely.
   let warnings: ReadonlyArray<string>;
   try {
     ({ warnings } = await teardownProject(context, projectId, project, {
