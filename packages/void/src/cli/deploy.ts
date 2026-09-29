@@ -57,6 +57,7 @@ import {
 } from '../asset-routing.ts';
 import { findVoidAuthConfig } from '../auth/config.ts';
 import type { VoidAuthMigrationSchema } from '../auth/drizzle.ts';
+import { materializeCloudflareConfig } from '../cloudflare-config.ts';
 import { findEnvFile } from '../codegen/env-types.ts';
 import {
   readConfig,
@@ -146,6 +147,7 @@ import {
 } from './cloudflare-readiness.ts';
 import { formatCloudflareUserMessage } from './cloudflare-user-output.ts';
 import { readGeneratedWranglerConfigFile } from './generated-wrangler-config.ts';
+import { migrateLegacyVoidConfig } from './migrate.ts';
 export { parseRootWranglerConfig } from '@void/deploy-cloudflare';
 import { promptAndCreateProject } from './create-project.ts';
 import {
@@ -5700,13 +5702,7 @@ export function discoverRootWranglerConfig(root: string): string {
       'Found wrangler.toml. Direct Cloudflare deployment needs one root wrangler.jsonc or wrangler.json with the same settings. Convert the config before deploying.',
     );
   }
-  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
-    const candidate = join(root, name);
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-  return join(root, 'wrangler.jsonc');
+  return materializeCloudflareConfig(root);
 }
 
 /** Avoid making Wrangler open a config path that Void has not created yet. */
@@ -6417,6 +6413,11 @@ async function runDeployInner(
   if (link === 'existing') {
     options = { ...options, platform: 'cloudflare', reuseExistingWorker: true };
   }
+  if (migrateLegacyVoidConfig(root)) {
+    log.success(
+      'Migrated project configuration to void.config.ts. Commit void.config.ts and void.lock.json.',
+    );
+  }
   const platform = resolveDeploymentPlatform(root, options);
 
   if (platform === 'none') {
@@ -6429,7 +6430,13 @@ async function runDeployInner(
   log.info(`Deployment target: ${targetLabel}`);
   cliLog.info('deploy_target', { target: platform });
 
-  return deployTargets[platform].deploy(root, options ?? {}, cliLog);
+  try {
+    return await deployTargets[platform].deploy(root, options ?? {}, cliLog);
+  } finally {
+    if (existsSync(join(root, 'void.config.ts'))) {
+      removeDeployPointer(root);
+    }
+  }
 }
 
 async function runManagedDeploy(

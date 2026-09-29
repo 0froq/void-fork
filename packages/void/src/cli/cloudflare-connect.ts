@@ -21,17 +21,13 @@ export async function connectCloudflare(
       'connect: Named Cloudflare environments and config overrides are not supported.',
     );
   }
-  const existingConfigPath = ['wrangler.jsonc', 'wrangler.json']
-    .map((name) => join(root, name))
-    .find(existsSync);
   let existingConfig: ReturnType<typeof readRootWranglerConfig>;
   try {
     existingConfig = readRootWranglerConfig(root);
   } catch {
-    throw new Error(
-      `connect: Invalid ${basename(existingConfigPath!)}. Fix it before connecting to Cloudflare.`,
-    );
+    throw new Error('connect: Invalid Cloudflare config. Fix it before connecting to Cloudflare.');
   }
+  const existingConfigPath = existingConfig?.configPath;
   const config = existingConfig?.config ?? {};
   const envAccount = process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
   const configuredAccount = typeof config.account_id === 'string' ? config.account_id : undefined;

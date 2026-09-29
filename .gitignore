@@ -5,6 +5,7 @@ dist
 *.tsbuildinfo
 .DS_Store
 .wrangler
+.void-wrangler.jsonc
 .env
 .claude
 plan.md

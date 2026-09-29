@@ -16,7 +16,10 @@ import type { PlatformDiscoveryDocument } from '@void/platform';
 import { parse, type ParseError } from 'jsonc-parser';
 import MagicString from 'magic-string';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'pathslash';
+import { materializeCloudflareConfig } from '../cloudflare-config.ts';
 import { createProjectTsconfig, ensureProjectTsconfig } from '../codegen/project-tsconfig.ts';
+import { TYPED_CONFIG_FILE } from '../config-loader.ts';
+import { writeVoidProjectConfig } from '../config-write.ts';
 import { getDatabaseDialect, readConfig, type DatabaseDialect } from '../config.ts';
 import { writeDrizzleConfig } from '../drizzle/config.ts';
 import { detectFramework, type DetectedFramework } from '../plugin-inference.ts';
@@ -26,6 +29,7 @@ import { connectCloudflare } from './cloudflare-connect.ts';
 import { maybeSetupDeployProject } from './deploy-setup.ts';
 import { maybeScaffoldEnvTs } from './env-scaffold.ts';
 import { initialCommitCommand, setupGit } from './init-git.ts';
+import { migrateLegacyVoidConfig } from './migrate.ts';
 import { cliTitle } from './output.ts';
 import { discoverPlatform, saveDiscoveredPlatform } from './platform-cmd.ts';
 import { formatProjectCommand } from './preset.ts';
@@ -214,7 +218,6 @@ const VITE_CONFIG_FILES = [
   'vite.config.cjs',
 ];
 const VOID_CONFIG_FILE = 'void.json';
-const VOID_SCHEMA_PATH = './node_modules/void/schema.json';
 type DatabaseSetupChoice = DatabaseDialect | 'none';
 type InitLocationChoice = 'subfolder' | 'current';
 type JsonObject = Record<string, unknown>;
@@ -549,7 +552,7 @@ function shouldPromptForInitLocation(root: string): boolean {
   if (existsSync(join(root, 'package.json'))) {
     return false;
   }
-  if (existsSync(join(root, VOID_CONFIG_FILE))) {
+  if (existsSync(join(root, VOID_CONFIG_FILE)) || existsSync(join(root, TYPED_CONFIG_FILE))) {
     return false;
   }
   return findViteConfig(root) === undefined;
@@ -1555,8 +1558,7 @@ function setupTsconfig(
 }
 
 function readProjectWranglerCompatDate(root: string): string | undefined {
-  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
-    const configPath = join(root, name);
+  for (const configPath of [materializeCloudflareConfig(root)]) {
     if (!existsSync(configPath)) {
       continue;
     }
@@ -1588,9 +1590,7 @@ function setupWranglerConfig(root: string, framework: DetectedFramework): void {
     return;
   }
 
-  const hadConfig = ['wrangler.jsonc', 'wrangler.json'].some((name) =>
-    existsSync(join(root, name)),
-  );
+  const hadConfig = existsSync(materializeCloudflareConfig(root));
   const result = writeProvisionedWranglerConfig(root, {
     compatibilityDate: LATEST_KNOWN_COMPAT_DATE,
     compatibilityFlags: ['nodejs_als'],
@@ -1607,18 +1607,8 @@ function setupWranglerConfig(root: string, framework: DetectedFramework): void {
   }
 }
 
-function withDefaultVoidSchema(config: Record<string, unknown>): Record<string, unknown> {
-  if (typeof config.$schema === 'string' && config.$schema.length > 0) {
-    return config;
-  }
-  return { $schema: VOID_SCHEMA_PATH, ...config };
-}
-
 function writeVoidConfig(root: string, config: Record<string, unknown>): void {
-  writeFileSync(
-    join(root, VOID_CONFIG_FILE),
-    JSON.stringify(withDefaultVoidSchema(config), null, 2) + '\n',
-  );
+  writeVoidProjectConfig(root, config);
 }
 
 function ensureVoidWorkerCompatibilityDate(root: string): void {
@@ -1639,7 +1629,7 @@ function ensureVoidWorkerCompatibilityDate(root: string): void {
     compatibility_date: compatibilityDate,
   };
   writeVoidConfig(root, config);
-  log.success('Pinned worker compatibility_date in void.json');
+  log.success('Pinned worker compatibility_date in void.config.ts');
 }
 
 function clearConfiguredDatabase(
@@ -1647,7 +1637,6 @@ function clearConfiguredDatabase(
   messages: { unchanged: string; updated: string },
 ): void {
   const config = readConfig(root) as Record<string, unknown>;
-  const configPath = join(root, VOID_CONFIG_FILE);
 
   if (config.database !== 'pg' && config.database !== 'mysql') {
     log.info(messages.unchanged);
@@ -1655,12 +1644,6 @@ function clearConfiguredDatabase(
   }
 
   delete config.database;
-
-  if (Object.keys(config).length === 0) {
-    unlinkSync(configPath);
-    log.success(messages.updated);
-    return;
-  }
 
   writeVoidConfig(root, config);
   log.success(messages.updated);
@@ -1671,31 +1654,31 @@ function applyDatabaseDialect(root: string, dialect: DatabaseDialect): void {
 
   if (dialect === 'postgresql') {
     if (config.database === 'pg') {
-      log.info('PostgreSQL already configured in void.json');
+      log.info('PostgreSQL already configured in void.config.ts');
       return;
     }
 
     config.database = 'pg';
     writeVoidConfig(root, config);
-    log.success('Configured PostgreSQL in void.json');
+    log.success('Configured PostgreSQL in void.config.ts');
     return;
   }
 
   if (dialect === 'mysql') {
     if (config.database === 'mysql') {
-      log.info('MySQL already configured in void.json');
+      log.info('MySQL already configured in void.config.ts');
       return;
     }
 
     config.database = 'mysql';
     writeVoidConfig(root, config);
-    log.success('Configured MySQL in void.json');
+    log.success('Configured MySQL in void.config.ts');
     return;
   }
 
   clearConfiguredDatabase(root, {
     unchanged: 'Using default D1 (SQLite) configuration',
-    updated: 'Updated void.json to use the default D1 (SQLite) configuration',
+    updated: 'Updated void.config.ts to use the default D1 (SQLite) configuration',
   });
 }
 
@@ -1718,7 +1701,7 @@ function applyDatabaseSetup(root: string, choice: DatabaseSetupChoice): void {
   if (choice === 'none') {
     clearConfiguredDatabase(root, {
       unchanged: 'No database configured yet',
-      updated: 'Removed database config from void.json',
+      updated: 'Removed database config from void.config.ts',
     });
     return;
   }
@@ -1738,12 +1721,12 @@ async function promptStarterMode(): Promise<ScaffoldStarterMode> {
       {
         value: 'postgresql',
         label: 'PostgreSQL',
-        hint: 'Scaffolds the same starter with PostgreSQL, a generated migration, a seed file, and writes "database": "pg" to void.json.',
+        hint: 'Scaffolds the same starter with PostgreSQL, a generated migration, a seed file, and writes database: "pg" to void.config.ts.',
       },
       {
         value: 'mysql',
         label: 'MySQL',
-        hint: 'Scaffolds the same starter with MySQL, a generated migration, a seed file, and writes "database": "mysql" to void.json.',
+        hint: 'Scaffolds the same starter with MySQL, a generated migration, a seed file, and writes database: "mysql" to void.config.ts.',
       },
       {
         value: 'static',
@@ -3421,6 +3404,11 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   if (!targeted) {
     root = await resolveInitRoot(root);
   }
+  if (migrateLegacyVoidConfig(root)) {
+    log.success(
+      'Migrated project configuration to void.config.ts. Commit void.config.ts and void.lock.json.',
+    );
+  }
   const workspaceSubpackage = isInsideWorkspaceSubpackage(root);
   if (workspaceSubpackage && initArgs?.git !== undefined) {
     throw new Error(
@@ -3556,13 +3544,13 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
 
   ensureGitignore(root);
 
-  // Step 2: Wrangler config (class B/C meta-frameworks)
-  if (framework) {
-    setupWranglerConfig(root, framework);
-  }
-
   if (!targeted) {
     ensureVoidWorkerCompatibilityDate(root);
+  }
+
+  // Step 2: Cloudflare config for class B/C meta-frameworks
+  if (framework) {
+    setupWranglerConfig(root, framework);
   }
 
   // Step 3: Database dialect

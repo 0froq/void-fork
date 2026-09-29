@@ -37,7 +37,7 @@ describe('migrateLegacyVoidConfig', () => {
 
     setup('{"target":"node"}');
     writeFileSync(join(root, 'void.config.ts'), 'export default { target: "bun" };\n');
-    expect(() => migrateLegacyVoidConfig(root)).toThrow('Both void.json and void.config.ts');
+    expect(() => migrateLegacyVoidConfig(root)).toThrow('void.config.ts already exists');
     expect(existsSync(join(root, 'void.json'))).toBe(true);
   });
 
@@ -49,5 +49,41 @@ describe('migrateLegacyVoidConfig', () => {
     expect(migrateLegacyVoidConfig(root)).toBe(true);
     expect(existsSync(join(root, 'void.json'))).toBe(false);
     expect(readConfig(root).target).toBe('node');
+  });
+
+  it('moves complete Wrangler JSONC settings into typed config and a checked-in lock', () => {
+    setup('{"routing":{"isr":false}}');
+    const original =
+      '// keep this provenance\n{ "name": "existing", "account_id": "123", "vars": { "CUSTOM": "yes" }, "d1_databases": [{ "binding": "DB", "database_name": "app", "database_id": "abc" }], "routes": [{ "pattern": "example.com/*", "zone_name": "example.com" }], "future_field": { "custom": true }, }\n';
+    writeFileSync(join(root, 'wrangler.jsonc'), original);
+
+    expect(migrateLegacyVoidConfig(root)).toBe(true);
+    expect(readConfig(root).cloudflare).toEqual({
+      name: 'existing',
+      account_id: '123',
+      vars: { CUSTOM: 'yes' },
+      d1_databases: [{ binding: 'DB', database_name: 'app', database_id: 'abc' }],
+      routes: [{ pattern: 'example.com/*', zone_name: 'example.com' }],
+      future_field: { custom: true },
+    });
+    expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(false);
+    expect(readFileSync(join(root, '.void/config-migration/wrangler.jsonc'), 'utf8')).toBe(
+      original,
+    );
+    expect(JSON.parse(readFileSync(join(root, 'void.lock.json'), 'utf8')).text).toBe(original);
+  });
+
+  it('migrates a Wrangler-only project and rejects duplicate JSONC keys', () => {
+    setup('{}');
+    rmSync(join(root, 'void.json'));
+    writeFileSync(join(root, 'wrangler.json'), '{"name":"existing"}');
+    expect(migrateLegacyVoidConfig(root)).toBe(true);
+    expect(readConfig(root).cloudflare?.name).toBe('existing');
+
+    setup('{}');
+    writeFileSync(join(root, 'wrangler.jsonc'), '{"name":"one", "name":"two"}');
+    expect(() => migrateLegacyVoidConfig(root)).toThrow('Duplicate key');
+    expect(existsSync(join(root, 'void.json'))).toBe(true);
+    expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(true);
   });
 });

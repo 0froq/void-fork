@@ -4,6 +4,8 @@ import type { ApprovedCloudflareKvBinding } from '@void/deploy-cloudflare';
 import { readStoredResourceName } from '@void/deploy-cloudflare';
 import { modify, applyEdits } from 'jsonc-parser';
 import { join } from 'pathslash';
+import { TYPED_CONFIG_FILE } from '../config-loader.ts';
+import { writeVoidProjectConfig } from '../config-write.ts';
 import { resolveBindingNames, type VoidConfig } from '../config.ts';
 
 /** A configured opt-in authorizes only the cache identity declared before the build. */
@@ -32,11 +34,11 @@ export async function chooseCloudflareIsr(
   }
   if (!options.interactive) {
     throw new Error(
-      'This migration needs an ISR caching choice. Set routing.isr to true in void.json to provision the KV cache, or false to keep rendering on each request, then rerun `void deploy`.',
+      'This migration needs an ISR caching choice. Set routing.isr to true in void.config.ts to provision the KV cache, or false to keep rendering on each request, then rerun `void deploy`.',
     );
   }
   const message =
-    'Enable ISR caching for this app? Yes provisions a Cloudflare KV cache; No keeps caching disabled until you change void.json.';
+    'Enable ISR caching for this app? Yes provisions a Cloudflare KV cache; No keeps caching disabled until you change void.config.ts.';
   const enabled = await (
     options.confirm ??
     (async (message) => {
@@ -47,20 +49,24 @@ export async function chooseCloudflareIsr(
       return answer === true;
     })
   )(message);
-  const path = join(root, 'void.json');
-  const source = existsSync(path) ? readFileSync(path, 'utf8') : '{}\n';
-  writeFileSync(
-    path,
-    applyEdits(
-      source,
-      modify(source, ['routing', 'isr'], enabled, {
-        formattingOptions: { insertSpaces: true, tabSize: 2 },
-      }),
-    ),
-  );
+  if (existsSync(join(root, TYPED_CONFIG_FILE))) {
+    writeVoidProjectConfig(root, { ...config, routing: { ...config.routing, isr: enabled } });
+  } else {
+    const path = join(root, 'void.json');
+    const source = existsSync(path) ? readFileSync(path, 'utf8') : '{}\n';
+    writeFileSync(
+      path,
+      applyEdits(
+        source,
+        modify(source, ['routing', 'isr'], enabled, {
+          formattingOptions: { insertSpaces: true, tabSize: 2 },
+        }),
+      ),
+    );
+  }
   config.routing = { ...config.routing, isr: enabled };
   log.info(
-    `Saved routing.isr: ${String(enabled)} in void.json. ISR caching ${enabled ? 'will be enabled in this deployment' : 'stays disabled until you change this setting'}.`,
+    `Saved routing.isr: ${String(enabled)} in void.config.ts. ISR caching ${enabled ? 'will be enabled in this deployment' : 'stays disabled until you change this setting'}.`,
   );
   return enabled;
 }

@@ -13,8 +13,14 @@ import {
   type Node,
   type ParseError,
 } from 'jsonc-parser';
-import { join, normalize } from 'pathslash';
-import type { VoidConfig } from '../config.ts';
+import { basename, dirname, join, normalize } from 'pathslash';
+import {
+  materializeCloudflareConfig,
+  MATERIALIZED_CLOUDFLARE_FILE,
+  persistCloudflareConfig,
+} from '../cloudflare-config.ts';
+import { TYPED_CONFIG_FILE } from '../config-loader.ts';
+import { readConfig, type VoidConfig } from '../config.ts';
 import type { DurableObjectModule } from '../durable/scan.ts';
 import type { InferredBindings } from '../inference/walk.ts';
 import type { WebSocketRouteDefinition } from '../router/websocket.ts';
@@ -31,6 +37,20 @@ const UTF8_BOM = '﻿';
 const NODEJS_ALS_FLAG = 'nodejs_als';
 const NODEJS_COMPAT_FLAG = 'nodejs_compat';
 const VOID_CONFIG_FILE = 'void.json';
+
+function projectWranglerPaths(root: string): Array<string> {
+  if (existsSync(join(root, TYPED_CONFIG_FILE))) {
+    return [materializeCloudflareConfig(root)];
+  }
+  return ['wrangler.jsonc', 'wrangler.json'].map((name) => join(root, name));
+}
+
+function writeProjectWranglerFile(configPath: string, text: string): void {
+  writeFileSync(configPath, text);
+  if (basename(configPath) === MATERIALIZED_CLOUDFLARE_FILE) {
+    persistCloudflareConfig(dirname(configPath));
+  }
+}
 const MANAGED_QUEUES_MARKER = /^\s*\/\/ void:managed-queues:v1:([A-Za-z0-9_-]+)\s*$/m;
 const PUBLISHED_TRAFFIC_MARKER = /^\s*\/\/ void:published-traffic:v1:([A-Za-z0-9_-]+)\s*$/m;
 export const DEFAULT_LIVE_BINDING = 'VOID_LIVE';
@@ -61,8 +81,7 @@ export type RootWranglerConfig = {
 
 /** Read the root Wrangler config with the same JSONC parser used by binding sync. */
 export function readRootWranglerConfig(root: string): RootWranglerConfig | undefined {
-  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
-    const configPath = join(root, name);
+  for (const configPath of projectWranglerPaths(root)) {
     if (!existsSync(configPath)) {
       continue;
     }
@@ -126,7 +145,7 @@ export function writeWranglerPublishedTrafficSnapshot(
     ? raw.slice(0, existing.index) + marker + raw.slice(existing.index + existing[0].length)
     : `${marker}${raw.includes('\r\n') ? '\r\n' : '\n'}${raw}`;
   if (next !== raw) {
-    writeFileSync(configPath, next);
+    writeProjectWranglerFile(configPath, next);
   }
 }
 
@@ -238,9 +257,9 @@ export function readExistingLiveBindingConfig(root: string): LiveBindingConfig |
 function readWranglerDurableObjectBindings(
   root: string,
 ): Array<{ name: string; class_name: string }> {
-  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
+  for (const path of projectWranglerPaths(root)) {
     try {
-      const parsed = parseJsonc(readFileSync(join(root, name), 'utf-8'));
+      const parsed = parseJsonc(readFileSync(path, 'utf-8'));
       const bindings = (
         parsed.durable_objects as
           | { bindings?: Array<{ name?: unknown; class_name?: unknown }> }
@@ -348,9 +367,9 @@ function readWranglerCompatFields(
 
   // 1. Read wrangler.jsonc / wrangler.json from project root
   let raw: string | undefined;
-  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
+  for (const path of projectWranglerPaths(root)) {
     try {
-      raw = readFileSync(join(root, name), 'utf-8');
+      raw = readFileSync(path, 'utf-8');
       break;
     } catch {
       // try next
@@ -446,26 +465,16 @@ function validateCompatDate(value: string, source: string): void {
 }
 
 function readVoidConfigIfExists(root: string): VoidConfig | undefined {
-  const filePath = join(root, VOID_CONFIG_FILE);
-  if (!existsSync(filePath)) {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(readFileSync(filePath, 'utf-8'));
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      throw new Error(`config: ${VOID_CONFIG_FILE} must be a JSON object.`);
-    }
-    return parsed as VoidConfig;
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new Error(`config: Invalid JSON in ${VOID_CONFIG_FILE}.`);
-    }
-    throw error;
-  }
+  return existsSync(join(root, VOID_CONFIG_FILE)) || existsSync(join(root, TYPED_CONFIG_FILE))
+    ? readConfig(root)
+    : undefined;
 }
 
 function ensureVoidCompatibilityDate(root: string, config?: VoidConfig): string {
+  if (existsSync(join(root, TYPED_CONFIG_FILE))) {
+    writeProvisionedWranglerConfig(root, { compatibilityDate: LATEST_KNOWN_COMPAT_DATE });
+    return LATEST_KNOWN_COMPAT_DATE;
+  }
   const filePath = join(root, VOID_CONFIG_FILE);
   let nextConfig: VoidConfig = {};
 
@@ -515,8 +524,7 @@ export function syncWranglerBindings(
   let configPath: string | undefined;
   let parsed: Record<string, unknown> | undefined;
   let created = false;
-  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
-    const p = join(root, name);
+  for (const p of projectWranglerPaths(root)) {
     if (existsSync(p)) {
       configPath = p;
       try {
@@ -529,7 +537,7 @@ export function syncWranglerBindings(
   }
 
   if (!configPath || !parsed) {
-    configPath = join(root, 'wrangler.jsonc');
+    configPath = materializeCloudflareConfig(root);
     parsed = {};
     created = true;
   }
@@ -821,7 +829,7 @@ export function syncWranglerBindings(
   }
 
   if (created || modified) {
-    writeFileSync(configPath, JSON.stringify(parsed, null, 2) + '\n');
+    writeProjectWranglerFile(configPath, JSON.stringify(parsed, null, 2) + '\n');
   }
 
   return created || modified;
@@ -854,10 +862,7 @@ export function syncWranglerWebSockets(
   root: string,
   websockets: Array<WebSocketRouteDefinition>,
 ): boolean {
-  if (
-    websockets.length === 0 &&
-    !['wrangler.jsonc', 'wrangler.json'].some((name) => existsSync(join(root, name)))
-  ) {
+  if (websockets.length === 0 && !projectWranglerPaths(root).some((path) => existsSync(path))) {
     return false;
   }
   return writeProvisionedWranglerConfig(root, { webSockets: websockets }).modified;
@@ -873,9 +878,7 @@ export function readWranglerWebSocketTombstones(
   root: string,
   websockets: Array<WebSocketRouteDefinition>,
 ): Array<string> {
-  const configPath = ['wrangler.jsonc', 'wrangler.json']
-    .map((name) => join(root, name))
-    .find((path) => existsSync(path));
+  const configPath = projectWranglerPaths(root).find((path) => existsSync(path));
   if (!configPath) {
     return [];
   }
@@ -918,8 +921,7 @@ export function ensureWranglerCompatibilityDate(root: string, compatibilityDate:
 
   let configPath: string | undefined;
   let parsed: Record<string, unknown> | undefined;
-  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
-    const p = join(root, name);
+  for (const p of projectWranglerPaths(root)) {
     if (existsSync(p)) {
       configPath = p;
       try {
@@ -932,7 +934,7 @@ export function ensureWranglerCompatibilityDate(root: string, compatibilityDate:
   }
 
   if (!configPath || !parsed) {
-    configPath = join(root, 'wrangler.jsonc');
+    configPath = materializeCloudflareConfig(root);
     parsed = {};
   }
 
@@ -941,7 +943,7 @@ export function ensureWranglerCompatibilityDate(root: string, compatibilityDate:
   }
 
   parsed.compatibility_date = compatibilityDate;
-  writeFileSync(configPath, JSON.stringify(parsed, null, 2) + '\n');
+  writeProjectWranglerFile(configPath, JSON.stringify(parsed, null, 2) + '\n');
   return true;
 }
 
@@ -953,8 +955,7 @@ export function ensureWranglerNodejsAlsFlag(root: string): boolean {
   // Find the wrangler config file
   let configPath: string | undefined;
   let parsed: Record<string, unknown> | undefined;
-  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
-    const p = join(root, name);
+  for (const p of projectWranglerPaths(root)) {
     if (existsSync(p)) {
       configPath = p;
       try {
@@ -967,7 +968,7 @@ export function ensureWranglerNodejsAlsFlag(root: string): boolean {
   }
 
   if (!configPath || !parsed) {
-    configPath = join(root, 'wrangler.jsonc');
+    configPath = materializeCloudflareConfig(root);
     parsed = {};
   }
 
@@ -979,7 +980,7 @@ export function ensureWranglerNodejsAlsFlag(root: string): boolean {
   }
 
   parsed.compatibility_flags = [...compatibilityFlags, NODEJS_ALS_FLAG];
-  writeFileSync(configPath, JSON.stringify(parsed, null, 2) + '\n');
+  writeProjectWranglerFile(configPath, JSON.stringify(parsed, null, 2) + '\n');
   return true;
 }
 
@@ -1213,7 +1214,7 @@ export function acknowledgeWranglerManagedQueueRemovals(
   });
   const finalText = hasBom ? `${UTF8_BOM}${updated}` : updated;
   if (finalText !== raw) {
-    writeFileSync(configPath, finalText);
+    writeProjectWranglerFile(configPath, finalText);
   }
 }
 
@@ -1253,14 +1254,13 @@ export function writeProvisionedWranglerConfig(
   // prefer wrangler.jsonc, fall back to wrangler.json, else create wrangler.jsonc.
   let configPath = options?.configPath;
   if (configPath === undefined) {
-    for (const name of ['wrangler.jsonc', 'wrangler.json']) {
-      const p = join(root, name);
+    for (const p of projectWranglerPaths(root)) {
       if (existsSync(p)) {
         configPath = p;
         break;
       }
     }
-    configPath ??= join(root, 'wrangler.jsonc');
+    configPath ??= materializeCloudflareConfig(root);
   }
 
   // Node's utf-8 read preserves a leading BOM; wrangler itself strips the BOM
@@ -1987,7 +1987,7 @@ export function writeProvisionedWranglerConfig(
   const finalText = hasBom ? `${UTF8_BOM}${text}` : text;
   const modified = finalText !== rawContent;
   if (modified) {
-    writeFileSync(configPath, finalText);
+    writeProjectWranglerFile(configPath, finalText);
   }
   return { configPath, modified, d1MigrationsDirSkipped };
 }
@@ -2090,7 +2090,7 @@ export function updateWranglerCustomDomain(
   const finalText = hasBom ? `${UTF8_BOM}${text}` : text;
   const modified = finalText !== raw;
   if (modified) {
-    writeFileSync(configPath, finalText);
+    writeProjectWranglerFile(configPath, finalText);
   }
   return {
     configPath,
@@ -2100,13 +2100,12 @@ export function updateWranglerCustomDomain(
 }
 
 function discoverWranglerConfigPath(root: string): string {
-  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
-    const path = join(root, name);
+  for (const path of projectWranglerPaths(root)) {
     if (existsSync(path)) {
       return path;
     }
   }
-  return join(root, 'wrangler.jsonc');
+  return materializeCloudflareConfig(root);
 }
 
 function parseCustomDomains(value: unknown, configPath: string): Array<WranglerCustomDomain> {

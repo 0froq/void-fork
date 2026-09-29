@@ -14,6 +14,7 @@ import {
   type CloudflareVersionMetadata,
 } from '@void/deploy-cloudflare';
 import { join } from 'pathslash';
+import { materializeCloudflareConfig, persistCloudflareConfig } from '../cloudflare-config.ts';
 import { scanWranglerDotenvKeys } from '../shared/dotenv.ts';
 import { resolveWranglerArgv } from './preset.ts';
 import {
@@ -99,7 +100,7 @@ export function resolveCloudflareOperationContext(
     (process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || undefined);
   if (!accountId) {
     throw new Error(
-      'No Cloudflare account is pinned. Set account_id in wrangler.jsonc or CLOUDFLARE_ACCOUNT_ID.',
+      'No Cloudflare account is pinned. Set cloudflare.account_id in void.config.ts or CLOUDFLARE_ACCOUNT_ID.',
     );
   }
   const apiBaseUrl = resolvePinnedApiBaseUrl(
@@ -615,6 +616,7 @@ export async function changeCloudflareDomain(
   }
   if (update.domains.length === 0 && !emptyDomainPublisher && !resolveCloudflareApiToken()) {
     writeFileSync(before.configPath, original);
+    persistCloudflareConfig(root);
     throw new Error(
       'Deleting the final Cloudflare custom domain requires CLOUDFLARE_API_TOKEN because Wrangler cannot reconcile an empty custom-domain set. Export a scoped token with Workers Scripts: Edit permission and retry. No local or remote state changed.',
     );
@@ -637,6 +639,7 @@ export async function changeCloudflareDomain(
     await deployRoutes();
   } catch (error) {
     writeFileSync(before.configPath, original);
+    persistCloudflareConfig(root);
     try {
       await deployRoutes();
     } catch (restoreError) {
@@ -828,13 +831,7 @@ function createCloudflareOperationRunner(
 }
 
 function discoverRootWranglerConfig(root: string): string {
-  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
-    const path = join(root, name);
-    if (existsSync(path)) {
-      return path;
-    }
-  }
-  return join(root, 'wrangler.jsonc');
+  return materializeCloudflareConfig(root);
 }
 
 function assertNoOperationConfigOverride(root: string): void {

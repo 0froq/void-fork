@@ -10,6 +10,7 @@ import {
 } from '@void/deploy-cloudflare';
 import { applyEdits, modify, parse, type ParseError } from 'jsonc-parser';
 import { basename, join } from 'pathslash';
+import { materializeCloudflareConfig, persistCloudflareConfig } from '../cloudflare-config.ts';
 import type { RunDeployOptions } from './deploy.ts';
 import { readDeploymentPlatform, writeDeploymentPlatform } from './project.ts';
 
@@ -174,6 +175,7 @@ export async function prepareExistingCloudflareDeploy(options: {
     workerName: config.name,
   });
   writeFileSync(options.configPath, updated);
+  persistCloudflareConfig(options.root);
   return existing;
 }
 
@@ -195,7 +197,7 @@ export async function maybeLinkCloudflareDeploy(
   const files = ['wrangler.jsonc', 'wrangler.json', 'wrangler.toml'].filter((name) =>
     existsSync(join(root, name)),
   );
-  if (!files.length) {
+  if (!files.length && !existsSync(join(root, 'void.config.ts'))) {
     return null;
   }
   if (files.length > 1) {
@@ -203,16 +205,20 @@ export async function maybeLinkCloudflareDeploy(
       'Multiple Wrangler config files were found. Keep one root configuration before linking to Cloudflare.',
     );
   }
-  const name = files[0]!;
+  const name = files[0] ?? '.void-wrangler.jsonc';
   if (name.endsWith('.toml')) {
     throw new Error(
       'Found wrangler.toml. Direct Cloudflare deployment currently needs a root wrangler.jsonc or wrangler.json with the same settings. Convert the config before linking.',
     );
   }
   const errors: Array<ParseError> = [];
-  const config = parse(readFileSync(join(root, name), 'utf8'), errors, {
+  const configPath = files.length ? join(root, name) : materializeCloudflareConfig(root);
+  const config = parse(readFileSync(configPath, 'utf8'), errors, {
     allowTrailingComma: true,
   });
+  if (!files.length && (!config || typeof config.name !== 'string' || !config.name.trim())) {
+    return null;
+  }
   if (
     errors.length ||
     !config ||

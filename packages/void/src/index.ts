@@ -5,6 +5,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  rmSync,
   statSync,
   writeSync,
 } from 'node:fs';
@@ -42,6 +43,7 @@ import {
   syncWranglerDurableObjects,
   syncWranglerWebSockets,
 } from './cli/wrangler.ts';
+import { materializeCloudflareConfig } from './cloudflare-config.ts';
 import { writeFileIfChanged } from './codegen/write-if-changed.ts';
 import {
   readConfig,
@@ -783,6 +785,24 @@ export function voidPlugin(options?: {
     ? crypto.randomUUID()
     : getOrCreateDevTriggerToken(root);
   const config = readConfig(root);
+  const projectCloudflareConfigPath = !isNodeTarget(config.target)
+    ? materializeCloudflareConfig(root)
+    : undefined;
+  const cloudflareConfigPath =
+    projectCloudflareConfigPath && existsSync(projectCloudflareConfigPath)
+      ? projectCloudflareConfigPath
+      : undefined;
+  const implicitDeployGuard: Plugin = {
+    name: 'void:remove-implicit-cloudflare-deploy-pointer',
+    closeBundle() {
+      if (
+        existsSync(join(root, 'void.config.ts')) &&
+        process.env[CLOUDFLARE_DEPLOY_BUILD_ENV] !== '1'
+      ) {
+        rmSync(join(root, '.wrangler', 'deploy', 'config.json'), { force: true });
+      }
+    },
+  };
   const paths = resolveProjectPaths(root, config);
   let routeEnvironment: RouteEnvironment = 'prod';
   assertNoRootSourceConventionConflicts(paths);
@@ -1208,6 +1228,7 @@ export function voidPlugin(options?: {
         : []),
       ...(detected.name === 'analog' ? [analogDevTriggerInjectPlugin(root)] : []),
       ...(detected.name === 'astro' ? [astroDevTriggerInjectPlugin(root)] : []),
+      implicitDeployGuard,
     ];
   }
 
@@ -2162,12 +2183,14 @@ export function voidPlugin(options?: {
       frameworkTriggersPlugin(root, { devTriggerToken }),
       devTriggersHintPlugin(root, { framework: true, devTriggerToken }),
       ...cloudflare({
+        configPath: cloudflareConfigPath,
         ...inspectorPortOption,
         persistState: { path: localD1.persistRoot },
         auxiliaryWorkers: options?.auxiliaryWorkers,
         viteEnvironment,
         config: mergeBindings,
       }),
+      implicitDeployGuard,
     ];
   }
 
@@ -2393,12 +2416,14 @@ export function voidPlugin(options?: {
     prerenderPlugin(root, config),
     devTriggersHintPlugin(root, { framework: false, devTriggerToken }),
     ...cloudflare({
+      configPath: cloudflareConfigPath,
       ...inspectorPortOption,
       persistState: { path: localD1.persistRoot },
       auxiliaryWorkers: options?.auxiliaryWorkers,
       viteEnvironment: { name: DEFAULT_WORKER_ENVIRONMENT_NAME },
       config: mergeBindings,
     }),
+    implicitDeployGuard,
   ];
 }
 

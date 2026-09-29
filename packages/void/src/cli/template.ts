@@ -3,6 +3,7 @@ export const SCAFFOLD_GITIGNORE_LINES = [
   'dist',
   '.void',
   '.wrangler',
+  '.void-wrangler.jsonc',
   '.env',
   '.env.*',
   '!.env.example',

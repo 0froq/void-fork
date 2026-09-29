@@ -26,6 +26,7 @@ import {
 import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
 import { LATEST_KNOWN_COMPAT_DATE } from '../../src/cli/wrangler.ts';
 import { buildDrizzleKitSpawnEnv } from '../../src/cli/yarn-pnp.ts';
+import { readConfig } from '../../src/config.ts';
 
 const mockSpawnSync = vi.fn();
 const mockSelect = vi.fn();
@@ -1405,8 +1406,7 @@ describe('isScaffoldableEmptyProject', () => {
       );
       expect(() => readFileSync(join(root, 'index.html'), 'utf-8')).toThrow(/ENOENT/);
       expect(() => readFileSync(join(root, 'src', 'main.ts'), 'utf-8')).toThrow(/ENOENT/);
-      expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
-        $schema: './node_modules/void/schema.json',
+      expect(readConfig(root)).toEqual({
         worker: {
           compatibility_date: LATEST_KNOWN_COMPAT_DATE,
         },
@@ -1440,8 +1440,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.devDependencies['@void/vue']).toBeDefined();
       expect(pkg.devDependencies.void).toBeDefined();
 
-      expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
-        $schema: './node_modules/void/schema.json',
+      expect(readConfig(root)).toEqual({
         database: 'pg',
         worker: {
           compatibility_date: LATEST_KNOWN_COMPAT_DATE,
@@ -1513,12 +1512,12 @@ describe('isScaffoldableEmptyProject', () => {
         {
           value: 'postgresql',
           label: 'PostgreSQL',
-          hint: 'Scaffolds the same starter with PostgreSQL, a generated migration, a seed file, and writes "database": "pg" to void.json.',
+          hint: 'Scaffolds the same starter with PostgreSQL, a generated migration, a seed file, and writes database: "pg" to void.config.ts.',
         },
         {
           value: 'mysql',
           label: 'MySQL',
-          hint: 'Scaffolds the same starter with MySQL, a generated migration, a seed file, and writes "database": "mysql" to void.json.',
+          hint: 'Scaffolds the same starter with MySQL, a generated migration, a seed file, and writes database: "mysql" to void.config.ts.',
         },
         {
           value: 'static',
@@ -1563,8 +1562,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(() =>
         readFileSync(join(root, 'db', 'migrations', '0000_generated.sql'), 'utf-8'),
       ).toThrow();
-      expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
-        $schema: './node_modules/void/schema.json',
+      expect(readConfig(root)).toEqual({
         worker: {
           compatibility_date: LATEST_KNOWN_COMPAT_DATE,
         },
@@ -2692,8 +2690,7 @@ export default config;
 
       await runInitCommand(root);
 
-      expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
-        $schema: './node_modules/void/schema.json',
+      expect(readConfig(root)).toEqual({
         worker: {
           compatibility_date: LATEST_KNOWN_COMPAT_DATE,
         },
@@ -2727,8 +2724,7 @@ export default config;
 
       await runInitCommand(root);
 
-      expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
-        $schema: './node_modules/void/schema.json',
+      expect(readConfig(root)).toEqual({
         routing: {
           prerender: ['/'],
         },
@@ -2749,8 +2745,7 @@ export default config;
 
       await runInitCommand(root);
 
-      expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
-        $schema: './node_modules/void/schema.json',
+      expect(readConfig(root)).toEqual({
         worker: {
           compatibility_date: LATEST_KNOWN_COMPAT_DATE,
         },
@@ -2903,13 +2898,13 @@ export default config;
       expect(JSON.parse(readFileSync(join(root, '.void', 'project.json'), 'utf-8'))).toEqual({
         platform: 'cloudflare',
       });
-      expect(JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8'))).toEqual({
+      expect(JSON.parse(readFileSync(join(root, '.void-wrangler.jsonc'), 'utf-8'))).toEqual({
         compatibility_date: LATEST_KNOWN_COMPAT_DATE,
         compatibility_flags: ['nodejs_als'],
       });
       expect(mockSpawnSync).toHaveBeenCalledWith(
         process.execPath,
-        expect.arrayContaining(['whoami', '--json', '-c', join(root, 'wrangler.jsonc')]),
+        expect.arrayContaining(['whoami', '--json', '-c', join(root, '.void-wrangler.jsonc')]),
         expect.objectContaining({ cwd: root, stdio: ['ignore', 'pipe', 'pipe'] }),
       );
       expect(mockSpawnSync).toHaveBeenCalledWith(
@@ -2948,7 +2943,9 @@ export default config;
 
       await runInitCommand(root);
 
-      const wrangler = readFileSync(join(root, 'wrangler.jsonc'), 'utf-8');
+      const wrangler = readFileSync(join(root, '.void-wrangler.jsonc'), 'utf-8');
+      expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(false);
+      expect(readConfig(root).cloudflare?.name).toBe('existing-worker');
       expect(wrangler).toContain('// Keep this comment.');
       expect(wrangler).toContain('"name": "existing-worker"');
       expect(wrangler).toContain('"EXAMPLE": "yes"');
@@ -3002,7 +2999,7 @@ export default config;
         { value: 'account-1', label: 'First account', hint: 'account-1' },
         { value: 'account-2', label: 'Second account', hint: 'account-2' },
       ]);
-      expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toContain(
+      expect(readFileSync(join(root, '.void-wrangler.jsonc'), 'utf-8')).toContain(
         '"account_id": "account-2"',
       );
     } finally {
@@ -3037,7 +3034,7 @@ export default config;
       expect(mockSelect).not.toHaveBeenCalledWith(
         expect.objectContaining({ message: 'Choose a Cloudflare account:' }),
       );
-      expect(JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8'))).toEqual({
+      expect(JSON.parse(readFileSync(join(root, '.void-wrangler.jsonc'), 'utf-8'))).toEqual({
         compatibility_date: '2026-01-02',
         account_id: 'account-2',
         name: 'my-worker',
@@ -3063,7 +3060,7 @@ export default config;
 
       await runInitCommand(root);
 
-      expect(JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8'))).toEqual({
+      expect(JSON.parse(readFileSync(join(root, '.void-wrangler.jsonc'), 'utf-8'))).toEqual({
         compatibility_date: LATEST_KNOWN_COMPAT_DATE,
         compatibility_flags: ['nodejs_als'],
       });

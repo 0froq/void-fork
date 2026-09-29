@@ -1,4 +1,5 @@
 import type { RewriteDestination } from 'void/routes';
+import type { Unstable_RawConfig } from 'wrangler';
 import type { DevRedirectRule, HeaderRule, RedirectRule } from './cli/types.ts';
 export type { RedirectRule };
 import {
@@ -94,7 +95,10 @@ export type EmailConfig = {
   from?: string;
 };
 
-/** Shape of the `void.json` config file. All fields optional. */
+/** Cloudflare Worker configuration passed through to the native deploy artifact. */
+export type CloudflareConfig = Unstable_RawConfig & Record<string, unknown>;
+
+/** Shape of the Void project config. All fields optional. */
 export type VoidConfig = {
   $schema?: string;
   sourceDir?: string;
@@ -107,6 +111,7 @@ export type VoidConfig = {
   sandbox?: boolean | SandboxConfig;
   remote?: boolean;
   worker?: WranglerConfig;
+  cloudflare?: CloudflareConfig;
   database?: 'pg' | 'mysql';
   ai?: AiConfig;
   email?: EmailConfig;
@@ -960,6 +965,17 @@ function validateConfigObject(config: unknown): VoidConfig {
           );
         }
       }
+    }
+  }
+
+  // Cloudflare's complete Worker config is passed through to its build tooling.
+  if (obj.cloudflare !== undefined) {
+    if (
+      typeof obj.cloudflare !== 'object' ||
+      obj.cloudflare === null ||
+      Array.isArray(obj.cloudflare)
+    ) {
+      throw new Error(`config: "cloudflare" in ${CONFIG_FILE} must be an object.`);
     }
   }
 
