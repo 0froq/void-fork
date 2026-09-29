@@ -2852,7 +2852,7 @@ describe('runCloudflareDeploy — resource provisioning', () => {
     );
   });
 
-  it('proceeds through whoami → build → gate → migrate-gate → remote-migrate → deploy when fully provisioned', async () => {
+  it('reconciles D1 replication before build, gate, migrations and deploy when fully provisioned', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'myapp' }),
       'void.json': JSON.stringify({}),
@@ -2867,6 +2867,7 @@ describe('runCloudflareDeploy — resource provisioning', () => {
     // and the REMOTE D1 apply runs after that (a failed gate never mutates D1).
     expect(trace).toEqual([
       'wrangler:whoami',
+      'provision',
       'build',
       'gate',
       'migrate-gate',
@@ -3169,6 +3170,16 @@ describe('runCloudflareDeploy — pg/Hyperdrive app skips D1 migrations', () => 
 });
 
 describe('runCloudflareDeploy — D1 migrations_dir gate', () => {
+  it('rechecks replication for an already provisioned D1 database', async () => {
+    const root = d1Project(PROVISIONED_D1);
+    const { deps, trace } = harness();
+
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+
+    expect(trace).toContain('provision');
+    expect(trace).toContain('wrangler:deploy');
+  });
+
   it('automatically reconciles a missing migrations_dir before applying D1 migrations', async () => {
     const root = d1Project(
       {

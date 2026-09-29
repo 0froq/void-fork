@@ -6,7 +6,7 @@
  * This stub exists for the published npm package and type declarations.
  */
 import { drizzle as _drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
-import { requireRuntimeBinding } from './env.ts';
+import { getRuntimeRequestResource, requireRuntimeBinding } from './env.ts';
 
 // Re-export commonly used Drizzle utilities so consumers never need
 // to depend on drizzle-orm directly.
@@ -47,10 +47,10 @@ export type { DrizzleD1Database } from 'drizzle-orm/d1';
  * Use this when you have multiple D1 databases or need a non-default binding.
  */
 export function createDb(d1: D1Database): DrizzleD1Database {
-  return _drizzle(d1);
+  return _drizzle(d1.withSession('first-unconstrained') as unknown as D1Database);
 }
 
-let _instance: DrizzleD1Database | undefined;
+const requestDbKey = {};
 
 /**
  * Default Drizzle D1 instance — resolves the `DB` binding from the runtime
@@ -59,7 +59,9 @@ let _instance: DrizzleD1Database | undefined;
  */
 export const db: DrizzleD1Database = new Proxy({} as DrizzleD1Database, {
   get(_, prop) {
-    _instance ??= _drizzle(requireRuntimeBinding<D1Database>('DB'));
-    return Reflect.get(_instance, prop);
+    const instance = getRuntimeRequestResource(requestDbKey, () =>
+      createDb(requireRuntimeBinding<D1Database>('DB')),
+    );
+    return Reflect.get(instance, prop);
   },
 });

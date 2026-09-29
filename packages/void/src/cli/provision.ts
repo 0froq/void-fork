@@ -187,6 +187,8 @@ export interface WranglerCallContext {
   apiBaseUrl?: string;
   cwd?: string;
   captureJson?: boolean;
+  /** Keep borrowed OAuth bearer values out of Wrangler's on-disk logs. */
+  suppressLogs?: boolean;
 }
 
 /**
@@ -1383,7 +1385,10 @@ export function createDefaultRunWrangler(
         // spawned wrangler targets the SAME reconciled account + endpoint the config +
         // Hyperdrive REST path use (no split-brain between the config pin and the
         // ambient/dotenv env).
-        env: provisionEnv({ accountId: opts.accountId, apiBaseUrl: opts.apiBaseUrl }),
+        env: {
+          ...provisionEnv({ accountId: opts.accountId, apiBaseUrl: opts.apiBaseUrl }),
+          ...(opts.suppressLogs ? { WRANGLER_WRITE_LOGS: 'false' } : {}),
+        },
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         detached: !isWindows,
@@ -4089,12 +4094,43 @@ export interface ProvisionOptions {
   runWrangler?: RunWrangler;
   accountId?: string;
   apiToken?: string;
+  /** Test seam for the D1 database-level read-replication update. */
+  enableD1ReadReplication?: (context: D1ReplicationContext) => Promise<void>;
   listHyperdriveConfigs?: ListHyperdriveConfigs;
   log?: ProvisionLogger;
   /** Test-only override of the `proper-lockfile` stale/update/retries/fs knobs. */
   lockOptions?: ProvisionLockOptions;
   /** Override the OVERALL Hyperdrive-lister deadline (ms). Defaults to {@link HYPERDRIVE_LIST_TIMEOUT_MS}. */
   listTimeoutMs?: number;
+}
+
+export type D1ReplicationContext = {
+  databaseId: string;
+  accountId: string;
+  apiBaseUrl: string;
+};
+
+export async function enableD1ReadReplicationViaApi(
+  context: D1ReplicationContext,
+  token: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  const response = await fetchImpl(
+    `${context.apiBaseUrl}/accounts/${context.accountId}/d1/database/${context.databaseId}`,
+    {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ read_replication: { mode: 'auto' } }),
+      signal: AbortSignal.timeout(15_000),
+    },
+  );
+  const envelope = (await response.json().catch(() => null)) as { success?: unknown } | null;
+  if (!response.ok || envelope?.success !== true) {
+    throw new Error(
+      `provision: could not enable D1 read replication for database ${context.databaseId} ` +
+        `(Cloudflare API status ${response.status}). The credential needs D1 Edit permission.`,
+    );
+  }
 }
 
 /**
@@ -4355,7 +4391,7 @@ async function provisionCloudflareResourcesLocked(
   // real (slow) wrangler call never blocks the lock heartbeat.
   const runWrangler = (
     args: Array<string>,
-    callOpts?: { cwd?: string; captureJson?: boolean },
+    callOpts?: { cwd?: string; captureJson?: boolean; suppressLogs?: boolean },
   ): Promise<RunWranglerResult> =>
     Promise.resolve(
       selectedRunWrangler(args, {
@@ -4535,6 +4571,56 @@ async function provisionCloudflareResourcesLocked(
             `provision: "wrangler d1 create ${name}" failed: ${created.stderr || created.stdout}`,
           );
         }
+      }
+    }
+
+    // The database-level setting is separate from the Worker binding. A reused
+    // database may predate this feature, so converge it on every provision run.
+    // Injected Wrangler runners own their remote transport in tests; an explicit
+    // replication seam lets those tests assert this side effect without network I/O.
+    if (opts?.enableD1ReadReplication || !opts?.runWrangler) {
+      const databaseId = readBindingEntry(configPath, 'd1_databases', binding)?.database_id;
+      if (!isRealD1Id(databaseId)) {
+        throw new Error(`provision: D1 binding ${binding} has no real database id after setup.`);
+      }
+      const context: D1ReplicationContext = {
+        databaseId,
+        accountId: transportAccountId,
+        apiBaseUrl: transportApiBaseUrl,
+      };
+      if (opts?.enableD1ReadReplication) {
+        await opts.enableD1ReadReplication(context);
+      } else {
+        let token = opts?.apiToken ?? process.env.CLOUDFLARE_API_TOKEN;
+        if (!token) {
+          const auth = await runWrangler(
+            ['auth', 'token', '--json', ...wranglerConfigArgs(configPath)],
+            { captureJson: true, suppressLogs: true },
+          );
+          const start = auth.stdout.indexOf('{');
+          const end = auth.stdout.lastIndexOf('}');
+          let parsed: { type?: unknown; token?: unknown } | undefined;
+          if (isCleanSuccess(auth) && start >= 0 && end > start) {
+            try {
+              parsed = JSON.parse(auth.stdout.slice(start, end + 1)) as typeof parsed;
+            } catch {
+              // A malformed response is handled by the missing-token error below.
+            }
+          }
+          if (
+            (parsed?.type === 'oauth' || parsed?.type === 'api_token') &&
+            typeof parsed.token === 'string'
+          ) {
+            token = parsed.token;
+          }
+        }
+        if (!token) {
+          throw new Error(
+            'provision: D1 read replication requires a Cloudflare API bearer with D1 Edit permission. ' +
+              'Log in with `wrangler login` or set CLOUDFLARE_API_TOKEN, then retry.',
+          );
+        }
+        await enableD1ReadReplicationViaApi(context, token);
       }
     }
   }

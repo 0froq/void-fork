@@ -1,8 +1,24 @@
-import { describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
 import { voidAuthPassword } from '../../src/runtime/better-auth-shared.ts';
 import { resolveVoidAuthOptions } from '../../src/runtime/better-auth.ts';
 
 describe('resolveVoidAuthOptions', () => {
+  it('starts authentication on the primary for current revocation state', async () => {
+    const primary = { prepare: vi.fn() };
+    const binding = {
+      withSession: vi.fn().mockReturnValue(primary),
+    };
+
+    const { options } = await resolveVoidAuthOptions(
+      new Request('https://example.com/api/auth'),
+      { DB: binding as unknown as D1Database, BETTER_AUTH_SECRET: 'secret' },
+      { dialect: 'sqlite', providers: null },
+    );
+
+    expect(binding.withSession).toHaveBeenCalledExactlyOnceWith('first-primary');
+    expect(options.database).toBe(primary);
+  });
+
   it('defaults to email auth when no providers are configured', async () => {
     const { options } = await resolveVoidAuthOptions(
       new Request('https://example.com/api/auth'),

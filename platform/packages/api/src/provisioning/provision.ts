@@ -14,6 +14,7 @@ import {
   deleteKVNamespace,
   deleteQueue,
   deleteR2Bucket,
+  enableD1ReadReplication,
   getD1DatabaseByName,
   getKVNamespaceByTitle,
   getQueueByName,
@@ -216,6 +217,9 @@ async function ensureResource(
 
   const found = existing.find((r) => r.type === type && r.binding_name === bindingName);
   if (found) {
+    if (type === 'd1') {
+      await enableD1ReadReplication(accountId, apiToken, found.cf_id);
+    }
     // Fix legacy queue resources that stored queue_name instead of queue_id (UUID)
     if (type === 'queue' && !UUID_RE.test(found.cf_id)) {
       const queueInfo = await getQueueByName(accountId, apiToken, resourceName);
@@ -239,6 +243,9 @@ async function ensureResource(
   } catch (err) {
     if (isAlreadyExistsError(err)) {
       cfId = await lookupCfResource(type, accountId, apiToken, resourceName);
+      if (type === 'd1') {
+        await enableD1ReadReplication(accountId, apiToken, cfId);
+      }
     } else {
       throw err;
     }

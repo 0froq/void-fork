@@ -239,21 +239,23 @@ export function createDb(connectionString) {
         // SQLite (default) — existing code
         return `
 import { drizzle } from ${JSON.stringify(drizzleD1Resolved)};
-import { requireRuntimeBinding } from ${JSON.stringify(envModuleResolved)};
+import { getRuntimeRequestResource, requireRuntimeBinding } from ${JSON.stringify(envModuleResolved)};
 ${schemaImport}
 export { ${DRIZZLE_OPERATORS} } from ${JSON.stringify(drizzleOrmResolved)};
 
-let _instance;
+const _requestResourceKey = {};
 
 export const db = new Proxy({}, {
   get(_, prop) {
-    _instance ??= drizzle(requireRuntimeBinding(${JSON.stringify(d1BindingName)})${drizzleConfig});
-    return Reflect.get(_instance, prop);
+    const instance = getRuntimeRequestResource(_requestResourceKey, () =>
+      createDb(requireRuntimeBinding(${JSON.stringify(d1BindingName)}))
+    );
+    return Reflect.get(instance, prop);
   },
 });
 
 export function createDb(d1) {
-  return drizzle(d1${drizzleConfig});
+  return drizzle(d1.withSession("first-unconstrained")${drizzleConfig});
 }
 `;
       },

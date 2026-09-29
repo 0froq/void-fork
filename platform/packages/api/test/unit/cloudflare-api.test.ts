@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vite-plus/test';
 import {
   addQueueConsumer,
+  createD1Database,
+  enableD1ReadReplication,
   createHyperdrive,
   getDispatchWorkerProxyToken,
   parseHyperdriveConnectionString,
@@ -22,6 +24,40 @@ function cfSuccess(result: unknown): Response {
 function cfError(message: string): Response {
   return Response.json({ success: false, errors: [{ code: 100, message }] }, { status: 400 });
 }
+
+describe('createD1Database', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('enables automatic read replication when creating a database', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(cfSuccess({ uuid: 'db-uuid', name: 'app-db' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createD1Database(ACCOUNT, TOKEN, 'app-db');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/d1/database`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ name: 'app-db', read_replication: { mode: 'auto' } }),
+      }),
+    );
+  });
+
+  it('enables read replication on an existing database', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(cfSuccess({}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await enableD1ReadReplication(ACCOUNT, TOKEN, 'db-uuid');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/d1/database/db-uuid`,
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ read_replication: { mode: 'auto' } }),
+      }),
+    );
+  });
+});
 
 describe('addQueueConsumer', () => {
   let fetchMock: ReturnType<typeof vi.fn>;

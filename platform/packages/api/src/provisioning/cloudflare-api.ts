@@ -67,7 +67,18 @@ export async function createD1Database(
 ): Promise<D1DatabaseInfo> {
   return cfFetch<D1DatabaseInfo>(`${CF_API_BASE}/${accountId}/d1/database`, apiToken, {
     method: 'POST',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, read_replication: { mode: 'auto' } }),
+  });
+}
+
+export async function enableD1ReadReplication(
+  accountId: string,
+  apiToken: string,
+  databaseId: string,
+): Promise<void> {
+  await cfFetch<D1DatabaseInfo>(`${CF_API_BASE}/${accountId}/d1/database/${databaseId}`, apiToken, {
+    method: 'PUT',
+    body: JSON.stringify({ read_replication: { mode: 'auto' } }),
   });
 }
 

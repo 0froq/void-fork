@@ -25,6 +25,7 @@ import {
   assertNoTransportRedirectInProjectDotenv,
   checkCloudflareProvisionDrift,
   createDefaultRunWrangler,
+  enableD1ReadReplicationViaApi,
   isAlreadyGoneKillError,
   normalizeRunWranglerResult,
   provisionCloudflareResources,
@@ -185,7 +186,81 @@ function simulateUpdateConfig(
 
 const emptyDesired: DesiredResourceSet = { kvNamespaces: [], queues: [] };
 
+describe('D1 read-replication API', () => {
+  it('uses the pinned account and endpoint with an authenticated update', async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    await enableD1ReadReplicationViaApi(
+      {
+        accountId: 'account-one',
+        apiBaseUrl: 'https://api.example.test/client/v4',
+        databaseId: uuid('db1'),
+      },
+      'token-one',
+      async (url, init) => {
+        requests.push({ url: String(url), init: init! });
+        return Response.json({ success: true });
+      },
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe(
+      `https://api.example.test/client/v4/accounts/account-one/d1/database/${uuid('db1')}`,
+    );
+    expect(requests[0].init.method).toBe('PUT');
+    expect(requests[0].init.headers).toEqual({
+      Authorization: 'Bearer token-one',
+      'Content-Type': 'application/json',
+    });
+    expect(requests[0].init.body).toBe(JSON.stringify({ read_replication: { mode: 'auto' } }));
+  });
+
+  it('fails closed when Cloudflare rejects the replication update', async () => {
+    const update = enableD1ReadReplicationViaApi(
+      {
+        accountId: 'account-one',
+        apiBaseUrl: 'https://api.example.test/client/v4',
+        databaseId: uuid('db1'),
+      },
+      'secret-token',
+      async () => Response.json({ success: false }, { status: 403 }),
+    );
+
+    await expect(update).rejects.toThrow(/D1 Edit permission/);
+  });
+});
+
 describe('provisionCloudflareResources — read-first', () => {
+  it('enables D1 replication for a reused database before continuing the deploy', async () => {
+    setup(
+      JSON.stringify({
+        d1_databases: [{ binding: 'DB', database_name: 'myapp-db', database_id: uuid('db1') }],
+      }),
+    );
+    const enabled: Array<unknown> = [];
+    const { run } = makeRunner([]);
+
+    await provisionCloudflareResources(
+      tmpDir,
+      wranglerPath,
+      { ...emptyDesired, d1: { binding: 'DB', name: 'myapp-db' } },
+      {
+        runWrangler: run,
+        log: silentLog,
+        enableD1ReadReplication: async (context: unknown) => {
+          enabled.push(context);
+        },
+      },
+    );
+
+    expect(enabled).toEqual([
+      {
+        databaseId: uuid('db1'),
+        accountId: AMBIENT_ACCOUNT,
+        apiBaseUrl: 'https://api.cloudflare.com/client/v4',
+      },
+    ]);
+  });
+
   it('skips D1 create when the binding already has a real database_id (records reused, no wrangler call)', async () => {
     setup(
       JSON.stringify({

@@ -4946,7 +4946,12 @@ export async function runCloudflareDeploy(
       desired.d1.binding,
       'migrations_dir',
     ) !== desired.d1.migrationsDir;
-  if (options.provision || initiallyMissing.length > 0 || d1NeedsConfigReconciliation) {
+  if (
+    options.provision ||
+    initiallyMissing.length > 0 ||
+    d1NeedsConfigReconciliation ||
+    (!existingWorker && desired.d1 != null)
+  ) {
     await provisionAndVerify();
   } else {
     // Queue names come from file paths (`queues/order/jobs.ts` → `order-jobs`, see

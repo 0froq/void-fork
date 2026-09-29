@@ -1663,6 +1663,9 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): MockCfApiHandle 
     if (method === 'DELETE' && url.includes('/d1/database/')) {
       return mocks.deleteD1(url, init);
     }
+    if (method === 'PUT' && url.includes('/d1/database/')) {
+      return Response.json({ success: true, errors: [], result: {} });
+    }
     if (method === 'DELETE' && url.includes('/storage/kv/namespaces/')) {
       return mocks.deleteKV(url, init);
     }

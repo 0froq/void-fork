@@ -6,6 +6,7 @@ import type { DeployManifest, Resource } from '../../src/types.ts';
 // Mock the CF API module
 vi.mock('../../src/provisioning/cloudflare-api', () => ({
   createD1Database: vi.fn().mockResolvedValue({ uuid: 'd1-uuid-123', name: 'test-DB' }),
+  enableD1ReadReplication: vi.fn().mockResolvedValue(undefined),
   createKVNamespace: vi.fn().mockResolvedValue({ id: 'kv-id-456', title: 'test-KV' }),
   createR2Bucket: vi.fn().mockResolvedValue({ name: 'test-STORAGE' }),
   createQueue: vi.fn().mockResolvedValue({ queue_id: 'queue-id-789', queue_name: 'test-queue' }),
@@ -39,6 +40,7 @@ vi.mock('../../src/db', () => ({
 import { getProjectResources, createResource } from '../../src/db.ts';
 import {
   createD1Database,
+  enableD1ReadReplication,
   createKVNamespace,
   createR2Bucket,
   createQueue,
@@ -244,6 +246,7 @@ describe('provisionBindings', () => {
     );
 
     expect(createD1Database).not.toHaveBeenCalled();
+    expect(enableD1ReadReplication).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, 'existing-d1-id');
     expect(createResource).not.toHaveBeenCalled();
     expect(bindings[0]).toEqual({ type: 'd1', name: 'DB', id: 'existing-d1-id' });
     expect(bindings).toHaveLength(5);
@@ -477,6 +480,7 @@ describe('ensureResource — already exists fallback', () => {
 
     expect(createD1Database).toHaveBeenCalledOnce();
     expect(getD1DatabaseByName).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, 'proj-abc123-db');
+    expect(enableD1ReadReplication).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, 'd1-looked-up');
     expect(createResource).toHaveBeenCalledWith(mockDb, PROJECT_ID, 'd1', 'd1-looked-up', 'DB');
     expect(bindings[0]).toEqual({ type: 'd1', name: 'DB', id: 'd1-looked-up' });
   });

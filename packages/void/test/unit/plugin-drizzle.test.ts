@@ -46,6 +46,7 @@ type FakePoolRecord = {
 type FakeDatabaseState = {
   nextId: number;
   pools: Array<FakePoolRecord>;
+  clients: Array<unknown>;
 };
 
 type ExecutableDbModule = {
@@ -59,14 +60,14 @@ type ExecutableDbModule = {
 };
 
 async function loadExecutableDbModule(
-  dialect: 'postgresql' | 'mysql',
+  dialect: 'postgresql' | 'mysql' | 'sqlite',
 ): Promise<{ module: ExecutableDbModule; state: FakeDatabaseState }> {
-  const root = createProjectRoot();
-  const plugin = drizzlePlugin(root, false, dialect);
+  const root = createProjectRoot({ schema: dialect !== 'sqlite' });
+  const plugin = drizzlePlugin(root, false, dialect, { forceVirtualDb: true });
   const load = getHookHandler(plugin.load) as (this: object, id: string) => string;
   let code = load.call({}, '\0virtual:void-db');
   const stateKey = `__void_db_scope_${dialect}_${crypto.randomUUID().replaceAll('-', '')}`;
-  const state: FakeDatabaseState = { nextId: 0, pools: [] };
+  const state: FakeDatabaseState = { nextId: 0, pools: [], clients: [] };
   (globalThis as Record<string, unknown>)[stateKey] = state;
   fakeStateKeys.push(stateKey);
 
@@ -95,7 +96,21 @@ function createDatabase(dialect, pool) {
 }
 `;
 
-  if (dialect === 'postgresql') {
+  if (dialect === 'sqlite') {
+    writeFileSync(
+      fakeDriverPath,
+      `const state = ${stateExpression};
+export function drizzle(client) {
+  state.clients.push(client);
+  return { instanceId: ++state.nextId };
+}
+`,
+    );
+    code = code.replace(
+      /^import \{ drizzle \} from .*;$/m,
+      'import { drizzle } from "./fake-driver.mjs";',
+    );
+  } else if (dialect === 'postgresql') {
     writeFileSync(
       fakePgPath,
       `const state = ${stateExpression};
@@ -147,8 +162,8 @@ export function drizzle(pool) {
   }
 
   code = code.replace(
-    /^import \{ getRuntimeBinding, getRuntimeRequestResource \} from .*;$/m,
-    `import { getRuntimeBinding, getRuntimeRequestResource } from ${JSON.stringify(envUrl)};`,
+    /^import \{ ((?:getRuntimeBinding|getRuntimeRequestResource|requireRuntimeBinding)[^}]*) \} from .*;$/m,
+    (_match, imports: string) => `import { ${imports} } from ${JSON.stringify(envUrl)};`,
   );
   writeFileSync(join(root, 'virtual-db.mjs'), code);
   writeFileSync(
@@ -180,6 +195,41 @@ beforeEach(() => {
 });
 
 describe('drizzlePlugin db typing generation', () => {
+  it('uses one nearby D1 session per request, including custom bindings', async () => {
+    const { module, state } = await loadExecutableDbModule('sqlite');
+    const sessions: Array<{ constraint: string; owner: string }> = [];
+    const binding = {
+      withSession(constraint: string) {
+        const session = { constraint, owner: 'default' };
+        sessions.push(session);
+        return session;
+      },
+    };
+
+    const first = module.withEnv({ DB: binding }, () => [
+      module.db.instanceId,
+      module.db.instanceId,
+    ]);
+    const second = module.withEnv({ DB: binding }, () => module.db.instanceId);
+    expect(first[0]).toBe(first[1]);
+    expect(second).not.toBe(first[0]);
+    expect(sessions).toEqual([
+      { constraint: 'first-unconstrained', owner: 'default' },
+      { constraint: 'first-unconstrained', owner: 'default' },
+    ]);
+    expect(state.clients).toEqual(sessions);
+
+    const other = {
+      withSession(constraint: string) {
+        const session = { constraint, owner: 'other' };
+        sessions.push(session);
+        return session;
+      },
+    };
+    module.createDb(other as unknown as string);
+    expect(state.clients[2]).toEqual({ constraint: 'first-unconstrained', owner: 'other' });
+  });
+
   it('keeps sqlite projects on the D1 internal db entry', () => {
     const root = createProjectRoot();
 

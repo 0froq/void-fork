@@ -11,7 +11,9 @@ async function resolveDatabase(env: VoidAuthEnv): Promise<ResolvedDatabase> {
     throw new Error('auth: Better Auth requires the "DB" D1 binding for sqlite apps.');
   }
   return {
-    database: env.DB,
+    // Auth must observe current revocations. Keep its first lookup on the
+    // primary, then preserve sequential consistency for the request.
+    database: env.DB.withSession('first-primary') as unknown as D1Database,
     async dispose() {},
   };
 }
