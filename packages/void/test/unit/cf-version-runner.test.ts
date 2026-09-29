@@ -162,23 +162,44 @@ it('applies the immutable trigger snapshot through a private cf output copy', as
   }
 });
 
-it('rejects malformed traffic splits and keeps unsupported trigger operations on the pinned legacy path', async () => {
+it('uses cf for Queue triggers, consumer cleanup, and version binding reads', async () => {
   const prepared = await output();
   const triggerConfig = join(roots.at(-1)!, 'legacy-trigger.json');
   writeFileSync(
     triggerConfig,
     JSON.stringify({ name: 'void-test', queues: { consumers: [{ queue: 'jobs' }] } }),
   );
-  const legacyCalls: Array<Array<string>> = [];
+  const calls: Array<Array<string>> = [];
   try {
     const runner = createCfVersionRunner({
       output: prepared,
       workerName: 'void-test',
-      runCf: () => {
-        throw new Error('cf must not receive a malformed command');
-      },
-      legacyReadAndTriggers: (args) => {
-        legacyCalls.push(args);
+      runCf: (args) => {
+        calls.push(args);
+        if (args[0] === 'queues' && args[1] === 'list') {
+          return {
+            status: 0,
+            stdout: JSON.stringify([{ queue_name: 'jobs', queue_id: 'queue-id' }]),
+            stderr: '',
+          };
+        }
+        if (args[0] === 'queues' && args[1] === 'consumers' && args[2] === 'list') {
+          return {
+            status: 0,
+            stdout: JSON.stringify([{ script: 'void-test', consumer_id: 'consumer-id' }]),
+            stderr: '',
+          };
+        }
+        if (args[0] === 'workers' && args[1] === 'versions' && args[2] === 'get') {
+          return {
+            status: 0,
+            stdout: JSON.stringify({
+              id: 'version-id',
+              bindings: [{ name: 'SECRET', type: 'secret_text' }],
+            }),
+            stderr: '',
+          };
+        }
         return { status: 0, stdout: '', stderr: '' };
       },
     });
@@ -191,8 +212,20 @@ it('rejects malformed traffic splits and keeps unsupported trigger operations on
     const removeArgs = ['queues', 'consumer', 'remove', 'jobs', 'void-test'];
     expect((await runner(removeArgs, { capture: false })).status).toBe(0);
     const viewArgs = ['versions', 'view', 'version-id', '--name', 'void-test'];
-    expect((await runner(viewArgs, { capture: true })).status).toBe(0);
-    expect(legacyCalls).toEqual([triggerArgs, removeArgs, viewArgs]);
+    const version = await runner(viewArgs, { capture: true });
+    expect(JSON.parse(version.stdout).resources.bindings).toEqual([
+      { name: 'SECRET', type: 'secret_text' },
+    ]);
+    expect(calls).toContainEqual(['workers', 'triggers', 'deploy', '--prebuilt']);
+    expect(calls).toContainEqual([
+      'queues',
+      'consumers',
+      'delete',
+      'consumer-id',
+      '--queue-id',
+      'queue-id',
+      '--force',
+    ]);
   } finally {
     prepared.dispose();
   }

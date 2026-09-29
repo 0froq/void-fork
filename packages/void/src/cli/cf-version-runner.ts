@@ -6,6 +6,7 @@ import { getWorkerConfigPath, readBuildOutput } from '@cloudflare/build-output-u
 import type { CloudflareCommandResult, CloudflareCommandRunner } from '@void/deploy-cloudflare';
 import { dirname, join } from 'pathslash';
 import type { CfBuildOutput } from './cf-build-output.ts';
+import { migrateBuiltWranglerConfig } from './cf-config-migrate.ts';
 
 type CfCommand = (
   args: Array<string>,
@@ -37,7 +38,7 @@ function record(value: unknown): value is Record<string, unknown> {
 export function createCfCommand(options: {
   accountId: string;
   apiBaseUrl: string;
-  token: string;
+  token?: string;
   env: (accountId: string, apiBaseUrl: string) => NodeJS.ProcessEnv;
   verifyUploader: () => boolean;
 }): CfCommand {
@@ -47,7 +48,9 @@ export function createCfCommand(options: {
       return failed('The Cloudflare uploader changed during deployment.');
     }
     const env = options.env(options.accountId, options.apiBaseUrl);
-    env.CLOUDFLARE_API_TOKEN = options.token;
+    if (options.token) {
+      env.CLOUDFLARE_API_TOKEN = options.token;
+    }
     const result = spawnSync(process.execPath, [cf, ...args], {
       cwd: run.cwd,
       env,
@@ -74,7 +77,6 @@ export function createCfVersionRunner(options: {
   output: CfBuildOutput;
   workerName: string;
   runCf: CfCommand;
-  legacyReadAndTriggers?: CloudflareCommandRunner;
 }): CloudflareCommandRunner {
   const { output, workerName, runCf } = options;
   const run = (args: Array<string>, capture: boolean, cwd = output.directory) =>
@@ -115,12 +117,18 @@ export function createCfVersionRunner(options: {
     }
 
     if (args[0] === 'versions' && args[1] === 'view' && args[2]) {
-      // The current cf response omits the resource metadata used to prove
-      // secret inheritance. Keep the existing read-only path until it does.
-      if (options.legacyReadAndTriggers) {
-        return options.legacyReadAndTriggers(args, command);
+      const result = run(['workers', 'versions', 'get', args[2], '--worker-id', workerName], true);
+      if (result.status !== 0) {
+        return result;
       }
-      return run(['workers', 'versions', 'get', args[2], '--worker-id', workerName], true);
+      const version = parseJson(result.stdout);
+      if (!record(version) || version.id !== args[2] || !Array.isArray(version.bindings)) {
+        return failed('The Cloudflare Worker version was not readable.');
+      }
+      return {
+        ...result,
+        stdout: JSON.stringify({ ...version, resources: { bindings: version.bindings } }),
+      };
     }
 
     if (args[0] === 'versions' && args[1] === 'upload') {
@@ -224,26 +232,6 @@ export function createCfVersionRunner(options: {
       if (!record(raw) || raw.name !== workerName) {
         return failed('The Cloudflare trigger snapshot was not readable.');
       }
-      const triggers = record(raw.triggers) ? raw.triggers : undefined;
-      const crons = triggers?.crons;
-      if (
-        (crons !== undefined &&
-          (!Array.isArray(crons) || !crons.every((cron) => typeof cron === 'string'))) ||
-        (raw.routes !== undefined && (!Array.isArray(raw.routes) || raw.routes.length > 0)) ||
-        raw.route !== undefined ||
-        (raw.queues !== undefined &&
-          (!record(raw.queues) ||
-            Object.values(raw.queues).some(
-              (value) => !Array.isArray(value) || value.length > 0,
-            ))) ||
-        (raw.workflows !== undefined &&
-          (!Array.isArray(raw.workflows) || raw.workflows.length > 0)) ||
-        raw.addresses !== undefined
-      ) {
-        return options.legacyReadAndTriggers
-          ? options.legacyReadAndTriggers(args, command)
-          : failed('The Cloudflare trigger snapshot uses an unsupported setting.');
-      }
       const directory = mkdtempSync(join(tmpdir(), 'void-cf-triggers-'));
       try {
         cpSync(join(output.directory, '.cloudflare'), join(directory, '.cloudflare'), {
@@ -254,9 +242,35 @@ export function createCfVersionRunner(options: {
         if (!record(worker)) {
           return failed('The private Cloudflare Worker config was not readable.');
         }
-        worker.triggers = (crons ?? []).map((schedule) => ({ type: 'scheduled', schedule }));
-        worker.workersDev = raw.workers_dev;
-        worker.previewUrls = raw.preview_urls;
+        const migrated = migrateBuiltWranglerConfig({
+          ...raw,
+          compatibility_date: worker.compatibilityDate,
+        }).worker;
+        if (!migrated) {
+          return failed('The Cloudflare trigger snapshot was not convertible.');
+        }
+        const next = migrated.triggers ?? [];
+        const previous = Array.isArray(worker.triggers) ? worker.triggers : [];
+        const preserveRoutes = raw.routes === undefined && raw.route === undefined;
+        const preserveEmail = raw.addresses === undefined;
+        worker.triggers = [
+          ...next,
+          ...(preserveRoutes
+            ? previous.filter((trigger) => record(trigger) && trigger.type === 'fetch')
+            : []),
+          ...(preserveEmail
+            ? previous.filter((trigger) => record(trigger) && trigger.type === 'email')
+            : []),
+        ];
+        if (!preserveRoutes) {
+          worker.domains = migrated.domains ?? [];
+        }
+        if (typeof raw.workers_dev === 'boolean') {
+          worker.workersDev = raw.workers_dev;
+        }
+        if (typeof raw.preview_urls === 'boolean') {
+          worker.previewUrls = raw.preview_urls;
+        }
         writeFileSync(workerPath, JSON.stringify(worker), { mode: 0o600 });
         await readBuildOutput(directory);
         return run(['workers', 'triggers', 'deploy', '--prebuilt'], command.capture, directory);
@@ -266,9 +280,53 @@ export function createCfVersionRunner(options: {
     }
 
     if (args[0] === 'queues' && args[1] === 'consumer' && args[2] === 'remove') {
-      return options.legacyReadAndTriggers
-        ? options.legacyReadAndTriggers(args, command)
-        : failed('Queue consumer removal requires the existing Cloudflare runner.');
+      const queueName = args[3];
+      if (!queueName || args[4] !== workerName) {
+        return failed('The Cloudflare Queue consumer target changed.');
+      }
+      const queues = run(['queues', 'list'], true);
+      if (queues.status !== 0) {
+        return queues;
+      }
+      const allQueues = parseJson(queues.stdout);
+      if (!Array.isArray(allQueues)) {
+        return failed('The Cloudflare Queue list was not readable.');
+      }
+      const queue = allQueues.find((item) => record(item) && item.queue_name === queueName);
+      if (!record(queue) || typeof queue.queue_id !== 'string') {
+        return failed(`Cloudflare Queue ${queueName} was not found.`);
+      }
+      const consumers = run(['queues', 'consumers', 'list', '--queue-id', queue.queue_id], true);
+      if (consumers.status !== 0) {
+        return consumers;
+      }
+      const allConsumers = parseJson(consumers.stdout);
+      if (!Array.isArray(allConsumers)) {
+        return failed('The Cloudflare Queue consumers were not readable.');
+      }
+      const matching = allConsumers.filter((item) => record(item) && item.script === workerName);
+      if (matching.length === 0) {
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      if (
+        matching.length !== 1 ||
+        !record(matching[0]) ||
+        typeof matching[0].consumer_id !== 'string'
+      ) {
+        return failed('The Cloudflare Queue consumer identity was ambiguous.');
+      }
+      return run(
+        [
+          'queues',
+          'consumers',
+          'delete',
+          matching[0].consumer_id,
+          '--queue-id',
+          queue.queue_id,
+          '--force',
+        ],
+        command.capture,
+      );
     }
 
     return failed(`Unsupported Cloudflare activation operation: ${args[0] ?? ''} ${args[1] ?? ''}`);
