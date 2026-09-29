@@ -961,6 +961,8 @@ Sandbox apps need Docker, [Workers Paid](https://dash.cloudflare.com/?to=/:accou
 
 Void provisions inferred resources, builds and validates the app, applies migrations, validates remote secrets, and checks the uploaded Worker Version before sending it traffic. After activation it synchronizes routes, custom domains, cron triggers, queue consumers, and the Email Routing rules derived from `addresses`. Static, hybrid, and SSR output from supported frameworks is also supported. A brand-new Worker may need one ordinary deployment before the Versions API can be used.
 
+During deployment, Void shows the current phase and an animated spinner in an interactive terminal. CI and redirected output receive plain progress lines. Cloudflare CLI setup notices and successful command output are hidden; Void reports deployment errors directly.
+
 If Cloudflare Access protects readiness URLs, supply an allowed `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` pair, or a short-lived local `CF_ACCESS_TOKEN`. These credentials are used only for matching HTTPS readiness requests. Versions without accessible previews can be checked at 0% traffic through the stable hostname.
 
 Secrets and migrations are validated after the build, so a failed check may leave provisioned resources. It doesn't apply remote D1 migrations or upload the application Worker. PostgreSQL migrations are transactional; MySQL schema changes may partially apply on error.

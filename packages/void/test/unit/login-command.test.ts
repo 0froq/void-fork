@@ -151,7 +151,7 @@ describe('runLoginCommand', () => {
     expect(mockDiscoverPlatform).toHaveBeenCalledWith('https://api.example.test');
     expect(mockRunLogin).toHaveBeenCalledWith(root, 'github', expect.any(Function));
     expect(mockSaveToken).toHaveBeenCalledWith('fresh-token', root);
-    expect(mockSpinnerStop).toHaveBeenCalledWith('Logged in!');
+    expect(mockInfo).toHaveBeenCalledWith('Logged in!');
   });
 
   it('continues into login when VOID_TOKEN is expired', async () => {

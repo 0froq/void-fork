@@ -16,13 +16,13 @@ it('passes interactive cancellation through to the native spinner', () => {
   const native = { start: vi.fn() };
   mocks.spinner.mockReturnValue(native);
   const onCancel = vi.fn();
-  expect(createSpinner({ onCancel })).toBe(native);
+  expect(createSpinner({ onCancel }, true)).toBe(native);
   expect(mocks.spinner).toHaveBeenCalledWith({ onCancel });
 });
 
 it('uses plain progress messages in CI without starting an animated spinner', () => {
   mocks.ci.mockReturnValue(true);
-  const progress = createSpinner();
+  const progress = createSpinner(undefined, true);
   progress.start('Installing the platform');
   progress.message('Preparing the platform database');
   progress.stop('Platform installed.');
@@ -32,4 +32,11 @@ it('uses plain progress messages in CI without starting an animated spinner', ()
     ['Preparing the platform database'],
   ]);
   expect(mocks.log.info).toHaveBeenCalledWith('Platform installed.');
+});
+
+it('uses plain progress messages when output is redirected', () => {
+  mocks.ci.mockReturnValue(false);
+  createSpinner(undefined, false).start('Uploading the Worker...');
+  expect(mocks.spinner).not.toHaveBeenCalled();
+  expect(mocks.log.step).toHaveBeenCalledWith('Uploading the Worker...');
 });

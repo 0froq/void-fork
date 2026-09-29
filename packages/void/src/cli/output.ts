@@ -10,13 +10,16 @@ export function cliCommandName(): 'void' | 'void-dev' {
 }
 
 /**
- * CI-safe spinner wrapper. In CI environments (GitHub Actions, etc.),
+ * Terminal-safe spinner wrapper. In CI and redirected output,
  * `@clack/prompts` spinner emits DEC Private Mode cursor hide/show codes
  * (`\x1b[?25l` / `\x1b[?25h`) that render as text artifacts. This wrapper
- * replaces the spinner with plain log output in CI.
+ * replaces the spinner with plain log output.
  */
-export function createSpinner(options?: Pick<SpinnerOptions, 'onCancel'>): SpinnerResult {
-  if (!isCI()) {
+export function createSpinner(
+  options?: Pick<SpinnerOptions, 'onCancel'>,
+  isTerminal: boolean = process.stdout.isTTY === true,
+): SpinnerResult {
+  if (!isCI() && isTerminal) {
     return spinner(options);
   }
 
