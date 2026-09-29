@@ -28,7 +28,7 @@ Edit** (Edit implies read, covering the ownership/teardown list calls). Cron tri
 the worker deploy — no extra permission.
 
 The account must also have a **workers.dev subdomain** already registered (with its wildcard TLS cert
-provisioned). Without one, `wrangler deploy` uploads the worker but cannot publish a public URL, and
+provisioned). Without one, `void deploy` uploads the worker but cannot publish a public URL, and
 the HTTP-200 assertion has nothing to hit. Opening the Workers & Pages dashboard once registers a
 subdomain automatically; a freshly-registered subdomain takes a few minutes for its cert to go live,
 during which the first run may see a TLS handshake failure — rerun once the cert is ready.
@@ -71,7 +71,7 @@ Each run derives a UNIQUE resource name — `void-e2e-cf-deploy-<suffix>` — so
 collide on remote resources. The suffix is `VOID_E2E_RUN_ID` (CI: `<run-id>-<attempt>`) or, locally, a
 timestamp + random. Derived names mirror the provisioner: `<name>-db` (D1), `<name>-kv` (KV). The
 shared `void-e2e-cf-deploy-` prefix keeps every resource greppable, so an orphan from a hard-killed run
-is easy to find and `wrangler delete`. A pre-run ownership gate refuses to start if the run's names
+is easy to find and clean up. A pre-run ownership gate refuses to start if the run's names
 already exist (failing closed on any lookup it cannot confirm), so the test never adopts or deletes a
 resource it does not own. Teardown runs even when the deploy or an assertion fails.
 

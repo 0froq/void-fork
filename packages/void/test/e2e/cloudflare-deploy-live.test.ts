@@ -37,7 +37,7 @@ function cfToken(): string {
 function cfAccountId(): string {
   return process.env.VOID_E2E_CF_ACCOUNT_ID ?? '';
 }
-// Windows is intentionally excluded from the LIVE deploy: invoking the wrangler bin against a real
+// Windows is intentionally excluded from the LIVE deploy: invoking the cf CLI against a real
 // account on win32 is unverified, and this gate runs on EVERY CI — a first-time, unproven windows
 // live deploy must not be what turns `main` red. The real-build integration test
 // (test/integration/cloudflare-deploy-build.test.ts) already exercises the build path on windows;
@@ -52,30 +52,31 @@ const NO_CREDS_NOTE =
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const PACKAGE_ROOT = join(ROOT, 'packages', 'void');
 const CLI_ENTRY = join(PACKAGE_ROOT, 'dist', 'cli', 'cli.mjs');
-const WRANGLER_BIN = join(PACKAGE_ROOT, 'node_modules', '.bin', 'wrangler');
+const CF_BIN = join(PACKAGE_ROOT, 'node_modules', 'cf', 'bin', 'cf');
+const CF_COMPAT_ENTRY = join(PACKAGE_ROOT, 'dist', 'cli', 'cf-compat.mjs');
 // Bound each deploy subprocess BELOW the enclosing vitest timeout. `spawn.sync` blocks the test
-// worker's event loop, so a hung CLI/wrangler would keep vitest's own timer from firing AND keep
+// worker's event loop, so a hung CLI/cf call would keep vitest's own timer from firing AND keep
 // `afterAll` from running — leaking the worker/D1/KV. On timeout, spawnSync returns a null status,
 // which fails the status assertion loudly and lets teardown reclaim the resources.
 const DEPLOY_TIMEOUT_MS = 480_000;
-// The same event-loop-block reasoning applies to every `wrangler` call (setup create/list, the
-// ownership gate, teardown list/delete): an unbounded `spawn.sync` on a stalled wrangler/CF call would
-// freeze vitest's hook timer and strand already-created resources. Quick ops, so a much shorter bound.
-const WRANGLER_TIMEOUT_MS = 120_000;
+// The same event-loop-block reasoning applies to every `cf` call (ownership lists and teardown):
+// an unbounded `spawn.sync` on a stalled Cloudflare call would freeze vitest's hook timer and strand
+// already-created resources. Quick ops, so a much shorter bound.
+const CF_TIMEOUT_MS = 120_000;
 // Per-request abort deadline for the polling fetches, so a single stalled request aborts and the
 // retry loop moves on instead of consuming the whole per-test budget on one hung socket.
 const REQUEST_TIMEOUT_MS = 20_000;
-// `WRANGLER_TIMEOUT_MS` bounds ONE stalled call, but each hook fires SEVERAL wrangler calls back to
-// back with no `await` between them (setup: 6 create/list; teardown: up to 5 list/delete), so
+// `CF_TIMEOUT_MS` bounds ONE stalled call, but each hook fires SEVERAL cf calls back to
+// back with no `await` between them (setup: 2 lists; teardown: up to 5 list/delete), so
 // `spawn.sync` blocks the event loop across the whole run and vitest's hook timer can never fire to
 // interrupt it — the per-call bound alone lets the AGGREGATE (5–6 × 120s) blow past the hook budget,
-// and an external cancel mid-teardown strands D1/KV. These budgets cap the SUM of wrangler wall-clock
-// per hook: each hook stamps `wranglerDeadline` at its start and `wrangler()` shrinks each call's
+// and an external cancel mid-teardown strands D1/KV. These budgets cap the SUM of cf wall-clock
+// per hook: each hook stamps `cfDeadline` at its start and `cf()` shrinks each call's
 // timeout to the time left, skipping (as a failed call) once spent. Sized under the hook timeouts —
 // setup: 90s + DEPLOY_TIMEOUT_MS (a separate spawn) = 570s < 600s beforeAll; teardown: 200s + the
 // ~64s async worker probe = 264s < 300s afterAll.
-const SETUP_WRANGLER_BUDGET_MS = 90_000;
-const TEARDOWN_WRANGLER_BUDGET_MS = 200_000;
+const SETUP_CF_BUDGET_MS = 90_000;
+const TEARDOWN_CF_BUDGET_MS = 200_000;
 
 // Deploy target: the SPA playground (real, buildable Void app exercising D1 + KV + a cron). The
 // deploy CLI runs its own build → provision → migrate → deploy pipeline against this dir.
@@ -142,7 +143,7 @@ function cloudEnv(): NodeJS.ProcessEnv {
   };
   // This suite only supports the PUBLIC Cloudflare API + a `*.workers.dev` URL: `workerExistence()`
   // fetches `api.cloudflare.com` directly and the 200 assertion hits `*.workers.dev`. Scrub every
-  // wrangler transport-redirect override inherited from the operator's shell so the spawned wrangler
+  // Cloudflare transport-redirect override inherited from the operator's shell so the spawned cf
   // calls AND the direct fetch resolve the SAME api base. Otherwise a worker deployed to a
   // staging/FedRAMP/custom base would 404 on the public api, and teardown's existence check would
   // treat it as absent and skip the delete — leaking the worker on the alternate base.
@@ -153,40 +154,42 @@ function cloudEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-// Absolute wall-clock deadline (epoch ms) for the CURRENT hook's aggregate wrangler work; each hook
-// stamps it at its start (see SETUP_/TEARDOWN_WRANGLER_BUDGET_MS). Infinity outside a hook so a stray
-// call is still bounded by WRANGLER_TIMEOUT_MS alone.
-let wranglerDeadline = Number.POSITIVE_INFINITY;
+// Absolute wall-clock deadline (epoch ms) for the CURRENT hook's aggregate cf work; each hook
+// stamps it at its start (see SETUP_/TEARDOWN_CF_BUDGET_MS). Infinity outside a hook so a stray
+// call is still bounded by CF_TIMEOUT_MS alone.
+let cfDeadline = Number.POSITIVE_INFINITY;
 
-/** Best-effort `wrangler` invocation for teardown — never throws, so afterAll always continues. */
-function wrangler(args: Array<string>): { status: number; stdout: string; output: string } {
+/** Best-effort pinned cf invocation for setup and teardown. */
+function cf(
+  args: Array<string>,
+  compatibility = false,
+): { status: number; stdout: string; output: string } {
   // Shrink this call's timeout to the time left in the hook's aggregate budget, so a run of stalled
   // calls can't collectively overrun the hook (spawn.sync blocks the loop, so vitest can't interrupt).
   // Once the budget is spent, skip the call as a failed one rather than launching a doomed spawn — the
   // ownership gate fails closed and teardown records the leak loudly instead of silently hanging.
-  const remaining = wranglerDeadline - Date.now();
+  const remaining = cfDeadline - Date.now();
   if (remaining <= 0) {
     return {
       status: 1,
       stdout: '',
-      output: `wrangler ${args.join(' ')} skipped — hook wrangler-time budget exhausted`,
+      output: `cf ${args.join(' ')} skipped — hook Cloudflare time budget exhausted`,
     };
   }
-  const res = spawn.sync(WRANGLER_BIN, args, {
+  const res = spawn.sync(process.execPath, [compatibility ? CF_COMPAT_ENTRY : CF_BIN, ...args], {
     cwd: APP,
     encoding: 'utf8',
     maxBuffer: 10 * 1024 * 1024,
-    env: cloudEnv(),
-    // Bound each call so a stalled wrangler/CF request can't block the event loop and freeze teardown
-    // (see WRANGLER_TIMEOUT_MS). On timeout, status is null → `?? 1` makes it a non-zero (failed) call,
+    env: { ...cloudEnv(), CF_DELEGATION: '1' },
+    // Bound each call so a stalled CF request can't block the event loop and freeze teardown
+    // (see CF_TIMEOUT_MS). On timeout, status is null → `?? 1` makes it a non-zero (failed) call,
     // which every caller already handles: the ownership gate fails closed, teardown records a failure.
-    timeout: Math.min(WRANGLER_TIMEOUT_MS, remaining),
+    timeout: Math.min(CF_TIMEOUT_MS, remaining),
   });
   const stdout = res.stdout ?? '';
   const stderr = res.stderr ?? '';
   // `output` (stdout+stderr) is for human-facing error text only. JSON parsing must read `stdout`
-  // ALONE: wrangler can print notices/warnings to stderr on a status-0 list (update notices, a
-  // "Delegating to locally-installed wrangler" line, a Node deprecation warning), and any non-JSON
+  // ALONE: cf can print notices/warnings to stderr on a status-0 list, and any non-JSON
   // trailing the payload would make JSON.parse throw — breaking the ownership gate / teardown.
   return {
     status: res.status ?? 1,
@@ -197,7 +200,7 @@ function wrangler(args: Array<string>): { status: number; stdout: string; output
 
 /**
  * Definitively resolve whether the fixed-name worker already exists, for the ownership gate. The CF
- * API returns an unambiguous 200 (exists) / 404 (absent) for a script, unlike a wrangler exit code
+ * API returns an unambiguous 200 (exists) / 404 (absent) for a script, unlike a CLI exit code
  * (a genuinely-absent worker ALSO exits nonzero). A DEFINITIVE 200/404 is returned immediately; any
  * other outcome — a non-200/404 status or a network error — is retried a few times so a single
  * transient CF API blip (a 5xx, a 429, a dropped connection) does not needlessly fail the gate. Only
@@ -362,10 +365,10 @@ describe('void deploy --platform cloudflare (live account)', () => {
     if (!e2eEnabled()) {
       return;
     }
-    // Cap the SUM of this hook's wrangler wall-clock (the ownership-gate lists + the create/list pairs)
+    // Cap the SUM of this hook's cf wall-clock (the ownership-gate lists)
     // so it plus the separate deploy spawn stays under the 600s beforeAll budget. The deploy is NOT a
-    // wrangler() call, so it keeps its own DEPLOY_TIMEOUT_MS.
-    wranglerDeadline = Date.now() + SETUP_WRANGLER_BUDGET_MS;
+    // cf() call, so it keeps its own DEPLOY_TIMEOUT_MS.
+    cfDeadline = Date.now() + SETUP_CF_BUDGET_MS;
     computeResourceNames();
 
     // Ownership gate — refuse to run if any of this run's resources ALREADY exist in the target account.
@@ -380,7 +383,7 @@ describe('void deploy --platform cloudflare (live account)', () => {
     // test did not create.
     const collisions: Array<string> = [];
 
-    // Worker — a genuinely-absent worker ALSO makes `wrangler` exit nonzero, so an exit code cannot
+    // Worker — a genuinely-absent worker ALSO makes `cf` exit nonzero, so an exit code cannot
     // tell "free" from "errored". Resolve it against the CF API instead, which returns an unambiguous
     // 200/404; anything else is `'unknown'` → treated as a collision (fail closed).
     const worker = await workerExistence();
@@ -393,7 +396,7 @@ describe('void deploy --platform cloudflare (live account)', () => {
     // D1 — `d1 info <name>` exits nonzero BOTH when the database is absent and when the call errors,
     // so it cannot fail closed. List every database instead: a successful JSON list that omits the
     // name proves it is free; a list failure or non-JSON body is ambiguous → collision.
-    const d1List = wrangler(['d1', 'list', '--json']);
+    const d1List = cf(['d1', 'list', '--json'], true);
     if (d1List.status !== 0) {
       collisions.push(`d1 database ${D1_NAME} (could not list databases to rule out a collision)`);
     } else {
@@ -409,7 +412,7 @@ describe('void deploy --platform cloudflare (live account)', () => {
       }
     }
 
-    const kvList = wrangler(['kv', 'namespace', 'list']);
+    const kvList = cf(['kv', 'namespace', 'list'], true);
     if (kvList.status !== 0) {
       collisions.push(
         `kv namespace ${KV_TITLE} (could not list namespaces to rule out a collision)`,
@@ -453,7 +456,7 @@ describe('void deploy --platform cloudflare (live account)', () => {
     writeFileSync(APP_WRANGLER, `${JSON.stringify(overlay, null, 2)}\n`);
 
     // No extra flag: this exercises automatic provision → build → tamper guard → remote migrations
-    // → `wrangler deploy` against the live account.
+    // → `cf deploy` against the live account.
     const res = spawn.sync('node', [CLI_ENTRY, 'deploy', '--platform', 'cloudflare'], {
       cwd: APP,
       encoding: 'utf8',
@@ -475,7 +478,7 @@ describe('void deploy --platform cloudflare (live account)', () => {
     // leak (or an ambiguous teardown) fails LOUD instead of reporting green.
     const failures: Array<string> = [];
     const attemptDelete = (label: string, args: Array<string>): void => {
-      const res = wrangler(args);
+      const res = cf(args);
       if (res.status !== 0) {
         failures.push(`${label} (exit ${res.status})\n${res.output.trim()}`);
       }
@@ -483,26 +486,29 @@ describe('void deploy --platform cloudflare (live account)', () => {
     // Delete ONLY when the ownership gate proved these names were free before the deploy, so a
     // collision that aborted beforeAll never deletes a pre-existing resource the test does not own.
     if (e2eEnabled() && ownershipVerified) {
-      // Cap the SUM of teardown's wrangler wall-clock (the worker probe is async + separately bounded)
+      // Cap the SUM of teardown's cf wall-clock (the worker probe is async + separately bounded)
       // so the whole cleanup stays under the 300s afterAll budget even if every list/delete stalls.
-      wranglerDeadline = Date.now() + TEARDOWN_WRANGLER_BUDGET_MS;
+      cfDeadline = Date.now() + TEARDOWN_CF_BUDGET_MS;
       // Worker — exists only if the deploy succeeded. Skip when the CF API confirms it is ABSENT
       // (avoids a spurious "does not exist" failure on a deploy that never got that far); fail closed
       // when existence cannot be confirmed ('unknown') by attempting the delete anyway.
       const worker = await workerExistence();
       if (worker !== 'absent') {
-        attemptDelete(`worker ${WORKER_NAME}`, ['delete', '--name', WORKER_NAME, '--force']);
+        attemptDelete(`worker ${WORKER_NAME}`, ['workers', 'delete', WORKER_NAME, '--force']);
       }
       // D1 — created in beforeAll; delete when the account still lists it by EXACT name. A list
       // failure cannot confirm the database is gone, so it is recorded (fail closed).
-      const d1List = wrangler(['d1', 'list', '--json']);
+      const d1List = cf(['d1', 'list', '--json'], true);
       if (d1List.status !== 0) {
         failures.push(`d1 list (exit ${d1List.status})\n${d1List.output.trim()}`);
       } else {
         try {
-          const databases = JSON.parse(d1List.stdout) as Array<{ name: string }>;
-          if (databases.some((d) => d.name === D1_NAME)) {
-            attemptDelete(`d1 ${D1_NAME}`, ['d1', 'delete', D1_NAME, '--skip-confirmation']);
+          const databases = JSON.parse(d1List.stdout) as Array<{ name: string; uuid: string }>;
+          const database = databases.find((d) => d.name === D1_NAME);
+          if (database && typeof database.uuid === 'string' && database.uuid) {
+            attemptDelete(`d1 ${D1_NAME}`, ['d1', 'delete', database.uuid, '--force']);
+          } else if (database) {
+            failures.push(`d1 ${D1_NAME} has no ID — delete the database manually`);
           }
         } catch {
           failures.push(
@@ -513,15 +519,17 @@ describe('void deploy --platform cloudflare (live account)', () => {
       // KV delete needs the namespace id — resolve it from the account's namespace list by EXACT
       // title. Matching by exact title (not `endsWith`) avoids selecting an unrelated namespace that
       // merely shares the suffix. A namespace absent from the list is already gone (skip).
-      const list = wrangler(['kv', 'namespace', 'list']);
+      const list = cf(['kv', 'namespace', 'list'], true);
       if (list.status !== 0) {
         failures.push(`kv namespace list (exit ${list.status})\n${list.output.trim()}`);
       } else {
         try {
           const namespaces = JSON.parse(list.stdout) as Array<{ id: string; title: string }>;
           const ns = namespaces.find((n) => n.title === KV_TITLE);
-          if (ns) {
-            attemptDelete(`kv ${KV_TITLE}`, ['kv', 'namespace', 'delete', '--namespace-id', ns.id]);
+          if (ns && typeof ns.id === 'string' && ns.id) {
+            attemptDelete(`kv ${KV_TITLE}`, ['kv', 'namespaces', 'delete', ns.id, '--force']);
+          } else if (ns) {
+            failures.push(`kv ${KV_TITLE} has no ID — delete the namespace manually`);
           }
         } catch {
           failures.push(
@@ -547,7 +555,7 @@ describe('void deploy --platform cloudflare (live account)', () => {
   it('deploys the worker to the live account', (ctx) => {
     ctx.skip(!e2eEnabled(), NO_CREDS_NOTE);
     expect(deployStatus, deployOutput).toBe(0);
-    // A successful `wrangler deploy` prints the worker's workers.dev URL.
+    // A successful `void deploy` prints the worker's workers.dev URL.
     const url = extractWorkerUrl(deployOutput);
     expect(url, deployOutput).toBeDefined();
     // The host's FIRST label must be THIS run's worker name. If a concurrent local run had clobbered
@@ -634,7 +642,7 @@ describe('void deploy --platform cloudflare (live account)', () => {
 
   it('registers the cron trigger on the deployed worker', async (ctx) => {
     ctx.skip(!e2eEnabled(), NO_CREDS_NOTE);
-    // The deploy emits `triggers.crons` and `wrangler deploy` PUTs them to the worker's schedules. We
+    // The deploy emits `triggers.crons` and Cloudflare registers them on the worker. We
     // assert the schedule is REGISTERED via the CF API — fast + deterministic — instead of waiting for
     // the hourly job to actually fire. Retry so a single transient CF-API blip (a 429/5xx or a network
     // throw) or a brief registration-visibility lag on the shared CI runner does not red an
