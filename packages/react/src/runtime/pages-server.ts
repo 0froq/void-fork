@@ -11,11 +11,11 @@ import {
   RouterContext,
   SharedContext,
 } from './context.ts';
-import { DEFERRED_SHELL_END_ID, DEFERRED_SHELL_END_MARKER } from './deferred-shell.ts';
+import { DEFERRED_SHELL_CANCEL_REASON, DEFERRED_SHELL_END_ID } from './deferred-shell.ts';
+import { concatStreams, readDeferredShell } from './page-streams.ts';
 
 // oxlint-disable-next-line no-explicit-any -- component props are narrowed by generated route types
 type ComponentModule = { default: ComponentType<any> };
-const DEFERRED_SHELL_CANCEL_REASON = 'Void deferred shell complete';
 
 export type ReactPagesServerConfig = Readonly<{
   pageObj: PageObject;
@@ -46,75 +46,6 @@ function textStream(text: string): ReadableStream<Uint8Array> {
     start(controller) {
       controller.enqueue(encoder.encode(text));
       controller.close();
-    },
-  });
-}
-
-function concatStreams(
-  streams: ReadonlyArray<ReadableStream<Uint8Array>>,
-): ReadableStream<Uint8Array> {
-  return new ReadableStream({
-    async start(controller) {
-      try {
-        for (const stream of streams) {
-          const reader = stream.getReader();
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              break;
-            }
-            controller.enqueue(value);
-          }
-        }
-        controller.close();
-      } catch (error) {
-        controller.error(error);
-      }
-    },
-  });
-}
-
-function readDeferredShell(stream: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  return new ReadableStream({
-    async start(controller) {
-      const reader = stream.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      const keepLength = DEFERRED_SHELL_END_MARKER.length - 1;
-
-      const flush = (text: string) => {
-        if (text) {
-          controller.enqueue(encoder.encode(text));
-        }
-      };
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            buffer += decoder.decode();
-            flush(buffer);
-            break;
-          }
-
-          buffer += decoder.decode(value, { stream: true });
-          const markerIndex = buffer.indexOf(DEFERRED_SHELL_END_MARKER);
-          if (markerIndex !== -1) {
-            flush(buffer.slice(0, markerIndex + DEFERRED_SHELL_END_MARKER.length));
-            await reader.cancel(DEFERRED_SHELL_CANCEL_REASON);
-            break;
-          }
-
-          if (buffer.length > keepLength) {
-            flush(buffer.slice(0, -keepLength));
-            buffer = buffer.slice(-keepLength);
-          }
-        }
-        controller.close();
-      } catch (error) {
-        controller.error(error);
-      }
     },
   });
 }
