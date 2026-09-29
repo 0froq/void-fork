@@ -197,3 +197,30 @@ it('rejects malformed traffic splits and keeps unsupported trigger operations on
     prepared.dispose();
   }
 });
+
+it('accepts only the staged static assets directory already sealed into prebuilt output', async () => {
+  const prepared = await output();
+  prepared.assetsDirectory = '/staged/assets';
+  const calls: Array<Array<string>> = [];
+  try {
+    const runner = createCfVersionRunner({
+      output: prepared,
+      workerName: 'void-test',
+      runCf: (args) => {
+        calls.push(args);
+        return { status: 0, stdout: '', stderr: '' };
+      },
+    });
+    const common = ['--name', 'void-test', '--assets'];
+    expect(
+      (await runner(['versions', 'upload', ...common, '/staged/assets'], { capture: true })).status,
+    ).toBe(0);
+    expect(calls.at(-1)?.slice(0, 4)).toEqual(['workers', 'versions', 'create', '--prebuilt']);
+    expect((await runner(['deploy', ...common, '/wrong/assets'], { capture: true })).status).toBe(
+      1,
+    );
+    expect(calls).toHaveLength(1);
+  } finally {
+    prepared.dispose();
+  }
+});

@@ -3,9 +3,10 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { readBuildOutput } from '@cloudflare/build-output-utils';
+import { renderCloudflareStaticEntry } from '@void/deploy-cloudflare';
 import { dirname, join } from 'pathslash';
 import { afterEach, expect, it } from 'vite-plus/test';
-import { prepareCfBuildOutput } from '../../src/cli/cf-build-output.ts';
+import { prepareCfBuildOutput, prepareCfStaticBuildOutput } from '../../src/cli/cf-build-output.ts';
 
 const roots: Array<string> = [];
 afterEach(() => {
@@ -78,4 +79,63 @@ it('keeps unsupported configuration on the existing deploy path', async () => {
     limits: { cpu_ms: 100 },
   });
   expect(await prepareCfBuildOutput(output, 'account-id')).toBeNull();
+});
+
+it('bundles a generated static Worker and staged assets into prebuilt cf output', async () => {
+  const root = mkdtempSync(join(dirname(fileURLToPath(import.meta.url)), '.tmp-cf-static-'));
+  roots.push(root);
+  const generated = join(root, '.void', 'deploy', 'cloudflare');
+  const assets = join(generated, 'assets');
+  mkdirSync(assets, { recursive: true });
+  writeFileSync(join(assets, 'index.html'), '<h1>static</h1>');
+  writeFileSync(
+    join(generated, 'static-edge.mjs'),
+    renderCloudflareStaticEntry({
+      runtimeImport: 'void/edge',
+      headerRules: [],
+      redirectRules: [],
+      fallbackRules: [],
+    }),
+  );
+  const configPath = join(generated, 'wrangler-static.json');
+  writeFileSync(
+    configPath,
+    JSON.stringify({
+      name: 'void-static-test',
+      account_id: 'account-id',
+      compatibility_date: '2026-09-29',
+      main: 'static-edge.mjs',
+      workers_dev: true,
+      assets: {
+        binding: 'ASSETS',
+        directory: './assets',
+        run_worker_first: true,
+        not_found_handling: 'single-page-application',
+      },
+    }),
+  );
+  const prepared = await prepareCfStaticBuildOutput({
+    projectRoot: root,
+    configPath,
+    assetsDirectory: assets,
+    accountId: 'account-id',
+  });
+  expect(prepared).not.toBeNull();
+  if (!prepared) {
+    return;
+  }
+  try {
+    const built = await readBuildOutput(prepared.directory);
+    expect(built.workers.default.config.manifest?.mainModule).toBe('index.js');
+    expect(built.workers.default.assetsDir).toBeDefined();
+    expect(prepared.assetsDirectory).toBe(assets);
+    const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
+    const dryRun = spawnSync(process.execPath, [cf, 'deploy', '--prebuilt', '--dry-run'], {
+      cwd: prepared.directory,
+      encoding: 'utf8',
+    });
+    expect(dryRun.status, `${dryRun.stdout}\n${dryRun.stderr}`).toBe(0);
+  } finally {
+    prepared.dispose();
+  }
 });

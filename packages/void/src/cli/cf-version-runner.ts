@@ -124,7 +124,10 @@ export function createCfVersionRunner(options: {
     }
 
     if (args[0] === 'versions' && args[1] === 'upload') {
-      if (flag(args, '--name') !== workerName || args.includes('--assets')) {
+      if (
+        flag(args, '--name') !== workerName ||
+        (args.includes('--assets') && flag(args, '--assets') !== output.assetsDirectory)
+      ) {
         return failed('The Cloudflare version upload target changed.');
       }
       return run(
@@ -193,7 +196,10 @@ export function createCfVersionRunner(options: {
     }
 
     if (args[0] === 'deploy') {
-      if (flag(args, '--name') !== workerName || args.includes('--assets')) {
+      if (
+        flag(args, '--name') !== workerName ||
+        (args.includes('--assets') && flag(args, '--assets') !== output.assetsDirectory)
+      ) {
         return failed('The Cloudflare bootstrap target changed.');
       }
       return run(

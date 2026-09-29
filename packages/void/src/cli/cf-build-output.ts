@@ -6,6 +6,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
@@ -18,11 +19,13 @@ import {
 } from '@cloudflare/build-output-utils';
 import { InputConfigSchema, convertToWranglerConfig } from '@cloudflare/config';
 import { basename, dirname, extname, join, relative, resolve } from 'pathslash';
+import { build } from 'vite';
 
 type JsonObject = Record<string, unknown>;
 
 export interface CfBuildOutput {
   directory: string;
+  assetsDirectory?: string;
   dispose(): void;
 }
 
@@ -330,10 +333,56 @@ export async function prepareCfBuildOutput(
     await readBuildOutput(directory);
     return {
       directory,
+      ...(typeof assetsDirectory === 'string'
+        ? { assetsDirectory: resolve(source, assetsDirectory) }
+        : {}),
       dispose: () => rmSync(directory, { recursive: true, force: true }),
     };
   } catch (error) {
     rmSync(directory, { recursive: true, force: true });
     throw error;
+  }
+}
+
+/** Bundle Void's generated thin static Worker before handing it to cf as prebuilt output. */
+export async function prepareCfStaticBuildOutput(options: {
+  projectRoot: string;
+  configPath: string;
+  assetsDirectory: string;
+  accountId: string;
+}): Promise<CfBuildOutput | null> {
+  const raw = object(JSON.parse(readFileSync(options.configPath, 'utf8')));
+  if (!raw || typeof raw.main !== 'string' || basename(raw.main) !== raw.main) {
+    return null;
+  }
+  const entry = join(dirname(options.configPath), raw.main);
+  if (!existsSync(entry)) {
+    return null;
+  }
+  const scratch = mkdtempSync(join(tmpdir(), 'void-cf-static-'));
+  try {
+    await build({
+      configFile: false,
+      root: options.projectRoot,
+      logLevel: 'error',
+      build: {
+        outDir: scratch,
+        emptyOutDir: true,
+        lib: { entry, formats: ['es'], fileName: 'index' },
+        target: 'es2022',
+      },
+    });
+    writeFileSync(
+      join(scratch, 'wrangler.json'),
+      JSON.stringify({
+        ...raw,
+        main: 'index.js',
+        assets: { ...object(raw.assets), directory: resolve(options.assetsDirectory) },
+      }),
+      { mode: 0o600 },
+    );
+    return await prepareCfBuildOutput(scratch, options.accountId);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 }
