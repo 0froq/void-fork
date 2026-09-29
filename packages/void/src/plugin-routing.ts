@@ -486,6 +486,10 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     },
     config(_, env) {
       routeEnvironment = env.command === 'serve' && !env.isPreview ? 'dev' : 'prod';
+      // The Void environment hook has selected the route-specific binding set
+      // before this hook runs. Keep route compilation aligned with the Worker
+      // entry and Cloudflare config for dev-only live streams.
+      compileOptions.hasLive = options.live !== undefined;
       compileOptions.managedDispatch =
         !options.target && env.command === 'build' && Boolean(process.env.VOID_DEPLOY_PROJECT_ID);
 

@@ -1302,6 +1302,31 @@ const KITCHEN_SINK_NON_ID_BINDINGS = {
 // ---------------------------------------------------------------------------
 
 describe('computeDesiredCloudflareResources — desired set from source', () => {
+  it('does not provision resources used only by a dev route', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'myapp' }),
+      'void.json': '{}',
+      'routes/api/debug.dev.ts': `export const GET = (c) => {
+        c.env.DB.prepare('SELECT 1');
+        c.env.KV.get('key');
+        c.env.STORAGE.get('key');
+        return new Response('ok');
+      };`,
+    });
+    const { desired, reasons } = await computeDesiredCloudflareResources(
+      root,
+      readConfig(root),
+      join(root, 'wrangler.jsonc'),
+    );
+
+    expect(desired.d1).toBeUndefined();
+    expect(desired.kvNamespaces).toEqual([]);
+    expect(desired.r2).toBeUndefined();
+    expect(reasons.has('DB')).toBe(false);
+    expect(reasons.has('KV')).toBe(false);
+    expect(reasons.has('STORAGE')).toBe(false);
+  });
+
   it('expects one native trigger for jobs sharing an expression', async () => {
     const source = 'export const cron = "* * * * *"; export default () => {};';
     const root = makeProject({

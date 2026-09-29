@@ -2778,7 +2778,11 @@ export async function computeDesiredCloudflareResources(
   const inferenceOptions = voidConfig.inference?.bindings
     ? { bindings: voidConfig.inference.bindings }
     : undefined;
-  const bindings = inferProjectBindings(root, { ...inferenceOptions, paths }, scanDirs);
+  const bindings = inferProjectBindings(
+    root,
+    { ...inferenceOptions, paths, environment: 'prod' },
+    scanDirs,
+  );
   const authEnabled =
     bindings.needsAuth || findVoidAuthConfig(root, paths) !== null || voidConfig.auth !== undefined;
   const dialect = getDatabaseDialect(voidConfig);
@@ -6270,7 +6274,7 @@ export async function resolveCloudflareVoidStaticPreset(
     return null;
   }
 
-  const bindings = inferProjectBindings(root, { paths });
+  const bindings = inferProjectBindings(root, { paths, environment: 'prod' });
   const authEnabled =
     bindings.needsAuth || findVoidAuthConfig(root, paths) !== null || voidConfig.auth !== undefined;
   // The SAME predicate the managed path's fully-static optimization uses
@@ -7849,7 +7853,11 @@ async function runFrameworkDeploy(
     : undefined;
   const paths = resolveProjectPaths(root, voidConfig);
   const scanDirs = voidConfig.inference?.scanDirs ?? FRAMEWORK_SCAN_DIRS;
-  const bindings = inferProjectBindings(root, { ...inferenceOptions, paths }, scanDirs);
+  const bindings = inferProjectBindings(
+    root,
+    { ...inferenceOptions, paths, environment: 'prod' },
+    scanDirs,
+  );
   const authEnabled =
     bindings.needsAuth || findVoidAuthConfig(root, paths) !== null || voidConfig.auth !== undefined;
 
@@ -8236,7 +8244,7 @@ async function runFullDeploy(
   const dialect = getDatabaseDialect(deployConfig);
   const deployScanDirs =
     deployConfig.inference?.scanDirs ?? (isFrameworkMode ? FRAMEWORK_SCAN_DIRS : undefined);
-  const bindings = inferProjectBindings(root, { paths }, deployScanDirs);
+  const bindings = inferProjectBindings(root, { paths, environment: 'prod' }, deployScanDirs);
   if (isSandboxEnabled(deployConfig)) {
     bindings.needsSandbox = true;
   }

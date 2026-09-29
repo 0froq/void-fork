@@ -1,8 +1,15 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'pathslash';
+import { join, relative, toSlash } from 'pathslash';
 import { globSync } from 'tinyglobby';
 import { inferBindingsFromSource, mergeBindings, type InferredBindings } from './inference/walk.ts';
 import { readProjectPaths, type ProjectPaths } from './project-paths.ts';
+import {
+  isRouteEnabledForEnvironment,
+  parseRouteFilename,
+  parseWebSocketFilename,
+  type RouteEnvironment,
+} from './router/parse-filename.ts';
+import { isWebSocketPatternFile } from './router/websocket.ts';
 import { getSsrServerEntryPath } from './ssr/entry.ts';
 
 const SOURCE_GLOB = '**/*.{ts,tsx,mts,js,jsx,mjs,astro}';
@@ -99,6 +106,8 @@ export type InferenceOptions = {
     email?: boolean;
   };
   paths?: ProjectPaths;
+  /** Filter route files for a Vite serve/build environment. Other source files are always scanned. */
+  environment?: RouteEnvironment;
 };
 
 function extractAstroFrontmatter(code: string): string {
@@ -121,8 +130,8 @@ function inferBindingsFromFile(file: string, code: string): InferredBindings {
  * Synchronously infer which Cloudflare bindings the project needs
  * by scanning route/middleware files and optional src/main.ssr.ts with oxc-parser.
  *
- * This runs once when voidPlugin() is called (before plugins initialize),
- * so results are available to configure the Cloudflare plugin.
+ * Without an environment this scans the full source superset, which is used
+ * during plugin construction for binding-name reservation and plugin setup.
  *
  * @param scanDirs - Override the default scan directories (e.g., for framework mode)
  */
@@ -149,6 +158,25 @@ export function inferProjectBindings(
   const paths = options?.paths ?? readProjectPaths(root);
   const dirs = scanDirs ?? (paths.sourceDir ? [paths.sourceDir] : DEFAULT_SCAN_DIRS);
   const allBindings: Array<InferredBindings> = [];
+  const routesPrefix = `${toSlash(paths.routesDir).replace(/\/$/, '')}/`;
+  const addFile = (file: string): void => {
+    const normalizedFile = toSlash(file);
+    if (
+      options?.environment &&
+      normalizedFile.startsWith(routesPrefix) &&
+      /\.(?:ts|mts|js|mjs)$/.test(normalizedFile)
+    ) {
+      const routePath = relative(paths.routesDir, normalizedFile);
+      const route = isWebSocketPatternFile(routePath)
+        ? parseWebSocketFilename(routePath)
+        : parseRouteFilename(routePath);
+      if (!isRouteEnabledForEnvironment(route, options.environment)) {
+        return;
+      }
+    }
+    const code = readFileSync(file, 'utf-8');
+    allBindings.push(inferBindingsFromFile(file, code));
+  };
 
   for (const dir of dirs) {
     const dirPath = join(root, dir);
@@ -160,8 +188,7 @@ export function inferProjectBindings(
     }
 
     for (const file of files) {
-      const code = readFileSync(file, 'utf-8');
-      allBindings.push(inferBindingsFromFile(file, code));
+      addFile(file);
     }
   }
 
@@ -185,8 +212,7 @@ export function inferProjectBindings(
       srcFiles = [];
     }
     for (const file of srcFiles) {
-      const code = readFileSync(file, 'utf-8');
-      allBindings.push(inferBindingsFromFile(file, code));
+      addFile(file);
     }
   }
 

@@ -65,13 +65,7 @@ describe('inferProjectBindings', () => {
     });
   });
 
-  // Binding inference is deliberately blind to the `.dev` / `.prod` route suffix.
-  // Over-emitting is the safe direction: a missing binding crashes the running
-  // worker, while a spare one only costs a resource. The environment is also not
-  // knowable where `inferProjectBindings()` runs — `index.ts` calls it during
-  // plugin construction, long before the `config` hook assigns `routeEnvironment`.
-  // Changing this means reordering `voidPlugin()`, so make it a deliberate change.
-  it('still infers a binding a dev-only route imports', () => {
+  it('filters route-only bindings for the selected environment', () => {
     const root = createTempRoot();
     mkdirSync(join(root, 'routes', 'api'), { recursive: true });
     writeFileSync(
@@ -81,9 +75,28 @@ describe('inferProjectBindings', () => {
       export const GET = async () => Response.json(await storage.list());
       `,
     );
+    writeFileSync(
+      join(root, 'routes', 'api', 'events.dev.ws.ts'),
+      "import { defineLiveStream } from 'void/live';",
+    );
 
-    const result = inferProjectBindings(root, undefined, ['routes']);
+    expect(inferProjectBindings(root, undefined, ['routes']).needsR2).toBe(true);
+    expect(inferProjectBindings(root, { environment: 'dev' }, ['routes']).needsR2).toBe(true);
+    const production = inferProjectBindings(root, { environment: 'prod' }, ['routes']);
+    expect(production.needsR2).toBe(false);
+    expect(production.needsLive).toBe(false);
+  });
+
+  it('keeps bindings from non-route files with environment-like suffixes', () => {
+    const root = createTempRoot();
+    mkdirSync(join(root, 'routes'), { recursive: true });
+    mkdirSync(join(root, 'queues'), { recursive: true });
+    writeFileSync(join(root, 'queues', 'sync.dev.ts'), "import { storage } from 'void/storage';");
+    writeFileSync(join(root, 'routes', 'helper.dev.tsx'), "import { kv } from 'void/kv';");
+
+    const result = inferProjectBindings(root, { environment: 'prod' });
     expect(result.needsR2).toBe(true);
+    expect(result.needsKV).toBe(true);
   });
 
   it('detects auth from void/client import with auth specifier in src/', () => {

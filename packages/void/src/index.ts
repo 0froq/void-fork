@@ -862,10 +862,10 @@ export function voidPlugin(options?: {
   );
   const inferredBindings = inferProjectBindings(root, { ...inferenceOptions, paths }, scanDirs);
   const sandboxEnabled = isSandboxEnabled(config);
-  const bindings = sandboxEnabled ? { ...inferredBindings, needsSandbox: true } : inferredBindings;
+  let bindings = sandboxEnabled ? { ...inferredBindings, needsSandbox: true } : inferredBindings;
   const sandboxConfig = bindings.needsSandbox ? resolveSandboxConfig(config, root) : undefined;
   const authConfigPath = findVoidAuthConfig(root, paths);
-  const authEnabled = bindings.needsAuth || authConfigPath !== null || config.auth !== undefined;
+  let authEnabled = bindings.needsAuth || authConfigPath !== null || config.auth !== undefined;
 
   if (detected && authEnabled) {
     throw new Error(
@@ -1054,6 +1054,9 @@ export function voidPlugin(options?: {
     syncWranglerWebSockets(root, productionWebSocketRoutes);
     websocketTombstones = readWranglerWebSocketTombstones(root, productionWebSocketRoutes);
   }
+  const existingLiveConfig = !isNodeTarget(config.target)
+    ? readExistingLiveBindingConfig(root)
+    : undefined;
   const liveConfig = !isNodeTarget(config.target)
     ? bindings.needsLive
       ? resolveLiveBindingConfig(root, {
@@ -1067,8 +1070,9 @@ export function voidPlugin(options?: {
             sandboxConfig?.className,
           ],
         })
-      : readExistingLiveBindingConfig(root)
+      : existingLiveConfig
     : undefined;
+  const shouldEmitLive = () => bindings.needsLive || existingLiveConfig !== undefined;
 
   // Class B/C: lighter composition — DB types + migrations only.
   // The framework's own adapter handles the CF worker build and dev server.
@@ -1742,7 +1746,7 @@ export function voidPlugin(options?: {
       }
     }
 
-    if (liveConfig) {
+    if (shouldEmitLive() && liveConfig) {
       const currentDurableObjects =
         ((result as Record<string, unknown>).durable_objects as
           | { bindings?: Array<{ name: string; class_name: string }> }
@@ -1848,6 +1852,15 @@ export function voidPlugin(options?: {
       // `dev` is the Vite dev server only. Every build, `void deploy`, and
       // `vite preview` (which reports `command: 'serve'`) is `prod`.
       routeEnvironment = command === 'serve' && !isPreview ? 'dev' : 'prod';
+      const environmentBindings = inferProjectBindings(
+        root,
+        { ...inferenceOptions, paths, environment: routeEnvironment },
+        scanDirs,
+      );
+      bindings = sandboxEnabled
+        ? { ...environmentBindings, needsSandbox: true }
+        : environmentBindings;
+      authEnabled = bindings.needsAuth || authConfigPath !== null || config.auth !== undefined;
       // `void cloudflare login` stores OAuth in Wrangler's OS-keychain-backed
       // credential store. The Cloudflare Vite plugin runs in this process, so
       // select that same store before it opens the remote Workers AI session.
@@ -2335,7 +2348,7 @@ export function voidPlugin(options?: {
       hasMiddleware,
       hasWebSockets: routeScanHasDocumentRoutes(environmentWebsocketRoutes),
       authEnabled,
-      liveEnabled: liveConfig !== undefined,
+      liveEnabled: shouldEmitLive() && liveConfig !== undefined,
       notFound: config.routing?.notFound,
     });
     const rules = mergeRoutingRules({ dir: assetRoutingPublicDir, routing: config.routing });
@@ -2428,10 +2441,14 @@ export function voidPlugin(options?: {
       // the rules because dispatch owns them; native builds keep them.
       routing: config.routing,
       bindingNames,
-      hasSandbox: bindings.needsSandbox,
+      get hasSandbox() {
+        return bindings.needsSandbox;
+      },
       sandboxBindingName: sandboxConfig?.binding,
       sandboxClassName: sandboxConfig?.className,
-      live: liveConfig,
+      get live() {
+        return shouldEmitLive() ? liveConfig : undefined;
+      },
       durableObjects,
       websocketTombstones,
       onDevAssetRoutingPolicyChange: updateDevAssetRoutingPolicy,
