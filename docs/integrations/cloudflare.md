@@ -4,11 +4,11 @@ outline: deep
 
 # Cloudflare
 
-Void runs on Cloudflare Workers. This page covers how bindings work, how the plugin merges Cloudflare configuration, and how to deploy directly to your own Cloudflare account.
+Void runs on Cloudflare Workers. Use this guide to access bindings, configure your Worker, and deploy to your own account.
 
 ## Bindings
 
-Void automatically infers and provisions Cloudflare bindings (D1, KV, R2, AI, Queues) by scanning your source files. There are two ways to access them at runtime depending on your setup.
+Void detects supported resource use in your source and provisions the corresponding bindings. How you access them depends on your framework.
 
 ### Via Hono context (`c.env`)
 
@@ -132,43 +132,36 @@ For environment variables, declare the schema in `env.ts` and put local values i
 API_URL=https://api.example.com
 ```
 
-Binding arrays such as `d1_databases`, `kv_namespaces`, and `r2_buckets` belong in the `cloudflare` field. Void adds inferred bindings that are missing by name and preserves custom bindings with real resource IDs. See [Cloudflare config merging](#cloudflare-config-merging) for details.
+Binding arrays such as `d1_databases`, `kv_namespaces`, and `r2_buckets` belong in the `cloudflare` field. Void adds inferred bindings that are missing by name and preserves custom bindings with real resource IDs. See [Cloudflare Configuration](#cloudflare-configuration) for details.
 
 For non-secret plain-text defaults, you can also set `worker.vars` in `void.config.ts`. Local `.env` values override `worker.vars` during development. Production builds reject any `worker.vars` name that is declared as a server key in `env.ts`; store those values remotely with `void secret put` instead.
 
-## Cloudflare config merging
+## Cloudflare Configuration
 
-Void reads `void.config.ts`, combines its `cloudflare` settings with provisioned values in `void.lock.json`, and generates the Cloudflare config needed by the build and deploy tools. Root `wrangler.jsonc` and `wrangler.json` files from existing apps are migrated automatically by `void init` or `void deploy`. Bindings are inferred from source code and use local placeholder IDs for development.
+Set Worker options in `void.config.ts`. Void combines its `cloudflare` settings with resource IDs in `void.lock.json` for development and deployment. `void init` and `void deploy` migrate root `wrangler.jsonc` or `wrangler.json` files from existing apps.
 
-Edit `cloudflare` in `void.config.ts` for custom Worker settings. Commit `void.lock.json` when Void records resource IDs or Durable Object migration history.
+Commit `void.lock.json` when Void records resource IDs or Durable Object migration history.
 
 ### Void-only mode and Vite-based frameworks
 
-In Void's default mode and frameworks where Void controls the Cloudflare integration (TanStack Start, React Router), Void manages `@cloudflare/vite-plugin` directly. It merges inferred bindings with the generated Cloudflare config:
+In native Void apps, TanStack Start, and React Router, Void manages the Cloudflare Vite plugin. It merges inferred bindings with your `cloudflare` settings:
 
-1. The plugin reads the generated config containing your `cloudflare` settings and Void's recorded resource values.
-2. Void checks each inferred binding **by name** (e.g. `"DB"`, `"KV"`, `"STORAGE"`). If a binding with that name already exists in your config, it is left untouched.
-3. Only bindings that are **missing** from your config are added with local placeholder IDs (e.g. `database_id: "local"`).
-4. The merged config is used for both `vite dev` (Miniflare) and `vite build` (output `wrangler.json` in `dist/`).
+- An existing binding with the same name stays unchanged.
+- Missing inferred bindings get local placeholder IDs for development. Deploy replaces them with provisioned IDs.
+- Other `cloudflare` settings, such as routes, services, variables, and compatibility settings, pass through.
 
-All other `cloudflare` fields -- `name`, `routes`, `services`, `vars`, `env`, `compatibility_date`, etc. -- flow through to the build output.
-
-Fields that Void always sets (`main`, `triggers`, `assets`) don't need to be in your Cloudflare config -- they're added programmatically based on your project structure.
-
-In this mode, normal inferred bindings are merged in memory. Typed state modules in `durable-objects/` are the exception: Void records their bindings and append-only `new_sqlite_classes` history in `void.lock.json`. Commit the lock.
+Void sets `main`, `triggers`, and `assets` from your project structure. It also records typed Durable Object bindings and migration history from `durable-objects/` in `void.lock.json`.
 
 ### Adapter-based frameworks (SvelteKit, Nuxt, Astro)
 
-When using SvelteKit, Nuxt, or Astro, the framework's own Cloudflare adapter owns the worker build and dev server. Void does **not** provide `@cloudflare/vite-plugin` in that setup. It only contributes DB type codegen, migration management, and binding sync.
+SvelteKit, Nuxt, and Astro build Workers through their own adapters. Void provides database types, migrations, and binding sync without replacing those adapters.
 
-Because Void does not control the Cloudflare plugin in this mode, it syncs inferred bindings to the generated Cloudflare config on dev startup:
+At dev startup, Void updates the framework's generated Cloudflare config:
 
-- Only adds bindings that are **missing** by name -- existing bindings are never modified or removed.
-- If `worker.compatibility_date` is set in `void.config.ts`, syncs that date into the Cloudflare config so the framework adapter reads the same value.
-- Also ensures the `nodejs_als` compatibility flag is present.
-- The framework adapter reads the generated config through its configured path.
+- It adds missing bindings by name without changing existing ones.
+- It copies `worker.compatibility_date`, when set, and adds the `nodejs_als` compatibility flag.
 
-The framework adapter reads the generated config. Void adds bindings as you import resources, and `void deploy --platform cloudflare` replaces local placeholder IDs when it provisions production resources.
+`void deploy --platform cloudflare` provisions production resources for inferred bindings.
 
 ### Merge precedence
 
