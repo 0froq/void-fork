@@ -78,7 +78,7 @@ Use `void --help` for the command list. For a specific command, try `void deploy
 
 ### `void migrate`
 
-`void migrate` converts `void.json` and root `wrangler.jsonc` or `wrangler.json` into a typed `void.config.ts`. Void backs up the originals under `.void/config-migration/`, keeps Cloudflare resource state in `void.lock.json`, and updates supported framework adapters to use its generated Cloudflare config. `void init` and `void deploy` run this migration automatically when they find legacy files. Review and commit the new config and lock. If existing files disagree, resolve them before retrying.
+`void migrate` converts `void.json` and root `wrangler.jsonc` or `wrangler.json` into a typed `void.config.ts`. It also recognizes a single root `wrangler*.json(c)` file explicitly referenced by a supported framework adapter. Void backs up the originals under `.void/config-migration/`, keeps Cloudflare resource state in `void.lock.json`, and updates supported framework adapters to use its generated Cloudflare config. `void init` and `void deploy` run this migration automatically when they find legacy files. Review and commit the new config and lock. If multiple Cloudflare config files exist or existing files disagree, resolve them before retrying.
 
 ### `void init`
 
@@ -862,7 +862,7 @@ void deploy [--platform <cloudflare|void>] [--require-email]
 
 Auto-detects your project type and chooses the right pipeline. See [Supported App Types](../guide/app-types.md) and [Deployment](../guide/deployment.md) for details.
 
-An unlinked project with a root `wrangler.jsonc` or `wrangler.json` gets a prompt to link and deploy to Cloudflare using its existing Worker and resources. Accepting verifies the target, saves Cloudflare as the destination, and continues deployment. A failed build retains the link for retry. Declining changes nothing. Explicit platform/project selections and saved destinations take precedence; CI must select a destination explicitly.
+An unlinked project with a root `wrangler.jsonc`, `wrangler.json`, or a single root `wrangler*.json(c)` file explicitly referenced by a supported framework adapter gets a prompt to link and deploy to Cloudflare using its existing Worker and resources. Accepting verifies the target, saves Cloudflare as the destination, and continues deployment. A failed build retains the link for retry. Declining changes nothing. Explicit platform/project selections and saved destinations take precedence; CI must select a destination explicitly.
 
 The first handoff preserves production bindings, variables, secrets, event handlers, and triggers. The active version must be the latest uploaded version so inherited secrets have an unambiguous source. Apart from an explicitly enabled ISR cache, new resources, migrations, runtime features, auth setup, or local secret overrides must be handled separately. See [Deploy an existing Worker](../integrations/cloudflare.md#deploy-an-existing-worker).
 
