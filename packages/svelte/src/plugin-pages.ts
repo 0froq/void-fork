@@ -268,7 +268,7 @@ const { router, initialPageData, initialComponent, initialLayouts, start } =
       isLoading: (ref) => ref.loading,
       applyUpdate(pageData, comp, layouts) {
         propsStore.set(pageData.props);
-        sharedStore.update((s) => ({ ...s, ...(pageData.shared || {}) }));
+        sharedStore.set(pageData.shared || {});
         errorsStore.set(pageData.errors || {});
         routeParams = pageData.params || {};
         paramsStore.set(routeParams);

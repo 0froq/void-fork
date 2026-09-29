@@ -364,7 +364,7 @@ const { router, initialPageData, initialComponent, initialLayouts, start } =
       isLoading: (ref) => ref.loading,
       applyUpdate(pageData, comp, layouts, options) {
         if (!options?.preserveState) currentPageKey.value++;
-        Object.assign(shared, pageData.shared || {});
+        replaceRecord(shared, pageData.shared || {});
         replaceRecord(errors, pageData.errors || {});
         replaceRecord(params, pageData.params || {});
         currentProps.value = pageData.props;

@@ -257,6 +257,7 @@ function generateClientEntry(
 ): string {
   return `
 import { createSignal, createComponent, batch } from "solid-js";
+import { createMutable } from "solid-js/store";
 import { hydrate, render } from "solid-js/web";
 import { SharedContext, ErrorsContext, ParamsContext, RouterContext, NavigationContext, setActionRouter } from "@void/solid";
 import { createRouterFacade, createVoidRouter, idleNavigationState } from "void/pages-client";
@@ -267,11 +268,17 @@ ${generateComponentManifest(scan, pagesDir)}
 const [component, setComponent] = createSignal(null);
 const [pageProps, setPageProps] = createSignal({});
 const [layouts, setLayouts] = createSignal([]);
-const [shared, setShared] = createSignal({});
+const shared = createMutable({});
 const [errors, setErrors] = createSignal({});
 const [routeUrl, setRouteUrl] = createSignal(window.location.pathname + window.location.search + window.location.hash);
 const [routeParams, setRouteParams] = createSignal({});
 const [navigation, setNavigation] = createSignal(idleNavigationState());
+
+// Keep the context object stable for layouts that call useShared() once.
+function replaceShared(next) {
+  for (const key of Object.keys(shared)) delete shared[key];
+  Object.assign(shared, next || {});
+}
 
 const { router, initialPageData, initialComponent, initialLayouts, start } =
   await createVoidRouter({
@@ -285,7 +292,7 @@ const { router, initialPageData, initialComponent, initialLayouts, start } =
           setPageProps(pageData.props);
           setComponent(() => comp);
           setLayouts(layoutComps);
-          setShared((prev) => ({ ...prev, ...(pageData.shared || {}) }));
+          replaceShared(pageData.shared);
           setErrors(pageData.errors || {});
           setRouteParams(pageData.params || {});
         });
@@ -316,14 +323,14 @@ batch(() => {
   setComponent(() => initialComponent);
   setPageProps(initialPageData.props);
   setLayouts(initialLayouts);
-  setShared(initialPageData.shared || {});
+  replaceShared(initialPageData.shared);
   setErrors(initialPageData.errors || {});
   setRouteParams(initialPageData.params || {});
 });
 
 function App() {
   return createComponent(SharedContext.Provider, {
-    get value() { return shared(); },
+    value: shared,
     get children() {
       return createComponent(ErrorsContext.Provider, {
         value: errors,

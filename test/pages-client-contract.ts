@@ -56,6 +56,41 @@ export function registerSharedClientTests({
     return;
   }
 
+  it('replaces shared data when a page response omits a previous key', async () => {
+    const page = await newPage();
+    await page.route('**/users', async (route) => {
+      if (route.request().headers()['x-voidpages'] !== 'true') {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      const pageData = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({
+        response,
+        body: JSON.stringify({ ...pageData, shared: {} }),
+      });
+    });
+
+    try {
+      await page.goto(BASE + '/');
+      await waitForHydration(page);
+      expect(await page.locator('nav span').textContent()).toContain('Pages Demo');
+
+      await page.click('a[href="/users"]');
+      await page.waitForFunction(() =>
+        document.querySelector('h1')?.textContent?.includes('Users'),
+      );
+      await page.waitForFunction(() => document.querySelector('nav span')?.textContent === '');
+
+      await page.click('a[href="/"]');
+      await page.waitForFunction(() =>
+        document.querySelector('nav span')?.textContent?.includes('Pages Demo'),
+      );
+    } finally {
+      await page.context().close();
+    }
+  });
+
   // The longer journey also covers both forward navigation steps and their
   // rendered data, so separate list/detail browser contexts add no coverage.
   it('browser back/forward navigation', async () => {

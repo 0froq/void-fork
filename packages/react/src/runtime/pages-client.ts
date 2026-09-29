@@ -8,7 +8,6 @@ import React, {
   useLayoutEffect,
   useMemo,
   useReducer,
-  useRef,
   useTransition,
   type ComponentType,
 } from 'react';
@@ -317,7 +316,7 @@ function RouteResource({
       { value: routeParams },
       React.createElement(
         SharedContext.Provider,
-        { value: pageData.shared },
+        { value: pageData.shared ?? {} },
         React.createElement(ErrorsContext.Provider, { value: pageData.errors ?? {} }, element),
       ),
     ),
@@ -357,7 +356,6 @@ function App({
   navigationFallback?: ComponentType<{ initialPageData: PageObject }>;
 }): React.ReactNode {
   const initialPageData = engine.initialPageData as ReactPageData;
-  const sharedStateRef = useRef<Record<string, unknown>>(initialPageData.shared);
   const initialResource = useMemo<ReactPageResource>(
     () => ({
       id: 0,
@@ -368,7 +366,7 @@ function App({
       options: {},
       immediate: false,
       shell: Promise.resolve({
-        pageData: { ...initialPageData, shared: initialPageData.shared },
+        pageData: initialPageData,
         component: engine.initialComponent,
         layouts: engine.initialLayouts,
       }),
@@ -386,22 +384,6 @@ function App({
     navigation: idleNavigationState(),
   });
   const [isTransitionPending, startTransition] = useTransition();
-
-  const mergeShared = useCallback(
-    (result: PageNavigationResult | undefined): PageNavigationResult | undefined => {
-      if (!result) {
-        return result;
-      }
-      sharedStateRef.current = {
-        ...sharedStateRef.current,
-        ...(result.pageData.shared || {}),
-      };
-      const shared = sharedStateRef.current;
-      result.pageData = { ...result.pageData, shared };
-      return result;
-    },
-    [],
-  );
 
   const finishNavigation = useCallback(
     (resource: ReactPageResource, result: PageNavigationResult) => {
@@ -474,7 +456,7 @@ function App({
 
       const next: ReactPageResource = {
         ...prepared,
-        shell: prepared.shell.then(mergeShared).then(
+        shell: prepared.shell.then(
           (result) => {
             if (!result) {
               const resolveViewTransition = viewTransitionWaiters.get(prepared.id);
@@ -583,7 +565,7 @@ function App({
       );
       return pagePromise;
     },
-    [engine, mergeShared, NavigationFallback, startTransition, viewTransitions],
+    [engine, NavigationFallback, startTransition, viewTransitions],
   );
 
   useInsertionEffect(() => {

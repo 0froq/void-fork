@@ -31,6 +31,14 @@
   let navigation = $state(init.navigation || idleNavigationState());
   const router = createRouterFacade(init.router, () => routeUrl, () => params);
 
+  // Layouts can keep the object returned by useShared() across navigations.
+  function replaceShared(next) {
+    for (const key of Object.keys(shared)) {
+      delete shared[key];
+    }
+    Object.assign(shared, next || {});
+  }
+
   // Capitalized alias for dynamic component rendering
   let Page = $derived(currentPage);
 
@@ -57,7 +65,7 @@
       init.stores.page.subscribe((v) => { currentPage = v; }),
       init.stores.props.subscribe((v) => { currentPageProps = v; }),
       init.stores.layouts.subscribe((v) => { currentLayouts = v; }),
-      init.stores.shared.subscribe((v) => { shared = v; }),
+      init.stores.shared.subscribe(replaceShared),
       init.stores.errors.subscribe((v) => { errors = v; }),
       init.stores.params.subscribe((v) => { params = v; }),
       init.stores.route.subscribe((v) => { routeUrl = v; }),
