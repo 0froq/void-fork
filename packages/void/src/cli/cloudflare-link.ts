@@ -12,6 +12,7 @@ import { applyEdits, modify, parse, type ParseError } from 'jsonc-parser';
 import { basename, join } from 'pathslash';
 import { materializeCloudflareConfig, persistCloudflareConfig } from '../cloudflare-config.ts';
 import type { RunDeployOptions } from './deploy.ts';
+import { discoverFrameworkWranglerFiles } from './framework-config-migrate.ts';
 import { readDeploymentPlatform, writeDeploymentPlatform } from './project.ts';
 
 const LINK_FILE = '.void/cloudflare-link.json';
@@ -194,9 +195,14 @@ export async function maybeLinkCloudflareDeploy(
   ) {
     return null;
   }
-  const files = ['wrangler.jsonc', 'wrangler.json', 'wrangler.toml'].filter((name) =>
-    existsSync(join(root, name)),
-  );
+  const files = [
+    ...new Set([
+      ...['wrangler.jsonc', 'wrangler.json', 'wrangler.toml'].filter((name) =>
+        existsSync(join(root, name)),
+      ),
+      ...discoverFrameworkWranglerFiles(root),
+    ]),
+  ];
   if (!files.length && !existsSync(join(root, 'void.config.ts'))) {
     return null;
   }

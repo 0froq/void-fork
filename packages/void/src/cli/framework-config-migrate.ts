@@ -38,6 +38,34 @@ type Expression = {
 };
 type Edit = { start: number; end: number; text: string };
 
+/** Find an adapter's explicit root Wrangler JSON file, including custom build filenames. */
+export function discoverFrameworkWranglerFiles(root: string): Array<string> {
+  const names = new Set<string>();
+  for (const file of CONFIG_FILES) {
+    const path = join(root, file);
+    if (!existsSync(path)) {
+      continue;
+    }
+    const source = readFileSync(path, 'utf8');
+    if (
+      !source.includes('@sveltejs/adapter-cloudflare') &&
+      !source.includes('@astrojs/cloudflare') &&
+      !source.includes('nitro-cloudflare-dev')
+    ) {
+      continue;
+    }
+    for (const match of source.matchAll(
+      /\b(?:configPath|config)\s*:\s*(['"])(?:\.\/)?(wrangler[A-Za-z0-9._-]*\.jsonc?)\1/g,
+    )) {
+      const name = match[2]!;
+      if (existsSync(join(root, name))) {
+        names.add(name);
+      }
+    }
+  }
+  return [...names];
+}
+
 function property(object: Expression, key: string): Expression | undefined {
   return object.properties?.find(
     (item) =>
@@ -48,7 +76,13 @@ function property(object: Expression, key: string): Expression | undefined {
   )?.value;
 }
 
-function setPath(object: Expression, key: string, file: string, edits: Array<Edit>): void {
+function setPath(
+  object: Expression,
+  key: string,
+  file: string,
+  edits: Array<Edit>,
+  legacyName?: string,
+): void {
   const value = property(object, key);
   if (!value) {
     edits.push({
@@ -59,10 +93,7 @@ function setPath(object: Expression, key: string, file: string, edits: Array<Edi
   } else if (
     value.type === 'Literal' &&
     typeof value.value === 'string' &&
-    (value.value === 'wrangler.jsonc' ||
-      value.value === './wrangler.jsonc' ||
-      value.value === 'wrangler.json' ||
-      value.value === './wrangler.json' ||
+    (['wrangler.jsonc', 'wrangler.json', legacyName].includes(value.value.replace(/^\.\//, '')) ||
       value.value === GENERATED_PATH)
   ) {
     edits.push({ start: value.start, end: value.end, text: `'${GENERATED_PATH}'` });
@@ -78,6 +109,7 @@ function patchAdapterCall(
   identifier: string,
   file: string,
   kind: 'svelte' | 'astro',
+  legacyName?: string,
 ): string {
   const candidates = [...source.matchAll(new RegExp(`\\b${identifier}\\s*\\(`, 'g'))];
   const calls: Array<Expression> = [];
@@ -116,9 +148,9 @@ function patchAdapterCall(
   const options = args[0]!;
   const edits: Array<Edit> = [];
   if (kind === 'astro') {
-    setPath(options, 'configPath', file, edits);
+    setPath(options, 'configPath', file, edits, legacyName);
   } else {
-    setPath(options, 'config', file, edits);
+    setPath(options, 'config', file, edits, legacyName);
     const proxy = property(options, 'platformProxy');
     if (!proxy) {
       edits.push({
@@ -127,7 +159,7 @@ function patchAdapterCall(
         text: `platformProxy: { configPath: '${GENERATED_PATH}' }, `,
       });
     } else if (proxy.type === 'ObjectExpression') {
-      setPath(proxy, 'configPath', file, edits);
+      setPath(proxy, 'configPath', file, edits, legacyName);
     } else {
       throw new Error(
         `migrate: Update ${file} to pass ${GENERATED_PATH} to its Cloudflare adapter before removing the root Wrangler config.`,
@@ -143,7 +175,10 @@ function patchAdapterCall(
 }
 
 /** Plan only edits whose adapter call can be identified without changing authored options. */
-export function planFrameworkConfigMigration(root: string): Array<FrameworkConfigPatch> {
+export function planFrameworkConfigMigration(
+  root: string,
+  legacyName?: string,
+): Array<FrameworkConfigPatch> {
   const patches: Array<FrameworkConfigPatch> = [];
   for (const file of CONFIG_FILES) {
     const path = join(root, file);
@@ -158,7 +193,7 @@ export function planFrameworkConfigMigration(root: string): Array<FrameworkConfi
     );
     if (svelteImport) {
       const identifier = svelteImport[1]!;
-      updated = patchAdapterCall(updated, identifier, file, 'svelte');
+      updated = patchAdapterCall(updated, identifier, file, 'svelte', legacyName);
     } else if (
       /(?:from\s*['"]|require\(\s*['"]|import\(\s*['"])@sveltejs\/adapter-cloudflare['"]/.test(
         original,
@@ -172,7 +207,7 @@ export function planFrameworkConfigMigration(root: string): Array<FrameworkConfi
     const astroImport = /import\s+(\w+)\s+from\s+['"]@astrojs\/cloudflare['"]/.exec(original);
     if (astroImport) {
       const identifier = astroImport[1]!;
-      updated = patchAdapterCall(updated, identifier, file, 'astro');
+      updated = patchAdapterCall(updated, identifier, file, 'astro', legacyName);
     } else if (
       /(?:from\s*['"]|require\(\s*['"]|import\(\s*['"])@astrojs\/cloudflare['"]/.test(original)
     ) {
@@ -199,14 +234,19 @@ export function planFrameworkConfigMigration(root: string): Array<FrameworkConfi
       !original.includes(`configPath: '${GENERATED_PATH}'`) &&
       !original.includes(`configPath: "${GENERATED_PATH}"`)
     ) {
-      const rootPath = /configPath:\s*(['"])(?:\.\/)?wrangler\.jsonc?\1/g;
-      const matches = [...updated.matchAll(rootPath)];
+      const rootPath = /configPath:\s*(['"])(?:\.\/)?([^'"]+)\1/g;
+      const names = new Set(['wrangler.jsonc', 'wrangler.json', legacyName]);
+      const matches = [...updated.matchAll(rootPath)].filter((match) => names.has(match[2]));
       if (matches.length !== 1) {
         throw new Error(
           `migrate: Set nitro.cloudflareDev.configPath to ${GENERATED_PATH} in ${file} before removing the root Wrangler config.`,
         );
       }
-      updated = updated.replace(rootPath, `configPath: '${GENERATED_PATH}'`);
+      const match = matches[0]!;
+      updated =
+        updated.slice(0, match.index) +
+        `configPath: '${GENERATED_PATH}'` +
+        updated.slice(match.index + match[0].length);
     }
 
     if (updated !== original) {

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { migrateLegacyVoidConfig } from '../../src/cli/migrate.ts';
+import { readConfig } from '../../src/config.ts';
 
 const root = join(import.meta.dirname, '.tmp-framework-config-migrate-test');
 
@@ -64,6 +65,29 @@ describe('framework config migration', () => {
       expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(false);
     },
   );
+
+  it('migrates an Astro adapter using a custom root Wrangler JSONC file', () => {
+    setup(
+      'astro.config.mjs',
+      'import cloudflare from "@astrojs/cloudflare";\nexport default { adapter: cloudflare({ configPath: "./wrangler.build.jsonc" }) };\n',
+    );
+    rmSync(join(root, 'wrangler.jsonc'));
+    writeFileSync(
+      join(root, 'wrangler.build.jsonc'),
+      '{"name":"app","compatibility_date":"2026-02-24"}',
+    );
+
+    expect(migrateLegacyVoidConfig(root)).toBe(true);
+    expect(readFileSync(join(root, 'astro.config.mjs'), 'utf8')).toContain(
+      "configPath: './.void-wrangler.jsonc'",
+    );
+    expect(existsSync(join(root, 'wrangler.build.jsonc'))).toBe(false);
+    expect(existsSync(join(root, '.void/config-migration/wrangler.build.jsonc'))).toBe(true);
+    expect(readConfig(root).cloudflare).toMatchObject({
+      name: 'app',
+      compatibility_date: '2026-02-24',
+    });
+  });
 
   it('preserves custom SvelteKit adapter options while migrating an explicit path', () => {
     setup(

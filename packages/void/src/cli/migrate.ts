@@ -21,6 +21,7 @@ import { loadTypedVoidConfigFile, TYPED_CONFIG_FILE } from '../config-loader.ts'
 import { validateConfig } from '../config.ts';
 import {
   applyFrameworkConfigMigration,
+  discoverFrameworkWranglerFiles,
   planFrameworkConfigMigration,
 } from './framework-config-migrate.ts';
 import { cliTitle } from './output.ts';
@@ -79,12 +80,15 @@ function generatedSource(config: Record<string, unknown>): string {
 /** Move Void and Cloudflare JSON/JSONC settings into a typed, checked-in project config. */
 export function migrateLegacyVoidConfig(root: string): boolean {
   const legacyPath = join(root, LEGACY_FILE);
-  const wranglerFiles = ['wrangler.jsonc', 'wrangler.json'].filter((name) =>
-    existsSync(join(root, name)),
-  );
+  const wranglerFiles = [
+    ...new Set([
+      ...['wrangler.jsonc', 'wrangler.json'].filter((name) => existsSync(join(root, name))),
+      ...discoverFrameworkWranglerFiles(root),
+    ]),
+  ];
   if (wranglerFiles.length > 1) {
     throw new Error(
-      'migrate: Both wrangler.jsonc and wrangler.json exist. Keep one before migrating.',
+      `migrate: Multiple root Wrangler JSON files exist (${wranglerFiles.join(', ')}). Keep one before migrating.`,
     );
   }
   if (existsSync(join(root, 'wrangler.toml'))) {
@@ -98,7 +102,7 @@ export function migrateLegacyVoidConfig(root: string): boolean {
     }
     return false;
   }
-  const frameworkPatches = planFrameworkConfigMigration(root);
+  const frameworkPatches = planFrameworkConfigMigration(root, wranglerName);
 
   const raw = existsSync(legacyPath) ? readFileSync(legacyPath, 'utf8') : undefined;
   let legacy: Record<string, unknown> = {};

@@ -34,6 +34,24 @@ describe('Cloudflare deployment onboarding', () => {
     expect(readDeploymentPlatform(root)).toBeNull();
     expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')).toBe(config);
   });
+  it('offers to link a Worker configured through a custom Astro JSONC path', async () => {
+    rmSync(join(root, 'wrangler.jsonc'));
+    writeFileSync(join(root, 'wrangler.build.jsonc'), config);
+    writeFileSync(
+      join(root, 'astro.config.mjs'),
+      'import cloudflare from "@astrojs/cloudflare"; export default { adapter: cloudflare({ configPath: "./wrangler.build.jsonc" }) };\n',
+    );
+    expect(
+      await maybeLinkCloudflareDeploy(
+        root,
+        {},
+        {
+          interactive: true,
+          confirm: vi.fn().mockResolvedValue(true),
+        },
+      ),
+    ).toBe('existing');
+  });
   it.each([false, Symbol('cancel')])(
     'leaves declined/cancelled projects unchanged (%s)',
     async (answer) => {
