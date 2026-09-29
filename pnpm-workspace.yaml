@@ -36,6 +36,7 @@ catalog:
   vite-plus: 0.3.1
   vitest: 4.1.11
   wrangler: 4.131.0
+  cf: 1.0.0-beta.5
   oauth4webapi: ^3.8.8
   '@astryxdesign/core': 0.6.3
   '@astryxdesign/theme-neutral': 0.6.3
@@ -67,3 +68,7 @@ peerDependencyRules:
   allowedVersions:
     tailwindcss: '*'
     vite: '*'
+
+minimumReleaseAgeExclude:
+  - '@cloudflare/codemods@0.2.1'
+  - cf@1.0.0-beta.5
