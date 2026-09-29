@@ -32,7 +32,8 @@
     "rolldown": "^1.2.8",
     "typescript": "catalog:",
     "vite": "catalog:",
-    "vite-plus": "catalog:"
+    "vite-plus": "catalog:",
+    "void": "npm:void@0.21.1"
   },
   "packageManager": "pnpm@12.6.0"
 }

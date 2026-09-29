@@ -72,3 +72,10 @@ peerDependencyRules:
 minimumReleaseAgeExclude:
   - '@cloudflare/codemods@0.2.1'
   - cf@1.0.0-beta.5
+  - '@void/deploy-cloudflare@0.21.1'
+  - '@void/deploy-core@0.21.1'
+  - '@void/edge@0.21.1'
+  - '@void/isr@0.21.1'
+  - '@void/md@0.21.1'
+  - '@void/platform@0.21.1'
+  - void@0.21.1
