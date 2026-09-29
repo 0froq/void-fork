@@ -31,6 +31,20 @@ describe('framework config migration', () => {
     );
   });
 
+  it('migrates a SvelteKit adapter followed by another option', () => {
+    setup(
+      'vite.config.ts',
+      "import adapter from '@sveltejs/adapter-cloudflare';\nexport default { plugins: [sveltekit({ adapter: adapter(), typescript: { config: withVoidTSConfig() } })] };\n",
+    );
+    expect(migrateLegacyVoidConfig(root)).toBe(true);
+    const source = readFileSync(join(root, 'vite.config.ts'), 'utf8');
+    expect(source).toContain(
+      "adapter: adapter({ config: './.void-wrangler.jsonc', platformProxy: { configPath: './.void-wrangler.jsonc' } })",
+    );
+    expect(source).toContain('typescript: { config: withVoidTSConfig() }');
+    expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(false);
+  });
+
   it('wires a default Astro adapter and Nitro Cloudflare dev module', () => {
     setup(
       'astro.config.mjs',

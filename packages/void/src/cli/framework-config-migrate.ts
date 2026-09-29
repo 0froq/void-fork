@@ -32,6 +32,7 @@ type Expression = {
   value?: unknown;
   callee?: Expression;
   arguments?: Array<Expression>;
+  expressions?: Array<Expression>;
   properties?: Array<
     Expression & { key?: Expression; value?: Expression; computed?: boolean; kind?: string }
   >;
@@ -115,10 +116,21 @@ function patchAdapterCall(
   const calls: Array<Expression> = [];
   for (const candidate of candidates) {
     try {
-      const node = parseExpressionAt(source, candidate.index!, {
+      const parsed = parseExpressionAt(source, candidate.index!, {
         ecmaVersion: 'latest',
         sourceType: 'module',
       }) as Expression;
+      // Acorn parses a property value followed by another property as a comma
+      // expression when started in the middle of an object. Accept only its
+      // first call when the source places it directly after a property colon.
+      const first = parsed.expressions?.[0];
+      const node =
+        parsed.type === 'SequenceExpression' &&
+        source.slice(0, candidate.index).trimEnd().endsWith(':') &&
+        first?.type === 'CallExpression' &&
+        /^\s*,/.test(source.slice(first.end))
+          ? first
+          : parsed;
       if (node.type === 'CallExpression' && node.callee?.name === identifier) {
         calls.push(node);
       }
