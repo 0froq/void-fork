@@ -235,6 +235,75 @@ it('does not delegate credentialed commands to a project-local cf', () => {
   expect(result.stdout).toContain('1.0.0-beta.5');
 });
 
+it('uses the configured HTTP proxy for direct cf activation reads', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'void-cf-proxy-read-'));
+  roots.push(root);
+  const requests: Array<string> = [];
+  const proxy = createServer((request, response) => {
+    requests.push(request.url ?? '');
+    request.resume();
+    response.writeHead(200, { 'Content-Type': 'application/json' });
+    response.end(
+      JSON.stringify({
+        success: true,
+        errors: [],
+        result: [{ id: '00000000-0000-0000-0000-000000000001', number: 1 }],
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+  try {
+    const proxyUrl = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`;
+    const apiBaseUrl = 'http://cf-proxy-test.invalid/client/v4';
+    const script = `
+      import { createCfCommand } from ${JSON.stringify(new URL('../../src/cli/cf-version-runner.ts', import.meta.url).href)};
+      const command = createCfCommand({
+        accountId: 'test-account', apiBaseUrl: ${JSON.stringify(apiBaseUrl)},
+        env: () => process.env, verifyUploader: () => true,
+      });
+      const result = command(
+        ['workers', 'versions', 'list', '--worker-id', 'proxy-worker'],
+        { cwd: ${JSON.stringify(root)}, capture: true },
+      );
+      console.log(JSON.stringify({ status: result.status, stdout: result.stdout }));
+    `;
+    const stdout = await new Promise<string>((resolve, reject) => {
+      execFile(
+        process.execPath,
+        ['--input-type=module', '-e', script],
+        {
+          cwd: root,
+          timeout: 20_000,
+          env: {
+            PATH: process.env.PATH,
+            SYSTEMROOT: process.env.SYSTEMROOT,
+            WINDIR: process.env.WINDIR,
+            TMP: process.env.TMP,
+            TEMP: process.env.TEMP,
+            CI: 'true',
+            HTTP_PROXY: proxyUrl,
+            NO_PROXY: '',
+            CLOUDFLARE_API_TOKEN: 'synthetic-token',
+            CLOUDFLARE_ACCOUNT_ID: 'test-account',
+            CLOUDFLARE_API_BASE_URL: apiBaseUrl,
+          },
+        },
+        (error, stdout, stderr) => (error ? reject(new Error(stderr)) : resolve(stdout)),
+      );
+    });
+    const result = JSON.parse(stdout) as { status: number; stdout: string };
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('00000000-0000-0000-0000-000000000001');
+    expect(requests).toEqual([
+      'http://cf-proxy-test.invalid/client/v4/accounts/test-account/workers/workers/proxy-worker/versions',
+    ]);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      proxy.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
 it('preserves activation metadata and sorts cf version history for the existing protocol', async () => {
   const prepared = await output();
   try {

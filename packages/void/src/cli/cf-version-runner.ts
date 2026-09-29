@@ -52,6 +52,9 @@ export function createCfCommand(options: {
       ...options.env(options.accountId, options.apiBaseUrl),
       CF_DELEGATION: '1',
     };
+    if (env.HTTP_PROXY || env.HTTPS_PROXY || env.http_proxy || env.https_proxy) {
+      env.NODE_USE_ENV_PROXY = '1';
+    }
     if (options.token) {
       env.CLOUDFLARE_API_TOKEN = options.token;
     }
