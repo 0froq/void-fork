@@ -159,6 +159,7 @@ import {
 } from './cloudflare-readiness.ts';
 import { formatCloudflareUserMessage } from './cloudflare-user-output.ts';
 import { readGeneratedWranglerConfigFile } from './generated-wrangler-config.ts';
+import { assertInstalledVoidMatchesCli } from './installed-void.ts';
 import { migrateLegacyVoidConfig } from './migrate.ts';
 export { parseRootWranglerConfig } from '@void/deploy-cloudflare';
 import { promptAndCreateProject } from './create-project.ts';
@@ -6502,6 +6503,7 @@ const cloudflareDeployTarget: RunDeployTargetAdapter = {
         'deploy: --project is not supported with platform cloudflare — this platform deploys to your own Cloudflare account and no Void project is involved.',
       );
     }
+    assertInstalledVoidMatchesCli(root);
     if (migrateLegacyVoidConfig(root)) {
       log.success(
         'Migrated project configuration to void.config.ts. Commit void.config.ts and void.lock.json.',
