@@ -42,7 +42,6 @@ import {
   writeCloudflareFrameworkDeployConfig,
   writeCloudflareStaticDeployConfig,
   readExistingCloudflareWorker,
-  readOptionalExistingCloudflareWorker,
   assertCloudflareDurableObjectLifecycleSupported,
   assertExistingCloudflareConfig,
   assertCloudflareBindingsPreserved,
@@ -3609,27 +3608,6 @@ export function createDeployWranglerRunner(
   };
 }
 
-async function cfInheritedBindings(
-  configPath: string,
-  workerName: string,
-  existingWorker: ExistingCloudflareWorker | null,
-  runWrangler: DeployWranglerRun,
-): Promise<ReadonlyArray<Record<string, unknown>> | undefined> {
-  const config = parseRootWranglerConfig(configPath);
-  if (config.keep_vars !== true && config.keep_secrets !== true) {
-    return undefined;
-  }
-  if (existingWorker) {
-    return existingWorker.bindings;
-  }
-  const remote = await readOptionalExistingCloudflareWorker({
-    runWrangler,
-    configPath,
-    workerName,
-  });
-  return remote?.bindings ?? [];
-}
-
 async function chooseCloudflareDeployAccount(options: {
   persist?: boolean;
   beforeWranglerRun: () => boolean;
@@ -5399,15 +5377,9 @@ export async function runCloudflareDeploy(
   const generatedConfigPath = (
     deps.resolveGeneratedConfigPath ?? resolveGeneratedDeployConfigPathDefault
   )(root);
-  const inheritedBindings =
-    deps.activateVersion || deps.runWrangler
-      ? undefined
-      : await cfInheritedBindings(generatedConfigPath, workerName, existingWorker, runWrangler);
   if (!deps.activateVersion && !deps.runWrangler) {
     // Validate the exact upload format before changing a remote database or secret.
-    const preflight = await prepareCfBuildOutput(dirname(generatedConfigPath), accountId, {
-      inheritedBindings,
-    });
+    const preflight = await prepareCfBuildOutput(dirname(generatedConfigPath), accountId);
     if (!preflight) {
       log.error('deploy: cf could not prepare the built Worker for deployment.');
       return exit(1);
@@ -5677,9 +5649,7 @@ export async function runCloudflareDeploy(
   const cfOutput =
     deps.activateVersion || deps.runWrangler
       ? null
-      : await prepareCfBuildOutput(dirname(generatedConfigPath), accountId, {
-          inheritedBindings,
-        });
+      : await prepareCfBuildOutput(dirname(generatedConfigPath), accountId);
   if (!cfOutput && !deps.activateVersion && !deps.runWrangler) {
     log.error('deploy: cf could not prepare the built Worker for deployment.');
     return exit(1);
@@ -6342,10 +6312,6 @@ async function runCloudflareStaticDeploy(
   if (!deps.activateVersion && !deps.runWrangler && !cfUploaderIsPinned()) {
     return exit(1);
   }
-  const inheritedBindings =
-    deps.activateVersion || deps.runWrangler
-      ? undefined
-      : await cfInheritedBindings(staticConfigPath, workerName, existingWorker, runWrangler);
   const cfOutput =
     deps.activateVersion || deps.runWrangler
       ? null
@@ -6354,7 +6320,6 @@ async function runCloudflareStaticDeploy(
           configPath: staticConfigPath,
           assetsDirectory: stagedAssetsDirectory,
           accountId,
-          inheritedBindings,
         });
   if (!cfOutput && !deps.activateVersion && !deps.runWrangler) {
     log.error('deploy: cf could not prepare the static Worker for deployment.');

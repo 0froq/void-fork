@@ -1,6 +1,5 @@
 export {
   readExistingCloudflareWorker,
-  readOptionalExistingCloudflareWorker,
   readCloudflareWorkerMigrationTag,
   readCloudflareVersionMigrationTag,
   assertCloudflareDurableObjectLifecycleSupported,

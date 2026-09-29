@@ -15,7 +15,6 @@ import { InputConfigSchema } from '@cloudflare/config';
 import { dirname, join } from 'pathslash';
 
 type JsonObject = Record<string, unknown>;
-type MigrationOptions = { inheritedBindings?: ReadonlyArray<JsonObject> };
 
 function record(value: unknown): JsonObject | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -32,8 +31,8 @@ function empty(value: unknown): boolean {
   );
 }
 
-/** Values emitted solely for Wrangler's build/dev machinery are not deployment settings. */
-function migrationInput(raw: JsonObject, options: MigrationOptions): JsonObject {
+/** Remove build-only fields and settings translated into cf's typed config below. */
+function migrationInput(raw: JsonObject): JsonObject {
   const result = { ...raw };
   if (
     !empty(result.rules) &&
@@ -43,54 +42,6 @@ function migrationInput(raw: JsonObject, options: MigrationOptions): JsonObject 
   }
   if (empty(result.logfwdr) || isDeepStrictEqual(result.logfwdr, { bindings: [] })) {
     delete result.logfwdr;
-  }
-  if (result.keep_assets === true && !record(result.assets)?.directory) {
-    throw new Error('cf cannot preserve existing Worker assets without a new assets directory.');
-  }
-  if (result.keep_vars === true || result.keep_secrets === true) {
-    const bindings = options.inheritedBindings;
-    if (!bindings) {
-      throw new Error('Existing Worker bindings are required to preserve variables and secrets.');
-    }
-    const vars = { ...record(result.vars) };
-    const secrets = record(result.secrets);
-    const required = new Set(
-      Array.isArray(secrets?.required) ? (secrets.required as Array<string>) : [],
-    );
-    for (const binding of bindings) {
-      if (typeof binding.name !== 'string') {
-        throw new Error('Cloudflare returned a binding without a name.');
-      }
-      if (result.keep_vars === true && !Object.hasOwn(vars, binding.name)) {
-        if (binding.type === 'plain_text') {
-          if (typeof binding.text !== 'string') {
-            throw new Error(
-              `Cloudflare did not return the value of Worker variable ${binding.name}.`,
-            );
-          }
-          vars[binding.name] = binding.text;
-        } else if (binding.type === 'json') {
-          if (binding.json === undefined) {
-            throw new Error(
-              `Cloudflare did not return the value of Worker variable ${binding.name}.`,
-            );
-          }
-          vars[binding.name] = binding.json;
-        }
-      }
-      if (
-        (result.keep_vars === true || result.keep_secrets === true) &&
-        (binding.type === 'secret_text' || binding.type === 'secret_key')
-      ) {
-        required.add(binding.name);
-      }
-    }
-    if (Object.keys(vars).length > 0) {
-      result.vars = vars;
-    }
-    if (required.size > 0) {
-      result.secrets = { ...secrets, required: [...required] };
-    }
   }
   for (const key of [
     'configPath',
@@ -118,6 +69,36 @@ function migrationInput(raw: JsonObject, options: MigrationOptions): JsonObject 
     }
   }
   return result;
+}
+
+function applyPreservationFlags(raw: JsonObject, worker: JsonObject): void {
+  // cf forwards unsafe.metadata to the Worker upload metadata, including these API flags.
+  const keepBindings = [
+    ...(raw.keep_vars === true ? ['plain_text', 'json'] : []),
+    ...(raw.keep_secrets === true ? ['secret_text', 'secret_key'] : []),
+  ];
+  if (keepBindings.length === 0 && raw.keep_assets !== true) {
+    return;
+  }
+  const unsafe = record(worker.unsafe) ?? {};
+  const metadata = record(unsafe.metadata) ?? {};
+  const previous = metadata.keep_bindings;
+  if (
+    previous !== undefined &&
+    (!Array.isArray(previous) || !previous.every((value) => typeof value === 'string'))
+  ) {
+    throw new Error('Invalid keep_bindings in the built Cloudflare config.');
+  }
+  worker.unsafe = {
+    ...unsafe,
+    metadata: {
+      ...metadata,
+      ...(keepBindings.length > 0
+        ? { keep_bindings: [...new Set([...(previous ?? []), ...keepBindings])] }
+        : {}),
+      ...(raw.keep_assets === true ? { keep_assets: true } : {}),
+    },
+  };
 }
 
 function applyWorkflows(raw: JsonObject, worker: JsonObject): void {
@@ -331,7 +312,6 @@ function containersFromWrangler(raw: JsonObject, exports: JsonObject): Array<Jso
  */
 export function migrateBuiltWranglerConfig(
   raw: JsonObject,
-  options: MigrationOptions = {},
 ): ReturnType<typeof InputConfigSchema.parse> {
   const cfPackage = fileURLToPath(import.meta.resolve('cf/package.json'));
   const cfBinary = join(dirname(cfPackage), 'bin', 'cf');
@@ -350,7 +330,7 @@ export function migrateBuiltWranglerConfig(
       { mode: 0o600 },
     );
     const configPath = join(directory, 'wrangler.json');
-    writeFileSync(configPath, JSON.stringify(migrationInput(raw, options)), { mode: 0o600 });
+    writeFileSync(configPath, JSON.stringify(migrationInput(raw)), { mode: 0o600 });
     const env = uncredentialedEnvironment();
     const migrated = spawnSync(
       process.execPath,
@@ -390,6 +370,7 @@ export function migrateBuiltWranglerConfig(
     if (!result || !worker) {
       throw new Error('cf did not generate a Worker configuration.');
     }
+    applyPreservationFlags(raw, worker);
     applyWorkflows(raw, worker);
     const exports = { ...record(worker.exports), ...durableObjectExports(raw) };
     const containers = containersFromWrangler(raw, exports);

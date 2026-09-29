@@ -190,21 +190,17 @@ it('preserves worker settings that the previous bridge dropped', async () => {
   }
 });
 
-it('preserves linked Worker variables and secrets in the cf upload', async () => {
+it('preserves existing Worker variables, secrets, and assets in the cf upload', async () => {
   const output = worker({
     name: 'void-test',
     compatibility_date: '2026-09-29',
     main: 'index.js',
     keep_vars: true,
+    keep_secrets: true,
+    keep_assets: true,
     vars: { EDITED: 'current' },
   });
-  const prepared = await prepareCfBuildOutput(output, 'account-id', {
-    inheritedBindings: [
-      { name: 'PRESERVED', type: 'plain_text', text: 'production' },
-      { name: 'STRUCTURED', type: 'json', json: { active: true } },
-      { name: 'TOKEN', type: 'secret_text' },
-    ],
-  });
+  const prepared = await prepareCfBuildOutput(output, 'account-id');
   expect(prepared).not.toBeNull();
   if (!prepared) {
     return;
@@ -213,9 +209,10 @@ it('preserves linked Worker variables and secrets in the cf upload', async () =>
     const built = await readBuildOutput(prepared.directory);
     expect(built.workers.default.config.env).toMatchObject({
       EDITED: { type: 'text', value: 'current' },
-      PRESERVED: { type: 'text', value: 'production' },
-      STRUCTURED: { type: 'json', value: { active: true } },
-      TOKEN: { type: 'secret' },
+    });
+    expect(built.workers.default.config.unsafe?.metadata).toMatchObject({
+      keep_bindings: ['plain_text', 'json', 'secret_text', 'secret_key'],
+      keep_assets: true,
     });
     const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
     const dryRun = spawnSync(
