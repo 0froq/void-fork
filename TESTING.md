@@ -67,6 +67,10 @@ The in-memory API deletion tests schedule the fixed container-orphan sweep delay
 They still execute both sweeps and all provider/database assertions. Production timing and the
 real subprocess/lock deadline tests retain their actual timing semantics.
 
+CLI and deploy tests that stub their network boundary and call production functions directly run
+in the unit project. The integration project is reserved for real builds, subprocesses, servers,
+and browser behavior.
+
 ## Prepublish Test
 
 Packed tests install the current tarballs into fresh applications through a temporary local
