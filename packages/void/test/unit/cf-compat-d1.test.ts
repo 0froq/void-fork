@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { join } from 'pathslash';
 import { expect, it } from 'vite-plus/test';
 
@@ -38,7 +39,17 @@ syncBuiltinESMExports();
     const entry = join(import.meta.dirname, '..', '..', 'src', 'cli', 'cf-compat.ts');
     const result = spawnSync(
       process.execPath,
-      ['--import', preload, entry, 'd1', 'migrations', 'list', 'DB', '-c', config],
+      [
+        '--import',
+        pathToFileURL(preload).href,
+        entry,
+        'd1',
+        'migrations',
+        'list',
+        'DB',
+        '-c',
+        config,
+      ],
       {
         env: { ...process.env, VOID_TEST_CF_CAPTURE: capture },
         encoding: 'utf8',

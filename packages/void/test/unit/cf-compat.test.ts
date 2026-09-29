@@ -4,6 +4,7 @@ import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { join } from 'pathslash';
 import { expect, it } from 'vite-plus/test';
 import { resolveWranglerArgv } from '../../src/cli/preset.ts';
@@ -97,7 +98,7 @@ syncBuiltinESMExports();
         process.execPath,
         [
           '--import',
-          preload,
+          pathToFileURL(preload).href,
           entry,
           'triggers',
           'clear-crons',
@@ -676,7 +677,16 @@ syncBuiltinESMExports();
       (resolve) => {
         execFile(
           process.execPath,
-          ['--import', preload, entry, 'versions', 'view', versionId, '-c', configPath],
+          [
+            '--import',
+            pathToFileURL(preload).href,
+            entry,
+            'versions',
+            'view',
+            versionId,
+            '-c',
+            configPath,
+          ],
           {
             cwd: directory,
             encoding: 'utf8',
