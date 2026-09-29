@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { readBuildOutput } from '@cloudflare/build-output-utils';
 import { parse } from 'jsonc-parser';
 import { dirname, join, resolve } from 'pathslash';
 import { EnvHttpProxyAgent, fetch as httpFetch } from 'undici';
@@ -103,6 +104,7 @@ async function withBuildOutput(
       throw new Error('Could not prepare the Cloudflare Worker build output.');
     }
     try {
+      await assertExistingProvisionableResources(output.directory, raw, accountId);
       return action(output.directory);
     } finally {
       output.dispose();
@@ -204,7 +206,11 @@ function accountId(): string {
   return accountId;
 }
 
-async function cloudflareApiGet(path: string, failure: string): Promise<Json> {
+async function cloudflareApiGet(
+  path: string,
+  failure: string,
+  extraHeaders: Record<string, string> = {},
+): Promise<Json> {
   const base = process.env.CLOUDFLARE_API_BASE_URL ?? 'https://api.cloudflare.com/client/v4';
   const url = `${base.replace(/\/$/, '')}${path}`;
   const proxy =
@@ -216,7 +222,7 @@ async function cloudflareApiGet(path: string, failure: string): Promise<Json> {
       : null;
   try {
     const response = await httpFetch(url, {
-      headers: apiHeaders(),
+      headers: { ...apiHeaders(), ...extraHeaders },
       redirect: 'error',
       signal: AbortSignal.timeout(30_000),
       ...(proxy ? { dispatcher: proxy } : {}),
@@ -228,6 +234,81 @@ async function cloudflareApiGet(path: string, failure: string): Promise<Json> {
     return body;
   } finally {
     await proxy?.close();
+  }
+}
+
+async function assertExistingProvisionableResources(
+  directory: string,
+  raw: Json,
+  account: string,
+): Promise<void> {
+  // cf 1.0.0-beta.5 turns on Wrangler's automatic provisioning for every
+  // prebuilt upload, with no exposed flag to turn it off. A named R2 bucket,
+  // Queue, or dispatch namespace may otherwise be created during an upload.
+  const built = await readBuildOutput(directory);
+  const bindings = built.workers.default.config.env ?? {};
+  const queueNames = new Set<string>();
+  const accountPath = `/accounts/${encodeURIComponent(account)}`;
+  for (const [bindingName, value] of Object.entries(bindings)) {
+    const binding = object(value);
+    const identifier = (key: string): string => {
+      const id = binding[key];
+      if (typeof id !== 'string' || !id) {
+        throw new Error(
+          `Cloudflare binding ${bindingName} has no ${key}; refusing automatic provisioning.`,
+        );
+      }
+      return id;
+    };
+    if (binding.type === 'kv' || binding.type === 'd1') {
+      identifier('id');
+    } else if (binding.type === 'r2') {
+      const name = identifier('name');
+      const source = Array.isArray(raw.r2_buckets)
+        ? raw.r2_buckets.map(object).find((entry) => entry.binding === bindingName)
+        : undefined;
+      const jurisdiction = source?.jurisdiction;
+      if (jurisdiction !== undefined && typeof jurisdiction !== 'string') {
+        throw new Error(`Cloudflare R2 binding ${bindingName} has an invalid jurisdiction.`);
+      }
+      await cloudflareApiGet(
+        `${accountPath}/r2/buckets/${encodeURIComponent(name)}`,
+        `Cloudflare R2 bucket ${name} is unavailable; refusing automatic provisioning.`,
+        jurisdiction ? { 'cf-r2-jurisdiction': jurisdiction } : {},
+      );
+    } else if (binding.type === 'queue') {
+      queueNames.add(identifier('name'));
+    } else if (binding.type === 'dispatch-namespace') {
+      const name = identifier('namespace');
+      await cloudflareApiGet(
+        `${accountPath}/workers/dispatch/namespaces/${encodeURIComponent(name)}`,
+        `Cloudflare dispatch namespace ${name} is unavailable; refusing automatic provisioning.`,
+      );
+    } else if (binding.type === 'ai-search-namespace') {
+      const name = identifier('namespace');
+      await cloudflareApiGet(
+        `${accountPath}/ai-search/namespaces/${encodeURIComponent(name)}`,
+        `Cloudflare AI Search namespace ${name} is unavailable; refusing automatic provisioning.`,
+      );
+    } else if (binding.type === 'agent-memory') {
+      const name = identifier('namespace');
+      await cloudflareApiGet(
+        `${accountPath}/agent-memory/namespaces/${encodeURIComponent(name)}`,
+        `Cloudflare Agent Memory namespace ${name} is unavailable; refusing automatic provisioning.`,
+      );
+    } else if (binding.type === 'flagship') {
+      identifier('id');
+    }
+  }
+  if (queueNames.size > 0) {
+    const existing = new Set((await readAllQueues()).map((queue) => queue.queue_name));
+    for (const name of queueNames) {
+      if (!existing.has(name)) {
+        throw new Error(
+          `Cloudflare Queue ${name} is unavailable; refusing automatic provisioning.`,
+        );
+      }
+    }
   }
 }
 
