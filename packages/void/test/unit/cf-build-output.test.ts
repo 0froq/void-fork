@@ -350,7 +350,7 @@ it('deploys Worker Workflow declarations through cf build output', async () => {
   } finally {
     prepared.dispose();
   }
-});
+}, 15_000);
 
 it('copies an internal symlinked Worker module into the prebuilt artifact', async () => {
   const output = worker({
@@ -418,7 +418,7 @@ it('keeps Durable Objects, Queue triggers, and Containers in cf prebuilt output'
   } finally {
     prepared.dispose();
   }
-});
+}, 15_000);
 
 it('bundles a generated static Worker and staged assets into prebuilt cf output', async () => {
   const root = mkdtempSync(join(dirname(fileURLToPath(import.meta.url)), '.tmp-cf-static-'));

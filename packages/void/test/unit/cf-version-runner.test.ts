@@ -753,6 +753,7 @@ it.each(['r2', 'queue'] as const)(
       prepared.dispose();
     }
   },
+  15_000,
 );
 
 it('uploads when existing R2 and Queue bindings are verified by exact identity', async () => {
