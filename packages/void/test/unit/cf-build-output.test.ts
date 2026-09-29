@@ -84,7 +84,9 @@ export default { fetch() {
   });
   await builder.buildApp();
   const output = join(root, 'dist', 'void_additional_modules');
-  expect(readdirSync(output, { recursive: true }).some((name) => name.endsWith('.css'))).toBe(true);
+  expect(
+    readdirSync(output, { recursive: true }).some((name) => String(name).endsWith('.css')),
+  ).toBe(true);
   const prepared = await prepareCfBuildOutput(output, 'account-id');
   expect(prepared).not.toBeNull();
   if (!prepared) {
