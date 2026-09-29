@@ -36,7 +36,7 @@ Types follow your data through the app: from a Drizzle schema to a route handler
 
 Void brings these pieces together:
 
-- **Resources from your code:** imports tell Void which supported resources to provision. Use `void.json` or your Cloudflare config when you need to customize them.
+- **Resources from your code:** imports tell Void which supported resources to provision. Use `void.config.ts` and its `cloudflare` field when you need to customize them.
 - **Types from database to frontend:** your Drizzle schema defines DB types, route handlers infer return types, and the [typed fetch client](./typed-fetch.md) checks calls at the usage site. One [Standard Schema](https://standardschema.dev/) validator can drive both runtime validation and compile-time types.
 - **Local Cloudflare development:** native Void apps run server code in `workerd`, with local database, KV, and storage.
 - **Deploy that understands the app:** `void deploy` reads your migrations, provisions the resources you actually use, and ships the result to the edge.

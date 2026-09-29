@@ -48,7 +48,7 @@ Use this page as a command reference. If you are setting up a project for the fi
 | `void email disallow <address>`   | Remove a recipient from the allowlist                                         |
 | `void email domain`               | Send and receive at your own domain on a Cloudflare zone                      |
 | `void init`                       | Setup wizard for new or existing projects                                     |
-| `void migrate`                    | Convert legacy `void.json` into `void.config.ts`                              |
+| `void migrate`                    | Convert legacy `void.json` and root Wrangler JSON/JSONC into `void.config.ts` |
 
 ## Binary Invocation
 
@@ -78,7 +78,7 @@ Use `void --help` for the command list. For a specific command, try `void deploy
 
 ### `void migrate`
 
-`void migrate` converts `void.json` into a typed `void.config.ts` and keeps a copy of the original file under `.void/config-migration/`. Review and commit the new config. If both config files already exist with different settings, resolve them before retrying.
+`void migrate` converts `void.json` and root `wrangler.jsonc` or `wrangler.json` into a typed `void.config.ts`. Void backs up the originals under `.void/config-migration/`, keeps Cloudflare resource state in `void.lock.json`, and updates supported framework adapters to use its generated Cloudflare config. `void init` and `void deploy` run this migration automatically when they find legacy files. Review and commit the new config and lock. If existing files disagree, resolve them before retrying.
 
 ### `void init`
 
@@ -113,7 +113,7 @@ After that, the full interactive flow walks through:
 3. **Agent instructions:** always creates or updates `AGENTS.md` with brief Void instructions and the bundled docs path, preserving content outside the versioned block.
 4. **Skills:** links Void skills for detected coding agents.
 5. **Demo code:** for existing non-Pages projects, optionally scaffolds a `db/migrations/` directory plus an API route and typed fetch example.
-6. **Deployment platform:** asks where `void deploy` should send the app: Cloudflare (the default), Void, or Skip deployment setup. The choice is stored as `platform` in `.void/project.json`. Choosing Cloudflare creates or augments `wrangler.jsonc`, checks the Cloudflare session through Void's bundled tooling, opens secure browser sign-in when needed, and writes the selected account as `account_id` (automatically when only one account is available).
+6. **Deployment platform:** asks where `void deploy` should send the app: Cloudflare (the default), Void, or Skip deployment setup. The choice is stored as `platform` in `.void/project.json`. Choosing Cloudflare records settings in `void.config.ts` and `void.lock.json`, checks the Cloudflare session through Void's bundled tooling, opens secure browser sign-in when needed, and writes the selected account as `account_id` (automatically when only one account is available).
 7. **GitHub Actions:** optionally creates `.github/workflows/void-deploy.yml` for the selected target. Cloudflare workflows run `void deploy --platform cloudflare` with `CLOUDFLARE_API_TOKEN` and pass the optional `DATABASE_URL` secret needed by PostgreSQL/MySQL apps. Void workflows use the selected platform's API URL and are offered only when its discovery document advertises GitHub Actions support.
 8. **`env.ts` scaffold:** if the project has no `env.ts` but has a root `.env`, generates an `env.ts` pre-populated with its keys. Values get conservative type inference (`boolean`/`url`/`number`/`string`) — the file carries a banner nudging you to tighten anything the heuristic got wrong.
 9. **Void project setup:** when Void is selected, optionally logs you in, lets you select or create a project, and adds the link to `.void/project.json` so your first deploy can just be `void deploy`.
@@ -159,7 +159,7 @@ void connect --platform void
 
 Connect a project to its deployment destination. With no arguments, choose Cloudflare or a Void platform interactively. A URL selects a Void platform directly. `--platform void` offers saved platforms and an option to enter another URL.
 
-For Cloudflare, Void signs in through the browser when needed, selects an accessible account, and saves `account_id` in the root `wrangler.jsonc` or `wrangler.json`. It shares this setup with `void init`. An existing account selection is preserved; conflicting or inaccessible account settings must be resolved before continuing.
+For Cloudflare, Void signs in through the browser when needed, selects an accessible account, and saves `cloudflare.account_id` in `void.config.ts` or resolved state in `void.lock.json`. It shares this setup with `void init`. An existing account selection is preserved; conflicting or inaccessible account settings must be resolved before continuing.
 
 For a Void platform, Void validates its discovery document, reuses a valid session or opens browser login using the platform's supported providers, and saves the verified API and proxy origins. Credentials are stored in the operating-system keychain for that API origin. A sole login provider is selected automatically.
 
@@ -225,11 +225,11 @@ An API token or global API key pair in the environment takes precedence over bro
 Show deployments for the configured target.
 
 - Void targets show recent hosted deployments; `[name]` looks up a project by slug and otherwise the linked project is used.
-- Cloudflare targets list Worker Versions, identify the active version, and show the recorded migration count. A project name is not accepted because the Worker name comes from root `wrangler.jsonc`.
+- Cloudflare targets list Worker Versions, identify the active version, and show the recorded migration count. A project name is not accepted because the Worker name comes from `cloudflare.name` in `void.config.ts`.
 
 ### `void project link [name]`
 
-Link current directory to an existing hosted Void project by slug, or select interactively if omitted. State is stored in `.void/project.json`. Direct Cloudflare apps use the Worker name in the root config and do not need linking.
+Link current directory to an existing hosted Void project by slug, or select interactively if omitted. State is stored in `.void/project.json`. Direct Cloudflare apps use `cloudflare.name` in `void.config.ts` and do not need linking.
 
 ### `void project list`
 
@@ -314,7 +314,7 @@ in the two entries when the Access policies require them.
 void project logs [--level <level>] [--filter <text>] [--range <duration>] [--deployment <id>]
 ```
 
-Show runtime logs from the deployed target. Hosted Void targets query retained log history. Cloudflare targets open a live tail for the Worker named in root `wrangler.jsonc`; they do not provide historical log storage.
+Show runtime logs from the deployed target. Hosted Void targets query retained log history. Cloudflare targets open a live tail for the Worker named in `void.config.ts`; they do not provide historical log storage.
 
 | Flag                 | Purpose                                                                                                                                                                                                         | Default |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
@@ -866,7 +866,7 @@ An unlinked project with a root `wrangler.jsonc` or `wrangler.json` gets a promp
 
 The first handoff preserves production bindings, variables, secrets, event handlers, and triggers. The active version must be the latest uploaded version so inherited secrets have an unambiguous source. Apart from an explicitly enabled ISR cache, new resources, migrations, runtime features, auth setup, or local secret overrides must be handled separately. See [Deploy an existing Worker](../integrations/cloudflare.md#deploy-an-existing-worker).
 
-When prerendered or revalidated pages need a cache during migration, Void asks whether to enable ISR and saves `routing.isr` in `void.json`. Yes provisions the KV cache during this handoff; No keeps ISR disabled on every later deploy until you change the setting. CI must set `routing.isr` explicitly if a pending migration has no saved choice. Existing ISR namespaces are reused; application KV bindings are still required.
+When prerendered or revalidated pages need a cache during migration, Void asks whether to enable ISR and saves `routing.isr` in `void.config.ts`. Yes provisions the KV cache during this handoff; No keeps ISR disabled on every later deploy until you change the setting. CI must set `routing.isr` explicitly if a pending migration has no saved choice. Existing ISR namespaces are reused; application KV bindings are still required.
 
 For Drizzle projects, deploy performs a read-only schema drift check. If a new migration would be generated, deploy stops and tells you to run `void db generate`, review the migration, commit it yourself, and rerun `void deploy`.
 
@@ -932,7 +932,7 @@ That fallback is mainly for projects that skipped Void project setup during `voi
 
 ### `void deploy --platform cloudflare`
 
-Build and deploy to your Cloudflare account using the root `wrangler.jsonc`:
+Build and deploy to your Cloudflare account using `void.config.ts`:
 
 ```sh
 void deploy --platform cloudflare
@@ -945,13 +945,13 @@ Void signs you in through your browser when needed and saves the selected accoun
 | ------------------------------ | -------------------------------------------------------------------------------------- |
 | `--dir`, `--spa`               | Deploy static output through a small Worker and Workers Assets                         |
 | `--skip-build`                 | Reuse existing static, SPA, or SSG output; unavailable for Worker apps                 |
-| `--project`                    | Unavailable; the Worker and account come from the Cloudflare config                    |
-| Named environments             | Unavailable; use the top-level root config                                             |
+| `--project`                    | Unavailable; the Worker and account come from `void.config.ts` and `void.lock.json`    |
+| Named environments             | Unavailable; use the top-level `cloudflare` config                                     |
 | `CLOUDFLARE_WORKERS_SUBDOMAIN` | Needed in fresh CI when versions have no preview URL; cached locally after a deploy    |
 | `--require-email`              | Fail instead of deploying without email when the email step cannot run, as in CI       |
 | `DATABASE_URL`                 | Required in the deploy environment for PostgreSQL or MySQL provisioning and migrations |
 
-The token needs Workers Scripts: Edit, read access to bound resources, and edit permissions for products Void provisions. First-time Hyperdrive provisioning specifically needs `CLOUDFLARE_API_TOKEN` with Hyperdrive edit permission, or an existing config ID in `wrangler.jsonc`.
+The token needs Workers Scripts: Edit, read access to bound resources, and edit permissions for products Void provisions. First-time Hyperdrive provisioning specifically needs `CLOUDFLARE_API_TOKEN` with Hyperdrive edit permission, or an existing config ID in `cloudflare.hyperdrive` in `void.config.ts`.
 
 Email setup needs a browser session from `void cloudflare login`, which carries the Email Routing and Email Sending scopes (a session created by older Cloudflare tooling lacks them: `void cloudflare logout`, then sign in again), or a `CLOUDFLARE_API_TOKEN` that also has Email Routing Edit and Email Sending Edit. A Global API Key pair is refused.
 
@@ -963,13 +963,13 @@ If Cloudflare Access protects readiness URLs, supply an allowed `CF_ACCESS_CLIEN
 
 Secrets and migrations are validated after the build, so a failed check may leave provisioned resources. It doesn't apply remote D1 migrations or upload the application Worker. PostgreSQL migrations are transactional; MySQL schema changes may partially apply on error.
 
-Provisioning reuses known resource IDs and writes newly resolved IDs into `wrangler.jsonc`, preserving comments but possibly changing indentation. Commit that file for other machines and CI. Run the first deploy from one machine at a time because provisioning locks are local. The old `--provision` flag is accepted but no longer needed.
+Provisioning reuses known resource IDs and records newly resolved IDs in `void.lock.json`. Commit that file for other machines and CI. Run the first deploy from one machine at a time because provisioning locks are local. The old `--provision` flag is accepted but no longer needed.
 
-`.env` is local-only and isn't emitted into Worker vars. Store every schema-declared server key with `void secret put <NAME>`; Void emits required names through `secrets.required` and blocks plaintext server vars. On a new Worker, set required secrets before retrying if the initial remote check reports them missing. Custom D1 layouts are accepted only when Cloudflare's exact file set, bytes, and numeric order match the migrations Void validated. Direct deploy and operational commands use the top-level root config and reject named environments and alternate config-path overrides.
+`.env` is local-only and isn't emitted into Worker vars. Store every schema-declared server key with `void secret put <NAME>`; Void emits required names through `secrets.required` and blocks plaintext server vars. On a new Worker, set required secrets before retrying if the initial remote check reports them missing. Custom D1 layouts are accepted only when Cloudflare's exact file set, bytes, and numeric order match the migrations Void validated. Direct deploy and operational commands use the top-level Cloudflare settings and reject named environments and alternate config-path overrides.
 
 Existing remote secrets are preserved. Void also preserves or creates `BETTER_AUTH_SECRET` for auth apps.
 
-**Email.** When the app uses email (`sendEmail()` or `email/` handlers) and `void.json` has `email.from`, the deploy reads the state of that address's zone before the build — session scopes, zone, MX records, Email Routing, subaddressing, routing rules, Email Sending, and what `wrangler.jsonc` holds — prints a checklist of what it would change in your account, and asks once (default Yes). On Yes it enables what is missing, writes `send_email: [{ "name": "SEND_EMAIL" }]`, the `__VOID_EMAIL_FROM` var and the `addresses` array into `wrangler.jsonc`, and lets wrangler create the routing rules when the activated version's triggers are synchronized; the deploy ends with the address map. A deploy with nothing left to set up asks nothing. Without `email.from` the deploy prints `add "email": { "from": "you@mail.acme.com" } to void.json` and continues without email. Non-interactive runs (CI, or stdin/stdout not a terminal) never prompt: they print the checklist plus `Run void email setup --platform cloudflare once locally, commit wrangler.jsonc, then redeploy` and deploy without email (or with the setup `wrangler.jsonc` already carries, when the binding is committed) — unless `--require-email` is passed, which fails instead. If setup has committed the exact subdomain `addresses` plan but the deploy's resolver still sees no MX records, Void preserves the plan and stops before build or upload until DNS can be verified. A deploy whose account rows all read ready reconciles the two config rows — `addresses` against the current derivation and `vars.__VOID_EMAIL_FROM` against `email.from` — with a plain file write and no prompt. See [Your own Cloudflare account](../guide/email.md#your-own-cloudflare-account) for the whole flow, including the subdomain-vs-apex rule and what stays manual.
+**Email.** When the app uses email (`sendEmail()` or `email/` handlers) and `void.config.ts` has `email.from`, the deploy reads the state of that address's zone before the build — session scopes, zone, MX records, Email Routing, subaddressing, routing rules, Email Sending, and what Void's Cloudflare config holds — prints a checklist of what it would change in your account, and asks once (default Yes). On Yes it enables what is missing, writes `send_email: [{ "name": "SEND_EMAIL" }]`, the `__VOID_EMAIL_FROM` var and the `addresses` array into Void's Cloudflare config, and lets Cloudflare tooling create the routing rules when the activated version's triggers are synchronized; the deploy ends with the address map. A deploy with nothing left to set up asks nothing. Without `email.from` the deploy prints `set email.from in void.config.ts` and continues without email. Non-interactive runs (CI, or stdin/stdout not a terminal) never prompt: they print the checklist plus `Run void email setup --platform cloudflare once locally, commit void.lock.json, then redeploy` and deploy without email (or with the setup Void's Cloudflare config already carries, when the binding is committed) — unless `--require-email` is passed, which fails instead. If setup has committed the exact subdomain `addresses` plan but the deploy's resolver still sees no MX records, Void preserves the plan and stops before build or upload until DNS can be verified. A deploy whose account rows all read ready reconciles the two config rows — `addresses` against the current derivation and `vars.__VOID_EMAIL_FROM` against `email.from` — with a plain file write and no prompt. See [Your own Cloudflare account](../guide/email.md#your-own-cloudflare-account) for the whole flow, including the subdomain-vs-apex rule and what stays manual.
 
 See the [Cloudflare guide](../integrations/cloudflare.md#deploy-to-your-own-cloudflare-account) for the complete deployment sequence, first-deploy exceptions, secret precedence, and recovery behavior.
 
@@ -1024,7 +1024,7 @@ Run ad-hoc SQL against the database. Provide SQL inline or from a file. SELECT q
 By default, targets the local database. Pass `--remote` to run against the deployed database selected in `.void/project.json`:
 
 - **Void platform D1 projects**: routes the query through the selected platform's registered proxy using your auth token. Void Cloud's proxy is `proxy.void.cloud`; a self-hosted platform uses its own proxy URL.
-- **Direct Cloudflare D1 projects**: invokes Cloudflare against the pinned D1 binding from root `wrangler.jsonc`.
+- **Direct Cloudflare D1 projects**: invokes Cloudflare against the pinned D1 binding from `void.config.ts` or `void.lock.json`.
 - **Hosted PostgreSQL and MySQL projects**: fetches the stored connection string from the platform and connects directly.
 - **Direct Cloudflare PostgreSQL and MySQL projects**: uses `DATABASE_URL` from the current shell; Cloudflare cannot return the password from Hyperdrive.
 
@@ -1216,7 +1216,7 @@ void gen queue emails
 void secret list [--project <name>]
 ```
 
-List production secret names for the saved target. Secret values are never printed. Direct Cloudflare targets query the Worker named in root `wrangler.jsonc`; `--project` is hosted-only.
+List production secret names for the saved target. Secret values are never printed. Direct Cloudflare targets query the Worker named in `void.config.ts`; `--project` is hosted-only.
 
 ### `void secret put`
 
@@ -1502,7 +1502,7 @@ Remove a custom domain from the saved target. For Cloudflare, this removes the m
 void domain list [--project <name>]
 ```
 
-List all custom domains. Hosted projects show active/pending state from the platform; direct Cloudflare projects list the custom-domain routes currently configured in root `wrangler.jsonc`.
+List all custom domains. Hosted projects show active/pending state from the platform; direct Cloudflare projects list the custom-domain routes currently configured in `void.config.ts`.
 
 ### `void domain status`
 
@@ -1516,7 +1516,7 @@ Pass `--verbose` to additionally print the raw multi-line status breakdown (DB s
 
 Project resolution for domain commands follows the same order as deploy (`--project`, `VOID_PROJECT`, linked project).
 
-For direct Cloudflare projects, status reports whether the route is present in the root config. It does not claim to inspect remote certificate issuance; Cloudflare owns that state and exposes it in the dashboard. `--project` is hosted-only.
+For direct Cloudflare projects, status reports whether the route is present in the Void Cloudflare config. It does not claim to inspect remote certificate issuance; Cloudflare owns that state and exposes it in the dashboard. `--project` is hosted-only.
 
 ## Email
 
@@ -1628,7 +1628,7 @@ Disable the domain assignment and record cleanup. Zone resources used by another
 void email status --platform cloudflare
 ```
 
-Read-only. Checks the email setup on your own Cloudflare account for the domain of `email.from` in `void.json` — session scopes, zone, MX records, Email Routing (and its subaddressing setting), Email Sending, the routing rule for every `email/` handler, and the `send_email` binding — then prints the status rows and the address map (`inbound <address> → email/<handler>`, `outbound sendEmail() from <email.from>`). Exits 1 when anything is not ready. A domain still not onboarded for Email Sending reads as set up once the `send_email` binding is committed — the binding is written only after an onboarding attempt, so that pair is how a Workers Free refusal is remembered — and the sending row says so (`not onboarded — verified destinations only; after upgrading to Workers Paid run void email setup --platform cloudflare`). Takes no `--project`: it reads the local project and your Cloudflare session, never a Void project.
+Read-only. Checks the email setup on your own Cloudflare account for the domain of `email.from` in `void.config.ts` — session scopes, zone, MX records, Email Routing (and its subaddressing setting), Email Sending, the routing rule for every `email/` handler, and the `send_email` binding — then prints the status rows and the address map (`inbound <address> → email/<handler>`, `outbound sendEmail() from <email.from>`). Exits 1 when anything is not ready. A domain still not onboarded for Email Sending reads as set up once the `send_email` binding is committed — the binding is written only after an onboarding attempt, so that pair is how a Workers Free refusal is remembered — and the sending row says so (`not onboarded — verified destinations only; after upgrading to Workers Paid run void email setup --platform cloudflare`). Takes no `--project`: it reads the local project and your Cloudflare session, never a Void project.
 
 Without `--platform cloudflare` (or with `--platform void`) the command is not available yet; on the Void platform use `void email usage` and `void email destinations`. The older `--backend cloudflare` spelling remains available as a compatibility alias on `void email status` and `void email setup`, with the same rules as `void deploy`: at most once, and never together with `--platform`.
 
@@ -1638,12 +1638,12 @@ Without `--platform cloudflare` (or with `--platform void`) the command is not a
 void email setup --platform cloudflare
 ```
 
-The same setup `void deploy --platform cloudflare` offers on its first deploy, on its own — for CI, which cannot press Enter: run it locally once, commit `wrangler.jsonc`, then let CI run `void deploy --platform cloudflare --require-email`. Needs `email.from` in `void.json` and a `void cloudflare login` session (a session created by older Cloudflare tooling lacks the email scopes: `void cloudflare logout`, then sign in again) or a `CLOUDFLARE_API_TOKEN` with Email Routing Edit + Email Sending Edit — the CI credential. It runs the preflight above, prints the checklist of what will change on your account, asks once, then:
+The same setup `void deploy --platform cloudflare` offers on its first deploy, on its own — for CI, which cannot press Enter: run it locally once, commit `void.lock.json`, then let CI run `void deploy --platform cloudflare --require-email`. Needs `email.from` in `void.config.ts` and a `void cloudflare login` session (a session created by older Cloudflare tooling lacks the email scopes: `void cloudflare logout`, then sign in again) or a `CLOUDFLARE_API_TOKEN` with Email Routing Edit + Email Sending Edit — the CI credential. It runs the preflight above, prints the checklist of what will change on your account, asks once, then:
 
 1. enables Email Routing on the domain (on an apex through Void's bundled Cloudflare tooling; a subdomain through your session's bearer, borrowed for that one call and dropped),
 2. turns on subaddressing for the zone, so `support+anything@` reaches `support@`,
 3. onboards the domain for Email Sending (a Workers Free account keeps inbound and sends to verified destinations only),
-4. writes `send_email: [{ "name": "SEND_EMAIL" }]`, the derived `addresses` array, and `vars.__VOID_EMAIL_FROM` into your root `wrangler.jsonc`, comments preserved.
+4. writes `send_email: [{ "name": "SEND_EMAIL" }]`, the derived `addresses` array, and `vars.__VOID_EMAIL_FROM` into `void.lock.json`.
 
 The routing rules themselves are created by the next `void deploy --platform cloudflare`: wrangler applies its Email Routing plan from `addresses` on deploy. `void email setup` never writes `addresses` unless routing is ready for the domain, prunes an address already routed to another worker or a forward (and says so), and skips the whole step when the existing `addresses` array holds entries it did not derive. A run that finds every row ready asks nothing and changes nothing on your account — with one exception: a domain still not onboarded for Email Sending while the `send_email` binding is committed (a remembered Workers Free refusal, see `void email status`) is offered as a retry on its own prompt, `Onboard <domain> for Email Sending? Inbound already works; onboarding needs Workers Paid.` — the step to run once after upgrading; answer No and nothing changes. The deploy never retries it. Needs an interactive terminal; exits 1 when the inbound rows are still not ready afterwards — routing not enabled, subaddressing still off, or `addresses` withheld — naming the row and saying to rerun. A Workers Free account's refused sending row is not a failure: inbound is complete, `addresses` is written, the plan hint is printed, and the binding written alongside is what makes the next deploy and `void email status` read the domain as set up. See [Your own Cloudflare account](../guide/email.md#your-own-cloudflare-account).
 

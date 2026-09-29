@@ -49,7 +49,7 @@ Each project on an email-enabled platform has:
 
 That's it for configuration. Delivery is gated separately: outbound mail only reaches verified recipients, so `sendEmail({ to: '...', subject: '...', text: '...' })` works on first deploy for your own address once it is verified, and for anyone else after `void email allow` — see [Adding recipients](#adding-recipients).
 
-Deploying to your own Cloudflare account instead (`void deploy --platform cloudflare`) takes one line of `void.json` and one Enter on the first deploy — see [Your own Cloudflare account](#your-own-cloudflare-account).
+Deploying to your own Cloudflare account instead (`void deploy --platform cloudflare`) takes one line of `void.config.ts` and one Enter on the first deploy — see [Your own Cloudflare account](#your-own-cloudflare-account).
 
 ## Adding recipients
 
@@ -126,7 +126,7 @@ At most 50 recipients across `to`, `cc` and `bcc` per call. Each address is chec
 
 On the platform the sender is pinned to your project. `from` must be your project's own platform address — `<project-slug>@<mail-domain>` or `<project-slug>+<tag>@<mail-domain>`, optionally with a display name — or any address on a domain registered with `void email domain add` (see [Your own domain on the platform](#your-own-domain-on-the-platform)). For example, if your platform's mail domain is `mail.example.com`, you can use `Acme <acme+noreply@mail.example.com>`. Anything else is rejected with `INVALID_FROM`. Omit `from` and Void fills in `<project-slug>+noreply@<mail-domain>` for you.
 
-On your own Cloudflare account, `from` defaults to `email.from` from `void.json` and must be on a domain your account can send from; Cloudflare rejects any other sender and `sendEmail` reports it as `INVALID_FROM`.
+On your own Cloudflare account, `from` defaults to `email.from` from `void.config.ts` and must be on a domain your account can send from; Cloudflare rejects any other sender and `sendEmail` reports it as `INVALID_FROM`.
 
 ## Attachments
 
@@ -239,7 +239,7 @@ Under the hood, your code runs in workerd (a separate process from the Vite dev 
 
 The dev inbox is **not** available under a Class B or C framework — SvelteKit, Nuxt, Analog, Astro. Those adapters own their own dev server and worker build, so Void never installs the Cloudflare Vite plugin for them and has nowhere to register the inbox. Declaring an `assets` binding does not help: SvelteKit, Nuxt and Analog do not run your code in a workerd instance fronted by Vite at all, so there is no loopback to bind to. Sends from those apps return `BINDING_MISSING`. Use `createEmailTestHarness` from `void/email/testing` instead, which captures in-process and works everywhere. When the inbox is configured but unreachable, `sendEmail` returns `UPSTREAM_ERROR` — nothing is captured and nothing is sent.
 
-`sendInDev: true` bypasses the dev inbox for a single send. `void dev` binds no send transport at all — the platform's `__VOID_PROXY` service binding is added only on a deployed worker, and the own-account `SEND_EMAIL` binding is stripped under `serve` so miniflare cannot write stray `.eml` files or send real mail (only that entry: a `send_email` binding of your own under another name is left exactly as `wrangler.jsonc` declares it). With the inbox skipped there is nothing left to fall through to, so the call returns `BINDING_MISSING`: it proves the inbox was bypassed, it does not deliver. To verify real delivery, deploy and send from the deployed worker.
+`sendInDev: true` bypasses the dev inbox for a single send. `void dev` binds no send transport at all — the platform's `__VOID_PROXY` service binding is added only on a deployed worker, and the own-account `SEND_EMAIL` binding is stripped under `serve` so miniflare cannot write stray `.eml` files or send real mail (only that entry: a `send_email` binding of your own under another name is left exactly as `cloudflare.send_email` in `void.config.ts` declares it). With the inbox skipped there is nothing left to fall through to, so the call returns `BINDING_MISSING`: it proves the inbox was bypassed, it does not deliver. To verify real delivery, deploy and send from the deployed worker.
 
 ```ts
 const result = await sendEmail({
@@ -408,7 +408,7 @@ deployed `email/` handlers without per-project DNS setup. A
 handlers once its inbound readiness is `ready`. Use `void email domain status`
 to check current provider routing and any remaining setup steps.
 
-On your own Cloudflare account there is no shared facility: the deploy derives one Email Routing rule per handler and writes it into `wrangler.jsonc` for you — see [Your own Cloudflare account](#your-own-cloudflare-account).
+On your own Cloudflare account there is no shared facility: the deploy derives one Email Routing rule per handler and records it in `void.lock.json` for you — see [Your own Cloudflare account](#your-own-cloudflare-account).
 
 There is no local inbound trigger yet — `void dev` serves the outbound dev inbox only, so test inbound handlers with `createInboundTestHarness` below.
 
@@ -478,7 +478,7 @@ The harness uses the same precedence rules as the production dispatcher. Reserve
 
 ### Two things to type, once
 
-1. **`email.from` in `void.json`** — the default sender, and the domain Void sets up:
+1. **`email.from` in `void.config.ts`** — the default sender, and the domain Void sets up:
 
    ```json
    {
@@ -488,17 +488,17 @@ The harness uses the same precedence rules as the production dispatcher. Reserve
    }
    ```
 
-   The host (`mail.acme.com`) must be a zone in the Cloudflare account your deploy is pinned to, or sit under one. Without `email.from`, a deploy that uses email prints `add "email": { "from": "you@mail.acme.com" } to void.json` and deploys without it. Void does not pick a zone for you — wrangler cannot list them — and it never writes `void.json`.
+   The host (`mail.acme.com`) must be a zone in the Cloudflare account your deploy is pinned to, or sit under one. Without `email.from`, a deploy that uses email asks you to set it in `void.config.ts` and deploys without email. Void does not pick a zone for you or write the setting automatically.
 
 2. **`void cloudflare login`**, or **`CLOUDFLARE_API_TOKEN`** set to a token with **Email Routing Edit** and **Email Sending Edit** (zone and account) alongside the deploy permissions. A browser session created by older Cloudflare tooling lacks the two email scopes; the deploy tells you to run `void cloudflare logout`, then `void cloudflare login` (one browser Allow) and skips the email step. A token's permissions cannot be listed up front, so a token that lacks one shows up as a row Void could not read (`unknown`), with the permission named. A Global API Key pair (`CLOUDFLARE_API_KEY`) is refused: it has no single bearer for the two calls wrangler has no command for.
 
 ### The first deploy
 
-Before any of your project code runs, the deploy **reads** — the session, the zone, public DNS (MX on the mail domain and on the apex, `_dmarc`, `cf-bounce`), Email Routing status, the zone's subaddressing setting, the routing rules on your addresses, Email Sending, and what `wrangler.jsonc` already holds — and prints what it found and what it would change:
+Before any of your project code runs, the deploy **reads** — the session, the zone, public DNS (MX on the mail domain and on the apex, `_dmarc`, `cf-bounce`), Email Routing status, the zone's subaddressing setting, the routing rules on your addresses, Email Sending, and what the resolved Cloudflare config already holds — and prints what it found and what it would change:
 
 ```
   Email in use   email/support+[ticket].ts · email/_default.ts · sendEmail() in 2 files
-    domain    mail.acme.com          (void.json email.from)
+    domain    mail.acme.com          (void.config.ts email.from)
     zone      acme.com               account Acme (f721b8e5…) · session dev@acme.com
     apex MX   aspmx.l.google.com     left alone — mail lives on the subdomain
     routing   mail.acme.com  not enabled · subaddressing off
@@ -511,7 +511,7 @@ Before any of your project code runs, the deploy **reads** — the session, the 
     + enable Email Routing on mail.acme.com       Cloudflare writes and locks 3 MX + 1 SPF record there
     + turn on subaddressing for acme.com          support+anything@ reaches support@
     + onboard mail.acme.com for Email Sending     MX/SPF/DKIM on cf-bounce.mail.acme.com, _dmarc.mail.acme.com (p=reject)
-    + wrangler.jsonc                              send_email: [{ name: "SEND_EMAIL" }], addresses: ["support@mail.acme.com"], vars.__VOID_EMAIL_FROM: "noreply@mail.acme.com"
+    + Cloudflare config                              send_email: [{ name: "SEND_EMAIL" }], addresses: ["support@mail.acme.com"], vars.__VOID_EMAIL_FROM: "noreply@mail.acme.com"
     + routing rule (created on deploy)            support@mail.acme.com → acme-support
     ! email/_default.ts                           a catch-all exists only on an apex; other @mail.acme.com mail bounces
 
@@ -530,7 +530,7 @@ On the second deploy every row reads ready: no prompt, no account call, and wran
 
 DNS can take a few minutes to become visible to the resolver running the deploy. If `void email setup` has already written the exact `addresses` plan but that resolver still sees no subdomain MX, Void preserves the plan and stops before the build or upload. Run `void email status --platform cloudflare`, then retry the deploy after it sees Cloudflare's MX records.
 
-Two rows live in `wrangler.jsonc` rather than in your account, and a deploy that finds every account row ready reconciles them with a plain file write, no prompt: the `addresses` array is rewritten whenever it is not the current derivation (an entry pruned since, a worker rename, a new handler), and `vars.__VOID_EMAIL_FROM` follows a changed `email.from`. Routing rules are `wrangler deploy`'s own work, so a committed `addresses` entry whose rule does not exist yet — the state right after `void email setup` — still reads ready; the address map marks it `(rule created by this deploy)`.
+Two rows live in the generated Cloudflare config rather than in your account, and a deploy that finds every account row ready reconciles them with a plain file write, no prompt: the `addresses` array is rewritten whenever it is not the current derivation (an entry pruned since, a worker rename, a new handler), and `vars.__VOID_EMAIL_FROM` follows a changed `email.from`. Routing rules are `wrangler deploy`'s own work, so a committed `addresses` entry whose rule does not exist yet — the state right after `void email setup` — still reads ready; the address map marks it `(rule created by this deploy)`.
 
 A subdomain is added to a zone that already routes. When Email Routing is **off** on the apex (`Enabled: false`), the subdomain step is not attempted at all — Void never enables routing on the apex from the subdomain path, since that would lock MX records over the apex's live mail — and the checklist prints the dashboard step (`Email → Settings → Subdomains → add mail.acme.com`) instead; `addresses` is withheld until routing on the subdomain reads ready.
 
@@ -546,7 +546,7 @@ The apex path (`email.from` on `acme.com` itself) is allowed with the same one E
 
 **Subaddressing** is a per-zone Cloudflare setting, and it is off by default. Until it is on, a rule for `support@mail.acme.com` does not match `support+T-42@mail.acme.com`. The checklist's `turn on subaddressing for acme.com` row flips it for the whole zone — on the apex and every subdomain — so `email/support+[ticket].ts` works the way it does on the platform.
 
-### What Void writes into `wrangler.jsonc`
+### What Void records in `void.lock.json`
 
 ```jsonc
 {
@@ -565,7 +565,7 @@ The apex path (`email.from` on `acme.com` itself) is allowed with the same one E
 - An address already routed to another worker or to a forwarding rule is **pruned** from the array and reported (`! support@mail.acme.com  already routed to …; left alone, not in addresses`). wrangler's plan is never destructive on your account because of something Void derived.
 - If the array holds entries Void did not derive, the deploy prints which ones and **skips the email step for that deploy** — the deploy itself continues and the array is left untouched. Remove them, or manage `addresses` by hand and leave `email.from` unset.
 
-Deleting a handler leaves its address in `addresses`: the next deploy names it in a `✘` row as an entry Void no longer derives, and skips the email step until you remove that entry from `wrangler.jsonc` by hand (the row says which). Once removed, wrangler's plan drops the rule with its own y/n (default No) in a terminal, an error in CI. Removing the last handler and every `sendEmail()` call leaves the whole setup in `wrangler.jsonc`; the deploy warns which addresses are still routed to a worker with no `email()` export and how to detach them, and deploys as-is.
+Deleting a handler leaves its address in `addresses`: the next deploy names it in a `✘` row as an entry Void no longer derives, and skips the email step until you override `cloudflare.addresses` in `void.config.ts` with the desired list (the row says which). Once removed, Cloudflare's plan drops the rule with its own y/n (default No) in a terminal, an error in CI. Removing the last handler and every `sendEmail()` call leaves the whole setup in `void.lock.json`; the deploy warns which addresses are still routed to a worker with no `email()` export and how to detach them, and deploys as-is. To detach fully, remove `addresses`, `send_email`, and `vars.__VOID_EMAIL_FROM` from `resolved` in `void.lock.json` and remove any authored overrides in `void.config.ts`, then delete the routing rules in Cloudflare.
 
 How handlers become addresses, with `email.from` on `mail.acme.com` under the zone `acme.com`:
 
@@ -593,7 +593,7 @@ Workers Paid needed for arbitrary recipients. Inbound works; sendEmail() to veri
 
 Everything else — routing, rules, the binding — still goes through, and the address map ends with `outbound  sendEmail() from support@mail.acme.com   (verified destinations only)`. Verified destinations are the addresses under **Email Routing → Destination addresses** in your Cloudflare dashboard; a handler that `forward()`s to a new address needs the same verification click.
 
-The refusal is remembered by the `send_email` binding that same run writes into `wrangler.jsonc`: Void writes the binding only after it has attempted the onboarding, so a committed binding next to a domain that is still not onboarded means "tried, refused". Later deploys ask nothing about it, `--require-email` passes, `void email status` reads the domain as set up (its sending row says `not onboarded — verified destinations only` and names the retry), and the address map keeps ending with `(verified destinations only)`. The deploy never retries the onboarding on its own. After upgrading to Workers Paid, run `void email setup --platform cloudflare` once: it asks `Onboard mail.acme.com for Email Sending?` and, on Yes, onboards the domain — from then on the map ends without the marker.
+The refusal is remembered by the `send_email` binding that same run records in `void.lock.json`: Void records the binding only after it has attempted the onboarding, so a committed binding next to a domain that is still not onboarded means "tried, refused". Later deploys ask nothing about it, `--require-email` passes, `void email status` reads the domain as set up (its sending row says `not onboarded — verified destinations only` and names the retry), and the address map keeps ending with `(verified destinations only)`. The deploy never retries the onboarding on its own. After upgrading to Workers Paid, run `void email setup --platform cloudflare` once: it asks `Onboard mail.acme.com for Email Sending?` and, on Yes, onboards the domain — from then on the map ends without the marker.
 
 If `_dmarc.mail.acme.com` or `cf-bounce.mail.acme.com` already has a TXT record, sending onboarding is refused — it writes its own `_dmarc` (`p=reject`) and DKIM records and Cloudflare would answer with a conflict. Inbound is unaffected; remove the records or keep sending off.
 
@@ -603,12 +603,12 @@ The email prompt follows wrangler's own interactivity rule: a CI environment as 
 
 ```
 deploy: email on mail.acme.com is not set up, and this shell cannot ask.
-Run `void email setup --platform cloudflare` once locally, commit wrangler.jsonc, then redeploy — deploying without email.
+Run `void email setup --platform cloudflare` once locally, commit void.lock.json, then redeploy — deploying without email.
 ```
 
 then deploys **without** email. Pass `--require-email` to fail instead. When setup has already committed the exact subdomain `addresses` plan and only its MX records are not visible yet, every deploy stops and preserves that plan until DNS can be verified. Automatic resource provisioning is not an escape hatch: it creates D1/KV/R2/Queue/Hyperdrive resources, never a mail setup. To read the rows without deploying or being asked anything, run `void email status --platform cloudflare`.
 
-So the CI story is: run `void email setup --platform cloudflare` once on your machine (it runs the same preflight, checklist and prompt as the first deploy, then writes `wrangler.jsonc`, without deploying), commit `wrangler.jsonc`, and let CI run `void deploy --platform cloudflare --require-email`. Once the MX records are visible, the committed binding and `addresses` make every row read ready and nothing is asked — on Workers Free too, where the committed binding is what remembers the refused sending onboarding (see [Sending](#sending)).
+So the CI story is: run `void email setup --platform cloudflare` once on your machine (it runs the same preflight, checklist and prompt as the first deploy, then updates `void.lock.json`, without deploying), commit `void.lock.json`, and let CI run `void deploy --platform cloudflare --require-email`. Once the MX records are visible, the committed binding and `addresses` make every row read ready and nothing is asked — on Workers Free too, where the committed binding is what remembers the refused sending onboarding (see [Sending](#sending)).
 
 ### If the subdomain step is refused
 

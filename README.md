@@ -171,7 +171,7 @@ Public SDK packages must not import from `platform/`. Hosted platform packages m
 ## GitHub Deployment
 
 The documentation site deploys from `main` through the Void GitHub App using the
-`container` executor. The root [`void.json`](./void.json) configures the monorepo
+`container` executor. The root [`void.config.ts`](./void.config.ts) configures the monorepo
 as a static project that builds `docs` and publishes `docs/.vitepress/dist`.
 There is no documentation deploy workflow or `VOID_TOKEN` repository secret.
 

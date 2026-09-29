@@ -35,23 +35,27 @@ import cloudflare from '@astrojs/cloudflare';
 import { voidPlugin } from 'void';
 
 export default defineConfig({
-  adapter: cloudflare(),
+  adapter: cloudflare({ configPath: './.void-wrangler.jsonc' }),
   vite: { plugins: [voidPlugin()] },
 });
 ```
 
 By default, Astro's Cloudflare runtime and `voidPlugin()` migrations share local state at `.wrangler/state/v3`, so no extra persistence configuration is required.
 
-### 4. Create `wrangler.jsonc`
+### 4. Create `void.config.ts`
 
-`voidPlugin()` auto-syncs inferred bindings into this file on dev startup:
+Void uses this config for the Cloudflare adapter during development and deployment:
 
-```jsonc
-{
-  "name": "my-app",
-  "compatibility_date": "2026-02-24",
-  "compatibility_flags": ["nodejs_als"],
-}
+```ts
+import { defineConfig } from 'void/config';
+
+export default defineConfig({
+  cloudflare: {
+    name: 'my-app',
+    compatibility_date: '2026-02-24',
+    compatibility_flags: ['nodejs_als'],
+  },
+});
 ```
 
 `nodejs_als` is required for `void/*` runtime helpers (for example `void/db`, `void/kv`) in Astro.

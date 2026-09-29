@@ -34,7 +34,10 @@ export default defineConfig({
   plugins: [
     voidPlugin(),
     sveltekit({
-      adapter: adapter(),
+      adapter: adapter({
+        config: './.void-wrangler.jsonc',
+        platformProxy: { configPath: './.void-wrangler.jsonc' },
+      }),
       typescript: {
         config: withVoidTSConfig(),
       },
@@ -45,16 +48,20 @@ export default defineConfig({
 
 If your project already configures SvelteKit in `svelte.config.js`, keep that file and add `typescript.config: withVoidTSConfig()` under its `kit` options instead. SvelteKit ignores `svelte.config.js` when options are passed directly to `sveltekit()`.
 
-### 4. Create `wrangler.jsonc`
+### 4. Create `void.config.ts`
 
-SvelteKit's adapter reads bindings from `wrangler.jsonc` for local dev. `voidPlugin()` auto-syncs inferred bindings into this file on dev startup, so you only need the base config:
+Point SvelteKit's adapter at Void's generated Cloudflare config as shown above. Add your Cloudflare settings to `void.config.ts`:
 
-```jsonc
-{
-  "name": "my-app",
-  "compatibility_date": "2026-02-24",
-  "compatibility_flags": ["nodejs_compat"],
-}
+```ts
+import { defineConfig } from 'void/config';
+
+export default defineConfig({
+  cloudflare: {
+    name: 'my-app',
+    compatibility_date: '2026-02-24',
+    compatibility_flags: ['nodejs_compat'],
+  },
+});
 ```
 
 By default, SvelteKit's Cloudflare adapter, `voidPlugin()` migrations, and `void db` commands share local state at `.wrangler/state/v3`, so no extra `platformProxy.persist` configuration is required.

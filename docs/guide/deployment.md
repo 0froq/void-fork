@@ -50,7 +50,7 @@ void deploy # builds and deploys to the saved platform
 
 During setup, Void asks where you want to deploy:
 
-- **Cloudflare:** sign in through your browser and choose an account. Void saves the account in `wrangler.jsonc`.
+- **Cloudflare:** sign in through your browser and choose an account. Void saves the account in `void.config.ts` or `void.lock.json`.
 - **Void:** connect to a platform, sign in, and link or create a project.
 - **Skip:** set up deployment later with `void connect`.
 
@@ -247,7 +247,7 @@ See the [Cloudflare guide](../integrations/cloudflare.md#deploy-to-your-own-clou
 
 ### Node.js, Bun, and Deno
 
-Set [`target`](../reference/config.md#target) in `void.json` to build a standalone server for Node.js, Bun, or Deno. You can run the result on your own server or in a container.
+Set [`target`](../reference/config.md#target) in `void.config.ts` to build a standalone server for Node.js, Bun, or Deno. You can run the result on your own server or in a container.
 
 Deploy `dist/ssr` and `dist/client` together. The server loads the Pages client manifest and assets relative to its emitted module; start it from the app root with `node dist/ssr/index.js`, `bun dist/ssr/index.js`, or `deno run -A dist/ssr/index.js`.
 

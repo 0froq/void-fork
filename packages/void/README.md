@@ -19,7 +19,7 @@ link another enabled login to their account with `void auth link`.
 - Pages mode from `pages/`
 - typed Drizzle access via `void/db`
 - `crons/` and `queues/`
-- URL redirects, rewrites, and fallbacks (`void.json` / `public/_redirects`, plus `c.rewrite()` from middleware)
+- URL redirects, rewrites, and fallbacks (`void.config.ts` / `public/_redirects`, plus `c.rewrite()` from middleware)
 - binding inference for D1, KV, R2, AI, auth, queues, and typed Durable Objects
 - remote bindings for local development
 - one target-aware deploy path for Void-hosted and direct Cloudflare apps
@@ -41,7 +41,7 @@ To install a team platform, use `void platform install`. A domain is recommended
 
 Init always writes brief coding-agent instructions to `AGENTS.md`, pointing to `node_modules/void/skills/void/docs/`, and links skills for detected agents. Run `void init --agents` to add or refresh just this setup without choosing an agent.
 
-Then run `npx void init`. In an empty directory, the full interactive flow can scaffold a starter and configure local project files. It then asks where to deploy: Cloudflare (the default) creates or augments `wrangler.jsonc`, handles secure browser sign-in through Void's bundled tooling, and saves the selected account; Void asks for the API URL of an explicitly connected company platform (`void connect <url>` or `void platform install`). Back up `~/.void/platforms/` after installing a company platform because its owner-only recovery material contains runtime keys that Cloudflare cannot return. The next app step is just `npx void deploy`. Auth-enabled deploys preserve an existing `BETTER_AUTH_SECRET` or create a persistent encrypted secret when missing on either platform. Root `.env` is local-only; production server keys declared in `env.ts` use encrypted remote secret storage and are rejected as plaintext Worker vars. In an existing app, init configures Void in place by adding missing Vite scripts and creating or patching `vite.config.*` with `voidPlugin()`.
+Then run `npx void init`. In an empty directory, the full interactive flow can scaffold a starter and configure local project files. It then asks where to deploy: Cloudflare (the default) writes `void.config.ts`, handles secure browser sign-in through Void's bundled tooling, and saves the selected account; Void asks for the API URL of an explicitly connected company platform (`void connect <url>` or `void platform install`). Existing `void.json` and root Wrangler JSON/JSONC files are migrated automatically; commit `void.config.ts` and `void.lock.json` when created. Back up `~/.void/platforms/` after installing a company platform because its owner-only recovery material contains runtime keys that Cloudflare cannot return. The next app step is just `npx void deploy`. Auth-enabled deploys preserve an existing `BETTER_AUTH_SECRET` or create a persistent encrypted secret when missing on either platform. Root `.env` is local-only; production server keys declared in `env.ts` use encrypted remote secret storage and are rejected as plaintext Worker vars. In an existing app, init configures Void in place by adding missing Vite scripts and creating or patching `vite.config.*` with `voidPlugin()`.
 
 ```ts
 // vite.config.ts
