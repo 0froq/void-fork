@@ -248,12 +248,12 @@ describe('environment token destinations', () => {
       const { root, origin } = await connectedProject(withProject);
       process.env.VOID_TOKEN = 'legacy-cloud-token';
       const { getApiUrl, getToken } = await import('../../src/cli/auth.ts');
-      const { runAuthCommand } = await import('../../src/cli/auth-cmd.ts');
+      const { runAccountCommand } = await import('../../src/cli/account-cmd.ts');
       const fetcher = vi.spyOn(globalThis, 'fetch');
       try {
         expect(getApiUrl(root)).toBe(origin);
         expect(() => getToken(root)).toThrow('VOID_TOKEN is not bound');
-        await expect(runAuthCommand(root, { subcommand: 'whoami' })).rejects.toThrow(
+        await expect(runAccountCommand(root, { subcommand: 'whoami' })).rejects.toThrow(
           'VOID_TOKEN is not bound',
         );
         expect(fetcher).not.toHaveBeenCalled();

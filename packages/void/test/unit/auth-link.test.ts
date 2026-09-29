@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
-import { parseAuthArgs } from '../../src/cli/auth-args.ts';
+import { parseAccountArgs } from '../../src/cli/account-args.ts';
 const state = vi.hoisted(() => ({
   open: vi.fn(),
   save: vi.fn(),
@@ -37,13 +37,13 @@ import { runAuthLink } from '../../src/cli/auth-link.ts';
 beforeEach(() => vi.clearAllMocks());
 describe('ordinary account linking CLI', () => {
   it('parses explicit or interactive connection selection and rejects extra arguments', () => {
-    expect(parseAuthArgs(['link', 'company'])).toEqual({
+    expect(parseAccountArgs(['link', 'company'])).toEqual({
       subcommand: 'link',
       connectionId: 'company',
     });
-    expect(parseAuthArgs(['link'])).toEqual({ subcommand: 'link' });
-    expect(() => parseAuthArgs(['link', 'company', 'extra'])).toThrow('Usage');
-    expect(() => parseAuthArgs(['link', 'https://evil.example'])).toThrow('Usage');
+    expect(parseAccountArgs(['link'])).toEqual({ subcommand: 'link' });
+    expect(() => parseAccountArgs(['link', 'company', 'extra'])).toThrow('Usage');
+    expect(() => parseAccountArgs(['link', 'https://evil.example'])).toThrow('Usage');
   });
   it('reauthenticates the original account before opening explicit linking confirmation', async () => {
     state.who.mockResolvedValue({ id: 'user', login: 'existing' });

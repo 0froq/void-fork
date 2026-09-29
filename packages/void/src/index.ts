@@ -1961,7 +1961,9 @@ export function voidPlugin(options?: {
         } else if (credentials.status === 'no-token') {
           afterReady(() => {
             console.log();
-            voidWarn('Remote mode requires authentication. Run `void auth login`, then restart.');
+            voidWarn(
+              'Remote mode requires authentication. Run `void account login`, then restart.',
+            );
             voidWarn('Falling back to local bindings.');
           });
         } else {
@@ -1980,7 +1982,7 @@ export function voidPlugin(options?: {
           afterReady(() => {
             console.log();
             voidWarn(
-              'AI requires authentication. Run `void auth login`, then restart the dev server.',
+              'AI requires authentication. Run `void account login`, then restart the dev server.',
             );
           });
         } else if (credentials.status === 'no-project') {

@@ -107,7 +107,7 @@ Cloudflare applications for deliberate cleanup. Disabling an Access login method
 does not remove the gate.
 
 Users can add another enabled login to their existing account with
-`void auth link <connection-id>` or **Account** in the optional
+`void account link <connection-id>` or **Account** in the optional
 dashboard. Sign in again first if prompted, then authenticate with the additional
 provider and confirm the identity shown. Matching email addresses alone do not
 link accounts.

@@ -176,7 +176,7 @@ export function formatConnection(connection: GithubConnection): string {
 export async function runGithubCommand(root: string, args: GithubArgs): Promise<void> {
   const token = getToken(root);
   if (!token) {
-    log.error('Not logged in. Run `void auth login` first.');
+    log.error('Not logged in. Run `void account login` first.');
     process.exit(1);
   }
   const client = new PlatformClient(token, { root });
@@ -210,7 +210,7 @@ export async function runGithubCommand(root: string, args: GithubArgs): Promise<
  *
  * If the account has no linked GitHub identity, the server returns a 403 with
  * the stable code `github_identity_required` (Task 3). Rather than telling the
- * user to `void auth login` (which risks forking into a second account), we run
+ * user to `void account login` (which risks forking into a second account), we run
  * the link flow inline and retry the install URL exactly once.
  *
  * `linkIdentity` is injectable so tests can supply a fake linker instead of
@@ -268,7 +268,7 @@ export async function runInstall(
 /**
  * Link the current Void account (the logged-in CLI token holder) to a GitHub
  * identity. Drives the platform's 3-endpoint link flow with a localhost +
- * PKCE handshake, mirroring `void auth login`.
+ * PKCE handshake, mirroring `void account login`.
  *
  * Exported so Task 5 can call it (e.g. when `github install` returns 403 for a
  * GitHub-less account, prompt to link and retry). The success path is

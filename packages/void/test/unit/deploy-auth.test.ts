@@ -111,7 +111,7 @@ beforeEach(() => {
 describe('runDeploy auth failures', () => {
   it('shows a re-login instruction for expired local auth tokens in non-interactive mode', async () => {
     await expect(runDeploy(process.cwd(), { projectSlug: 'my-app' })).rejects.toThrow(
-      'Auth token expired. Run `void auth login` and try again.',
+      'Auth token expired. Run `void account login` and try again.',
     );
   });
 
@@ -276,7 +276,7 @@ describe('runDeploy GitHub Actions OIDC exchange', () => {
 
   it('prefers OIDC over an AMBIENT saved keychain/file token in Actions (no VOID_TOKEN env)', async () => {
     // Regression guard: on a self-hosted / reused runner a leftover
-    // `void auth login` credential lives in the keychain/config file, so
+    // `void account login` credential lives in the keychain/config file, so
     // getToken() returns it — but there is NO explicit VOID_TOKEN env. The
     // deploy MUST still mint a fresh project-scoped OIDC deploy token and use
     // THAT, not the broad long-lived saved token. (Before the fix, getToken was

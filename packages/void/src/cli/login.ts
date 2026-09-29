@@ -115,7 +115,7 @@ export async function runLoginCommand(root: string = process.cwd()): Promise<voi
         return;
       }
       log.warn('Already logged in.');
-      outro('To re-login, run `void auth logout` first.');
+      outro('To re-login, run `void account logout` first.');
       return;
     } catch (error) {
       if (!isExpiredTokenError(error)) {

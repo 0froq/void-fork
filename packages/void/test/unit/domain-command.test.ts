@@ -103,7 +103,7 @@ describe('runDomainCommand top-level guards', () => {
 
     await runExpectingExit(root, args({ subcommand: 'list' }));
 
-    expect(mockLogError).toHaveBeenCalledWith('Not logged in. Run `void auth login` first.');
+    expect(mockLogError).toHaveBeenCalledWith('Not logged in. Run `void account login` first.');
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 

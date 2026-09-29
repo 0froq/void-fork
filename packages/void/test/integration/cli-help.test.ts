@@ -59,6 +59,26 @@ describe('void help (subprocess)', () => {
     expect(output).toContain('--skip-build');
   });
 
+  it('distinguishes destination auth from Void account auth in help', () => {
+    const root = createProject();
+    const auth = runVoid(root, ['auth', '--help']);
+    const account = runVoid(root, ['account', '--help']);
+    expect(auth.status).toBe(0);
+    expect(auth.output).toContain('void auth <login|status|logout>');
+    expect(auth.output).toContain('--platform <cloudflare|void>');
+    expect(account.status).toBe(0);
+    expect(account.output).toContain('void account <command>');
+    expect(account.output).toContain('link [connection-id]');
+  });
+
+  it('does not choose an auth destination silently in a non-interactive project', () => {
+    const root = createProject();
+    const auth = runVoid(root, ['auth', 'login']);
+    expect(auth.status).toBe(1);
+    expect(auth.output).toContain('No deployment destination is saved');
+    expect(auth.output).toContain('void cloudflare login');
+  });
+
   it('prints command help through `void deploy --help` without running deploy', () => {
     const root = createProject();
     const { output, status } = runVoid(root, ['deploy', '--help']);

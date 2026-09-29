@@ -217,7 +217,7 @@ Use remote D1/KV/R2 bindings during local development instead of local miniflare
 
 **Requirements:**
 
-- Must be logged in (`void auth login`)
+- Must be logged in (`void account login`)
 - Must have a linked project (`void project link`)
 - Only affects D1 (`DB`), KV (`KV`), and R2 (`STORAGE`) bindings
 

@@ -191,8 +191,35 @@ const HELP_TREE: HelpTree = {
     ],
   },
   auth: {
-    summary: 'Log in, link login methods, log out, and inspect local auth state.',
-    usage: ['void auth <command>'],
+    summary:
+      'Authenticate with this project’s saved Cloudflare or Void destination. Without one, choose interactively or pass --platform.',
+    usage: ['void auth <login|status|logout> [--platform cloudflare|void]'],
+    commands: [
+      { command: 'login', description: 'Sign in to the selected destination' },
+      { command: 'status', description: 'Show the selected destination’s identity' },
+      { command: 'logout', description: 'Sign out of the selected destination' },
+    ],
+    options: [
+      { command: '--platform <cloudflare|void>', description: 'Choose the destination explicitly' },
+    ],
+    children: {
+      login: basicSubcommand(
+        'Sign in to the selected destination.',
+        'void auth login [--platform cloudflare|void]',
+      ),
+      status: basicSubcommand(
+        'Show the selected destination’s identity.',
+        'void auth status [--platform cloudflare|void]',
+      ),
+      logout: basicSubcommand(
+        'Sign out of the selected destination.',
+        'void auth logout [--platform cloudflare|void]',
+      ),
+    },
+  },
+  account: {
+    summary: 'Manage your Void platform account.',
+    usage: ['void account <command>'],
     commands: [
       { command: 'login', description: 'Log in with an enabled platform login method' },
       { command: 'link [connection-id]', description: 'Link another login method to your account' },
@@ -201,14 +228,14 @@ const HELP_TREE: HelpTree = {
       { command: 'token', description: 'Copy auth token to clipboard' },
     ],
     children: {
-      login: basicSubcommand('Log in with an enabled platform login method.', 'void auth login'),
+      login: basicSubcommand('Log in with an enabled platform login method.', 'void account login'),
       link: basicSubcommand(
         'Sign in again, then verify and link another login method to your existing account.',
-        'void auth link [connection-id]',
+        'void account link [connection-id]',
       ),
-      logout: basicSubcommand('Log out and remove credentials.', 'void auth logout'),
-      whoami: basicSubcommand('Show the logged-in username.', 'void auth whoami'),
-      token: basicSubcommand('Copy auth token to clipboard.', 'void auth token'),
+      logout: basicSubcommand('Log out and remove credentials.', 'void account logout'),
+      whoami: basicSubcommand('Show the logged-in username.', 'void account whoami'),
+      token: basicSubcommand('Copy auth token to clipboard.', 'void account token'),
     },
   },
   cloudflare: {
@@ -1254,6 +1281,10 @@ export function printGlobalHelp(): void {
       '',
       ...globalCommandGroup('auth'),
       '',
+      ...globalCommandGroup('account'),
+      '',
+      ...globalCommandGroup('cloudflare'),
+      '',
       ...globalCommandGroup('platform'),
       '',
       ...globalCommandGroup('project'),
@@ -1297,7 +1328,7 @@ export function printGlobalHelp(): void {
 
   note(
     [
-      helpLine('VOID_TOKEN', 'Auth token (or use `void auth login`)'),
+      helpLine('VOID_TOKEN', 'Auth token (or use `void account login`)'),
       helpLine('VOID_PROJECT', 'Deploy target project name override'),
     ].join('\n'),
     sectionTitle('Environment'),

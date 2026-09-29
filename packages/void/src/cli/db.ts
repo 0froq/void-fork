@@ -877,7 +877,7 @@ async function runExecute(
 
     const token = getToken(root);
     if (!token) {
-      log.error('Not logged in. Run `void auth login` first.');
+      log.error('Not logged in. Run `void account login` first.');
       process.exit(1);
     }
 
@@ -1192,7 +1192,7 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
 
     const token = getToken(root);
     if (!token) {
-      log.error('Not logged in. Run `void auth login` first.');
+      log.error('Not logged in. Run `void account login` first.');
       process.exit(1);
     }
 
@@ -1375,7 +1375,7 @@ async function runStudio(root: string, dialect: DatabaseDialect, remote?: boolea
     } else {
       const token = getToken(root);
       if (!token) {
-        log.error('Not logged in. Run `void auth login` first.');
+        log.error('Not logged in. Run `void account login` first.');
         process.exit(1);
       }
       const projectConfig = readProjectConfig(root);
@@ -1622,7 +1622,7 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
   if (config && !token) {
     log.error(
       'Project is linked but you are not logged in.\n' +
-        'Run `void auth login` first so remote migration records can be updated.',
+        'Run `void account login` first so remote migration records can be updated.',
     );
     process.exit(1);
   }
@@ -2198,7 +2198,7 @@ async function runSetUrl(root: string): Promise<void> {
 
   const token = getToken(root);
   if (!token) {
-    log.error('No auth token found. Run `void auth login` first.');
+    log.error('No auth token found. Run `void account login` first.');
     process.exit(1);
   }
 

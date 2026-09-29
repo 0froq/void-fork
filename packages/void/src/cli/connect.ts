@@ -125,7 +125,7 @@ export async function runConnectCommand(
   }
   if (args.noLogin) {
     log.info(
-      'Connection saved without login. Run `void auth login` in a project using this platform when ready.',
+      'Connection saved without login. Run `void account login` in a project using this platform when ready.',
     );
   } else if (selected) {
     log.info('Run `void project link` to select a project, then `void deploy`.');

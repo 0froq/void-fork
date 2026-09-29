@@ -8,7 +8,7 @@ import { discoverPlatform } from './platform-cmd.ts';
 export async function runAuthLink(root: string, connectionId?: string): Promise<void> {
   const token = getToken(root);
   if (!token) {
-    throw new Error('auth: Sign in to your existing account with `void auth login` first.');
+    throw new Error('auth: Sign in to your existing account with `void account login` first.');
   }
   const apiUrl = getApiUrl(root);
   const platform = await discoverPlatform(apiUrl);

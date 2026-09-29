@@ -32,7 +32,7 @@ export async function runLink(root: string, slug?: string): Promise<void> {
   // Auth
   const token = getToken(root);
   if (!token) {
-    cancel('No auth token found. Run `void auth login` first.');
+    cancel('No auth token found. Run `void account login` first.');
     process.exit(1);
   }
 

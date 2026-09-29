@@ -419,7 +419,7 @@ describe('project team target selection', () => {
       error: 'forbidden',
       status: 403,
       message: 'Your account cannot respond',
-      recovery: 'void auth logout',
+      recovery: 'void account logout',
     },
     {
       error: 'project invitation has expired',

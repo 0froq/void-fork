@@ -950,7 +950,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         'Apps will use workers.dev addresses. When your domain is ready: void platform domain set <domain>',
       );
     }
-    outro('Run `void auth login`, then deploy an app with `void deploy --platform void`.');
+    outro('Run `void account login`, then deploy an app with `void deploy --platform void`.');
   } catch (error) {
     progress?.error('Platform installation failed.');
     progress = undefined;

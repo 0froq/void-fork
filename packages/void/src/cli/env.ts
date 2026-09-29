@@ -37,7 +37,7 @@ async function runCheck(root: string, useRemoteSecrets: boolean): Promise<void> 
     } else {
       const token = getToken(root);
       if (!token) {
-        log.error('--remote requires authentication. Run `void auth login` first.');
+        log.error('--remote requires authentication. Run `void account login` first.');
         process.exit(1);
       }
       const config = readProjectConfig(root);

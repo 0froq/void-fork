@@ -11,7 +11,7 @@ export async function runPurgeCacheCommand(root: string, projectSlug?: string): 
 
   const token = getToken(root);
   if (!token) {
-    log.error('Not logged in. Run `void auth login` first.');
+    log.error('Not logged in. Run `void account login` first.');
     process.exit(1);
   }
 

@@ -134,7 +134,7 @@ describe('runLoginCommand', () => {
 
     expect(mockWhoami).toHaveBeenCalledTimes(1);
     expect(mockWarn).toHaveBeenCalledWith('Already logged in.');
-    expect(mockOutro).toHaveBeenCalledWith('To re-login, run `void auth logout` first.');
+    expect(mockOutro).toHaveBeenCalledWith('To re-login, run `void account logout` first.');
     expect(mockRunLogin).not.toHaveBeenCalled();
     expect(mockRemoveToken).not.toHaveBeenCalled();
   });

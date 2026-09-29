@@ -11,7 +11,7 @@ for every command.
 
 Use `void platform config auth` to manage login methods and company signup.
 Cloudflare Access protection has separate create/connect controls. Users can
-link another enabled login to their account with `void auth link`.
+link another enabled login to their account with `void account link`.
 
 ## What It Covers
 
@@ -57,7 +57,8 @@ export default defineConfig({
 
 - `voidPlugin()` — Vite integration, routing, pages mode, codegen, migrations, packaging
 - `void prepare` — generate `.void` artifacts for CI, editors, and fresh clones
-- `void auth login` — platform auth
+- `void auth login` — sign in to the project's saved Cloudflare or Void destination
+- `void account login` — platform auth
 - `void connect [url]` — choose Cloudflare or a Void platform, sign in, and save the deployment destination
 - `void platform *` — list, select, inspect, install, recover, repair, upgrade, disable, and safely uninstall a company platform
 - `void deploy` — build and deploy to the saved Cloudflare or Void target

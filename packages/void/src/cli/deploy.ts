@@ -6626,7 +6626,7 @@ async function runManagedDeploy(
       //
       // OIDC MUST beat an AMBIENT saved token here. `getToken()` returns the env
       // token AND a keychain/config-file token, so calling it unconditionally
-      // first would let a leftover `void auth login` credential on a self-hosted
+      // first would let a leftover `void account login` credential on a self-hosted
       // / reused runner preempt OIDC. Only consult it before OIDC when the user
       // supplied an explicit env token; that still applies the shared origin
       // guard before any platform client can receive the credential. With no env
@@ -6663,7 +6663,7 @@ async function runManagedDeploy(
       // `VOID_TOKEN` first, which is harmlessly unset on this branch.
       token ??= getToken(root);
       if (!token) {
-        log.error('No auth token found. Run `void auth login` first.');
+        log.error('No auth token found. Run `void account login` first.');
         process.exit(1);
       }
 
@@ -6865,7 +6865,7 @@ async function runManagedDeploy(
           );
         }
         if (!process.stdin.isTTY || reauthenticated) {
-          throw new Error('Auth token expired. Run `void auth login` and try again.');
+          throw new Error('Auth token expired. Run `void account login` and try again.');
         }
         log.warn('Auth token expired. Re-authenticating...');
         await promptForLoginToken(root);

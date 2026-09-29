@@ -87,7 +87,7 @@ function invitationResponseError(error: unknown, apiUrl: string): unknown {
   if (error.code === 'project invitation not found') {
     message = `Invitation not found on ${apiUrl}. Check VOID_API_URL if set, connect to the platform in your invitation with \`void connect <url>\`, then run \`void project team pending\` to check the invitation ID. If it is missing, ask a project administrator for a new invitation.`;
   } else if (error.code === 'forbidden') {
-    message = `Your account cannot respond to this invitation on ${apiUrl}. Sign in with the account whose registered email received the invitation. To switch accounts, set VOID_API_URL to ${apiUrl}, unset VOID_TOKEN if present, then run \`void auth logout\` and \`void auth login\`. Run \`void project team pending\` to see that account's invitations.`;
+    message = `Your account cannot respond to this invitation on ${apiUrl}. Sign in with the account whose registered email received the invitation. To switch accounts, set VOID_API_URL to ${apiUrl}, unset VOID_TOKEN if present, then run \`void account logout\` and \`void account login\`. Run \`void project team pending\` to see that account's invitations.`;
   } else if (error.code === 'project invitation has expired') {
     message =
       'This invitation has expired. Ask a project administrator to invite you again, then run `void project team pending`.';
@@ -117,7 +117,7 @@ export async function runProjectTeamCommand(root: string, args: ProjectTeamArgs)
     log.error(
       apiUrl
         ? `Not logged in to ${apiUrl}. Run \`void connect ${apiUrl}\` to sign in.`
-        : 'Not logged in. Run `void auth login` first.',
+        : 'Not logged in. Run `void account login` first.',
     );
     process.exit(1);
   }

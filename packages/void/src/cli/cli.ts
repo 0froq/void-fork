@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { log } from '@clack/prompts';
 import { join } from 'pathslash';
+import { accountSubcommands, parseAccountArgs } from './account-args.ts';
 import { getPackageDir } from './agents.ts';
 import { parseDeployArgs } from './args.ts';
 import { authSubcommands, parseAuthArgs } from './auth-args.ts';
@@ -159,7 +160,11 @@ if (helpPath) {
   });
 } else if (command === 'auth') {
   runSubcommandGroup('auth', authSubcommands, parseAuthArgs, (root, parsed) =>
-    import('./auth-cmd.ts').then(({ runAuthCommand }) => runAuthCommand(root, parsed)),
+    import('./auth-router.ts').then(({ runAuthRouter }) => runAuthRouter(root, parsed)),
+  );
+} else if (command === 'account') {
+  runSubcommandGroup('account', accountSubcommands, parseAccountArgs, (root, parsed) =>
+    import('./account-cmd.ts').then(({ runAccountCommand }) => runAccountCommand(root, parsed)),
   );
 } else if (command === 'platform') {
   runSubcommandGroup('platform', platformSubcommands, parsePlatformArgs, (root, parsed) =>
@@ -268,8 +273,13 @@ if (helpPath) {
     { name: 'deploy', description: 'Build and deploy, or link an existing Cloudflare Worker' },
     {
       name: 'auth',
-      hint: 'login | logout | whoami | token',
-      description: 'Login, account linking, logout, and token management',
+      hint: 'login | status | logout',
+      description: 'Sign in to this project’s Cloudflare or Void destination',
+    },
+    {
+      name: 'account',
+      hint: 'login | link | logout | whoami | token',
+      description: 'Manage your Void platform account',
     },
     {
       name: 'platform',
@@ -364,7 +374,11 @@ if (helpPath) {
       }
       case 'auth':
         return runSubcommandGroup('auth', authSubcommands, parseAuthArgs, (r, p) =>
-          import('./auth-cmd.ts').then(({ runAuthCommand }) => runAuthCommand(r, p)),
+          import('./auth-router.ts').then(({ runAuthRouter }) => runAuthRouter(r, p)),
+        );
+      case 'account':
+        return runSubcommandGroup('account', accountSubcommands, parseAccountArgs, (r, p) =>
+          import('./account-cmd.ts').then(({ runAccountCommand }) => runAccountCommand(r, p)),
         );
       case 'platform':
         return runSubcommandGroup('platform', platformSubcommands, parsePlatformArgs, (r, p) =>

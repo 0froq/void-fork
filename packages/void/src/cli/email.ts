@@ -56,7 +56,7 @@ export async function runEmailCommand(root: string, args: EmailArgs): Promise<vo
 
   const token = getToken(root);
   if (!token) {
-    log.error('Not logged in. Run `void auth login` first.');
+    log.error('Not logged in. Run `void account login` first.');
     process.exit(1);
   }
 
@@ -271,7 +271,7 @@ export function classifyCfApiTokenShape(value: string): CfApiTokenShape {
   return 'unknown';
 }
 
-// Clipboard helpers — the read side mirrors the write side in auth-cmd.ts
+// Clipboard helpers — the read side mirrors the write side in account-cmd.ts
 // (pbcopy / clip / xclip); wl-paste/wl-copy cover Wayland sessions.
 function readClipboard(): string | null {
   const platform = process.platform;

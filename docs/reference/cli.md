@@ -28,7 +28,8 @@ Use this page as a command reference. If you are setting up a project for the fi
 | `void secret sync .env`           | Bulk upload secrets from dotenv file                                          |
 | `void env check [--remote]`       | Validate env.ts schema                                                        |
 | `void env types`                  | Regenerate .void/env.d.ts from env.ts                                         |
-| `void auth login`                 | Authenticate with Void                                                        |
+| `void auth login`                 | Authenticate with the project’s saved destination, or choose one              |
+| `void account login`              | Authenticate with a Void platform                                             |
 | `void cloudflare login`           | Authenticate with Cloudflare through Void                                     |
 | `void platform install`           | Install a company Void platform in Cloudflare                                 |
 | `void connect <url>`              | Connect the CLI to a Void platform                                            |
@@ -169,9 +170,23 @@ The deployment preference is saved in `.void/project.json`. Connecting to anothe
 
 In a non-interactive shell, supply a URL or explicit target. Cloudflare requires usable credentials and an unambiguous account (`CLOUDFLARE_ACCOUNT_ID` when needed). For a Void platform, provide `VOID_TOKEN` with a matching `VOID_API_URL`, or reuse a valid origin-scoped keychain session. Use `void connect <url> --no-login` to save the verified connection without authenticating; this option is only available for Void platforms.
 
-## Auth
+## Authentication
 
-### `void auth login`
+`void auth login`, `void auth status`, and `void auth logout` use the destination
+saved for the current project by `void init` or `void connect`. If no destination
+is saved, interactive commands let you choose Cloudflare or a connected Void
+platform. In a non-interactive shell, pass `--platform cloudflare|void` or use
+the explicit `void cloudflare` and `void account` commands. Choosing a destination
+for authentication does not change the project's deploy target.
+
+`void auth whoami`, `void auth link`, and `void auth token` remain supported for
+existing scripts. `whoami` follows the selected destination; `link` and `token`
+are Void account operations. Prefer `void auth status`, `void account link`, and
+`void account token` in new scripts.
+
+## Void platform account
+
+### `void account login`
 
 Browser login through one of the platform's currently enabled methods. The token is saved in the operating-system keychain, scoped to the platform origin. Login fails closed when no keychain is available instead of writing the token to a plaintext file; headless environments use `VOID_TOKEN` from their secret manager.
 
@@ -182,22 +197,22 @@ saved login instead, unset `VOID_TOKEN`.
 
 This is optional if you already completed auth during `void connect` or the interactive `void init` flow.
 
-### `void auth link [connection-id]`
+### `void account link [connection-id]`
 
 Link another enabled login method to your current account. Sign in again if your
 session is no longer recent, complete the additional provider's browser login,
 and confirm the displayed identity. With no connection ID, choose an enabled
 method interactively. The optional dashboard exposes the same flow in **Account**.
 
-### `void auth logout`
+### `void account logout`
 
 Removes saved credentials.
 
-### `void auth whoami`
+### `void account whoami`
 
 Prints your current login.
 
-### `void auth token`
+### `void account token`
 
 Copies your human auth token to the system clipboard. It is intended for
 interactive troubleshooting and remains subject to login-method revocation. Do
@@ -1300,12 +1315,12 @@ Deploy-on-GitHub works from **any** Void login — Google, GitHub, or other SSO.
 void github link
 ```
 
-Link your current Void account to a GitHub identity. Opens your browser to authorize Void on GitHub (a localhost + PKCE handshake, the same mechanics as `void auth login`), then binds that GitHub identity to the logged-in account. Requires an authenticated CLI (`void auth login` first).
+Link your current Void account to a GitHub identity. Opens your browser to authorize Void on GitHub (a localhost + PKCE handshake, the same mechanics as `void account login`), then binds that GitHub identity to the logged-in account. Requires an authenticated CLI (`void account login` first).
 
 You normally don't need to run this directly — `void github install` runs the link automatically when your account has no GitHub identity yet. Run it on its own to link ahead of time, or to link a GitHub identity without installing the App.
 
 ::: warning Existing GitHub sign-in
-Void accounts cannot be merged. If the GitHub account you authorize is already linked to a different Void account, including one created through GitHub sign-in, `void github link` is refused with `This GitHub account is already linked to another Void account.` Run `void auth logout` and sign in to that existing account, or authorize a different GitHub account. The command is also refused if your current Void account is already linked to a different GitHub identity. Re-authorizing the GitHub account attached to your current Void account is allowed and reports `GitHub account already linked.`
+Void accounts cannot be merged. If the GitHub account you authorize is already linked to a different Void account, including one created through GitHub sign-in, `void github link` is refused with `This GitHub account is already linked to another Void account.` Run `void account logout` and sign in to that existing account, or authorize a different GitHub account. The command is also refused if your current Void account is already linked to a different GitHub identity. Re-authorizing the GitHub account attached to your current Void account is allowed and reports `GitHub account already linked.`
 :::
 
 ### `void github install`
@@ -1334,7 +1349,7 @@ Join the GitHub App installations your organization already has. If a teammate i
 
 In an interactive terminal you rarely need to run this yourself — `void github connect` runs the same join automatically when no active installations are linked to your account. Running `void github join` yourself matters mainly for non-interactive use (without a TTY, `void github connect` never opens a browser), or to link installations ahead of time.
 
-Requires an authenticated CLI (`void auth login` first) and organization-installation sharing enabled on your Void instance; when it is not enabled the command fails closed with a clear message. You can only join installations your GitHub authorization actually returns — you cannot name or join one you cannot access on GitHub.
+Requires an authenticated CLI (`void account login` first) and organization-installation sharing enabled on your Void instance; when it is not enabled the command fails closed with a clear message. You can only join installations your GitHub authorization actually returns — you cannot name or join one you cannot access on GitHub.
 
 ### `void github connect`
 
