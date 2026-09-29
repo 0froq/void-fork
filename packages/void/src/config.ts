@@ -100,7 +100,6 @@ export type CloudflareConfig = Unstable_RawConfig & Record<string, unknown>;
 
 /** Shape of the Void project config. All fields optional. */
 export type VoidConfig = {
-  $schema?: string;
   sourceDir?: string;
   target?: 'cloudflare' | 'node' | 'bun' | 'deno';
   output?: 'server' | 'static';
@@ -1025,6 +1024,13 @@ function validateConfigObject(config: unknown): VoidConfig {
     }
   }
 
+  // Legacy void.json files may carry an editor hint. It is not part of the
+  // typed config and should never reach consumers of the resolved config.
+  if ('$schema' in obj) {
+    const resolved = { ...obj };
+    delete resolved.$schema;
+    return resolved as VoidConfig;
+  }
   return obj as VoidConfig;
 }
 

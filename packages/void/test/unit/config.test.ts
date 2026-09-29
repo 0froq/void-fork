@@ -163,7 +163,7 @@ describe('readConfig', () => {
   it('ignores $schema field', () => {
     setup(JSON.stringify({ $schema: 'https://unpkg.com/void/schema.json' }));
     const config = readConfig(tmpDir);
-    expect(config.$schema).toBe('https://unpkg.com/void/schema.json');
+    expect(config).toEqual({});
     cleanup();
   });
 
