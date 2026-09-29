@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, beforeEach, afterEach } from 'vite-plus/test';
+import { generateRouteTypes } from '../../src/codegen/route-types.ts';
 import { resolveLayoutIds } from '../../src/pages/layout-resolution.ts';
 import {
   scanPages,
@@ -100,6 +101,41 @@ describe('scanPages', () => {
     const page = result.pages.find((p) => p.componentId === 'profile');
     expect(page).toBeDefined();
     expect(page!.methods).toEqual(['loader', 'actions']);
+  });
+
+  it('ignores commented and stringified action exports', async () => {
+    writeFile('settings.vue', '<template><div>Settings</div></template>');
+    writeFile(
+      'settings.server.ts',
+      `export const action = () => ({});
+// export const actions = {};
+/* export async function loader() {} */
+const example = 'export const actions = {}';`,
+    );
+
+    const result = await scanPages(TMP);
+    expect(result.pages[0]?.methods).toEqual(['action']);
+    expect(() =>
+      generateRouteTypes(
+        { routes: [], middleware: [], jobs: [], queues: [], pages: result },
+        join(TMP, 'routes'),
+        join(TMP, '.void'),
+        join(TMP, 'pages'),
+      ),
+    ).not.toThrow();
+  });
+
+  it('detects page methods from named value re-exports without counting type exports', async () => {
+    writeFile('settings.vue', '<template><div>Settings</div></template>');
+    writeFile(
+      'settings.server.ts',
+      `const handler = () => ({});
+type actions = {};
+export { handler as action, type actions };`,
+    );
+
+    const result = await scanPages(TMP);
+    expect(result.pages[0]?.methods).toEqual(['action']);
   });
 
   it('identifies layout.vue files separately', async () => {

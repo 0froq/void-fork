@@ -1,8 +1,16 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname, basename, extname } from 'pathslash';
 import { glob } from 'tinyglobby';
+import { parseSync } from 'vite';
 import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
 import { parseRouteFilename } from '../router/parse-filename.ts';
+import {
+  isIdentifier,
+  type AstExportNamedDeclaration,
+  type AstFunctionDeclaration,
+  type AstProgram,
+  type AstVariableDeclaration,
+} from '../shared/ast.ts';
 import { resolveNamedLayout } from './layout-resolution.ts';
 import type {
   ExplicitBoolean,
@@ -17,7 +25,7 @@ import type {
 
 const COMPONENT_EXTENSIONS = ['vue', 'tsx', 'jsx', 'svelte', 'md'];
 const SERVER_EXTENSIONS = ['ts', 'tsx', 'js', 'mjs', 'mts'];
-const PAGES_EXPORT_RE = /export\s+(?:const|function|async\s+function)\s+(loader|actions?)\b/g;
+const PAGE_METHODS = new Set(['loader', 'action', 'actions']);
 const REVALIDATE_RE = /export\s+const\s+revalidate\s*=\s*(\d+)\s*;?/;
 const PRERENDER_RE = /export\s+const\s+prerender\s*=\s*true\s*;?/;
 const PRERENDER_FALSE_RE = /export\s+const\s+prerender\s*=\s*false\s*;?/;
@@ -47,6 +55,50 @@ type ResolvedPageRendering = {
   renderMode: PageRenderMode;
   shouldPrerender: boolean;
 };
+
+function detectPageMethods(source: string, filename: string): Array<string> {
+  let parsed: ReturnType<typeof parseSync>;
+  try {
+    parsed = parseSync(filename, source);
+  } catch {
+    return [];
+  }
+
+  const methods: Array<string> = [];
+  const program = parsed.program as unknown as AstProgram;
+  for (const node of program.body ?? []) {
+    if (node.type !== 'ExportNamedDeclaration') {
+      continue;
+    }
+    const exported = node as AstExportNamedDeclaration;
+    if (exported.exportKind === 'type') {
+      continue;
+    }
+    const declaration = exported.declaration;
+    if (declaration?.type === 'VariableDeclaration') {
+      for (const variable of (declaration as AstVariableDeclaration).declarations ?? []) {
+        if (isIdentifier(variable.id) && PAGE_METHODS.has(variable.id.name)) {
+          methods.push(variable.id.name);
+        }
+      }
+    } else if (declaration?.type === 'FunctionDeclaration') {
+      const functionName = (declaration as AstFunctionDeclaration).id;
+      if (isIdentifier(functionName) && PAGE_METHODS.has(functionName.name)) {
+        methods.push(functionName.name);
+      }
+    }
+    for (const specifier of exported.specifiers ?? []) {
+      if (
+        specifier.exportKind !== 'type' &&
+        isIdentifier(specifier.exported) &&
+        PAGE_METHODS.has(specifier.exported.name)
+      ) {
+        methods.push(specifier.exported.name);
+      }
+    }
+  }
+  return methods;
+}
 
 function inferAutoPrerender(page: PageRenderingSource, options?: PageScanOptions): boolean {
   const isDynamic = page.params.length > 0 || page.catchAll;
@@ -167,9 +219,7 @@ export async function scanPages(root: string, options?: PageScanOptions): Promis
       if (existsSync(join(pagesDir, candidate))) {
         serverPath = candidate;
         const content = readFileSync(join(pagesDir, candidate), 'utf-8');
-        for (const m of content.matchAll(PAGES_EXPORT_RE)) {
-          methods.push(m[1]);
-        }
+        methods.push(...detectPageMethods(content, candidate));
         const revalidateMatch = content.match(REVALIDATE_RE);
         if (revalidateMatch) {
           revalidate = Number(revalidateMatch[1]);
