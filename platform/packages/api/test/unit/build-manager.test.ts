@@ -5758,6 +5758,21 @@ describe('formatLogTailMarkdown sanitizes before measuring', () => {
     );
   });
 
+  it('keeps diagnostics visible after a tool leaves a wide terminal margin', async () => {
+    const margin = ' '.repeat(512);
+    const out = (await formatLogTailMarkdown(
+      [
+        { line: `${ESC}[?25l${margin}build finished`, lineEnding: 'crlf' },
+        { line: `${margin}deploy: output missing`, lineEnding: 'none' },
+      ],
+      2,
+    )) as string;
+    expect(parseFence(out).content).toEqual([
+      `${' '.repeat(32)}build finished`,
+      `${' '.repeat(32)}deploy: output missing`,
+    ]);
+  });
+
   it('drops lines that carried nothing but control output', async () => {
     const out = (await formatLogTailMarkdown(
       ['real output', `${ESC}[?25h`, 'more output'],

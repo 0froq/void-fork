@@ -1069,7 +1069,13 @@ export async function formatLogTailMarkdown(
   if (groups.slice(0, selectedStart).some((group) => group.requiresTerminal)) {
     return null;
   }
-  const visibleLines = await renderTerminalGroups(selectedNewestFirst.reverse());
+  // A tool can leave the virtual terminal cursor thousands of columns to the
+  // right. GitHub preserves those spaces in its code block, making the useful
+  // text appear blank until the reader scrolls horizontally. Keep ordinary
+  // indentation, but bound excessive left padding after terminal rendering.
+  const visibleLines = (await renderTerminalGroups(selectedNewestFirst.reverse())).map((line) =>
+    line.replace(/^ {257,}/, ' '.repeat(32)),
+  );
 
   // Apply the user-visible byte cap newest-first after terminal rendering. This
   // keeps at most the final 60KB plus one currently considered row live.
