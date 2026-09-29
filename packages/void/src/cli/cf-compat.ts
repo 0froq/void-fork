@@ -190,13 +190,17 @@ function cleanJson(command: Array<string>, transform?: (value: unknown) => unkno
   return result(0, `${JSON.stringify(transform(parsedJson(called.stdout)))}\n`, called.stderr);
 }
 
-async function readVersionResources(worker: string, versionId: string): Promise<Json> {
+function accountId(): string {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? config().account_id;
   if (typeof accountId !== 'string' || !accountId) {
-    throw new Error('Cloudflare account is not pinned for Worker inspection.');
+    throw new Error('Cloudflare account is not pinned for API inspection.');
   }
+  return accountId;
+}
+
+async function cloudflareApiGet(path: string, failure: string): Promise<Json> {
   const base = process.env.CLOUDFLARE_API_BASE_URL ?? 'https://api.cloudflare.com/client/v4';
-  const url = `${base.replace(/\/$/, '')}/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(worker)}/versions/${encodeURIComponent(versionId)}`;
+  const url = `${base.replace(/\/$/, '')}${path}`;
   const proxy =
     process.env.HTTP_PROXY ||
     process.env.HTTPS_PROXY ||
@@ -213,16 +217,24 @@ async function readVersionResources(worker: string, versionId: string): Promise<
     });
     const body = object(await response.json());
     if (!response.ok || body.success !== true) {
-      throw new Error('Cloudflare did not return Worker version resources.');
+      throw new Error(failure);
     }
-    const resources = object(object(body.result).resources);
-    if (!Array.isArray(resources.bindings) || !resources.script || !resources.script_runtime) {
-      throw new Error('Cloudflare Worker version resources were incomplete.');
-    }
-    return resources;
+    return body;
   } finally {
     await proxy?.close();
   }
+}
+
+async function readVersionResources(worker: string, versionId: string): Promise<Json> {
+  const body = await cloudflareApiGet(
+    `/accounts/${encodeURIComponent(accountId())}/workers/scripts/${encodeURIComponent(worker)}/versions/${encodeURIComponent(versionId)}`,
+    'Cloudflare did not return Worker version resources.',
+  );
+  const resources = object(object(body.result).resources);
+  if (!Array.isArray(resources.bindings) || !resources.script || !resources.script_runtime) {
+    throw new Error('Cloudflare Worker version resources were incomplete.');
+  }
+  return resources;
 }
 
 function apiHeaders(): Record<string, string> {
@@ -348,6 +360,46 @@ function listAllResourcePages(command: Array<string>, extraFlags: Array<string> 
     }
   }
   throw new Error(`Cloudflare ${command.join(' ')} exceeded the supported page limit.`);
+}
+
+async function readAllQueues(): Promise<Array<Json>> {
+  // cf queues list has no page option, so read the API's paginated response directly.
+  const queues: Array<Json> = [];
+  const seen = new Set<string>();
+  for (let page = 1; page <= 1000; page++) {
+    const body = await cloudflareApiGet(
+      `/accounts/${encodeURIComponent(accountId())}/queues?page=${page}`,
+      'Cloudflare did not return the Queue list.',
+    );
+    const entries = body.result;
+    const info = object(body.result_info);
+    if (
+      !Array.isArray(entries) ||
+      !Number.isSafeInteger(info.page) ||
+      info.page !== page ||
+      !Number.isSafeInteger(info.total_pages) ||
+      (info.total_pages as number) < 0 ||
+      (info.total_pages as number) > 1000
+    ) {
+      throw new Error('Cloudflare returned incomplete Queue pagination.');
+    }
+    for (const entry of entries) {
+      const queue = object(entry);
+      if (
+        typeof queue.queue_id !== 'string' ||
+        typeof queue.queue_name !== 'string' ||
+        seen.has(queue.queue_id)
+      ) {
+        throw new Error('Cloudflare returned an invalid Queue list.');
+      }
+      seen.add(queue.queue_id);
+      queues.push(queue);
+    }
+    if (page >= (info.total_pages as number)) {
+      return queues;
+    }
+  }
+  throw new Error('Cloudflare Queue list exceeded the supported page limit.');
 }
 
 async function resources(): Promise<Result> {
@@ -491,15 +543,7 @@ async function resources(): Promise<Result> {
     if (verb === 'create') {
       return runCf(['queues', 'create', '--queue-name', third]);
     }
-    const listed = runCf(['queues', 'list']);
-    if (listed.status !== 0) {
-      return listed;
-    }
-    const value = parsedJson(listed.stdout);
-    if (!Array.isArray(value)) {
-      throw new Error('Queue list was malformed.');
-    }
-    const queue = value.find((item) => object(item).queue_name === third);
+    const queue = (await readAllQueues()).find((item) => item.queue_name === third);
     return queue
       ? result(0, `Queue Name: ${third}\n`)
       : result(1, '', `Queue "${third}" does not exist`);
@@ -791,15 +835,7 @@ async function workerChanges(): Promise<Result> {
     if (!queueName || !worker) {
       throw new Error('Queue consumer target is missing.');
     }
-    const queues = runCf(['queues', 'list']);
-    if (queues.status !== 0) {
-      return queues;
-    }
-    const list = parsedJson(queues.stdout);
-    if (!Array.isArray(list)) {
-      throw new Error('Queue list was malformed.');
-    }
-    const queue = list.map(object).find((item) => item.queue_name === queueName);
+    const queue = (await readAllQueues()).find((item) => item.queue_name === queueName);
     if (!queue || typeof queue.queue_id !== 'string') {
       return result(1, '', `Queue "${queueName}" does not exist`);
     }

@@ -109,6 +109,67 @@ it('discovers KV namespaces beyond the first cf API page', async () => {
   }
 }, 30_000);
 
+it('finds existing Queues beyond the first cf API page', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'void-cf-queue-pages-'));
+  const requestedPages: Array<number> = [];
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? '', 'http://127.0.0.1');
+    expect(url.pathname).toBe('/client/v4/accounts/test-account/queues');
+    const page = Number(url.searchParams.get('page'));
+    requestedPages.push(page);
+    response.setHeader('Content-Type', 'application/json');
+    response.end(
+      JSON.stringify({
+        success: true,
+        result: [
+          page === 1
+            ? { queue_id: 'first-queue', queue_name: 'another-queue' }
+            : { queue_id: 'target-queue', queue_name: 'existing-void-queue' },
+        ],
+        result_info: { page, per_page: 1, total_pages: 2, total_count: 2 },
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const configPath = join(directory, 'wrangler.json');
+    writeFileSync(configPath, JSON.stringify({ account_id: 'test-account' }));
+    const [command, ...prefix] = resolveWranglerArgv(directory);
+    const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
+      (resolve) => {
+        execFile(
+          command!,
+          [...prefix, 'queues', 'info', 'existing-void-queue', '-c', configPath],
+          {
+            cwd: directory,
+            encoding: 'utf8',
+            timeout: 20_000,
+            env: {
+              PATH: process.env.PATH,
+              SYSTEMROOT: process.env.SYSTEMROOT,
+              WINDIR: process.env.WINDIR,
+              CI: 'true',
+              CF_API_TOKEN: 'synthetic-token',
+              CLOUDFLARE_ACCOUNT_ID: 'test-account',
+              CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`,
+            },
+          },
+          (error, stdout, stderr) => resolve({ status: error ? 1 : 0, stdout, stderr }),
+        );
+      },
+    );
+    expect(output.status, output.stderr).toBe(0);
+    expect(output.stdout).toContain('Queue Name: existing-void-queue');
+    expect(requestedPages).toEqual([1, 2]);
+  } finally {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeAllConnections();
+    });
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 30_000);
+
 it('uses pinned cf despite a project-local CLI and preserves D1 results and the CF token alias', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'void-cf-d1-contract-'));
   const requests: Array<{ method: string; path: string; authorization: string | undefined }> = [];
