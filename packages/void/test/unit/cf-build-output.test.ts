@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { readBuildOutput } from '@cloudflare/build-output-utils';
@@ -78,6 +78,16 @@ it('keeps unsupported configuration on the existing deploy path', async () => {
     main: 'index.js',
     limits: { cpu_ms: 100 },
   });
+  expect(await prepareCfBuildOutput(output, 'account-id')).toBeNull();
+});
+
+it('falls back when the generated bundle contains a symlink that would be omitted', async () => {
+  const output = worker({
+    name: 'void-test',
+    compatibility_date: '2026-09-29',
+    main: 'index.js',
+  });
+  symlinkSync('index.js', join(output, 'chunk.js'));
   expect(await prepareCfBuildOutput(output, 'account-id')).toBeNull();
 });
 

@@ -262,6 +262,9 @@ function toCfWorker(raw: JsonObject): ReturnType<typeof InputConfigSchema.parse>
 
 function copyBundle(source: string, destination: string): boolean {
   for (const entry of readdirSync(source, { recursive: true, withFileTypes: true })) {
+    if (entry.isSymbolicLink()) {
+      return false;
+    }
     if (!entry.isFile()) {
       continue;
     }
