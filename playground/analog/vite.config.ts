@@ -13,6 +13,7 @@ export default defineConfig({
       nitro: {
         preset: 'cloudflare-module',
         modules: ['nitro-cloudflare-dev'],
+        cloudflareDev: { configPath: './.void-wrangler.jsonc' },
         alias: {
           // Nitro has its own bundler that doesn't use Vite aliases.
           // Duplicate @schema here so Nitro can resolve it.

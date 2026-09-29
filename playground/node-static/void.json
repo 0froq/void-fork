@@ -1,5 +1,0 @@
-{
-  "$schema": "../../packages/void/schema.json",
-  "target": "node",
-  "output": "static"
-}

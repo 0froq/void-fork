@@ -6,6 +6,7 @@ export default defineNuxtConfig({
   compatibilityDate: '2026-02-24',
   nitro: {
     preset: 'cloudflare-module',
+    cloudflareDev: { configPath: './.void-wrangler.jsonc' },
     alias: {
       // Nitro has its own bundler that doesn't use Vite aliases.
       // Duplicate @schema here so Nitro can resolve it.

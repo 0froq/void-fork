@@ -8,7 +8,10 @@ export default defineConfig({
   plugins: [
     voidPlugin(),
     sveltekit({
-      adapter: adapter(),
+      adapter: adapter({
+        config: './.void-wrangler.jsonc',
+        platformProxy: { configPath: './.void-wrangler.jsonc' },
+      }),
       typescript: {
         config: withVoidTSConfig(),
       },
