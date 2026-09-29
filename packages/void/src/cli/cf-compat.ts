@@ -22,6 +22,12 @@ const args = process.argv.slice(2);
 function cfEnvironment(): NodeJS.ProcessEnv {
   // The pinned bin otherwise delegates to any cf installed by the project.
   const env: NodeJS.ProcessEnv = { ...process.env, CF_DELEGATION: '1' };
+  // cf uses Node's built-in fetch for API operations. Node does not consult
+  // HTTP(S)_PROXY for fetch unless its environment proxy support is enabled.
+  // Match the proxy handling of our direct API reads below.
+  if (env.HTTP_PROXY || env.HTTPS_PROXY || env.http_proxy || env.https_proxy) {
+    env.NODE_USE_ENV_PROXY = '1';
+  }
   for (const [canonical, alias] of [
     ['CLOUDFLARE_API_TOKEN', 'CF_API_TOKEN'],
     ['CLOUDFLARE_API_KEY', 'CF_API_KEY'],

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -262,6 +262,92 @@ it('uses pinned cf despite a project-local CLI and preserves D1 results and the 
       server.close(() => resolve());
       server.closeAllConnections();
     });
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 30_000);
+
+it('uses the configured HTTP proxy for cf resource requests', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'void-cf-resource-proxy-'));
+  let proxied = 0;
+  let queried = 0;
+  const api = createServer((request, response) => {
+    queried++;
+    expect(request.url).toBe('/client/v4/accounts/test-account/d1/database/test-database/query');
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify({ success: true, result: [{ results: [], success: true }] }));
+  });
+  const proxy = createServer((request, response) => {
+    proxied++;
+    const upstream = httpRequest(
+      request.url!,
+      { method: request.method, headers: request.headers },
+      (upstreamResponse) => {
+        response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+        upstreamResponse.pipe(response);
+      },
+    );
+    request.pipe(upstream);
+    upstream.on('error', () => response.destroy());
+  });
+  proxy.on('connect', (request, socket, head) => {
+    proxied++;
+    const [host, port] = request.url!.split(':');
+    const upstream = connect(Number(port), host!, () => {
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      if (head.length) {
+        upstream.write(head);
+      }
+      socket.pipe(upstream).pipe(socket);
+    });
+    upstream.on('error', () => socket.destroy());
+  });
+  await Promise.all([
+    new Promise<void>((resolve) => api.listen(0, '127.0.0.1', resolve)),
+    new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve)),
+  ]);
+  try {
+    const configPath = join(directory, 'wrangler.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        account_id: 'test-account',
+        d1_databases: [{ binding: 'DB', database_id: 'test-database' }],
+      }),
+    );
+    const [command, ...prefix] = resolveWranglerArgv(directory);
+    const output = await new Promise<{ status: number; stderr: string }>((resolve) => {
+      execFile(
+        command!,
+        [...prefix, 'd1', 'execute', 'DB', '--command', 'SELECT 1', '-c', configPath],
+        {
+          cwd: directory,
+          timeout: 20_000,
+          env: {
+            ...process.env,
+            CF_API_TOKEN: 'synthetic-token',
+            CLOUDFLARE_ACCOUNT_ID: 'test-account',
+            CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${(api.address() as AddressInfo).port}/client/v4`,
+            HTTP_PROXY: `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`,
+            HTTPS_PROXY: '',
+            NO_PROXY: '',
+          },
+        },
+        (error, _stdout, stderr) => resolve({ status: error ? 1 : 0, stderr }),
+      );
+    });
+    expect(output.status, output.stderr).toBe(0);
+    expect(queried).toBe(1);
+    expect(proxied).toBe(1);
+  } finally {
+    await Promise.all(
+      [api, proxy].map(
+        (server) =>
+          new Promise<void>((resolve) => {
+            server.close(() => resolve());
+            server.closeAllConnections();
+          }),
+      ),
+    );
     rmSync(directory, { recursive: true, force: true });
   }
 }, 30_000);
