@@ -24,6 +24,9 @@ import {
 } from '../../src/cli/cf-build-output.ts';
 
 const roots: Array<string> = [];
+// These tests start a real cf CLI process (and one also runs a Vite build).
+// Windows CI can take longer than Vitest's 5-second default under parallel load.
+const CF_BUILD_TIMEOUT_MS = process.platform === 'win32' ? 45_000 : 15_000;
 afterEach(() => {
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
@@ -43,33 +46,35 @@ function worker(config: Record<string, unknown>): string {
   return output;
 }
 
-it('preserves additional module types from a real Cloudflare Vite build', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'void-cf-additional-modules-'));
-  roots.push(root);
-  writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }));
-  const configPath = join(root, 'wrangler.json');
-  writeFileSync(
-    configPath,
-    JSON.stringify({
-      name: 'void-additional-modules',
-      main: 'index.js',
-      compatibility_date: '2026-09-29',
-    }),
-  );
-  const assets = {
-    'message.txt': 'hello',
-    'page.html': '<p>hello</p>',
-    'query.sql': 'SELECT 1',
-    'bytes.bin': Buffer.from([1, 2, 3]),
-    'module.wasm': Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]),
-  };
-  for (const [name, contents] of Object.entries(assets)) {
-    writeFileSync(join(root, name), contents);
-  }
-  writeFileSync(join(root, 'style.css'), 'body { color: red; }');
-  writeFileSync(
-    join(root, 'index.js'),
-    `import message from './message.txt';
+it(
+  'preserves additional module types from a real Cloudflare Vite build',
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-cf-additional-modules-'));
+    roots.push(root);
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }));
+    const configPath = join(root, 'wrangler.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        name: 'void-additional-modules',
+        main: 'index.js',
+        compatibility_date: '2026-09-29',
+      }),
+    );
+    const assets = {
+      'message.txt': 'hello',
+      'page.html': '<p>hello</p>',
+      'query.sql': 'SELECT 1',
+      'bytes.bin': Buffer.from([1, 2, 3]),
+      'module.wasm': Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]),
+    };
+    for (const [name, contents] of Object.entries(assets)) {
+      writeFileSync(join(root, name), contents);
+    }
+    writeFileSync(join(root, 'style.css'), 'body { color: red; }');
+    writeFileSync(
+      join(root, 'index.js'),
+      `import message from './message.txt';
 import page from './page.html';
 import query from './query.sql';
 import bytes from './bytes.bin';
@@ -78,165 +83,175 @@ import './style.css';
 export default { fetch() {
   return Response.json({ message, page, query, bytes: Array.from(new Uint8Array(bytes)), imports: WebAssembly.Module.imports(wasm) });
 } };`,
-  );
-  const builder = await createBuilder({
-    root,
-    configFile: false,
-    logLevel: 'silent',
-    plugins: [cloudflare({ configPath })],
-    build: { sourcemap: true },
-  });
-  await builder.buildApp();
-  const output = join(root, 'dist', 'void_additional_modules');
-  expect(
-    readdirSync(output, { recursive: true }).some((name) => String(name).endsWith('.css')),
-  ).toBe(true);
-  const prepared = await prepareCfBuildOutput(output, 'account-id');
-  expect(prepared).not.toBeNull();
-  if (!prepared) {
-    return;
-  }
-  try {
-    const built = await readBuildOutput(prepared.directory);
-    const manifest = built.workers.default.config.manifest!;
-    expect(manifest.type).toBe('complete');
-    expect(manifest.modules['index.js']).toEqual({ type: 'esm' });
-    expect(manifest.modules['index.js.map']).toEqual({ type: 'sourcemap' });
-    for (const [name, type] of Object.entries({
-      message: 'text',
-      page: 'text',
-      query: 'text',
-      bytes: 'data',
-      module: 'wasm',
-    })) {
-      const moduleName = Object.keys(manifest.modules).find((path) =>
-        path.startsWith(`assets/${name}-`),
-      );
-      expect(moduleName).toBeDefined();
-      expect(manifest.modules[moduleName!]).toEqual({ type });
-      expect(
-        readFileSync(
-          join(prepared.directory, '.cloudflare/output/v0/workers/default/bundle', moduleName!),
-        ),
-      ).toEqual(readFileSync(join(output, moduleName!)));
+    );
+    const builder = await createBuilder({
+      root,
+      configFile: false,
+      logLevel: 'silent',
+      plugins: [cloudflare({ configPath })],
+      build: { sourcemap: true },
+    });
+    await builder.buildApp();
+    const output = join(root, 'dist', 'void_additional_modules');
+    expect(
+      readdirSync(output, { recursive: true }).some((name) => String(name).endsWith('.css')),
+    ).toBe(true);
+    const prepared = await prepareCfBuildOutput(output, 'account-id');
+    expect(prepared).not.toBeNull();
+    if (!prepared) {
+      return;
     }
-    expect(manifest.modules['.vite/manifest.json']).toBeUndefined();
-    expect(Object.keys(manifest.modules).some((name) => name.endsWith('.css'))).toBe(false);
-    const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
-    const dryRun = spawnSync(
-      process.execPath,
-      [cf, 'workers', 'versions', 'create', '--prebuilt', '--dry-run'],
-      { cwd: prepared.directory, encoding: 'utf8' },
-    );
-    expect(dryRun.status, `${dryRun.stdout}\n${dryRun.stderr}`).toBe(0);
-  } finally {
-    prepared.dispose();
-  }
-});
+    try {
+      const built = await readBuildOutput(prepared.directory);
+      const manifest = built.workers.default.config.manifest!;
+      expect(manifest.type).toBe('complete');
+      expect(manifest.modules['index.js']).toEqual({ type: 'esm' });
+      expect(manifest.modules['index.js.map']).toEqual({ type: 'sourcemap' });
+      for (const [name, type] of Object.entries({
+        message: 'text',
+        page: 'text',
+        query: 'text',
+        bytes: 'data',
+        module: 'wasm',
+      })) {
+        const moduleName = Object.keys(manifest.modules).find((path) =>
+          path.startsWith(`assets/${name}-`),
+        );
+        expect(moduleName).toBeDefined();
+        expect(manifest.modules[moduleName!]).toEqual({ type });
+        expect(
+          readFileSync(
+            join(prepared.directory, '.cloudflare/output/v0/workers/default/bundle', moduleName!),
+          ),
+        ).toEqual(readFileSync(join(output, moduleName!)));
+      }
+      expect(manifest.modules['.vite/manifest.json']).toBeUndefined();
+      expect(Object.keys(manifest.modules).some((name) => name.endsWith('.css'))).toBe(false);
+      const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
+      const dryRun = spawnSync(
+        process.execPath,
+        [cf, 'workers', 'versions', 'create', '--prebuilt', '--dry-run'],
+        { cwd: prepared.directory, encoding: 'utf8' },
+      );
+      expect(dryRun.status, `${dryRun.stdout}\n${dryRun.stderr}`).toBe(0);
+    } finally {
+      prepared.dispose();
+    }
+  },
+  CF_BUILD_TIMEOUT_MS,
+);
 
-it('produces deployable cf build output without changing the authored project', async () => {
-  const output = worker({
-    name: 'void-test',
-    compatibility_date: '2026-09-29',
-    main: 'index.js',
-    send_metrics: false,
-    keep_assets: true,
-    vars: { MESSAGE: 'hello' },
-    kv_namespaces: [{ binding: 'CACHE', id: 'namespace-id' }],
-    d1_databases: [{ binding: 'DB', database_id: 'database-id', database_name: 'database' }],
-    triggers: { crons: ['0 * * * *'] },
-    assets: { binding: 'ASSETS', directory: '../client', run_worker_first: ['/**'] },
-  });
-  const client = join(dirname(output), 'client');
-  mkdirSync(client);
-  writeFileSync(join(client, 'index.html'), '<h1>hello</h1>');
-  const prepared = await prepareCfBuildOutput(output, 'account-id');
-  expect(prepared).not.toBeNull();
-  if (!prepared) {
-    return;
-  }
-  try {
-    const built = await readBuildOutput(prepared.directory);
-    expect(built.rootConfig.accountId).toBe('account-id');
-    expect(built.workers.default.config.env?.CACHE).toEqual({ type: 'kv', id: 'namespace-id' });
-    expect(built.workers.default.config.manifest?.mainModule).toBe('index.js');
-    expect(built.workers.default.assetsDir).toBeDefined();
-    const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
-    const dryRun = spawnSync(
-      process.execPath,
-      [cf, 'workers', 'versions', 'create', '--prebuilt', '--dry-run'],
-      {
-        cwd: prepared.directory,
-        encoding: 'utf8',
-      },
-    );
-    expect(dryRun.status, `${dryRun.stdout}\n${dryRun.stderr}`).toBe(0);
-    expect(dryRun.stdout).toContain('Dry run complete');
-  } finally {
-    prepared.dispose();
-  }
-  expect(existsSync(prepared.directory)).toBe(false);
-  expect(existsSync(join(output, 'wrangler.json'))).toBe(true);
-});
-
-it('bundles framework Worker output while honoring its public asset exclusions', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'void-cf-framework-output-test-'));
-  roots.push(root);
-  const output = join(root, 'framework');
-  mkdirSync(output);
-  writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }));
-  writeFileSync(
-    join(root, 'wrangler.json'),
-    JSON.stringify({
-      name: 'void-framework-test',
-      account_id: 'account-id',
-      main: 'framework/_worker.js',
+it(
+  'produces deployable cf build output without changing the authored project',
+  async () => {
+    const output = worker({
+      name: 'void-test',
       compatibility_date: '2026-09-29',
-      assets: { directory: 'framework', binding: 'ASSETS', run_worker_first: true },
-    }),
-  );
-  writeFileSync(
-    join(output, '_worker.js'),
-    "import app from './__original.js'; export default app;\n",
-  );
-  writeFileSync(
-    join(output, '__original.js'),
-    'export default { fetch() { return new Response("ok") } };\n',
-  );
-  writeFileSync(join(output, 'index.html'), '<h1>public</h1>');
-  writeFileSync(join(output, '.assetsignore'), '_worker.js\n__original.js\n');
+      main: 'index.js',
+      send_metrics: false,
+      keep_assets: true,
+      vars: { MESSAGE: 'hello' },
+      kv_namespaces: [{ binding: 'CACHE', id: 'namespace-id' }],
+      d1_databases: [{ binding: 'DB', database_id: 'database-id', database_name: 'database' }],
+      triggers: { crons: ['0 * * * *'] },
+      assets: { binding: 'ASSETS', directory: '../client', run_worker_first: ['/**'] },
+    });
+    const client = join(dirname(output), 'client');
+    mkdirSync(client);
+    writeFileSync(join(client, 'index.html'), '<h1>hello</h1>');
+    const prepared = await prepareCfBuildOutput(output, 'account-id');
+    expect(prepared).not.toBeNull();
+    if (!prepared) {
+      return;
+    }
+    try {
+      const built = await readBuildOutput(prepared.directory);
+      expect(built.rootConfig.accountId).toBe('account-id');
+      expect(built.workers.default.config.env?.CACHE).toEqual({ type: 'kv', id: 'namespace-id' });
+      expect(built.workers.default.config.manifest?.mainModule).toBe('index.js');
+      expect(built.workers.default.assetsDir).toBeDefined();
+      const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
+      const dryRun = spawnSync(
+        process.execPath,
+        [cf, 'workers', 'versions', 'create', '--prebuilt', '--dry-run'],
+        {
+          cwd: prepared.directory,
+          encoding: 'utf8',
+        },
+      );
+      expect(dryRun.status, `${dryRun.stdout}\n${dryRun.stderr}`).toBe(0);
+      expect(dryRun.stdout).toContain('Dry run complete');
+    } finally {
+      prepared.dispose();
+    }
+    expect(existsSync(prepared.directory)).toBe(false);
+    expect(existsSync(join(output, 'wrangler.json'))).toBe(true);
+  },
+  CF_BUILD_TIMEOUT_MS,
+);
 
-  const prepared = await prepareCfFrameworkBuildOutput({
-    projectRoot: root,
-    configPath: join(root, 'wrangler.json'),
-    accountId: 'account-id',
-  });
-  expect(prepared).not.toBeNull();
-  if (!prepared) {
-    return;
-  }
-  try {
-    const built = await readBuildOutput(prepared.directory);
-    expect(built.workers.default.config.manifest?.mainModule).toBe('index.js');
-    const assets = getWorkerAssetsDir(prepared.directory);
-    expect(readFileSync(join(assets, 'index.html'), 'utf8')).toContain('public');
-    expect(existsSync(join(assets, '_worker.js'))).toBe(false);
-    expect(existsSync(join(assets, '__original.js'))).toBe(false);
-    expect(existsSync(join(assets, '.assetsignore'))).toBe(false);
-    const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
-    const dryRun = spawnSync(
-      process.execPath,
-      [cf, 'workers', 'versions', 'create', '--prebuilt', '--dry-run'],
-      {
-        cwd: prepared.directory,
-        encoding: 'utf8',
-      },
+it(
+  'bundles framework Worker output while honoring its public asset exclusions',
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-cf-framework-output-test-'));
+    roots.push(root);
+    const output = join(root, 'framework');
+    mkdirSync(output);
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }));
+    writeFileSync(
+      join(root, 'wrangler.json'),
+      JSON.stringify({
+        name: 'void-framework-test',
+        account_id: 'account-id',
+        main: 'framework/_worker.js',
+        compatibility_date: '2026-09-29',
+        assets: { directory: 'framework', binding: 'ASSETS', run_worker_first: true },
+      }),
     );
-    expect(dryRun.status, `${dryRun.stdout}\n${dryRun.stderr}`).toBe(0);
-  } finally {
-    prepared.dispose();
-  }
-});
+    writeFileSync(
+      join(output, '_worker.js'),
+      "import app from './__original.js'; export default app;\n",
+    );
+    writeFileSync(
+      join(output, '__original.js'),
+      'export default { fetch() { return new Response("ok") } };\n',
+    );
+    writeFileSync(join(output, 'index.html'), '<h1>public</h1>');
+    writeFileSync(join(output, '.assetsignore'), '_worker.js\n__original.js\n');
+
+    const prepared = await prepareCfFrameworkBuildOutput({
+      projectRoot: root,
+      configPath: join(root, 'wrangler.json'),
+      accountId: 'account-id',
+    });
+    expect(prepared).not.toBeNull();
+    if (!prepared) {
+      return;
+    }
+    try {
+      const built = await readBuildOutput(prepared.directory);
+      expect(built.workers.default.config.manifest?.mainModule).toBe('index.js');
+      const assets = getWorkerAssetsDir(prepared.directory);
+      expect(readFileSync(join(assets, 'index.html'), 'utf8')).toContain('public');
+      expect(existsSync(join(assets, '_worker.js'))).toBe(false);
+      expect(existsSync(join(assets, '__original.js'))).toBe(false);
+      expect(existsSync(join(assets, '.assetsignore'))).toBe(false);
+      const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
+      const dryRun = spawnSync(
+        process.execPath,
+        [cf, 'workers', 'versions', 'create', '--prebuilt', '--dry-run'],
+        {
+          cwd: prepared.directory,
+          encoding: 'utf8',
+        },
+      );
+      expect(dryRun.status, `${dryRun.stdout}\n${dryRun.stderr}`).toBe(0);
+    } finally {
+      prepared.dispose();
+    }
+  },
+  CF_BUILD_TIMEOUT_MS,
+);
 
 it('preserves worker settings that the previous bridge dropped', async () => {
   const output = worker({
@@ -260,44 +275,48 @@ it('preserves worker settings that the previous bridge dropped', async () => {
   }
 });
 
-it('preserves existing Worker variables, secrets, and assets in the cf upload', async () => {
-  const output = worker({
-    name: 'void-test',
-    compatibility_date: '2026-09-29',
-    main: 'index.js',
-    keep_vars: true,
-    keep_secrets: true,
-    keep_assets: true,
-    vars: { EDITED: 'current' },
-  });
-  const prepared = await prepareCfBuildOutput(output, 'account-id');
-  expect(prepared).not.toBeNull();
-  if (!prepared) {
-    return;
-  }
-  try {
-    const built = await readBuildOutput(prepared.directory);
-    expect(built.workers.default.config.env).toMatchObject({
-      EDITED: { type: 'text', value: 'current' },
-    });
-    expect(built.workers.default.config.unsafe?.metadata).toMatchObject({
-      keep_bindings: ['plain_text', 'json', 'secret_text', 'secret_key'],
+it(
+  'preserves existing Worker variables, secrets, and assets in the cf upload',
+  async () => {
+    const output = worker({
+      name: 'void-test',
+      compatibility_date: '2026-09-29',
+      main: 'index.js',
+      keep_vars: true,
+      keep_secrets: true,
       keep_assets: true,
+      vars: { EDITED: 'current' },
     });
-    const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
-    const dryRun = spawnSync(
-      process.execPath,
-      [cf, 'workers', 'versions', 'create', '--prebuilt', '--dry-run'],
-      {
-        cwd: prepared.directory,
-        encoding: 'utf8',
-      },
-    );
-    expect(dryRun.status, `${dryRun.stdout}\n${dryRun.stderr}`).toBe(0);
-  } finally {
-    prepared.dispose();
-  }
-});
+    const prepared = await prepareCfBuildOutput(output, 'account-id');
+    expect(prepared).not.toBeNull();
+    if (!prepared) {
+      return;
+    }
+    try {
+      const built = await readBuildOutput(prepared.directory);
+      expect(built.workers.default.config.env).toMatchObject({
+        EDITED: { type: 'text', value: 'current' },
+      });
+      expect(built.workers.default.config.unsafe?.metadata).toMatchObject({
+        keep_bindings: ['plain_text', 'json', 'secret_text', 'secret_key'],
+        keep_assets: true,
+      });
+      const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
+      const dryRun = spawnSync(
+        process.execPath,
+        [cf, 'workers', 'versions', 'create', '--prebuilt', '--dry-run'],
+        {
+          cwd: prepared.directory,
+          encoding: 'utf8',
+        },
+      );
+      expect(dryRun.status, `${dryRun.stdout}\n${dryRun.stderr}`).toBe(0);
+    } finally {
+      prepared.dispose();
+    }
+  },
+  CF_BUILD_TIMEOUT_MS,
+);
 
 it('deploys Worker Workflow declarations through cf build output', async () => {
   const output = worker({
