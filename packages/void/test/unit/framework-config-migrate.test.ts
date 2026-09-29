@@ -50,6 +50,21 @@ describe('framework config migration', () => {
     );
   });
 
+  it.each(['astro.config.js', 'astro.config.mts'])(
+    'migrates the Astro adapter in %s before deleting the root config',
+    (file) => {
+      setup(
+        file,
+        'import cloudflare from "@astrojs/cloudflare";\nexport default { adapter: cloudflare() };\n',
+      );
+      expect(migrateLegacyVoidConfig(root)).toBe(true);
+      expect(readFileSync(join(root, file), 'utf8')).toContain(
+        "configPath: './.void-wrangler.jsonc'",
+      );
+      expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(false);
+    },
+  );
+
   it('preserves custom SvelteKit adapter options while migrating an explicit path', () => {
     setup(
       'vite.config.ts',
@@ -72,6 +87,16 @@ describe('framework config migration', () => {
       "import adapter from '@sveltejs/adapter-cloudflare';\nexport default { adapter: adapter(options) };\n",
     );
     expect(() => migrateLegacyVoidConfig(root)).toThrow('Update vite.config.ts');
+    expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(true);
+    expect(existsSync(join(root, 'void.config.ts'))).toBe(false);
+  });
+
+  it('leaves an adapter loaded with require and the root config intact', () => {
+    setup(
+      'svelte.config.js',
+      "const adapter = require('@sveltejs/adapter-cloudflare');\nmodule.exports = { kit: { adapter: adapter() } };\n",
+    );
+    expect(() => migrateLegacyVoidConfig(root)).toThrow('Update svelte.config.js');
     expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(true);
     expect(existsSync(join(root, 'void.config.ts'))).toBe(false);
   });

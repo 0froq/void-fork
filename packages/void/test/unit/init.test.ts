@@ -61,6 +61,26 @@ it('pins compatibility date in the lock without rewriting authored TypeScript', 
   }
 });
 
+it('keeps an existing typed Astro adapter with dynamic options during targeted init', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'void-init-typed-astro-'));
+  const adapter =
+    'import cloudflare from "@astrojs/cloudflare"; const options = { configPath: "./.void-wrangler.jsonc" }; export default { adapter: cloudflare(options) };\n';
+  try {
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: { astro: '*' } }));
+    writeFileSync(
+      join(root, 'void.config.ts'),
+      'export default { cloudflare: { name: "app" } };\n',
+    );
+    writeFileSync(join(root, 'astro.config.ts'), adapter);
+
+    await runInitCommand(root, { tsconfig: false, github: false, agents: true });
+    expect(readFileSync(join(root, 'astro.config.ts'), 'utf8')).toBe(adapter);
+    expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 describe('init Git arguments', () => {
   it('keeps Git optional and honors the last positive or negative flag', () => {
     expect(parseInitArgs([]).git).toBeUndefined();

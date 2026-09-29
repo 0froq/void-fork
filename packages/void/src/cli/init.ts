@@ -3410,6 +3410,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   if (!targeted) {
     root = await resolveInitRoot(root);
   }
+  const hadTypedConfig = existsSync(join(root, TYPED_CONFIG_FILE));
   if (migrateLegacyVoidConfig(root)) {
     log.success(
       'Migrated project configuration to void.config.ts. Commit void.config.ts and void.lock.json.',
@@ -3558,7 +3559,9 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   if (framework) {
     setupWranglerConfig(root, framework);
   }
-  migrateFrameworkAdapterPaths(root);
+  if (!hadTypedConfig) {
+    migrateFrameworkAdapterPaths(root);
+  }
 
   // Step 3: Database dialect
   if (!targeted && !didScaffoldStarter) {

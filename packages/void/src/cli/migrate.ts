@@ -88,13 +88,10 @@ export function migrateLegacyVoidConfig(root: string): boolean {
   }
   const wranglerName = wranglerFiles[0];
   const typedPath = join(root, TYPED_CONFIG_FILE);
-  if (!existsSync(legacyPath) && !wranglerName && !existsSync(typedPath)) {
+  if (!existsSync(legacyPath) && !wranglerName) {
     return false;
   }
   const frameworkPatches = planFrameworkConfigMigration(root);
-  if (!existsSync(legacyPath) && !wranglerName) {
-    return applyFrameworkConfigMigration(root, frameworkPatches);
-  }
 
   const raw = existsSync(legacyPath) ? readFileSync(legacyPath, 'utf8') : undefined;
   let legacy: Record<string, unknown> = {};

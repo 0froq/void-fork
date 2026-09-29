@@ -8,12 +8,18 @@ const CONFIG_FILES = [
   'vite.config.js',
   'vite.config.mts',
   'vite.config.mjs',
+  'vite.config.cts',
+  'vite.config.cjs',
   'svelte.config.ts',
   'svelte.config.js',
   'astro.config.ts',
   'astro.config.mjs',
+  'astro.config.js',
+  'astro.config.mts',
   'nuxt.config.ts',
   'nuxt.config.mjs',
+  'nuxt.config.js',
+  'nuxt.config.mts',
 ];
 
 export type FrameworkConfigPatch = { file: string; original: string; updated: string };
@@ -153,12 +159,26 @@ export function planFrameworkConfigMigration(root: string): Array<FrameworkConfi
     if (svelteImport) {
       const identifier = svelteImport[1]!;
       updated = patchAdapterCall(updated, identifier, file, 'svelte');
+    } else if (
+      /(?:from\s*['"]|require\(\s*['"]|import\(\s*['"])@sveltejs\/adapter-cloudflare['"]/.test(
+        original,
+      )
+    ) {
+      throw new Error(
+        `migrate: Update ${file} to pass ${GENERATED_PATH} to its Cloudflare adapter before removing the root Wrangler config.`,
+      );
     }
 
     const astroImport = /import\s+(\w+)\s+from\s+['"]@astrojs\/cloudflare['"]/.exec(original);
     if (astroImport) {
       const identifier = astroImport[1]!;
       updated = patchAdapterCall(updated, identifier, file, 'astro');
+    } else if (
+      /(?:from\s*['"]|require\(\s*['"]|import\(\s*['"])@astrojs\/cloudflare['"]/.test(original)
+    ) {
+      throw new Error(
+        `migrate: Update ${file} to pass ${GENERATED_PATH} to its Cloudflare adapter before removing the root Wrangler config.`,
+      );
     }
 
     if (original.includes('nitro-cloudflare-dev') && !original.includes('cloudflareDev:')) {

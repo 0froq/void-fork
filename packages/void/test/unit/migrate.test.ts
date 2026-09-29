@@ -86,4 +86,18 @@ describe('migrateLegacyVoidConfig', () => {
     expect(existsSync(join(root, 'void.json'))).toBe(true);
     expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(true);
   });
+
+  it('leaves an already typed project with dynamic adapter options alone', () => {
+    setup('{}');
+    rmSync(join(root, 'void.json'));
+    const typed = 'export default { cloudflare: { name: "app" } };\n';
+    const adapter =
+      'import cloudflare from "@astrojs/cloudflare"; const options = { configPath: "./.void-wrangler.jsonc" }; export default { adapter: cloudflare(options) };\n';
+    writeFileSync(join(root, 'void.config.ts'), typed);
+    writeFileSync(join(root, 'astro.config.ts'), adapter);
+
+    expect(migrateLegacyVoidConfig(root)).toBe(false);
+    expect(readFileSync(join(root, 'void.config.ts'), 'utf8')).toBe(typed);
+    expect(readFileSync(join(root, 'astro.config.ts'), 'utf8')).toBe(adapter);
+  });
 });
