@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -61,6 +62,7 @@ it('preserves additional module types from a real Cloudflare Vite build', async 
   for (const [name, contents] of Object.entries(assets)) {
     writeFileSync(join(root, name), contents);
   }
+  writeFileSync(join(root, 'style.css'), 'body { color: red; }');
   writeFileSync(
     join(root, 'index.js'),
     `import message from './message.txt';
@@ -68,6 +70,7 @@ import page from './page.html';
 import query from './query.sql';
 import bytes from './bytes.bin';
 import wasm from './module.wasm';
+import './style.css';
 export default { fetch() {
   return Response.json({ message, page, query, bytes: Array.from(new Uint8Array(bytes)), imports: WebAssembly.Module.imports(wasm) });
 } };`,
@@ -81,6 +84,7 @@ export default { fetch() {
   });
   await builder.buildApp();
   const output = join(root, 'dist', 'void_additional_modules');
+  expect(readdirSync(output, { recursive: true }).some((name) => name.endsWith('.css'))).toBe(true);
   const prepared = await prepareCfBuildOutput(output, 'account-id');
   expect(prepared).not.toBeNull();
   if (!prepared) {
@@ -111,6 +115,7 @@ export default { fetch() {
       ).toEqual(readFileSync(join(output, moduleName!)));
     }
     expect(manifest.modules['.vite/manifest.json']).toBeUndefined();
+    expect(Object.keys(manifest.modules).some((name) => name.endsWith('.css'))).toBe(false);
     const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
     const dryRun = spawnSync(
       process.execPath,

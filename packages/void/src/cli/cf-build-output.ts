@@ -74,7 +74,12 @@ function copyBundle(
     if (
       name === 'wrangler.json' ||
       name === '.dev.vars' ||
-      name === join('.vite', 'manifest.json')
+      name === join('.vite', 'manifest.json') ||
+      // Vite extracts side-effect CSS imports into the Worker output, but they
+      // are static build assets rather than Worker modules. Wrangler's module
+      // rules do not upload CSS, and a complete cf manifest must omit it too.
+      name.endsWith('.css') ||
+      name.endsWith('.css.map')
     ) {
       continue;
     }
