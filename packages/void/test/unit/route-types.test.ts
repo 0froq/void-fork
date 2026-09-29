@@ -64,6 +64,81 @@ describe('generateRouteTypes', () => {
     expect(dts).toContain('typeof import("../routes/api/users/index.ts")');
   });
 
+  it('emits one route key and preserves methods from colliding route files', () => {
+    const scan: ScanResult = {
+      routes: [
+        {
+          pattern: '/api/health',
+          methods: ['GET'],
+          params: [],
+          catchAll: false,
+          env: null,
+          filePath: 'api/health.ts',
+        },
+        {
+          pattern: '/api/health',
+          methods: ['POST'],
+          params: [],
+          catchAll: false,
+          env: null,
+          filePath: 'api/health/index.ts',
+        },
+      ],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: { pages: [], layouts: [], namedLayouts: [] },
+    };
+
+    const { dts } = generateRouteTypes(scan, '/project/routes', '/project/.void');
+    const routeMap = dts
+      .split('  interface RouteMap {')[1]!
+      .split('  interface WebSocketRouteMap {')[0]!;
+
+    expect(routeMap.match(/"\/api\/health": \{/g)).toHaveLength(1);
+    expect(routeMap).toContain('GET: {');
+    expect(routeMap).toContain('POST: {');
+    expect(routeMap).toContain('typeof import("../routes/api/health.ts")');
+    expect(routeMap).toContain('typeof import("../routes/api/health/index.ts")');
+  });
+
+  it('combines colliding environment-specific methods conservatively', () => {
+    const scan: ScanResult = {
+      routes: [
+        {
+          pattern: '/api/health',
+          methods: ['GET'],
+          params: [],
+          catchAll: false,
+          env: 'dev',
+          filePath: 'api/health.dev.ts',
+        },
+        {
+          pattern: '/api/health',
+          methods: ['GET'],
+          params: [],
+          catchAll: false,
+          env: 'prod',
+          filePath: 'api/health.prod.ts',
+        },
+      ],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: { pages: [], layouts: [], namedLayouts: [] },
+    };
+
+    const { dts } = generateRouteTypes(scan, '/project/routes', '/project/.void');
+    const routeMap = dts
+      .split('  interface RouteMap {')[1]!
+      .split('  interface WebSocketRouteMap {')[0]!;
+
+    expect(routeMap.match(/"\/api\/health": \{/g)).toHaveLength(1);
+    expect(routeMap.match(/GET: \{/g)).toHaveLength(1);
+    expect(routeMap).toMatch(/input: .*health\.dev\.ts.* & .*health\.prod\.ts/);
+    expect(routeMap).toMatch(/output: .*health\.dev\.ts.* \| .*health\.prod\.ts/);
+  });
+
   it('skips routes with no methods', () => {
     const scan: ScanResult = {
       routes: [
@@ -288,6 +363,47 @@ describe('generateRouteTypes', () => {
     expect(dts).toContain('client:');
     expect(dts).toContain('server:');
     expect(dts).toContain('params: RouteParams<["room"]>');
+  });
+
+  it('emits one WebSocket route key for colliding route files', () => {
+    const websocket = {
+      pattern: '/chat/:room',
+      methods: [],
+      params: ['room'],
+      catchAll: false,
+      env: 'dev' as const,
+      filePath: 'chat/[room].dev.ws.ts',
+      className: 'ChatRoomDevWs',
+      bindingName: 'ChatRoomDevWs',
+      mode: 'room' as const,
+      hasAuthGate: true,
+    };
+    const scan: ScanResult = {
+      routes: [],
+      websockets: [
+        websocket,
+        {
+          ...websocket,
+          env: 'prod',
+          filePath: 'chat/[room].prod.ws.ts',
+          className: 'ChatRoomProdWs',
+          bindingName: 'ChatRoomProdWs',
+        },
+      ],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: { pages: [], layouts: [], namedLayouts: [] },
+    };
+
+    const { dts } = generateRouteTypes(scan, '/project/routes', '/project/.void');
+    const websocketMap = dts.split('  interface WebSocketRouteMap {')[1]!.split('\n  }\n}')[0]!;
+
+    expect(websocketMap.match(/"\/chat\/:room": \{/g)).toHaveLength(1);
+    expect(websocketMap).toContain('chat/[room].dev.ws.ts');
+    expect(websocketMap).toContain('chat/[room].prod.ws.ts');
+    expect(websocketMap).toMatch(/client: .*dev\.ws\.ts.* & .*prod\.ws\.ts/);
+    expect(websocketMap).toMatch(/server: .*dev\.ws\.ts.* \| .*prod\.ws\.ts/);
   });
 
   it('skips pages without action in PageActionMap', () => {

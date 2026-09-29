@@ -1,5 +1,7 @@
 import { relative } from 'pathslash';
+import type { RouteDefinition } from '../router/parse-filename.ts';
 import type { ScanResult } from '../router/scan.ts';
+import type { WebSocketRouteDefinition } from '../router/websocket.ts';
 
 export type RouteTypesResult = {
   dts: string;
@@ -144,24 +146,37 @@ export function generateRouteTypes(
   lines.push('');
   lines.push('  interface RouteMap {');
 
+  const routesByPattern = new Map<string, Map<string, Array<RouteDefinition>>>();
   for (const route of scan.routes) {
-    if (route.methods.length === 0) {
-      continue;
-    }
-
-    // Compute relative path from outDir (.void/) to the route file
-    const absRoutePath = `${routesDir}/${route.filePath}`;
-    const importPath = relative(outDir, absRoutePath);
-
-    lines.push(`    ${JSON.stringify(route.pattern)}: {`);
-
     for (const method of route.methods) {
+      let methods = routesByPattern.get(route.pattern);
+      if (!methods) {
+        methods = new Map();
+        routesByPattern.set(route.pattern, methods);
+      }
+      let sources = methods.get(method);
+      if (!sources) {
+        sources = [];
+        methods.set(method, sources);
+      }
+      sources.push(route);
+    }
+  }
+
+  for (const [pattern, methods] of routesByPattern) {
+    lines.push(`    ${JSON.stringify(pattern)}: {`);
+
+    for (const [method, sources] of methods) {
+      const imports = sources.map((route) => {
+        const importPath = relative(outDir, `${routesDir}/${route.filePath}`);
+        return `(typeof import(${JSON.stringify(importPath)}))["${method}"]`;
+      });
       lines.push(`      ${method}: {`);
       lines.push(
-        `        input: ExtractInput<(typeof import(${JSON.stringify(importPath)}))["${method}"]["__validators"]>;`,
+        `        input: ${imports.map((source) => `ExtractInput<${source}["__validators"]>`).join(' & ')};`,
       );
       lines.push(
-        `        output: Serialize<Awaited<(typeof import(${JSON.stringify(importPath)}))["${method}"]["__output"]>>;`,
+        `        output: ${imports.map((source) => `Serialize<Awaited<${source}["__output"]>>`).join(' | ')};`,
       );
       lines.push('      };');
     }
@@ -173,17 +188,25 @@ export function generateRouteTypes(
   lines.push('');
   lines.push('  interface WebSocketRouteMap {');
 
+  const websocketsByPattern = new Map<string, Array<WebSocketRouteDefinition>>();
   for (const route of scan.websockets ?? []) {
-    const absRoutePath = `${routesDir}/${route.filePath}`;
-    const importPath = relative(outDir, absRoutePath);
+    const sources = websocketsByPattern.get(route.pattern) ?? [];
+    sources.push(route);
+    websocketsByPattern.set(route.pattern, sources);
+  }
 
-    lines.push(`    ${JSON.stringify(route.pattern)}: {`);
-    lines.push(`      params: RouteParams<${JSON.stringify(route.params)}>;`);
+  for (const [pattern, sources] of websocketsByPattern) {
+    const imports = sources.map((route) => {
+      const importPath = relative(outDir, `${routesDir}/${route.filePath}`);
+      return `(typeof import(${JSON.stringify(importPath)}))["default"]["messages"]`;
+    });
+    lines.push(`    ${JSON.stringify(pattern)}: {`);
+    lines.push(`      params: RouteParams<${JSON.stringify(sources[0]!.params)}>;`);
     lines.push(
-      `      client: ExtractInput<(typeof import(${JSON.stringify(importPath)}))["default"]["messages"]["client"]>;`,
+      `      client: ${imports.map((source) => `ExtractInput<${source}["client"]>`).join(' & ')};`,
     );
     lines.push(
-      `      server: ExtractOutput<(typeof import(${JSON.stringify(importPath)}))["default"]["messages"]["server"]>;`,
+      `      server: ${imports.map((source) => `ExtractOutput<${source}["server"]>`).join(' | ')};`,
     );
     lines.push('    };');
   }
