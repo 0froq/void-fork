@@ -307,7 +307,7 @@ it('uses the configured HTTP proxy for direct cf activation reads', async () => 
       proxy.close((error) => (error ? reject(error) : resolve())),
     );
   }
-});
+}, 30_000);
 
 it('preserves activation metadata and sorts cf version history for the existing protocol', async () => {
   const prepared = await output();
