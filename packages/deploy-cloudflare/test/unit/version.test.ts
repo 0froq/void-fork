@@ -1105,8 +1105,10 @@ describe('Cloudflare version activation', () => {
   it('uploads, probes, activates, and applies triggers in order', async () => {
     const runWrangler = runner();
     const fetcher = vi.fn(async () => Response.json({ ready: true }));
+    const phases: Array<string> = [];
     const result = await activateCloudflareVersion({
       runWrangler,
+      onProgress: (phase) => phases.push(phase),
       verifyUploader: () => true,
       workerName: 'my-worker',
       configPath: '/app/wrangler.jsonc',
@@ -1128,6 +1130,14 @@ describe('Cloudflare version activation', () => {
       },
       workersDevSubdomain: 'example',
     });
+    expect(phases).toEqual([
+      'Checking the current Worker deployment...',
+      'Uploading the Worker and assets...',
+      'Verifying the uploaded Worker...',
+      'Waiting for the Worker to become ready...',
+      'Activating the Worker...',
+      'Updating routes and triggers...',
+    ]);
     expect(fetcher).toHaveBeenCalledWith(
       'https://ready.example.workers.dev/__void/ready',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),

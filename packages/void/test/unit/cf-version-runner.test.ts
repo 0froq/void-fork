@@ -50,7 +50,7 @@ it('preserves real cf provider codes so a missing Worker can reach its first upl
         accountId: 'test-account', apiBaseUrl: ${JSON.stringify(apiBaseUrl)},
         env: () => process.env, verifyUploader: () => true,
       });
-      console.log(JSON.stringify(command(
+      console.log(JSON.stringify(await command(
         ['workers', 'deployments', 'list', '--worker', 'missing-worker'],
         { cwd: ${JSON.stringify(root)}, capture: true },
       )));
@@ -127,7 +127,7 @@ it('captures a version list larger than Node’s default child-process buffer', 
         accountId: 'test-account', apiBaseUrl: ${JSON.stringify(apiBaseUrl)},
         env: () => process.env, verifyUploader: () => true,
       });
-      const result = command(
+      const result = await command(
         ['workers', 'versions', 'list', '--worker-id', 'large-worker', '--per-page', '10'],
         { cwd: ${JSON.stringify(root)}, capture: true },
       );
@@ -218,7 +218,7 @@ async function output(config: Record<string, unknown> = {}) {
   return prepared!;
 }
 
-it('does not delegate credentialed commands to a project-local cf', () => {
+it('does not delegate credentialed commands to a project-local cf', async () => {
   const root = mkdtempSync(join(tmpdir(), 'void-cf-pinned-command-'));
   roots.push(root);
   const local = join(root, 'node_modules', 'cf');
@@ -235,9 +235,23 @@ it('does not delegate credentialed commands to a project-local cf', () => {
     verifyUploader: () => true,
     env: () => ({ PATH: process.env.PATH, CI: 'true', CLOUDFLARE_API_TOKEN: 'synthetic-token' }),
   });
-  const result = command(['--version'], { cwd: root, capture: true });
+  const result = await command(['--version'], { cwd: root, capture: true });
   expect(result.status, result.stderr).toBe(0);
   expect(result.stdout).not.toContain('UNPINNED_PROJECT_CF_EXECUTED');
+  expect(result.stdout).toContain('1.0.0-beta.5');
+});
+
+it('captures noninteractive cf output when Void owns the terminal', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'void-cf-quiet-command-'));
+  roots.push(root);
+  const command = createCfCommand({
+    accountId: 'test-account',
+    apiBaseUrl: 'https://api.cloudflare.com/client/v4',
+    verifyUploader: () => true,
+    env: () => ({ PATH: process.env.PATH, CI: 'true' }),
+  });
+  const result = await command(['--version'], { cwd: root, capture: false });
+  expect(result.status, result.stderr).toBe(0);
   expect(result.stdout).toContain('1.0.0-beta.5');
 });
 
@@ -290,7 +304,7 @@ it('uses the configured HTTP proxy for direct cf activation reads', async () => 
         accountId: 'test-account', apiBaseUrl: ${JSON.stringify(apiBaseUrl)},
         env: () => process.env, verifyUploader: () => true,
       });
-      const result = command(
+      const result = await command(
         ['workers', 'versions', 'list', '--worker-id', 'proxy-worker'],
         { cwd: ${JSON.stringify(root)}, capture: true },
       );

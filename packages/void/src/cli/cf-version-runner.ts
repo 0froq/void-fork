@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +11,7 @@ import { migrateBuiltWranglerConfig } from './cf-config-migrate.ts';
 type CfCommand = (
   args: Array<string>,
   options: { cwd: string; capture: boolean },
-) => CloudflareCommandResult;
+) => CloudflareCommandResult | Promise<CloudflareCommandResult>;
 
 function failed(message: string): CloudflareCommandResult {
   return { status: 1, stdout: '', stderr: message };
@@ -137,7 +137,7 @@ export function createCfResourceVerifier(options: {
       if (jurisdiction !== undefined && !safePositional(jurisdiction)) {
         return failed(`Cloudflare R2 binding ${bindingName} has an invalid jurisdiction.`);
       }
-      const result = options.runCf(
+      const result = await options.runCf(
         [
           ...resource.command,
           name,
@@ -171,7 +171,7 @@ export function createCfCommand(options: {
   verifyUploader: () => boolean;
 }): CfCommand {
   const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
-  return (args, run) => {
+  return async (args, run) => {
     if (!options.verifyUploader()) {
       return failed('The Cloudflare uploader changed during deployment.');
     }
@@ -179,6 +179,11 @@ export function createCfCommand(options: {
     const env: NodeJS.ProcessEnv = {
       ...options.env(options.accountId, options.apiBaseUrl),
       CF_DELEGATION: '1',
+      // Void owns the terminal UI. Keep cf's notices, progress, and telemetry out
+      // of successful deploys; retain its complete output for error diagnosis.
+      CF_QUIET: '1',
+      CF_NO_OSC_PROGRESS: '1',
+      CF_SEND_TELEMETRY: 'false',
     };
     if (env.HTTP_PROXY || env.HTTPS_PROXY || env.http_proxy || env.https_proxy) {
       env.NODE_USE_ENV_PROXY = '1';
@@ -186,25 +191,47 @@ export function createCfCommand(options: {
     if (options.token) {
       env.CLOUDFLARE_API_TOKEN = options.token;
     }
-    const result = spawnSync(process.execPath, [cf, ...args], {
-      cwd: run.cwd,
-      env,
-      shell: false,
-      windowsHide: true,
-      encoding: 'utf8',
-      // Version lists contain the full Worker records. Ten sizable bundles can
-      // exceed Node's 1 MiB spawnSync default before activation can inspect them.
-      maxBuffer: 256 * 1024 * 1024,
-      stdio: run.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+    return await new Promise<CloudflareCommandResult>((resolve) => {
+      const child = spawn(process.execPath, [cf, ...args], {
+        cwd: run.cwd,
+        env,
+        shell: false,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      const stdout: Array<Buffer> = [];
+      const stderr: Array<Buffer> = [];
+      let bytes = 0;
+      let error: string | null = null;
+      // Version lists contain full Worker records. Preserve the previous 256 MiB
+      // limit while letting Void's spinner animate during the network operation.
+      const collect = (chunks: Array<Buffer>, chunk: Buffer) => {
+        bytes += chunk.length;
+        if (bytes > 256 * 1024 * 1024) {
+          error = 'Cloudflare command output exceeded 256 MiB.';
+          child.kill();
+        } else {
+          chunks.push(chunk);
+        }
+      };
+      child.stdout.on('data', (chunk: Buffer) => collect(stdout, chunk));
+      child.stderr.on('data', (chunk: Buffer) => collect(stderr, chunk));
+      child.on('error', (cause: Error) => {
+        error = cause.message;
+      });
+      child.on('close', (status, signal) => {
+        resolve({
+          status: typeof status === 'number' ? status : 1,
+          stdout: Buffer.concat(stdout).toString('utf8'),
+          // Keep the activation protocol's provider-code parsing across CLI renderers.
+          stderr: Buffer.concat(stderr)
+            .toString('utf8')
+            .replace(/\[(\d{4,})\]/g, '[code: $1]'),
+          signal,
+          error,
+        });
+      });
     });
-    return {
-      status: typeof result.status === 'number' ? result.status : 1,
-      stdout: result.stdout ?? '',
-      // Keep the activation protocol's provider-code parsing across CLI renderers.
-      stderr: (result.stderr ?? '').replace(/\[(\d{4,})\]/g, '[code: $1]'),
-      signal: result.signal ?? null,
-      error: result.error?.message ?? null,
-    };
   };
 }
 
@@ -219,8 +246,8 @@ export function createCfVersionRunner(options: {
   verifyResources: (directory: string) => Promise<CloudflareCommandResult>;
 }): CloudflareCommandRunner {
   const { output, workerName, runCf } = options;
-  const run = (args: Array<string>, capture: boolean, cwd = output.directory) =>
-    runCf(args, { cwd, capture });
+  const run = async (args: Array<string>, capture: boolean, cwd = output.directory) =>
+    await runCf(args, { cwd, capture });
   const verifyResources = async (directory: string) => {
     try {
       return await options.verifyResources(directory);
@@ -231,7 +258,7 @@ export function createCfVersionRunner(options: {
 
   return async (args, command) => {
     if (args[0] === 'deployments' && args[1] === 'status') {
-      const result = run(['workers', 'deployments', 'list', '--worker', workerName], true);
+      const result = await run(['workers', 'deployments', 'list', '--worker', workerName], true);
       if (result.status !== 0) {
         return result;
       }
@@ -248,8 +275,8 @@ export function createCfVersionRunner(options: {
 
     if (args[0] === 'versions' && args[1] === 'list') {
       const pageSize = 10;
-      const readPage = (page: number) => {
-        const result = run(
+      const readPage = async (page: number) => {
+        const result = await run(
           [
             'workers',
             'versions',
@@ -278,7 +305,7 @@ export function createCfVersionRunner(options: {
               : null,
         };
       };
-      const first = readPage(1);
+      const first = await readPage(1);
       if (first.result.status !== 0) {
         return first.result;
       }
@@ -287,7 +314,7 @@ export function createCfVersionRunner(options: {
       }
       const versions = [...first.versions];
       if (versions.length === pageSize) {
-        const second = readPage(2);
+        const second = await readPage(2);
         if (second.result.status !== 0 || !second.versions) {
           return failed('The Cloudflare Worker version history was not readable.');
         }
@@ -298,7 +325,7 @@ export function createCfVersionRunner(options: {
             versions.push(...second.versions);
             let last = Math.max(...secondNumbers);
             for (let page = 3; page <= 1000 && second.versions.length === pageSize; page++) {
-              const next = readPage(page);
+              const next = await readPage(page);
               if (next.result.status !== 0 || !next.versions) {
                 return failed('The Cloudflare Worker version history was not readable.');
               }
@@ -332,7 +359,10 @@ export function createCfVersionRunner(options: {
     }
 
     if (args[0] === 'versions' && args[1] === 'view' && args[2]) {
-      const result = run(['workers', 'versions', 'get', args[2], '--worker-id', workerName], true);
+      const result = await run(
+        ['workers', 'versions', 'get', args[2], '--worker-id', workerName],
+        true,
+      );
       if (result.status !== 0) {
         return result;
       }
@@ -514,7 +544,11 @@ export function createCfVersionRunner(options: {
         if (verified.status !== 0 || verified.signal || verified.error) {
           return verified;
         }
-        return run(['workers', 'triggers', 'deploy', '--prebuilt'], command.capture, directory);
+        return await run(
+          ['workers', 'triggers', 'deploy', '--prebuilt'],
+          command.capture,
+          directory,
+        );
       } finally {
         rmSync(directory, { recursive: true, force: true });
       }
@@ -525,7 +559,7 @@ export function createCfVersionRunner(options: {
       if (!queueName || args[4] !== workerName) {
         return failed('The Cloudflare Queue consumer target changed.');
       }
-      const queues = run(['queues', 'list'], true);
+      const queues = await run(['queues', 'list'], true);
       if (queues.status !== 0) {
         return queues;
       }
@@ -537,7 +571,10 @@ export function createCfVersionRunner(options: {
       if (!record(queue) || typeof queue.queue_id !== 'string') {
         return failed(`Cloudflare Queue ${queueName} was not found.`);
       }
-      const consumers = run(['queues', 'consumers', 'list', '--queue-id', queue.queue_id], true);
+      const consumers = await run(
+        ['queues', 'consumers', 'list', '--queue-id', queue.queue_id],
+        true,
+      );
       if (consumers.status !== 0) {
         return consumers;
       }

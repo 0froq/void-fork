@@ -715,6 +715,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export type CloudflareVersionActivationOptions = {
+  /** Human-readable deployment phases; the caller owns terminal rendering. */
+  onProgress?: (message: string) => void;
   /** Reuse an inspected Worker without republishing its domains or other triggers. */
   preserveTriggers?: boolean;
   expectedPreviousVersionId?: string;
@@ -799,6 +801,7 @@ async function activateCloudflareVersionWithSecretsFile(
   if (!options.verifyUploader()) {
     return { ok: false, reason: 'uploader-changed' };
   }
+  options.onProgress?.('Checking the current Worker deployment...');
   const previous = await readCurrentProductionVersion(options, commonArgs);
   if (previous.kind === 'failed') {
     return { ok: false, reason: 'status-failed', status: previous.status };
@@ -959,6 +962,7 @@ async function activateCloudflareVersionWithSecretsFile(
   );
 
   const alias = `void-ready-${Date.now().toString(36)}`;
+  options.onProgress?.('Uploading the Worker and assets...');
   const upload = await Promise.resolve(
     options.runWrangler(
       [
@@ -1016,6 +1020,7 @@ async function activateCloudflareVersionWithSecretsFile(
   if (!versionId) {
     return { ok: false, reason: 'upload-output-invalid' };
   }
+  options.onProgress?.('Verifying the uploaded Worker...');
   if (inheritanceBaseline) {
     const recent = await readRecentCloudflareVersionIds(options, commonArgs);
     const previousLatest = inheritanceBaseline.at(-1);
@@ -1125,6 +1130,7 @@ async function activateCloudflareVersionWithSecretsFile(
     stagedVersionOverride = true;
   }
 
+  options.onProgress?.('Waiting for the Worker to become ready...');
   let ready = await probeReadiness(
     `${readinessUrl.replace(/\/$/, '')}/__void/ready`,
     options.workerName,
@@ -1279,6 +1285,7 @@ async function activateCloudflareVersionWithSecretsFile(
     };
   }
 
+  options.onProgress?.('Activating the Worker...');
   const activate = await deployVersionPercentages(
     options,
     commonArgs,
@@ -1346,6 +1353,7 @@ async function activateCloudflareVersionWithSecretsFile(
   if (previous.versionId && previousTriggerConfig) {
     knownTriggerConfigs[previous.versionId] = previousTriggerConfig;
   }
+  options.onProgress?.('Updating routes and triggers...');
   const triggers = await stabilizeCloudflareVersionTriggers({
     runWrangler: options.runWrangler,
     workerName: options.workerName,
@@ -1734,6 +1742,7 @@ async function bootstrapFirstDeployment(
   if (!options.verifyUploader()) {
     return { ok: false, reason: 'uploader-changed' };
   }
+  options.onProgress?.('Publishing the first Worker deployment...');
   const bootstrap = await Promise.resolve(
     options.runWrangler(
       [
@@ -1794,6 +1803,7 @@ async function bootstrapFirstDeployment(
     desiredTriggerConfig,
     reportedOrConfiguredUrl,
   );
+  options.onProgress?.('Waiting for the Worker to become ready...');
   const ready = await probeReadiness(
     `${previewUrl.replace(/\/$/, '')}/__void/ready`,
     options.workerName,
