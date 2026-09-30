@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from 'node:util';
 import { expect, it, vi } from 'vite-plus/test';
 import {
   cloudflareDeviceCode,
@@ -22,7 +23,7 @@ it('prints only the short Void prompt with the actual code', () => {
   try {
     printCloudflareLoginPrompt('a1B2c3D4');
     expect(printed).toHaveBeenCalledTimes(1);
-    expect(printed.mock.calls[0]?.[0]).toContain(
+    expect(stripVTControlCharacters(printed.mock.calls[0]?.[0] ?? '')).toContain(
       'Opening Cloudflare login in your browser. Confirm the code a1B2c3D4 in your browser. Press Ctrl+C to cancel.',
     );
   } finally {
@@ -65,7 +66,7 @@ syncBuiltinESMExports();
       },
     );
     expect(output.status, output.stderr).toBe(0);
-    expect(output.stdout.trim()).toBe(
+    expect(stripVTControlCharacters(output.stdout.trim())).toBe(
       'Opening Cloudflare login in your browser. Confirm the code a1B2c3D4 in your browser. Press Ctrl+C to cancel.',
     );
     expect(output.stdout + output.stderr).not.toContain('Attempting to login');
