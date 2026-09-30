@@ -20,6 +20,8 @@ import { isAdminSuspended } from '../suspension.ts';
  * The set is the exact list of authenticated API calls `void deploy` makes
  * (traced from `packages/void/src/cli/{deploy,client}.ts`):
  *   - `GET  /projects`                         listProjects (slug→id resolution)
+ *   - `GET  /projects/resolve?slug=...`        resolve one project by slug
+ *   - `GET  /projects/:id`                     read the linked project
  *   - `GET  /projects/:id/resources`           getResources (PostgreSQL gate)
  *   - `POST /projects/:id/database`            provisionDatabase (PostgreSQL gate)
  *   - `POST /projects/:id/prerender-token`      mint binding-proxy credential
@@ -35,6 +37,8 @@ import { isAdminSuspended } from '../suspension.ts';
 type DeployAllowEntry = Readonly<{ method: string; segments: ReadonlyArray<string | null> }>;
 const DEPLOY_TOKEN_ALLOWLIST: ReadonlyArray<DeployAllowEntry> = [
   { method: 'GET', segments: ['projects'] },
+  { method: 'GET', segments: ['projects', 'resolve'] },
+  { method: 'GET', segments: ['projects', null] },
   { method: 'GET', segments: ['projects', null, 'resources'] },
   { method: 'POST', segments: ['projects', null, 'database'] },
   { method: 'POST', segments: ['projects', null, 'prerender-token'] },

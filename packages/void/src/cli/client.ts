@@ -615,6 +615,50 @@ export class PlatformClient {
     return res.json();
   }
 
+  /** A lightweight project list for interactive linking; older platforms use the full list. */
+  async listProjectChoices(): Promise<Array<ProjectResponse>> {
+    const res = await this.request(`${this.baseUrl}/projects/choices`, {
+      headers: { ...this.authHeaders },
+    });
+    if (res.status === 404) {
+      return this.listProjects();
+    }
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to list project choices', res);
+    }
+    return res.json();
+  }
+
+  /** Resolve one known project without loading account-wide deployment and traffic summaries. */
+  async getProject(projectId: string): Promise<ProjectResponse | null> {
+    const res = await this.request(`${this.baseUrl}/projects/${encodeURIComponent(projectId)}`, {
+      headers: { ...this.authHeaders },
+    });
+    if (res.status === 404) {
+      return null;
+    }
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to get project', res);
+    }
+    return res.json();
+  }
+
+  /** New platforms resolve a slug directly; older installations retain the list fallback. */
+  async findProjectBySlug(slug: string): Promise<ProjectResponse | null> {
+    const url = new URL(`${this.baseUrl}/projects/resolve`);
+    url.searchParams.set('slug', slug);
+    const res = await this.request(url.toString(), { headers: { ...this.authHeaders } });
+    if (res.status === 404) {
+      const projects = await this.listProjects();
+      return projects.find((project) => project.slug === slug) ?? null;
+    }
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to resolve project', res);
+    }
+    const body = (await res.json()) as { project: ProjectResponse | null };
+    return body.project;
+  }
+
   async listProjectTokens(projectId: string): Promise<Array<ProjectDeployCredentialResponse>> {
     const res = await this.request(`${this.baseUrl}/projects/${projectId}/tokens`, {
       headers: { ...this.authHeaders },

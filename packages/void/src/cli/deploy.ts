@@ -288,7 +288,7 @@ function requireProvisionModule(): ProvisionModule {
   }
   return loadedProvisionModule;
 }
-import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project.ts';
+import { getRequestedProjectSlug } from './resolve-project.ts';
 import type {
   AssetConfig,
   DeployEvent,
@@ -6822,14 +6822,23 @@ async function runManagedDeploy(
 
       // 2. Resolve target project (CLI flag > env var > linked project file)
       const requestedProjectSlug = getRequestedProjectSlug(options);
+      const linkedProject = readProjectConfig(root);
       let config: ProjectConfig | null = null;
 
       if (requestedProjectSlug) {
-        const projects = await client.listProjects();
-        assertProjectDeployAccess(
-          projects.find((project) => project.slug === requestedProjectSlug),
-        );
-        config = resolveProjectBySlug(projects, requestedProjectSlug);
+        // Most deploys already have a project ID. The existing single-project
+        // endpoint avoids account-wide history/traffic queries even when CI
+        // also sets VOID_PROJECT to the linked slug.
+        const linked =
+          linkedProject?.slug === requestedProjectSlug
+            ? await client.getProject(linkedProject.projectId)
+            : null;
+        const project =
+          linked?.slug === requestedProjectSlug
+            ? linked
+            : await client.findProjectBySlug(requestedProjectSlug);
+        assertProjectDeployAccess(project ?? undefined);
+        config = project ? { projectId: project.id, slug: project.slug } : null;
 
         if (!config) {
           if (!process.stdin.isTTY) {
@@ -6848,11 +6857,10 @@ async function runManagedDeploy(
           }
         }
       } else {
-        config = readProjectConfig(root);
+        config = linkedProject;
         if (config) {
-          const projects = await client.listProjects();
           const { projectId, slug } = config;
-          const project = projects.find((project) => project.id === projectId);
+          const project = await client.getProject(projectId);
           if (!project) {
             throw new Error(
               `deploy: The linked project "${slug}" is unavailable or you no longer have access. ` +
@@ -7039,7 +7047,7 @@ export async function promptDeployProjectConfig(
   client: PlatformClient,
   cliLog?: CliLogger,
 ): Promise<ProjectConfig> {
-  const projects = await client.listProjects();
+  const projects = await client.listProjectChoices();
   const deployableProjects = projects.filter((project) => project.role !== 'reader');
   if (deployableProjects.length !== projects.length) {
     log.warn(

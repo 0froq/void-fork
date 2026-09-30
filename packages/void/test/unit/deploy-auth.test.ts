@@ -13,7 +13,7 @@ const mockSuccess = vi.fn();
 const mockGetToken = vi.fn();
 const mockGetTokenSource = vi.fn();
 const mockGetApiUrl = vi.fn();
-const mockListProjects = vi.fn();
+const mockProjectLookup = vi.fn();
 const mockIsExpiredTokenError = vi.fn();
 const mockPromptForLoginToken = vi.fn();
 const mockIsOidcAvailable = vi.fn();
@@ -59,8 +59,16 @@ vi.mock('../../src/cli/client', () => ({
     constructor(...args: Array<unknown>) {
       mockClientCtor(...args);
     }
-    listProjects(...args: Array<unknown>) {
-      return mockListProjects(...args);
+    listProjects() {
+      throw new Error('deploy unexpectedly loaded the full project list');
+    }
+    async findProjectBySlug(slug: string) {
+      const projects = await mockProjectLookup();
+      return projects.find((project: { slug: string }) => project.slug === slug) ?? null;
+    }
+    async getProject(projectId: string) {
+      const projects = await mockProjectLookup();
+      return projects.find((project: { id: string }) => project.id === projectId) ?? null;
     }
   },
   isExpiredTokenError: (...args: Array<unknown>) => mockIsExpiredTokenError(...args),
@@ -79,7 +87,7 @@ beforeEach(() => {
   mockGetToken.mockReset();
   mockGetTokenSource.mockReset();
   mockGetApiUrl.mockReset();
-  mockListProjects.mockReset();
+  mockProjectLookup.mockReset();
   mockIsExpiredTokenError.mockReset();
   mockPromptForLoginToken.mockReset();
   mockIsOidcAvailable.mockReset();
@@ -94,7 +102,7 @@ beforeEach(() => {
   // existing auth tests are unaffected.
   mockIsOidcAvailable.mockReturnValue(false);
   mockExchangeOidc.mockResolvedValue('minted-token');
-  mockListProjects.mockRejectedValue(new Error('expired-token'));
+  mockProjectLookup.mockRejectedValue(new Error('expired-token'));
   mockIsExpiredTokenError.mockImplementation((error: unknown) => {
     return error instanceof Error && error.message === 'expired-token';
   });
@@ -134,7 +142,7 @@ describe('runDeploy auth failures', () => {
 
   it('reauthenticates and retries once for expired local auth tokens in interactive mode', async () => {
     Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
-    mockListProjects
+    mockProjectLookup
       .mockRejectedValueOnce(new Error('expired-token'))
       .mockRejectedValueOnce(new Error('second failure'));
 
@@ -189,7 +197,7 @@ describe('runDeploy project access', () => {
   it.each(['flag', 'environment', 'saved'])(
     'rejects a reader selected by %s before loading app configuration or building',
     async (source) => {
-      mockListProjects.mockResolvedValue([{ id: 'proj_1', slug: 'my-app', role: 'reader' }]);
+      mockProjectLookup.mockResolvedValue([{ id: 'proj_1', slug: 'my-app', role: 'reader' }]);
       if (source === 'environment') {
         process.env.VOID_PROJECT = 'my-app';
       } else if (source === 'saved') {
@@ -206,20 +214,20 @@ describe('runDeploy project access', () => {
         'You have reader access to "my-app" and cannot deploy. Ask a project admin or owner to grant collaborator access',
       );
 
-      expect(mockListProjects).toHaveBeenCalledOnce();
+      expect(mockProjectLookup).toHaveBeenCalledOnce();
     },
   );
 
   it.each(['collaborator', 'admin', 'owner', undefined])(
     'continues to app configuration for an explicit project with role %s',
     async (role) => {
-      mockListProjects.mockResolvedValue([{ id: 'proj_1', slug: 'my-app', role }]);
+      mockProjectLookup.mockResolvedValue([{ id: 'proj_1', slug: 'my-app', role }]);
 
       await expect(runDeploy(root, { platform: 'void', projectSlug: 'my-app' })).rejects.toThrow(
         'migrate: Invalid JSON in void.json. Fix it before migrating.',
       );
 
-      expect(mockListProjects).toHaveBeenCalledOnce();
+      expect(mockProjectLookup).toHaveBeenCalledOnce();
     },
   );
 
@@ -227,25 +235,25 @@ describe('runDeploy project access', () => {
     'continues to app configuration for a saved project with role %s',
     async (role) => {
       linkProject();
-      mockListProjects.mockResolvedValue([{ id: 'proj_1', slug: 'my-app', role }]);
+      mockProjectLookup.mockResolvedValue([{ id: 'proj_1', slug: 'my-app', role }]);
 
       await expect(runDeploy(root, { platform: 'void' })).rejects.toThrow(
         'migrate: Invalid JSON in void.json. Fix it before migrating.',
       );
 
-      expect(mockListProjects).toHaveBeenCalledOnce();
+      expect(mockProjectLookup).toHaveBeenCalledOnce();
     },
   );
 
   it('rejects a stale saved project before building, even when another project shares its slug', async () => {
     linkProject();
-    mockListProjects.mockResolvedValue([{ id: 'proj_2', slug: 'my-app', role: 'owner' }]);
+    mockProjectLookup.mockResolvedValue([{ id: 'proj_2', slug: 'my-app', role: 'owner' }]);
 
     await expect(runDeploy(root, { platform: 'void' })).rejects.toThrow(
       'The linked project "my-app" is unavailable or you no longer have access.',
     );
 
-    expect(mockListProjects).toHaveBeenCalledOnce();
+    expect(mockProjectLookup).toHaveBeenCalledOnce();
   });
 
   it('does not fetch Void project roles for a direct Cloudflare deployment', async () => {
@@ -255,7 +263,7 @@ describe('runDeploy project access', () => {
       runDeploy(root, { platform: 'cloudflare', projectSlug: 'my-app' }),
     ).rejects.toThrow('--project is not supported with platform cloudflare');
 
-    expect(mockListProjects).not.toHaveBeenCalled();
+    expect(mockProjectLookup).not.toHaveBeenCalled();
     expect(mockClientCtor).not.toHaveBeenCalled();
   });
 });
@@ -266,7 +274,7 @@ describe('runDeploy GitHub Actions OIDC exchange', () => {
     mockIsOidcAvailable.mockReturnValue(true);
     mockExchangeOidc.mockResolvedValue('minted-token');
 
-    // The deploy still fails later (listProjects is mocked to reject), but the
+    // The deploy still fails later (project lookup is mocked to reject), but the
     // OIDC exchange must run first and mint the token the client is built with.
     await expect(runDeploy(process.cwd(), { projectSlug: 'my-app' })).rejects.toThrow();
 
@@ -425,7 +433,7 @@ describe('runDeploy keeps the CF Access service token in process.env', () => {
       process.env.CF_ACCESS_CLIENT_SECRET = 'svc-secret';
       process.env.CF_ACCESS_TOKEN = 'jwt-keep-me';
 
-      // Default mocks make listProjects reject with an expired token in non-TTY
+      // Default mocks make project lookup reject with an expired token in non-TTY
       // mode, so runDeploy throws after constructing the client.
       await expect(runDeploy(process.cwd(), { projectSlug: 'my-app' })).rejects.toThrow();
 
@@ -467,7 +475,7 @@ describe('runDeploy keeps the CF Access service token in process.env', () => {
         return Promise.resolve('fresh-token');
       });
       // First call expires (triggers re-auth), second fails to end the loop.
-      mockListProjects
+      mockProjectLookup
         .mockRejectedValueOnce(new Error('expired-token'))
         .mockRejectedValueOnce(new Error('second failure'));
 

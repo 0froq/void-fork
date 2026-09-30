@@ -8,7 +8,7 @@ import { runDeploy } from '../../src/cli/deploy.ts';
 // (an `email/` handler AND `void.json` `email.from`) far enough to reach the full-deploy branch,
 // and proves the email module was never invoked — no preflight, no apply, no bearer, no prompt.
 
-const { emailModule, mockConfirm, mockPreflight, mockListProjects, mockClientCtor } = vi.hoisted(
+const { emailModule, mockConfirm, mockPreflight, mockProjectLookup, mockClientCtor } = vi.hoisted(
   () => {
     const never = (): never => {
       throw new Error('the email module must never run on the managed platform path');
@@ -25,7 +25,7 @@ const { emailModule, mockConfirm, mockPreflight, mockListProjects, mockClientCto
       },
       mockConfirm: vi.fn(),
       mockPreflight: vi.fn(),
-      mockListProjects: vi.fn(),
+      mockProjectLookup: vi.fn(),
       mockClientCtor: vi.fn(),
     };
   },
@@ -68,8 +68,12 @@ vi.mock('../../src/cli/client', () => ({
     constructor(...args: Array<unknown>) {
       mockClientCtor(...args);
     }
-    listProjects(...args: Array<unknown>) {
-      return mockListProjects(...args);
+    listProjects() {
+      throw new Error('deploy unexpectedly loaded the full project list');
+    }
+    async findProjectBySlug(slug: string) {
+      const projects = await mockProjectLookup();
+      return projects.find((project: { slug: string }) => project.slug === slug) ?? null;
     }
     preflight(...args: Array<unknown>) {
       return mockPreflight(...args);
@@ -97,9 +101,9 @@ beforeEach(() => {
   }
   mockConfirm.mockReset();
   mockClientCtor.mockReset();
-  mockListProjects.mockReset();
+  mockProjectLookup.mockReset();
   mockPreflight.mockReset();
-  mockListProjects.mockResolvedValue([{ id: 'proj_1', slug: 'my-app', name: 'my-app' }]);
+  mockProjectLookup.mockResolvedValue([{ id: 'proj_1', slug: 'my-app', name: 'my-app' }]);
   // The first UPLOAD call inside the full-deploy branch — a distinctive stop so the test proves
   // how far the managed path ran without a real build or network.
   mockPreflight.mockRejectedValue(new Error('stop-here: reached the managed upload'));
@@ -128,7 +132,7 @@ describe('managed `void deploy` never runs the Mode B email step', () => {
     );
     // The managed path DID run: it built a platform client and resolved the project.
     expect(mockClientCtor).toHaveBeenCalledTimes(1);
-    expect(mockListProjects).toHaveBeenCalledTimes(1);
+    expect(mockProjectLookup).toHaveBeenCalledTimes(1);
     expect(mockPreflight).toHaveBeenCalledTimes(1);
     // …and never asked the email module — or the developer — anything.
     for (const [name, spy] of Object.entries(emailModule)) {

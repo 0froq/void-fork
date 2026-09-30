@@ -86,6 +86,8 @@ drizzle/
 - `GET /me`
 - `/projects/*`
   - CRUD
+  - `GET /projects/choices` — list accessible projects for interactive selection without deployment or traffic summaries.
+  - `GET /projects/resolve?slug=...` — look up one accessible project for deploy setup. Returns `{ "project": null }` when the slug does not exist or is not accessible.
   - deploys and rollbacks
   - migrations and logs
     - Managed D1 apply submits each migration's SQL and `_void_migrations` insert in one transactional query batch. Retries require a tracking row to establish success; an existing table or column alone is insufficient. Failures retain the confirmed committed prefix in project metadata. Reconcile older untracked schema changes explicitly before retrying.

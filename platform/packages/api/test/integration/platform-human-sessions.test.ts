@@ -19,6 +19,7 @@ import {
   clearTables,
   createTestProject,
   createTestUser,
+  mockCfApi,
   setupEnv,
   teardownEnv,
   type TestEnv,
@@ -103,6 +104,7 @@ describe('platform human session revocation', () => {
   });
 
   it('does not revoke scoped deployment tokens or confuse them with human sessions', async () => {
+    mockCfApi();
     await env.db.update(platformAuthSettings).set({ sessions_required: true });
     const project = await createTestProject(env.db, admin.id, 'project');
     const deploy = await signJwt(

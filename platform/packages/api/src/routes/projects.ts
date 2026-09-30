@@ -19,6 +19,7 @@ import {
   getProjectBuilds,
   getProjectBySlug,
   getAccessibleProjectsByUserId,
+  getAccessibleProjectBySlug,
   getLatestDeploymentsByProjectIds,
   getProjectDeployments,
   getProjectResources,
@@ -644,6 +645,46 @@ const app = new Hono<ApiEnv>()
     });
 
     return context.json(projectsWithSummaries.sort(sortProjectList));
+  })
+
+  // Lightweight project choices for interactive deploys.
+  .get('/choices', async (context) => {
+    const projects = await getAccessibleProjectsByUserId(context.get('db'), context.get('user').id);
+    return context.json(
+      projects.map(({ project, role, owner }) => ({
+        ...projectWithUrl(project, context.env),
+        role,
+        owner: { id: owner.id, login: owner.login },
+      })),
+    );
+  })
+
+  // Resolve one project for the CLI without loading deployment and traffic summaries.
+  .get('/resolve', async (context) => {
+    const slug = context.req.query('slug');
+    if (!slug || slug.length > MAX_SLUG_LENGTH || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(slug)) {
+      return context.json({ error: 'valid slug is required' }, 400);
+    }
+
+    const access = await getAccessibleProjectBySlug(
+      context.get('db'),
+      context.get('user').id,
+      slug,
+    );
+    if (
+      !access ||
+      (context.get('deployScope') && context.get('deployScope') !== access.project.id)
+    ) {
+      return context.json({ project: null });
+    }
+
+    return context.json({
+      project: {
+        ...projectWithUrl(access.project, context.env),
+        role: access.role,
+        owner: { id: access.owner.id, login: access.owner.login },
+      },
+    });
   })
 
   // Create a new project

@@ -500,6 +500,38 @@ export async function getAccessibleProjectsByUserId(
     }));
 }
 
+/** Resolve one accessible project without loading the user's project list. */
+export async function getAccessibleProjectBySlug(
+  db: Db,
+  userId: string,
+  slug: string,
+): Promise<AccessibleProject | null> {
+  const [row] = await db
+    .select({ project: projects, memberRole: projectMembers.role, owner: accessibleProjectOwner })
+    .from(projects)
+    .innerJoin(accessibleProjectOwner, eq(projects.user_id, accessibleProjectOwner.id))
+    .leftJoin(
+      projectMembers,
+      and(eq(projectMembers.project_id, projects.id), eq(projectMembers.user_id, userId)),
+    )
+    .where(
+      and(
+        eq(projects.slug, slug),
+        or(eq(projects.user_id, userId), eq(projectMembers.user_id, userId)),
+      ),
+    )
+    .limit(1);
+
+  if (!row || isAdminSuspended(row.owner.suspended_reason)) {
+    return null;
+  }
+  return {
+    project: row.project,
+    role: row.project.user_id === userId ? 'owner' : row.memberRole!,
+    owner: row.owner,
+  };
+}
+
 // --- Project team membership and invitations ---
 
 type ProjectMemberWithUser = Readonly<{ member: ProjectMember; user: User }>;
@@ -1286,7 +1318,7 @@ export async function getLatestDeploymentsByProjectIds(
   }
 
   const rows = await db
-    .select({
+    .selectDistinctOn([deployments.project_id], {
       id: deployments.id,
       project_id: deployments.project_id,
       status: deployments.status,
@@ -1297,15 +1329,9 @@ export async function getLatestDeploymentsByProjectIds(
     })
     .from(deployments)
     .where(inArray(deployments.project_id, projectIds))
-    .orderBy(desc(deployments.created_at));
+    .orderBy(deployments.project_id, desc(deployments.created_at), desc(deployments.id));
 
-  const latest = new Map<string, (typeof rows)[number]>();
-  for (const row of rows) {
-    if (!latest.has(row.project_id)) {
-      latest.set(row.project_id, row);
-    }
-  }
-  return latest;
+  return new Map(rows.map((row) => [row.project_id, row]));
 }
 
 export async function getProjectsByIds(

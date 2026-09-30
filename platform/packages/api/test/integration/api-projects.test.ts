@@ -270,7 +270,213 @@ describe('GET /projects', () => {
   });
 });
 
+describe('GET /projects/resolve', () => {
+  const resolve = (slug: string, token?: string) =>
+    app.fetch(
+      new Request(`http://localhost/projects/resolve?slug=${encodeURIComponent(slug)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      }),
+      env,
+    );
+
+  it('requires authentication and a valid slug', async () => {
+    expect((await resolve('my-app')).status).toBe(401);
+    const user = await createTestUser(env.db, 'resolve-validation');
+    for (const path of ['/projects/resolve', '/projects/resolve?slug=Bad%20Slug']) {
+      const response = await app.fetch(
+        new Request(`http://localhost${path}`, {
+          headers: { Authorization: `Bearer ${user.jwt}` },
+        }),
+        env,
+      );
+      expect(response.status).toBe(400);
+    }
+  });
+
+  it('returns the same project details as the ID lookup for owners and collaborators', async () => {
+    const owner = await createTestUser(env.db, 'resolve-owner');
+    const collaborator = await createTestUser(env.db, 'resolve-collaborator');
+    const project = await createTestProject(env.db, owner.id, 'resolve-shared');
+    await env.db.insert(projectMembers).values({
+      project_id: project.id,
+      user_id: collaborator.id,
+      role: 'reader',
+      added_by_user_id: owner.id,
+    });
+    const externalFetch = vi.fn(() => {
+      throw new Error('project resolution must not query external analytics');
+    });
+    vi.stubGlobal('fetch', externalFetch);
+
+    for (const user of [owner, collaborator]) {
+      const resolved = await resolve(project.slug, user.jwt);
+      const byId = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}`, {
+          headers: { Authorization: `Bearer ${user.jwt}` },
+        }),
+        env,
+      );
+      expect(resolved.status).toBe(200);
+      expect(await resolved.json()).toEqual({ project: await byId.json() });
+    }
+    expect(externalFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns null for missing, inaccessible, and manually suspended projects', async () => {
+    const owner = await createTestUser(env.db, 'resolve-private-owner');
+    const other = await createTestUser(env.db, 'resolve-private-other');
+    const project = await createTestProject(env.db, owner.id, 'resolve-private');
+    expect(await (await resolve('resolve-missing', other.jwt)).json()).toEqual({ project: null });
+    expect(await (await resolve(project.slug, other.jwt)).json()).toEqual({ project: null });
+
+    await env.db.insert(projectMembers).values({
+      project_id: project.id,
+      user_id: other.id,
+      role: 'collaborator',
+      added_by_user_id: owner.id,
+    });
+    await env.db
+      .update(users)
+      .set({ suspended_reason: 'platform policy violation' })
+      .where(eq(users.id, owner.id));
+    expect(await (await resolve(project.slug, other.jwt)).json()).toEqual({ project: null });
+  });
+
+  it('limits deploy credentials to their assigned project', async () => {
+    const owner = await createTestUser(env.db, 'resolve-deploy-owner');
+    const assigned = await createTestProject(env.db, owner.id, 'resolve-assigned');
+    const sibling = await createTestProject(env.db, owner.id, 'resolve-sibling');
+    const token = await signDeployToken(
+      { projectId: assigned.id, userId: owner.id, login: owner.login },
+      env.JWT_SECRET,
+    );
+
+    const allowed = await resolve(assigned.slug, token);
+    expect(allowed.status).toBe(200);
+    expect(await allowed.json()).toMatchObject({ project: { id: assigned.id } });
+    const denied = await resolve(sibling.slug, token);
+    expect(denied.status).toBe(200);
+    expect(await denied.json()).toEqual({ project: null });
+    expect(await (await resolve('resolve-absent', token)).json()).toEqual({ project: null });
+  });
+});
+
+describe('GET /projects/choices', () => {
+  it('returns accessible project details without querying traffic', async () => {
+    const owner = await createTestUser(env.db, 'choices-owner');
+    const collaborator = await createTestUser(env.db, 'choices-collaborator');
+    const privateOwner = await createTestUser(env.db, 'choices-private-owner');
+    const owned = await createTestProject(env.db, owner.id, 'choices-owned');
+    const shared = await createTestProject(env.db, collaborator.id, 'choices-shared');
+    await createTestProject(env.db, privateOwner.id, 'choices-private');
+    await env.db.insert(projectMembers).values({
+      project_id: shared.id,
+      user_id: owner.id,
+      role: 'reader',
+      added_by_user_id: collaborator.id,
+    });
+    const externalFetch = vi.fn(() => {
+      throw new Error('project choices must not query external analytics');
+    });
+    vi.stubGlobal('fetch', externalFetch);
+
+    const response = await app.fetch(
+      new Request('http://localhost/projects/choices', {
+        headers: { Authorization: `Bearer ${owner.jwt}` },
+      }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    const choices = (await response.json()) as Array<{ id: string; role: string }>;
+    expect(choices).toHaveLength(2);
+    expect(choices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: shared.id, role: 'reader' }),
+        expect.objectContaining({ id: owned.id, role: 'owner' }),
+      ]),
+    );
+    expect(externalFetch).not.toHaveBeenCalled();
+  });
+
+  it('requires a full account credential', async () => {
+    const owner = await createTestUser(env.db, 'choices-token-owner');
+    const project = await createTestProject(env.db, owner.id, 'choices-token-project');
+    const token = await signDeployToken(
+      { projectId: project.id, userId: owner.id, login: owner.login },
+      env.JWT_SECRET,
+    );
+    expect((await app.fetch(new Request('http://localhost/projects/choices'), env)).status).toBe(
+      401,
+    );
+    const scoped = await app.fetch(
+      new Request('http://localhost/projects/choices', {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env,
+    );
+    expect(scoped.status).toBe(403);
+  });
+});
+
+describe('getLatestDeploymentsByProjectIds', () => {
+  it('returns one most recent deployment per project', async () => {
+    const user = await createTestUser(env.db, 'latest-deployment-owner');
+    const first = await createTestProject(env.db, user.id, 'latest-first');
+    const second = await createTestProject(env.db, user.id, 'latest-second');
+    const empty = await createTestProject(env.db, user.id, 'latest-empty');
+    const old = await createTestDeployment(env.db, first.id, 'live');
+    const newest = await createTestDeployment(env.db, first.id, 'failed');
+    const other = await createTestDeployment(env.db, second.id, 'pending');
+    await env.db
+      .update(deployments)
+      .set({ created_at: '2026-01-01T00:00:00.000Z' })
+      .where(eq(deployments.id, old.id));
+    await env.db
+      .update(deployments)
+      .set({ created_at: '2026-01-03T00:00:00.000Z' })
+      .where(eq(deployments.id, newest.id));
+    await env.db
+      .update(deployments)
+      .set({ created_at: '2026-01-02T00:00:00.000Z' })
+      .where(eq(deployments.id, other.id));
+
+    const latest = await db.getLatestDeploymentsByProjectIds(env.db, [
+      first.id,
+      second.id,
+      empty.id,
+    ]);
+    expect(latest.size).toBe(2);
+    expect(latest.get(first.id)).toMatchObject({ id: newest.id, status: 'failed' });
+    expect(latest.get(second.id)).toMatchObject({ id: other.id, status: 'pending' });
+    expect(latest.has(empty.id)).toBe(false);
+  });
+});
+
 describe('GET /projects/:id', () => {
+  it('allows a deploy credential to read only its assigned project', async () => {
+    const owner = await createTestUser(env.db, 'get-deploy-owner');
+    const assigned = await createTestProject(env.db, owner.id, 'get-deploy-assigned');
+    const sibling = await createTestProject(env.db, owner.id, 'get-deploy-sibling');
+    const token = await signDeployToken(
+      { projectId: assigned.id, userId: owner.id, login: owner.login },
+      env.JWT_SECRET,
+    );
+    const read = (id: string) =>
+      app.fetch(
+        new Request(`http://localhost/projects/${id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        env,
+      );
+
+    const allowed = await read(assigned.id);
+    expect(allowed.status).toBe(200);
+    expect(await allowed.json()).toMatchObject({ id: assigned.id });
+    const denied = await read(sibling.id);
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toMatchObject({ error: 'forbidden' });
+  });
+
   it('returns project for the owner', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'my-app');
@@ -816,6 +1022,7 @@ describe('POST /projects/:id/prerender-token', () => {
     await revokeConnectionSessions(env.db, 'github');
 
     expect((await proxyRequest(credential.derivedToken, project.id)).status).toBe(200);
+    mockCfApi();
     const parentStillValid = await app.fetch(
       new Request('http://localhost/projects', {
         headers: { Authorization: `Bearer ${credential.token}` },

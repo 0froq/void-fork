@@ -111,19 +111,17 @@ function installPlatformMocks(role: ProjectRole = 'owner'): Captured {
     const reqInit = init ?? {};
     const method = (reqInit.method ?? 'GET').toUpperCase();
 
-    if (url.endsWith('/projects') && method === 'GET') {
-      return json([
-        {
-          id: 'proj_named_layouts_test',
-          user_id: 'user_owner',
-          slug: 'named-layouts-test',
-          type: 'worker',
-          created_at: '2026-09-01T00:00:00.000Z',
-          custom_domain: null,
-          role,
-          owner: { id: 'user_owner', login: 'owner' },
-        },
-      ]);
+    if (url.endsWith('/projects/proj_named_layouts_test') && method === 'GET') {
+      return json({
+        id: 'proj_named_layouts_test',
+        user_id: 'user_owner',
+        slug: 'named-layouts-test',
+        type: 'worker',
+        created_at: '2026-09-01T00:00:00.000Z',
+        custom_domain: null,
+        role,
+        owner: { id: 'user_owner', login: 'owner' },
+      });
     }
 
     if (url.endsWith('/deploy/preflight') && method === 'POST') {
@@ -342,7 +340,7 @@ describe('runFullDeploy emits manifest.pages (Void pages app, end-to-end)', () =
     );
 
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(fetchMock.mock.calls[0]?.[0]).toMatch(/\/projects$/);
+    expect(fetchMock.mock.calls[0]?.[0]).toMatch(/\/projects\/proj_named_layouts_test$/);
     expect(mockDetectFramework).not.toHaveBeenCalled();
     expect(mockCollectPrerenderPaths).not.toHaveBeenCalled();
     expect(captured.finalizeBody).toBeNull();
