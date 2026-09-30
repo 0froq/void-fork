@@ -1997,9 +1997,12 @@ export async function installPlatform(
         zoneId,
         action.action !== 'create',
       );
-      manifest = recordProvisionIntent(manifest, action, now());
-      writeInstallationManifest(manifest);
-      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      const intended = recordProvisionIntent(manifest, action, now());
+      if (intended !== manifest) {
+        manifest = intended;
+        writeInstallationManifest(manifest);
+        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      }
       await dependencies.revalidateBeforeWorkerDeploy(manifest, action);
       const preservedRoutes = dependencies.deployWorker
         ? []
@@ -2037,14 +2040,17 @@ export async function installPlatform(
                 dependencies.client.listWorkerDomains(plan.account.id),
                 zoneId ? dependencies.client.listWorkerRoutes(zoneId) : Promise.resolve([]),
               ]);
-              manifest = recordPlatformWorkerTraffic(
+              const next = recordPlatformWorkerTraffic(
                 manifest!,
                 action.name,
                 { customDomains, routes },
                 now(),
               );
-              writeInstallationManifest(manifest);
-              await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+              if (JSON.stringify(next.resources) !== JSON.stringify(manifest!.resources)) {
+                manifest = next;
+                writeInstallationManifest(manifest);
+                await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+              }
             },
             onUnsafeTraffic: async () => {
               manifest = recordWorkerUnsafeTraffic(
@@ -2116,9 +2122,16 @@ export async function installPlatform(
       if (rollback) {
         workerRollbacks.push(rollback);
       }
-      manifest = recordResource(manifest, action, action.name, 'created', now());
-      writeInstallationManifest(manifest);
-      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      const recorded = recordResource(manifest, action, action.name, 'created', now());
+      if (
+        rollback ||
+        dependencies.deployWorker ||
+        JSON.stringify(recorded.resources) !== JSON.stringify(manifest.resources)
+      ) {
+        manifest = recorded;
+        writeInstallationManifest(manifest);
+        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      }
     }
 
     manifest = setInstallationEndpoints(
@@ -2388,14 +2401,17 @@ export async function installPlatform(
                   dependencies.client.listWorkerDomains(plan.account.id),
                   zoneId ? dependencies.client.listWorkerRoutes(zoneId) : Promise.resolve([]),
                 ]);
-                manifest = recordPlatformWorkerTraffic(
+                const next = recordPlatformWorkerTraffic(
                   manifest!,
                   action.name,
                   { customDomains, routes },
                   now(),
                 );
-                writeInstallationManifest(manifest);
-                await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+                if (JSON.stringify(next.resources) !== JSON.stringify(manifest!.resources)) {
+                  manifest = next;
+                  writeInstallationManifest(manifest);
+                  await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+                }
               },
               onUnsafeTraffic: async () => {
                 manifest = recordWorkerUnsafeTraffic(
@@ -4157,7 +4173,7 @@ export function platformWorkerUploadFingerprint(
   }
 }
 
-async function deployPlatformWorker(
+export async function deployPlatformWorker(
   config: Record<string, unknown>,
   secrets: Record<string, string> | null,
   options: PlatformWorkerDeploymentOptions,
