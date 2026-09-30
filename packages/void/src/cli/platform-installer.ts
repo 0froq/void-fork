@@ -112,6 +112,7 @@ import {
   recordPlatformWorkerTraffic,
   trackedPlatformWorkerTraffic,
 } from './platform-traffic.ts';
+import { platformWorkerLiveTriggersMatch } from './platform-trigger-proof.ts';
 import { resolveWranglerArgv } from './preset.ts';
 import { createDefaultRunWrangler, resolvePinnedApiBaseUrl } from './provision.ts';
 
@@ -4370,21 +4371,47 @@ export async function deployPlatformWorker(
     ): Promise<null> => {
       // A reused version still needs its mutable traffic state reconciled.
       try {
-        const triggers = await stabilizeCloudflareVersionTriggers({
-          configPath,
-          knownTriggerConfigs: { [versionId]: nextTriggers },
-          manageRoutes: false,
-          previousTriggerConfig: triggerConfig,
-          publishEmptyCustomDomains: async () => {
-            await options.removeCustomDomains();
-            return cleanPlatformCommandResult();
-          },
-          runWrangler: platformWorkerCommandRunner(accountId, directory, runner),
-          targetTriggerConfig: nextTriggers,
-          targetVersionId: versionId,
-          workerName,
-        });
-        assertPlatformTriggerStabilization(triggers, workerName, versionId, 'publish');
+        const liveTriggersMatch =
+          deploymentId && options.readCloudflare
+            ? await platformWorkerLiveTriggersMatch({
+                accountId,
+                workerName,
+                desired: nextTriggers,
+                readCloudflare: options.readCloudflare,
+              })
+            : false;
+        if (liveTriggersMatch) {
+          const beforeTraffic = await readPlatformWorkerDeployments(
+            configPath,
+            accountId,
+            workerName,
+            runner,
+          );
+          if (
+            beforeTraffic[0]?.id !== deploymentId ||
+            !deploymentRunsOnlyVersion(beforeTraffic[0], versionId)
+          ) {
+            throw new Error(
+              `platform: Worker ${workerName} changed deployment lineage during trigger verification.`,
+            );
+          }
+        } else {
+          const triggers = await stabilizeCloudflareVersionTriggers({
+            configPath,
+            knownTriggerConfigs: { [versionId]: nextTriggers },
+            manageRoutes: false,
+            previousTriggerConfig: triggerConfig,
+            publishEmptyCustomDomains: async () => {
+              await options.removeCustomDomains();
+              return cleanPlatformCommandResult();
+            },
+            runWrangler: platformWorkerCommandRunner(accountId, directory, runner),
+            targetTriggerConfig: nextTriggers,
+            targetVersionId: versionId,
+            workerName,
+          });
+          assertPlatformTriggerStabilization(triggers, workerName, versionId, 'publish');
+        }
         if (nextTraffic.customDomains.length > 0) {
           await options.publishCustomDomains(workerName, nextTraffic.customDomains);
         }

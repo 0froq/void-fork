@@ -23,6 +23,7 @@ async function attemptReuse(input: {
   directApi?: boolean;
   directDeploymentDrift?: boolean;
   directLateDeploymentDrift?: boolean;
+  liveTriggers?: boolean;
   secrets?: Record<string, string> | null;
   triggerFailure?: boolean;
   lateVersionDrift?: boolean;
@@ -93,6 +94,21 @@ async function attemptReuse(input: {
       }
       if (path.endsWith(`/versions/${VERSION}`)) {
         return version;
+      }
+      if (input.liveTriggers) {
+        if (path.endsWith('/workers/workers/void-test-api')) {
+          return {
+            name: 'void-test-api',
+            subdomain: { enabled: true, previews_enabled: false },
+            references: { queues: [] },
+          };
+        }
+        if (path.endsWith('/schedules')) {
+          return { schedules: [] };
+        }
+        if (path.includes('/workflows?')) {
+          return [];
+        }
       }
       throw new Error(`Unexpected Cloudflare API read: ${path}`);
     });
@@ -204,10 +220,21 @@ it('uses direct Cloudflare reads for a verified matching version', async () => {
     'deployments',
     VERSION,
     'deployments',
+    'void-test-api',
+    'schedules',
+    'workflows?page=1&per_page=100',
+    'workflows?page=2&per_page=100',
     'deployments',
     'deployments',
     'deployments',
   ]);
+});
+
+it('skips trigger publication only after live traffic matches the reused version', async () => {
+  const run = await attemptReuse({ directApi: true, liveTriggers: true });
+  expect(run.error).toBeNull();
+  expect(run.calls).not.toContain('triggers deploy');
+  expect(run.onTrafficPublished).toHaveBeenCalledOnce();
 });
 
 it('refuses reuse when direct Cloudflare reads observe a deployment change', async () => {
