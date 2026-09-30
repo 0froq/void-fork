@@ -120,3 +120,32 @@ it('allows rollback to the 0.20.3 schema after adding direct member grants', () 
     schemaDigest,
   });
 });
+
+it('allows upgrading the 0.21.2 schema after adding project cleanup jobs', () => {
+  const root = resolve(import.meta.dirname, '../../drizzle');
+  const journal = JSON.parse(readFileSync(resolve(root, 'meta/_journal.json'), 'utf8')) as {
+    entries: Array<{ tag: string; idx: number; when: number }>;
+  };
+  const compatibility = JSON.parse(readFileSync(resolve(root, 'compatibility.json'), 'utf8')) as {
+    lineage: string;
+    rollbackSafeFrom: Array<{ platformVersion: string; schemaDigest: string }>;
+  };
+  const previous = journal.entries.filter((entry) => entry.idx <= 50);
+  expect(previous.at(-1)?.tag).toBe('0050_project_member_direct_grants');
+  const schemaDigest = platformDatabaseSchemaDigest(
+    compatibility.lineage,
+    previous.map((entry) => ({
+      index: entry.idx,
+      tag: entry.tag,
+      timestampMillis: entry.when,
+      sha256: createHash('sha256')
+        .update(readFileSync(resolve(root, `${entry.tag}.sql`)))
+        .digest('hex'),
+    })),
+  );
+  expect(schemaDigest).toBe('9a9ae6677b795debd4ffaa20a05f533727063c7a21366310a2fe4b17bd918edd');
+  expect(compatibility.rollbackSafeFrom).toContainEqual({
+    platformVersion: '0.21.2',
+    schemaDigest,
+  });
+});
