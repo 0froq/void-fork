@@ -6219,7 +6219,7 @@ export function formatCloudflareActivationError(
         'and retry. Void caches it after a successful workers.dev deployment; production traffic is unchanged.',
       ].join('\n');
     case 'readiness-staging-failed':
-      return `deploy: Cloudflare could not stage the uploaded Worker Version at zero-percent traffic${status}; production traffic is unchanged.${cloudflareCode}${diagnostic}`;
+      return `deploy: Cloudflare could not stage the uploaded Worker Version at zero-percent traffic${status}; production traffic is unchanged.${cloudflareCode}${diagnostic}${result.cloudflareErrorCode === 10210 && /Durable Object migration/i.test(result.diagnostic ?? '') ? '\n\nReview the Durable Object migration, then run `void deploy --platform cloudflare --atomic` to publish without pre-traffic staging.' : ''}`;
     case 'atomic-failed':
       return `deploy: Cloudflare could not publish the Worker atomically${status}; inspect production status before retrying.${cloudflareCode}${diagnostic}`;
     case 'atomic-output-invalid':

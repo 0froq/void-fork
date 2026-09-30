@@ -208,6 +208,17 @@ describe('Cloudflare activation diagnostics', () => {
     },
   );
 
+  it('suggests explicit atomic publication for a Durable Object staging conflict', () => {
+    const message = formatCloudflareActivationError({
+      ok: false,
+      reason: 'readiness-staging-failed',
+      status: 1,
+      cloudflareErrorCode: 10210,
+      diagnostic: 'The version depends on Durable Object migration fate-live-v1.',
+    });
+    expect(message).toContain('void deploy --platform cloudflare --atomic');
+  });
+
   it('reports readiness restoration outcomes without claiming uncertain traffic is unchanged', () => {
     expect(
       formatCloudflareActivationError({

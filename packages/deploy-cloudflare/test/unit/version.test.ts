@@ -192,7 +192,7 @@ describe('Cloudflare version activation', () => {
       activate: {
         status: 1,
         stdout: '',
-        stderr: `[ERROR] Invalid deployment: migration live-v1 conflicts with an older version. [code: 10210]`,
+        stderr: `[ERROR] Invalid deployment: version depends on Durable Object migration fate-live-v1, but the current deployment is using live-v1. [code: 10210]`,
       },
     });
     await expect(
@@ -206,7 +206,8 @@ describe('Cloudflare version activation', () => {
     ).resolves.toMatchObject({
       ok: false,
       reason: 'readiness-staging-failed',
-      diagnostic: expect.stringContaining('migration live-v1'),
+      cloudflareErrorCode: 10210,
+      diagnostic: expect.stringContaining('Durable Object migration fate-live-v1'),
     });
   });
   it('shares the initial version snapshot while rechecking inheritance after upload', async () => {

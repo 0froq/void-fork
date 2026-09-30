@@ -1143,11 +1143,13 @@ async function activateCloudflareVersionWithSecretsFile(
       message,
     );
     if (!isCleanCommandExit(staged)) {
+      const cloudflareErrorCode = parseCloudflareErrorCode(`${staged.stdout}\n${staged.stderr}`);
       return {
         ok: false,
         reason: 'readiness-staging-failed',
         status: staged.status,
         ...commandDiagnosticFields(staged),
+        ...(cloudflareErrorCode === undefined ? {} : { cloudflareErrorCode }),
         versionId,
         previousVersionId: previous.versionId,
         rollback: 'not-needed',
@@ -1208,11 +1210,13 @@ async function activateCloudflareVersionWithSecretsFile(
         message,
       );
       if (!isCleanCommandExit(staged)) {
+        const cloudflareErrorCode = parseCloudflareErrorCode(`${staged.stdout}\n${staged.stderr}`);
         return {
           ok: false,
           reason: 'readiness-staging-failed',
           status: staged.status,
           ...commandDiagnosticFields(staged),
+          ...(cloudflareErrorCode === undefined ? {} : { cloudflareErrorCode }),
           versionId,
           previousVersionId: previous.versionId,
           rollback: 'not-needed',
