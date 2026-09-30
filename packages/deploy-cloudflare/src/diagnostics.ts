@@ -16,6 +16,17 @@ export function cloudflareCommandDiagnostic(result: CloudflareCommandResult): st
       break;
     }
   }
+  if (message === stderr && !/(?:^|\n)[ \t]*(?:[✘×X][ \t]+)?\[ERROR\]/i.test(stderr)) {
+    // cf renders API failures as a box on stdout while config warnings go to
+    // stderr. Only copy the error box; stdout may also contain binding values.
+    const box =
+      /(?:^|\n)[ \t]*┌[ \t]*(?:APIError|Error)\b[^\n]*\n(?:[ \t]*│[^\n]*\n)*[ \t]*└[^\n]*/i.exec(
+        stdout,
+      );
+    if (box) {
+      message = box[0].trim();
+    }
+  }
   // Upload progress and bindings are printed on stdout. Never echo that whole stream
   // when no error block was found, even when the process failed without stderr.
   message = stripVTControlCharacters(message)

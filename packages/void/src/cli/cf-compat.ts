@@ -71,10 +71,14 @@ function runCf(command: Array<string>, cwd = process.cwd()): Result {
     maxBuffer: 32 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  const stderr = (child.stderr || child.error?.message || '').replace(
-    /\[(\d{4,})\]/g,
-    '[code: $1]',
-  );
+  const stderr = [
+    child.stderr || '',
+    child.error?.message || '',
+    child.signal ? `Cloudflare CLI terminated by ${child.signal}.` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .replace(/\[(\d{4,})\]/g, '[code: $1]');
   return result(child.status ?? 1, child.stdout ?? '', stderr);
 }
 

@@ -42,6 +42,17 @@ describe('Cloudflare command diagnostics', () => {
     ).toBeUndefined();
   });
 
+  it('uses cf error boxes on stdout when stderr contains a config warning', () => {
+    expect(
+      cloudflareCommandDiagnostic({
+        status: 1,
+        stdout:
+          'env.PRIVATE_VALUE: "do-not-echo"\n┌ APIError\n│ [10000] Worker upload failed.\n└\n',
+        stderr: 'Processing worker.config.json:\n  - "unsafe" fields are experimental.',
+      }),
+    ).toBe('┌ APIError\n│ [10000] Worker upload failed.\n└');
+  });
+
   it('retains plain stderr and process-spawn failures', () => {
     expect(
       cloudflareCommandDiagnostic({ status: 1, stdout: '', stderr: 'Unknown argument: strict' }),
