@@ -5,6 +5,8 @@ const filename = 'auth-fixture.json';
 const state = JSON.parse(readFileSync(filename, 'utf8'));
 const args = process.argv.slice(2);
 state.commands.push(args);
+state.credentialStores ??= [];
+state.credentialStores.push(process.env.CLOUDFLARE_AUTH_USE_KEYRING ?? 'default');
 const finish = (value, status = 0) => {
   writeFileSync(filename, JSON.stringify(state));
   if (value !== undefined) {

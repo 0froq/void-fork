@@ -64,7 +64,7 @@ it('clears Worker Cron Triggers through the pinned account API', async () => {
   }
 }, 30_000);
 
-it('uses the browser login profile for Cron Trigger cleanup during a keyring-pinned deploy', async () => {
+it('reads OAuth credentials through cf instead of using the whoami source as a file path', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'void-cf-clear-crons-oauth-'));
   const server = createServer((request, response) => {
     expect(request.headers.authorization).toBe('Bearer synthetic-oauth-token');
@@ -75,19 +75,34 @@ it('uses the browser login profile for Cron Trigger cleanup during a keyring-pin
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
     const configPath = join(directory, 'wrangler.json');
-    const credentialPath = join(directory, 'credential.json');
+    const credentialPath = join(
+      directory,
+      'Library',
+      'Preferences',
+      'cloudflare',
+      'config',
+      'default.json',
+    );
     const preload = join(directory, 'mock-cf.mjs');
     writeFileSync(configPath, JSON.stringify({ name: 'test-worker', account_id: 'test-account' }));
+    mkdirSync(join(directory, 'Library', 'Preferences', 'cloudflare', 'config'), {
+      recursive: true,
+    });
     writeFileSync(credentialPath, JSON.stringify({ oauth_token: 'synthetic-oauth-token' }));
     writeFileSync(
       preload,
       `import child from 'node:child_process';
+import os from 'node:os';
 import { syncBuiltinESMExports } from 'node:module';
+os.homedir = () => process.env.VOID_TEST_HOME;
 child.spawnSync = (_binary, args, options) => {
-  if (args[1] !== 'auth' || args[2] !== 'whoami' || options.env.CLOUDFLARE_AUTH_USE_KEYRING) {
+  if (args[1] !== 'auth' || args[2] !== 'whoami' || options.env.CLOUDFLARE_AUTH_USE_KEYRING !== 'true') {
     return { status: 1, stdout: '', stderr: 'Wrong authentication source.' };
   }
-  return { status: 0, stdout: JSON.stringify({ authenticated: true, tokenValid: true, authSource: 'OAuth token from ' + process.env.VOID_TEST_CREDENTIAL }), stderr: '' };
+  // Keep this synthetic test independent of the host OS keyring. The cf
+  // subprocess still has to receive the keyring pin.
+  process.env.CLOUDFLARE_AUTH_USE_KEYRING = 'false';
+  return { status: 0, stdout: JSON.stringify({ authenticated: true, tokenValid: true, authSource: 'OAuth token from encrypted store' }), stderr: '' };
 };
 syncBuiltinESMExports();
 `,
@@ -119,7 +134,7 @@ syncBuiltinESMExports();
             CLOUDFLARE_AUTH_USE_KEYRING: 'true',
             CLOUDFLARE_ACCOUNT_ID: 'test-account',
             CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`,
-            VOID_TEST_CREDENTIAL: credentialPath,
+            VOID_TEST_HOME: directory,
           },
         },
         (error, _stdout, stderr) => resolve({ status: error ? 1 : 0, stderr }),

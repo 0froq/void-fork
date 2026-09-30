@@ -132,7 +132,7 @@ describe('platform Cloudflare authentication', () => {
         VOID_PLATFORM_GITHUB_CLIENT_SECRET: 'github-secret',
         VOID_PLATFORM_RECOVERY_KEY: 'recovery-secret',
       }),
-    ).toEqual({ PATH: '/bin' });
+    ).toEqual({ CLOUDFLARE_AUTH_USE_KEYRING: 'true', PATH: '/bin' });
   });
 });
 

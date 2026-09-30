@@ -29,6 +29,7 @@ type State = {
   session?: typeof oldSession;
   nextLogin: typeof newSession;
   commands: Array<Array<string>>;
+  credentialStores?: Array<string>;
   failLogin?: boolean;
   badWhoami?: boolean;
 };
@@ -125,6 +126,8 @@ describe('Cloudflare session switching through the bundled CLI runner', () => {
     expect(output.join('\n')).toContain('work-id');
     expect(output.join('\n')).toContain('individual-id');
     expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')).toBe(pin);
+    await runCloudflareCommand(root, { subcommand: 'status' });
+    expect(read().credentialStores).toEqual(['true', 'true', 'true']);
   });
 
   it.each(['automatic authentication', 'status'])(

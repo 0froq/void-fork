@@ -99,13 +99,23 @@ describe('Cloudflare authentication', () => {
         PATH: '/bin',
         VOID_PLATFORM_RECOVERY_KEY: 'recovery',
       }),
-    ).toEqual({ PATH: '/bin' });
+    ).toEqual({ PATH: '/bin', CLOUDFLARE_AUTH_USE_KEYRING: 'true' });
   });
 
   it('uses the same safe environment for all cf auth commands', () => {
-    expect(cloudflareAuthCommandEnvironment(['login'], { PATH: '/bin' })).toEqual({ PATH: '/bin' });
+    expect(cloudflareAuthCommandEnvironment(['login'], { PATH: '/bin' })).toEqual({
+      PATH: '/bin',
+      CLOUDFLARE_AUTH_USE_KEYRING: 'true',
+    });
     expect(cloudflareAuthCommandEnvironment(['whoami', '--json'], { PATH: '/bin' })).toEqual({
       PATH: '/bin',
+      CLOUDFLARE_AUTH_USE_KEYRING: 'true',
     });
+    expect(
+      cloudflareAuthCommandEnvironment(['login'], {
+        PATH: '/bin',
+        cloudflare_auth_use_keyring: 'false',
+      }),
+    ).toEqual({ PATH: '/bin', CLOUDFLARE_AUTH_USE_KEYRING: 'true' });
   });
 });

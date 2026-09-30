@@ -5,9 +5,16 @@
  * process translates them to the pinned cf CLI. It never invokes Wrangler.
  */
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readBuildOutput } from '@cloudflare/build-output-utils';
 import { parse } from 'jsonc-parser';
 import { dirname, join, resolve } from 'pathslash';
@@ -27,6 +34,7 @@ function cfEnvironment(): NodeJS.ProcessEnv {
     CF_DELEGATION: '1',
     CF_SEND_TELEMETRY: 'false',
     CF_NO_OSC_PROGRESS: '1',
+    CLOUDFLARE_AUTH_USE_KEYRING: 'true',
   };
   // cf uses Node's built-in fetch for API operations. Node does not consult
   // HTTP(S)_PROXY for fetch unless its environment proxy support is enabled.
@@ -51,14 +59,9 @@ function result(status: number, stdout = '', stderr = ''): Result {
   return { status, stdout, stderr };
 }
 
-function runCf(command: Array<string>, cwd = process.cwd(), useLoginProfile = false): Result {
+function runCf(command: Array<string>, cwd = process.cwd()): Result {
   const env = cfEnvironment();
   env.CF_QUIET = '1';
-  if (useLoginProfile) {
-    // Void's browser login uses cf's regular profile. Deploy's legacy Wrangler
-    // keyring pin must not switch the credential source while borrowing it.
-    delete env.CLOUDFLARE_AUTH_USE_KEYRING;
-  }
   const child = spawnSync(process.execPath, [cf, ...command], {
     cwd,
     env,
@@ -236,7 +239,7 @@ async function cloudflareApiGet(
       : null;
   try {
     const response = await httpFetch(url, {
-      headers: { ...apiHeaders(), ...extraHeaders },
+      headers: { ...(await apiHeaders()), ...extraHeaders },
       redirect: 'error',
       signal: AbortSignal.timeout(30_000),
       ...(proxy ? { dispatcher: proxy } : {}),
@@ -266,7 +269,7 @@ async function clearWorkerCronSchedules(worker: string): Promise<Result> {
   try {
     const response = await httpFetch(endpoint, {
       method: 'PUT',
-      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...(await apiHeaders()), 'Content-Type': 'application/json' },
       body: '[]',
       redirect: 'error',
       signal: AbortSignal.timeout(30_000),
@@ -373,13 +376,13 @@ async function readVersionResources(worker: string, versionId: string): Promise<
   return resources;
 }
 
-function apiHeaders(): Record<string, string> {
+async function apiHeaders(): Promise<Record<string, string>> {
   const key = process.env.CLOUDFLARE_API_KEY ?? process.env.CF_API_KEY;
   const email = process.env.CLOUDFLARE_EMAIL ?? process.env.CF_EMAIL;
   if (key && email) {
     return { 'X-Auth-Key': key, 'X-Auth-Email': email };
   }
-  const credential = sessionCredential();
+  const credential = await sessionCredential();
   if (!credential) {
     throw new Error('Cloudflare session bearer is unavailable.');
   }
@@ -400,12 +403,12 @@ async function withSecretFile(
   }
 }
 
-function sessionCredential(): { type: 'oauth' | 'api_token'; token: string } | null {
+async function sessionCredential(): Promise<{ type: 'oauth' | 'api_token'; token: string } | null> {
   const token = process.env.CLOUDFLARE_API_TOKEN || process.env.CF_API_TOKEN;
   if (token) {
     return { type: 'api_token', token };
   }
-  const identity = runCf(['auth', 'whoami'], process.cwd(), true);
+  const identity = runCf(['auth', 'whoami']);
   if (identity.status !== 0) {
     return null;
   }
@@ -413,19 +416,35 @@ function sessionCredential(): { type: 'oauth' | 'api_token'; token: string } | n
   if (state.authenticated !== true || state.tokenValid !== true) {
     return null;
   }
-  const source = state.authSource;
-  if (typeof source !== 'string' || !source.startsWith('OAuth token from ')) {
+  if (typeof state.authSource !== 'string' || !state.authSource.startsWith('OAuth token')) {
     return null;
   }
-  const credential = object(
-    parsedJson(readFileSync(source.slice('OAuth token from '.length), 'utf8')),
-  );
-  return typeof credential.oauth_token === 'string' && credential.oauth_token
+  // cf's encrypted store is authoritative. Reading the path from whoami would
+  // fail after cf migrates and deletes the old plaintext credential file.
+  const dist = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'dist');
+  const entry = readdirSync(dist).find((name) => /^cf-[^/]+\.mjs$/.test(name));
+  if (!entry) {
+    throw new Error('The bundled Cloudflare credential reader is unavailable.');
+  }
+  const module = (await import(pathToFileURL(join(dist, entry)).href)) as {
+    t?: (options: { logger: Record<string, (...args: Array<unknown>) => void> }) => {
+      readAuthCredentials: () => unknown;
+    };
+  };
+  if (typeof module.t !== 'function') {
+    throw new Error('The bundled Cloudflare credential reader is unavailable.');
+  }
+  const noop = () => {};
+  const stored = module
+    .t({ logger: { debug: noop, info: noop, log: noop, warn: noop, error: noop } })
+    .readAuthCredentials();
+  const credential = stored && typeof stored === 'object' ? (stored as Json) : null;
+  return credential && typeof credential.oauth_token === 'string' && credential.oauth_token
     ? { type: 'oauth', token: credential.oauth_token }
     : null;
 }
 
-function auth(): Result {
+async function auth(): Promise<Result> {
   if (args[0] === 'login') {
     return runInteractiveCf(['auth', 'login', '--force']);
   }
@@ -463,7 +482,7 @@ function auth(): Result {
     );
   }
   if (args[0] === 'auth' && args[1] === 'token') {
-    const credential = sessionCredential();
+    const credential = await sessionCredential();
     return credential
       ? result(0, `${JSON.stringify(credential)}\n`)
       : result(1, '', 'Cloudflare session has no OAuth bearer.');
@@ -1074,7 +1093,7 @@ async function tail(): Promise<Result> {
     process.env.CLOUDFLARE_API_BASE_URL ?? 'https://api.cloudflare.com/client/v4'
   ).replace(/\/$/, '');
   const endpoint = `${base}/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(worker)}/tails`;
-  const headers = { ...apiHeaders(), 'Content-Type': 'application/json' };
+  const headers = { ...(await apiHeaders()), 'Content-Type': 'application/json' };
   const stopped = new AbortController();
   let socket: WebSocket | undefined;
   let finish: (() => void) | undefined;

@@ -298,7 +298,13 @@ export function cloudflareAuthEnvironment(
     ) {
       delete env[key];
     }
+    if (key.toUpperCase() === 'CLOUDFLARE_AUTH_USE_KEYRING') {
+      delete env[key];
+    }
   }
+  // Deploy uses the encrypted cf store. Login and status must read that same
+  // store: cf migrates plaintext credentials into it and removes the old file.
+  env.CLOUDFLARE_AUTH_USE_KEYRING = 'true';
   return env;
 }
 
