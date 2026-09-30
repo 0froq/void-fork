@@ -645,6 +645,30 @@ export { handler as action, type actions };`,
       expect(page!.layout).toBe(false);
     });
 
+    it('ignores layout exports in Vue comments and template text', async () => {
+      writeFile('_layouts/home.vue', '<template><slot /></template>');
+      writeFile(
+        'index.vue',
+        `<script>
+// export const layout = "home";
+const example = 'export const layout = "home"';
+</script>
+<template><div>export const layout = "home"</div></template>`,
+      );
+      const result = await scanPages(TMP);
+      expect(result.pages.find((p) => p.componentId === 'index')?.layout).toBeUndefined();
+    });
+
+    it('reads a Svelte script layout export with TypeScript syntax', async () => {
+      writeFile('_layouts/home.svelte', '<slot />');
+      writeFile(
+        'index.svelte',
+        '<script lang="ts">export const layout = "home" as const;</script><div />',
+      );
+      const result = await scanPages(TMP);
+      expect(result.pages.find((p) => p.componentId === 'index')?.layout).toBe('home');
+    });
+
     it('extracts exclusive layout from Vue SFC', async () => {
       writeFile('_layouts/home.vue', '<template><slot /></template>');
       writeFile(

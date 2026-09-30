@@ -13,6 +13,7 @@ import {
   type AstProgram,
   type AstVariableDeclaration,
 } from '../shared/ast.ts';
+import { staticExportInitializers, staticLiteral } from '../shared/static-exports.ts';
 import { resolveNamedLayout } from './layout-resolution.ts';
 import type {
   ExplicitBoolean,
@@ -28,8 +29,6 @@ import type {
 const COMPONENT_EXTENSIONS = ['vue', 'tsx', 'jsx', 'svelte', 'md'];
 const SERVER_EXTENSIONS = ['ts', 'tsx', 'js', 'mjs', 'mts'];
 const PAGE_METHODS = new Set(['loader', 'action', 'actions']);
-const LAYOUT_STRING_RE = /export\s+const\s+layout\s*=\s*["']([^"']+)["']\s*;?/;
-const LAYOUT_FALSE_RE = /export\s+const\s+layout\s*=\s*false\s*;?/;
 export const MAX_REVALIDATE = 31536000; // 1 year in seconds
 
 type PageRenderingSource = {
@@ -59,6 +58,31 @@ type PageServerMetadata = {
   ssr?: ExplicitBoolean;
   hasGetPrerenderPaths?: boolean;
 };
+
+function componentLayout(source: string, filename: string): string | false | undefined {
+  if (!source.includes('layout')) {
+    return undefined;
+  }
+  const scripts =
+    filename.endsWith('.vue') || filename.endsWith('.svelte')
+      ? [...source.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)].map((match) => match[1]!)
+      : [source];
+  for (const script of scripts) {
+    if (!script.includes('layout')) {
+      continue;
+    }
+    const initializer = staticExportInitializers(
+      filename.replace(/\.(vue|svelte)$/, '.ts'),
+      script,
+      new Set(['layout']),
+    ).get('layout');
+    const value = staticLiteral(initializer);
+    if (typeof value === 'string' || value === false) {
+      return value;
+    }
+  }
+  return undefined;
+}
 
 const TRANSPARENT_EXPRESSION_TYPES = new Set([
   'ParenthesizedExpression',
@@ -300,12 +324,7 @@ export async function scanPages(root: string, options?: PageScanOptions): Promis
       layout = extractFrontmatterLayout(mdContent);
     } else {
       const componentContent = readFileSync(join(pagesDir, file), 'utf-8');
-      const layoutStringMatch = componentContent.match(LAYOUT_STRING_RE);
-      if (layoutStringMatch) {
-        layout = layoutStringMatch[1];
-      } else if (LAYOUT_FALSE_RE.test(componentContent)) {
-        layout = false;
-      }
+      layout = componentLayout(componentContent, file);
     }
 
     pages.push({
