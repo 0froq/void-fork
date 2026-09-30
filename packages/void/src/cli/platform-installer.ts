@@ -4218,14 +4218,7 @@ export function platformWorkerUploadFingerprint(
       return null;
     }
     const mainSha256 = createHash('sha256').update(readFileSync(config.main)).digest('hex');
-    const mainDirectoryHash = platformWorkerDirectoryHash(dirname(config.main));
-    if (!mainDirectoryHash) {
-      return null;
-    }
-    const normalized: Record<string, unknown> = {
-      ...config,
-      main: { sha256: mainSha256, directorySha256: mainDirectoryHash },
-    };
+    const normalized: Record<string, unknown> = { ...config, main: { sha256: mainSha256 } };
     if (config.assets !== undefined) {
       const assets = config.assets;
       if (!assets || typeof assets !== 'object' || Array.isArray(assets)) {
