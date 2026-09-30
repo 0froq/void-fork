@@ -44,12 +44,12 @@ export function verifyExternalPlatformHyperdrive(input: {
     (input.recordedHash && input.recordedHash !== hash)
   ) {
     throw new Error(
-      'platform: The Terraform-managed Hyperdrive does not match the expected database origin.',
+      'platform: The externally managed Hyperdrive does not match the expected database origin.',
     );
   }
   if (config.cachingDisabled !== true) {
     throw new Error(
-      'platform: Disable SQL result caching on the Terraform-managed Hyperdrive before installing.',
+      'platform: Disable SQL result caching on the externally managed Hyperdrive before installing.',
     );
   }
   return hash;

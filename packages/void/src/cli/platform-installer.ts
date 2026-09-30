@@ -863,10 +863,10 @@ export async function installPlatform(
     (hyperdriveAction.action === 'adopt' || recordedHyperdrive?.ownership === 'adopted')
   ) {
     if (!hyperdriveAction.id) {
-      throw new Error('platform: The Terraform-managed Hyperdrive has no ID.');
+      throw new Error('platform: The externally managed Hyperdrive has no ID.');
     }
     if (!plan.externalHyperdrive && !recordedHyperdrive) {
-      throw new Error('platform: The Terraform-managed Hyperdrive origin must be specified.');
+      throw new Error('platform: The externally managed Hyperdrive origin must be specified.');
     }
     const live = await dependencies.client.getHyperdriveConfig(
       plan.account.id,

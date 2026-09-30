@@ -69,9 +69,14 @@ beforeEach(() => {
   vi.spyOn(PlatformCloudflareClient.prototype, 'listHyperdriveConfigs').mockResolvedValue([]);
   mocks.text.mockResolvedValue('');
   mocks.select.mockImplementation(async ({ message, options }) =>
-    message === 'How should Void set up Hyperdrive?' ? options[0].value : 'workers-dev',
+    message === 'How should Void set up Hyperdrive?' ||
+    message === 'Which Hyperdrive should Void use?'
+      ? options[0].value
+      : 'workers-dev',
   );
-  mocks.confirm.mockResolvedValue(false);
+  mocks.confirm.mockImplementation(async ({ message }) =>
+    message.startsWith('Use ') ? true : false,
+  );
   mocks.plan.mockResolvedValue({
     account: { id: 'account', name: 'Account' },
     actions: [],
@@ -95,13 +100,14 @@ afterEach(() => {
 });
 
 describe('interactive platform installation prompts', () => {
-  it('offers the matching externally managed Hyperdrive and passes the confirmed origin into the plan', async () => {
+  it('lists and confirms an externally managed Hyperdrive with an unrelated name', async () => {
     vi.spyOn(PlatformCloudflareClient.prototype, 'listHyperdriveConfigs').mockResolvedValue([
-      { id: 'terraform-id', name: 'void-test-database' },
+      { id: 'other-id', name: 'another-database' },
+      { id: 'terraform-id', name: 'company-managed-postgres' },
     ]);
     vi.spyOn(PlatformCloudflareClient.prototype, 'getHyperdriveConfig').mockResolvedValue({
       id: 'terraform-id',
-      name: 'void-test-database',
+      name: 'company-managed-postgres',
       origin: {
         database: 'void_platform',
         host: 'hyperdrive-productiondb.databases.cfdata.org/itdb/primary',
@@ -111,24 +117,44 @@ describe('interactive platform installation prompts', () => {
       },
       cachingDisabled: true,
     });
+    mocks.select.mockImplementation(async ({ message }) =>
+      message === 'How should Void set up Hyperdrive?'
+        ? 'existing'
+        : message === 'Which Hyperdrive should Void use?'
+          ? 'terraform-id'
+          : 'workers-dev',
+    );
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev']));
 
     expect(mocks.note).toHaveBeenCalledWith(
       expect.stringContaining('Database: void_platform'),
-      'Existing Hyperdrive void-test-database',
+      'Existing Hyperdrive company-managed-postgres',
     );
     expect(mocks.select).toHaveBeenCalledWith({
       message: 'How should Void set up Hyperdrive?',
       options: [
-        { value: 'existing', label: 'Use existing Hyperdrive void-test-database' },
-        { value: 'cancel', label: 'Cancel installation' },
+        { value: 'existing', label: 'Use an existing Hyperdrive' },
+        { value: 'create', label: 'Let Void create Hyperdrive', hint: 'recommended' },
+        { value: 'setup', label: 'Set up a separately managed Hyperdrive' },
       ],
+    });
+    expect(mocks.select).toHaveBeenCalledWith({
+      message: 'Which Hyperdrive should Void use?',
+      options: [
+        { value: 'other-id', label: 'another-database', hint: 'other-id' },
+        { value: 'terraform-id', label: 'company-managed-postgres', hint: 'terraform-id' },
+      ],
+    });
+    expect(mocks.confirm).toHaveBeenCalledWith({
+      message: 'Use company-managed-postgres for this platform?',
+      initialValue: true,
     });
     expect(mocks.plan).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         externalHyperdrive: {
           id: 'terraform-id',
+          name: 'company-managed-postgres',
           host: 'hyperdrive-productiondb.databases.cfdata.org/itdb/primary',
           user: 'hyperdrive_void_platform_service',
         },
@@ -160,8 +186,48 @@ describe('interactive platform installation prompts', () => {
     );
   });
 
+  it('suggests a matching name without requiring it', async () => {
+    vi.spyOn(PlatformCloudflareClient.prototype, 'listHyperdriveConfigs').mockResolvedValue([
+      { id: 'other-id', name: 'company-managed-postgres' },
+      { id: 'suggested-id', name: 'void-test-database' },
+    ]);
+    vi.spyOn(PlatformCloudflareClient.prototype, 'getHyperdriveConfig').mockResolvedValue({
+      id: 'suggested-id',
+      name: 'void-test-database',
+      origin: {
+        database: 'void_platform',
+        host: 'db.example.com',
+        port: 5432,
+        scheme: 'postgresql',
+        user: 'runtime_user',
+      },
+      cachingDisabled: true,
+    });
+
+    await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev']));
+
+    expect(mocks.select).toHaveBeenCalledWith({
+      message: 'How should Void set up Hyperdrive?',
+      options: [
+        { value: 'existing', label: 'Use an existing Hyperdrive' },
+        { value: 'setup', label: 'Set up a separately managed Hyperdrive' },
+      ],
+    });
+    expect(mocks.select).toHaveBeenCalledWith({
+      message: 'Which Hyperdrive should Void use?',
+      options: [
+        {
+          value: 'suggested-id',
+          label: 'void-test-database',
+          hint: 'suggested · suggested-id',
+        },
+        { value: 'other-id', label: 'company-managed-postgres', hint: 'other-id' },
+      ],
+    });
+  });
+
   it('explains how to set up a separately managed Hyperdrive before planning', async () => {
-    mocks.select.mockResolvedValue('existing');
+    mocks.select.mockResolvedValue('setup');
 
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev']));
 
@@ -169,11 +235,11 @@ describe('interactive platform installation prompts', () => {
       message: 'How should Void set up Hyperdrive?',
       options: [
         { value: 'create', label: 'Let Void create Hyperdrive', hint: 'recommended' },
-        { value: 'existing', label: 'Use a separately managed Hyperdrive' },
+        { value: 'setup', label: 'Set up a separately managed Hyperdrive' },
       ],
     });
     expect(mocks.note).toHaveBeenCalledWith(
-      expect.stringContaining('Create a Hyperdrive in account account named void-test-database'),
+      expect.stringContaining('with any unused name (for example void-test-database)'),
       'Set up Hyperdrive first',
     );
     expect(mocks.plan).not.toHaveBeenCalled();
@@ -196,7 +262,7 @@ describe('interactive platform installation prompts', () => {
       cachingDisabled: true,
     });
 
-    mocks.select.mockResolvedValue('cancel');
+    mocks.confirm.mockResolvedValue(false);
 
     await expect(
       runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev'])),

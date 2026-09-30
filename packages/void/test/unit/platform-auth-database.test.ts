@@ -28,7 +28,7 @@ const config = {
 };
 
 describe('fresh platform authentication database reads', () => {
-  it('pins an uncached Terraform-managed origin while migrations use the owner connection', async () => {
+  it('pins an uncached externally managed origin while migrations use the owner connection', async () => {
     const ownerDatabaseUrl = `${databaseUrl}?sslmode=disable`;
     const external = {
       ...config,

@@ -47,6 +47,7 @@ export type PlatformInstallPlan = Readonly<{
 
 export type PlatformExternalHyperdrive = Readonly<{
   id: string;
+  name?: string;
   host: string;
   user: string;
 }>;
@@ -574,12 +575,20 @@ export async function createPlatformInstallPlan(
       recordedHyperdrive &&
       (recordedHyperdrive.ownership !== 'adopted' || recordedHyperdrive.id !== externalHyperdriveId)
     ) {
-      throw new Error('platform: The Terraform-managed Hyperdrive differs from this installation.');
+      throw new Error(
+        'platform: The externally managed Hyperdrive differs from this installation.',
+      );
     }
     const remote = hyperdrives.find((resource) => resource.id === externalHyperdriveId);
-    if (!remote || remote.name !== names.hyperdrive) {
+    const selectedName = input.externalHyperdrive?.name;
+    const recordedName = recordedHyperdrive?.name;
+    if (
+      !remote ||
+      (selectedName && remote.name !== selectedName) ||
+      (recordedName && remote.name !== recordedName)
+    ) {
       throw new Error(
-        `platform: Terraform-managed Hyperdrive ${JSON.stringify(externalHyperdriveId)} must exist with the name ${JSON.stringify(names.hyperdrive)}.`,
+        `platform: Externally managed Hyperdrive ${JSON.stringify(externalHyperdriveId)} must exist with its selected name.`,
       );
     }
     actions.push({
@@ -589,8 +598,8 @@ export async function createPlatformInstallPlan(
       kind: 'hyperdrive',
       name: remote.name,
       reason: recordedHyperdrive
-        ? 'Reuse the recorded Terraform-managed Hyperdrive.'
-        : 'Use the Terraform-managed Hyperdrive without taking ownership.',
+        ? 'Reuse the recorded externally managed Hyperdrive.'
+        : 'Use the externally managed Hyperdrive without taking ownership.',
     });
   } else {
     addNamedPlan(

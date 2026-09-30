@@ -36,6 +36,7 @@ import {
   createPlatformInstallPlan,
   formatPlatformInstallPlan,
   revalidatePlatformInstallAction,
+  type PlatformExternalHyperdrive,
 } from './platform-plan.ts';
 import {
   acquirePlatformLifecycleLock,
@@ -405,7 +406,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         'platform: VOID_PLATFORM_HYPERDRIVE_ID, VOID_PLATFORM_HYPERDRIVE_ORIGIN_HOST, and VOID_PLATFORM_HYPERDRIVE_ORIGIN_USER must be set together.',
       );
     }
-    let externalHyperdrive = externalHyperdriveId
+    let externalHyperdrive: PlatformExternalHyperdrive | undefined = externalHyperdriveId
       ? {
           id: externalHyperdriveId,
           host: externalHyperdriveHost,
@@ -418,65 +419,87 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       (!existing || isPlatformSetupDraft(existing)) &&
       !existing?.resources.some((resource) => resource.key === 'hyperdrive')
     ) {
-      const expectedName =
+      const suggestedName =
         existing?.deployment.resources.hyperdrive ??
         createPlatformResourceNames(installationSlug).hyperdrive;
-      const matches = (await client.listHyperdriveConfigs(accountId)).filter(
-        (resource) => resource.name === expectedName,
+      const configurations = await client.listHyperdriveConfigs(accountId);
+      const suggestedNameAvailable = !configurations.some(
+        (resource) => resource.name === suggestedName,
       );
-      if (matches.length > 1) {
-        throw new Error(`platform: More than one Hyperdrive named ${expectedName} exists.`);
+      const choice = await select({
+        message: 'How should Void set up Hyperdrive?',
+        options: [
+          ...(configurations.length > 0
+            ? [{ value: 'existing', label: 'Use an existing Hyperdrive' }]
+            : []),
+          ...(suggestedNameAvailable
+            ? [{ value: 'create', label: 'Let Void create Hyperdrive', hint: 'recommended' }]
+            : []),
+          { value: 'setup', label: 'Set up a separately managed Hyperdrive' },
+        ],
+      });
+      if (isCancel(choice)) {
+        throw new Error('platform: Cancelled.');
       }
-      const live = matches[0] ? await client.getHyperdriveConfig(accountId, matches[0].id) : null;
-      if (live) {
-        if (live.id !== matches[0].id || live.name !== expectedName || !live.origin.user) {
+      if (choice === 'setup') {
+        note(
+          `Create a Hyperdrive in account ${accountId} with any unused name${suggestedNameAvailable ? ` (for example ${suggestedName})` : ''}. Point it at the same dedicated PostgreSQL database you will give Void, use a runtime database user, and disable SQL result caching. If your organization manages Hyperdrive, ask its administrator to create it. Then rerun this command and select it from the list.\nSetup: https://developers.cloudflare.com/hyperdrive/get-started/`,
+          'Set up Hyperdrive first',
+        );
+        outro('No Cloudflare or local installation state was changed.');
+        return;
+      }
+      if (choice === 'existing') {
+        const selectedId = await select({
+          message: 'Which Hyperdrive should Void use?',
+          options: [...configurations]
+            .sort(
+              (a, b) =>
+                Number(b.name === suggestedName) - Number(a.name === suggestedName) ||
+                a.name.localeCompare(b.name) ||
+                a.id.localeCompare(b.id),
+            )
+            .map((resource) => ({
+              value: resource.id,
+              label: resource.name,
+              hint: resource.name === suggestedName ? `suggested · ${resource.id}` : resource.id,
+            })),
+        });
+        if (isCancel(selectedId)) {
+          throw new Error('platform: Cancelled.');
+        }
+        const selected = configurations.find((resource) => resource.id === selectedId);
+        if (!selected) {
+          throw new Error('platform: The selected Hyperdrive is no longer available.');
+        }
+        const live = await client.getHyperdriveConfig(accountId, selected.id);
+        if (live.id !== selected.id || live.name !== selected.name || !live.origin.user) {
           throw new Error(
-            `platform: Could not verify the database user for existing Hyperdrive ${expectedName}.`,
+            `platform: Could not verify the database user for existing Hyperdrive ${selected.name}.`,
           );
         }
         note(
           `Database: ${live.origin.database}\nHost: ${live.origin.host}\nPort: ${live.origin.port}\nUser: ${live.origin.user}\nSQL result caching: ${live.cachingDisabled ? 'disabled' : 'enabled'}`,
-          `Existing Hyperdrive ${expectedName}`,
+          `Existing Hyperdrive ${live.name}`,
         );
-        const choice = await select({
-          message: 'How should Void set up Hyperdrive?',
-          options: [
-            { value: 'existing', label: `Use existing Hyperdrive ${expectedName}` },
-            { value: 'cancel', label: 'Cancel installation' },
-          ],
-        });
-        if (isCancel(choice) || choice === 'cancel') {
-          throw new Error('platform: Cancelled.');
-        }
         if (!live.cachingDisabled) {
           throw new Error(
-            `platform: Disable SQL result caching on existing Hyperdrive ${expectedName} before installing.`,
+            `platform: Disable SQL result caching on existing Hyperdrive ${live.name} before installing.`,
           );
+        }
+        const confirmed = await confirm({
+          message: `Use ${live.name} for this platform?`,
+          initialValue: true,
+        });
+        if (isCancel(confirmed) || !confirmed) {
+          throw new Error('platform: Cancelled.');
         }
         externalHyperdrive = {
           id: live.id,
+          name: live.name,
           host: live.origin.host,
           user: live.origin.user,
         };
-      } else {
-        const choice = await select({
-          message: 'How should Void set up Hyperdrive?',
-          options: [
-            { value: 'create', label: 'Let Void create Hyperdrive', hint: 'recommended' },
-            { value: 'existing', label: 'Use a separately managed Hyperdrive' },
-          ],
-        });
-        if (isCancel(choice)) {
-          throw new Error('platform: Cancelled.');
-        }
-        if (choice === 'existing') {
-          note(
-            `Create a Hyperdrive in account ${accountId} named ${expectedName}. Point it at the same dedicated PostgreSQL database you will give Void, use a runtime database user, and disable SQL result caching. If your organization manages Hyperdrive, ask its administrator to create it. Then rerun this command.\nSetup: https://developers.cloudflare.com/hyperdrive/get-started/`,
-            'Set up Hyperdrive first',
-          );
-          outro('No Cloudflare or local installation state was changed.');
-          return;
-        }
       }
     }
     let authoritativeProvisionIntents = false;

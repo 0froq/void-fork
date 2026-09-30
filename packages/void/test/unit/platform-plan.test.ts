@@ -80,13 +80,17 @@ function legacyInstallation(suffix = '0123456789ab') {
 }
 
 describe('platform installation planning', () => {
-  it('adopts only the explicitly selected Terraform-managed Hyperdrive', async () => {
+  it('adopts an explicitly selected Hyperdrive without coupling its name to the installation', async () => {
     const fake = client({
-      listHyperdriveConfigs: async () => [{ id: 'terraform-id', name: 'void-example-database' }],
+      listHyperdriveConfigs: async () => [
+        { id: 'other-id', name: 'void-example-database' },
+        { id: 'terraform-id', name: 'company-managed-postgres' },
+      ],
     });
     await expect(createPlatformInstallPlan(fake, input, null)).rejects.toThrow('not owned');
     const externalHyperdrive = {
       id: 'terraform-id',
+      name: 'company-managed-postgres',
       host: 'hyperdrive-productiondb.databases.cfdata.org/itdb/primary',
       user: 'hyperdrive_void_platform_service',
     };
@@ -94,8 +98,9 @@ describe('platform installation planning', () => {
     expect(plan.actions.find((action) => action.key === 'hyperdrive')).toMatchObject({
       action: 'adopt',
       id: 'terraform-id',
-      name: 'void-example-database',
+      name: 'company-managed-postgres',
     });
+    expect(plan.deployment.resources.hyperdrive).toBe('company-managed-postgres');
     const recorded = recordInstallationResource(
       createPlatformInstallationManifest({
         account: plan.account,
@@ -109,7 +114,7 @@ describe('platform installation planning', () => {
         key: 'hyperdrive',
         kind: 'hyperdrive',
         id: 'terraform-id',
-        name: 'void-example-database',
+        name: 'company-managed-postgres',
         ownership: 'adopted',
         state: 'ready',
         configHash: '0'.repeat(64),
@@ -120,6 +125,7 @@ describe('platform installation planning', () => {
     expect(resumed.actions.find((action) => action.key === 'hyperdrive')).toMatchObject({
       action: 'reuse',
       id: 'terraform-id',
+      name: 'company-managed-postgres',
     });
     await expect(
       createPlatformInstallPlan(
@@ -128,6 +134,22 @@ describe('platform installation planning', () => {
         null,
       ),
     ).rejects.toThrow('must exist');
+    await expect(
+      createPlatformInstallPlan(
+        fake,
+        { ...input, externalHyperdrive: { ...externalHyperdrive, name: 'renamed-config' } },
+        null,
+      ),
+    ).rejects.toThrow('selected name');
+    await expect(
+      createPlatformInstallPlan(
+        client({
+          listHyperdriveConfigs: async () => [{ id: 'terraform-id', name: 'renamed-config' }],
+        }),
+        input,
+        recorded,
+      ),
+    ).rejects.toThrow('selected name');
   });
   it.each(['install', 'upgrade'] as const)(
     'rejects incomplete shared email settings during %s',
