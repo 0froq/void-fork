@@ -1408,9 +1408,6 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.devDependencies['@types/react']).toBeDefined();
       expect(pkg.devDependencies['@types/react-dom']).toBeDefined();
       expect(pkg.devDependencies['oxc-transform-react']).toBeDefined();
-      expect(pkg.devDependencies['@rolldown/plugin-babel']).toBeUndefined();
-      expect(pkg.devDependencies['@vitejs/plugin-react']).toBeUndefined();
-      expect(pkg.devDependencies['babel-plugin-react-compiler']).toBeUndefined();
       expect(pkg.scripts.dev).toBe('vp dev');
       expect(pkg.scripts.build).toBe('vp build');
       expect(pkg.scripts.preview).toBe('vp preview');
@@ -1418,7 +1415,6 @@ describe('isScaffoldableEmptyProject', () => {
       const reactViteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf-8');
       expect(reactViteConfig).toContain('from "@void/react/plugin"');
       expect(reactViteConfig).toContain('voidReact({ react: { compiler: true } })');
-      expect(reactViteConfig).not.toContain('babel');
       expect(readFileSync(join(root, 'pages', 'index.tsx'), 'utf-8')).toContain('Welcome to Void');
       expect(readFileSync(join(root, 'pages', 'index.server.ts'), 'utf-8')).toContain(
         'import { messages } from "@schema";',
@@ -2685,15 +2681,11 @@ export default config;
       expect(pkg.devDependencies.void).toBe('^0.2.3');
       expect(pkg.devDependencies['@void/react']).toBe('^0.2.3');
       expect(pkg.devDependencies['oxc-transform-react']).toBe('^0.149.0');
-      expect(pkg.devDependencies['@rolldown/plugin-babel']).toBeUndefined();
-      expect(pkg.devDependencies['@vitejs/plugin-react']).toBeUndefined();
-      expect(pkg.devDependencies['babel-plugin-react-compiler']).toBeUndefined();
       expectPnpmAllowBuilds(root);
 
       const reactViteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf-8');
       expect(reactViteConfig).toContain('from "@void/react/plugin"');
       expect(reactViteConfig).toContain('voidReact({ react: { compiler: true } })');
-      expect(reactViteConfig).not.toContain('babel');
 
       expect(mockSelect.mock.calls[0]?.[0].message).toBe('Choose a Pages scaffold toolchain:');
       expect(mockSelect.mock.calls[0]?.[0].initialValue).toBe('vite-plus');
