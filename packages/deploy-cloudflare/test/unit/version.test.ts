@@ -172,7 +172,12 @@ describe('Cloudflare version activation', () => {
       message: encodeCloudflareVersionMessage([]),
       fetch: async () => Response.json({ ready: true }),
     });
-    expect(result).toMatchObject({ ok: true, versionId: NEXT, previousVersionId: CURRENT });
+    expect(result).toMatchObject({
+      ok: true,
+      versionId: NEXT,
+      previousVersionId: CURRENT,
+      trafficConfig: { workers_dev: true },
+    });
     expect(runWrangler.mock.calls.filter(([args]) => args[0] === 'deploy')).toHaveLength(1);
     expect(
       runWrangler.mock.calls.some(([args]) => args[0] === 'versions' && args[1] === 'upload'),

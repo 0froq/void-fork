@@ -1883,6 +1883,15 @@ async function bootstrapFirstDeployment(
     versionId,
     previewUrl,
     previousVersionId,
+    ...(atomic
+      ? {
+          trafficConfig: {
+            workers_dev: desiredTriggerConfig.workers_dev,
+            preview_urls: desiredTriggerConfig.preview_urls,
+            routes: desiredTriggerConfig.routes,
+          },
+        }
+      : {}),
     ...workersDevSubdomainResult(previewUrl),
   };
 }
