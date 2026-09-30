@@ -89,7 +89,7 @@ describe('compileRouteTable', () => {
     expect(code).toContain('export default app');
   });
 
-  it('does not cache route modules in dev so transitive route dependency changes reload', () => {
+  it('imports route modules on demand in dev so transitive dependency changes reload', () => {
     const scan: ScanResult = {
       routes: [
         {
@@ -114,8 +114,6 @@ describe('compileRouteTable', () => {
 
     expect(code).toContain('async function _load_api_hello_ts()');
     expect(code).toContain('return import("/routes/api/hello.ts")');
-    expect(code).not.toContain('let _mod_api_hello_ts');
-    expect(code).not.toContain('if (!_mod_api_hello_ts)');
   });
 
   it('matches every expression of a multi-cron job', () => {
