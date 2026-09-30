@@ -21,9 +21,9 @@ type Json = Record<string, unknown>;
 
 const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
 const args = process.argv.slice(2);
-// This dedicated transport process uses the same encrypted OAuth store for
-// login, deployment, and ancillary API calls. API-token overrides still win.
-process.env.CLOUDFLARE_AUTH_USE_KEYRING = 'true';
+// This dedicated transport process uses the same OAuth store for login,
+// deployment, and ancillary API calls. API-token overrides still win.
+process.env.CLOUDFLARE_AUTH_USE_KEYRING ??= 'true';
 
 function cfEnvironment(): NodeJS.ProcessEnv {
   // The pinned bin otherwise delegates to any cf installed by the project.
@@ -32,7 +32,7 @@ function cfEnvironment(): NodeJS.ProcessEnv {
     CF_DELEGATION: '1',
     CF_SEND_TELEMETRY: 'false',
     CF_NO_OSC_PROGRESS: '1',
-    CLOUDFLARE_AUTH_USE_KEYRING: 'true',
+    CLOUDFLARE_AUTH_USE_KEYRING: process.env.CLOUDFLARE_AUTH_USE_KEYRING,
   };
   // cf uses Node's built-in fetch for API operations. Node does not consult
   // HTTP(S)_PROXY for fetch unless its environment proxy support is enabled.

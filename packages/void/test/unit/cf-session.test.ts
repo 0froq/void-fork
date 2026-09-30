@@ -122,3 +122,19 @@ it('retains the encrypted preference for later compatible CLI logins', () => {
   vi.stubEnv('CLOUDFLARE_AUTH_USE_KEYRING', undefined);
   expect(createCfAuth(authContext).getCredentialStore().kind).toBe('encrypted-file');
 });
+
+it('respects an explicit plaintext storage setting', () => {
+  vi.stubEnv('CLOUDFLARE_AUTH_USE_KEYRING', 'false');
+  const auth = createCfAuth(authContext);
+  auth.writeAuthCredentials({ oauth_token: 'synthetic-plaintext' });
+  const path = auth.getCredentialStore().path();
+  expect(path).not.toMatch(/\.enc$/);
+  expect(
+    readCfSessionCredential(root, {
+      authenticated: true,
+      tokenValid: true,
+      authSource: `OAuth token from ${path}`,
+    }),
+  ).toBe('synthetic-plaintext');
+  expect(readUserPreferences().keyring_enabled).not.toBe(true);
+});

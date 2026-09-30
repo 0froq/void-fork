@@ -132,9 +132,14 @@ it.each(['clear-crons', 'clear-domains'])(
   30_000,
 );
 
-it.each(['clear-crons', 'clear-domains'])(
-  'uses encrypted browser credentials for %s',
-  async (operation) => {
+it.each([
+  ['clear-crons', 'true'],
+  ['clear-domains', 'true'],
+  ['clear-crons', 'false'],
+  ['clear-domains', 'false'],
+])(
+  'uses browser credentials for %s with keyring %s',
+  async (operation, keyringSetting) => {
     const directory = mkdtempSync(join(tmpdir(), 'void-cf-clear-crons-oauth-'));
     const requests: Array<{
       method: string | undefined;
@@ -180,7 +185,7 @@ const auth = createCfAuth({ logger, userAgent: 'void-test', prompt: async () => 
 auth.writeAuthCredentials({ oauth_token: 'synthetic-oauth-token', refresh_token: 'synthetic-refresh', expiration_time: new Date(Date.now() + 3600000).toISOString(), scopes: [] });
 const credentialPath = auth.getCredentialStore().path();
 child.spawnSync = (_binary, args, options) => {
-  if (args[1] !== 'auth' || args[2] !== 'whoami' || options.env.CLOUDFLARE_AUTH_USE_KEYRING !== 'true') {
+  if (args[1] !== 'auth' || args[2] !== 'whoami' || options.env.CLOUDFLARE_AUTH_USE_KEYRING !== ${JSON.stringify(keyringSetting)}) {
     return { status: 1, stdout: '', stderr: 'Wrong authentication source.' };
   }
   return { status: 0, stdout: JSON.stringify({ authenticated: true, tokenValid: true, authSource: 'OAuth token from ' + credentialPath }), stderr: '' };
@@ -212,7 +217,7 @@ syncBuiltinESMExports();
               SYSTEMROOT: process.env.SYSTEMROOT,
               WINDIR: process.env.WINDIR,
               CI: 'true',
-              CLOUDFLARE_AUTH_USE_KEYRING: 'true',
+              CLOUDFLARE_AUTH_USE_KEYRING: keyringSetting,
               CLOUDFLARE_ACCOUNT_ID: 'test-account',
               CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`,
               HOME: directory,

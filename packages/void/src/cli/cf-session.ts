@@ -1,6 +1,8 @@
+import { getCloudflareAuthUseKeyringFromEnv } from '@cloudflare/workers-auth';
 import {
   createCfAuth,
   createCfProfileStore,
+  readUserPreferences,
   setKeyringPreference,
 } from '@cloudflare/workers-auth/cf';
 
@@ -49,6 +51,12 @@ export function readCfSessionCredential(
 
 /** Keep subsequent cf logins on the encrypted profile adopted by Void. */
 export function persistCfKeyringPreference(root: string): void {
+  if (
+    getCloudflareAuthUseKeyringFromEnv() === false ||
+    readUserPreferences().keyring_enabled === true
+  ) {
+    return;
+  }
   const auth = session(root);
   if (
     !setKeyringPreference(true, { logger, getCredentialStore: auth.getCredentialStore }).enabled
