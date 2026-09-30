@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
 import type { CloudContext } from '../../src/runtime/handler.ts';
 import { createLiveDurableObject } from '../../src/runtime/live-server.ts';
 import { defineLiveStream, type LiveLimits } from '../../src/runtime/live.ts';
@@ -161,6 +161,102 @@ describe('live Durable Object runtime', () => {
 
     expect(response.ok).toBe(true);
     expect(Date.now() - startedAt).toBeLessThan(1_000);
+  });
+
+  it('fans out publish deliveries six at a time and prunes missing connections', async () => {
+    const pending: Array<(response: Response) => void> = [];
+    let calls = 0;
+    const harness = createHarness({
+      fetch(_name, request) {
+        if (new URL(request.url).pathname === '/deliver') {
+          calls++;
+          return new Promise<Response>((resolve) => pending.push(resolve));
+        }
+      },
+    });
+    const topic = harness.stub('live:app:topic:topic-key');
+    await registerSubscribers(topic, 7);
+
+    const publish = topic.fetch(
+      jsonRequest('/publish', {
+        streamId: 'app',
+        topic: 'post:12',
+        topicKey: 'topic-key',
+        data: { body: 'hello' },
+        limits: LIMITS,
+      }),
+    );
+
+    await vi.waitFor(() => expect(calls).toBe(6));
+    expect(pending).toHaveLength(6);
+    for (const resolve of pending.slice(0, 6)) {
+      resolve(new Response('connection missing', { status: 410 }));
+    }
+    await vi.waitFor(() => expect(calls).toBe(7));
+    pending[6]!(new Response('connection missing', { status: 410 }));
+
+    expect((await publish).ok).toBe(true);
+    expect(await harness.subscriberCount('live:app:topic:topic-key')).toBe(0);
+  });
+
+  it('propagates delivery 413 without starting another fanout batch', async () => {
+    let calls = 0;
+    const harness = createHarness({
+      fetch(_name, request) {
+        if (new URL(request.url).pathname === '/deliver') {
+          calls++;
+          return Promise.resolve(
+            calls === 1
+              ? new Response('event too large', { status: 413 })
+              : Response.json({ delivered: 1, stale: [] }),
+          );
+        }
+      },
+    });
+    const topic = harness.stub('live:app:topic:topic-key');
+    await registerSubscribers(topic, 7);
+
+    const response = await topic.fetch(
+      jsonRequest('/publish', {
+        streamId: 'app',
+        topic: 'post:12',
+        topicKey: 'topic-key',
+        data: { body: 'hello' },
+        limits: LIMITS,
+      }),
+    );
+
+    expect(response.status).toBe(413);
+    expect(await response.text()).toBe('event too large');
+    expect(calls).toBe(6);
+  });
+
+  it('checks stale subscribers six connections at a time during alarm pruning', async () => {
+    const pending: Array<(response: Response) => void> = [];
+    let calls = 0;
+    const harness = createHarness({
+      fetch(_name, request) {
+        if (new URL(request.url).pathname === '/check') {
+          calls++;
+          return new Promise<Response>((resolve) => pending.push(resolve));
+        }
+      },
+    });
+    const topicName = 'live:app:topic:topic-key';
+    const topic = harness.stub(topicName);
+    await registerSubscribers(topic, 7);
+
+    const prune = harness.alarm(topicName);
+    await vi.waitFor(() => expect(calls).toBe(6));
+    expect(pending).toHaveLength(6);
+    for (const resolve of pending.slice(0, 6)) {
+      resolve(Response.json({ stale: [0] }));
+    }
+    await vi.waitFor(() => expect(calls).toBe(7));
+    pending[6]!(Response.json({ stale: [0] }));
+
+    await prune;
+    expect(await harness.subscriberCount(topicName)).toBe(0);
   });
 
   it('serializes publishes for one topic so slow stale connections cannot reorder events', async () => {
@@ -464,7 +560,10 @@ function createHarness(options?: {
   fetch?: (name: string, request: Request) => Promise<Response> | undefined;
 }) {
   const LiveDurableObject = createLiveDurableObject();
-  const instances = new Map<string, { fetch(request: Request): Promise<Response> }>();
+  const instances = new Map<
+    string,
+    { fetch(request: Request): Promise<Response>; alarm?(): Promise<void> }
+  >();
   const states = new Map<string, DurableObjectState>();
   const env = {} as { VOID_LIVE: DurableObjectNamespace };
   const namespace = {
@@ -496,6 +595,13 @@ function createHarness(options?: {
 
   return {
     env,
+    async alarm(name: string): Promise<void> {
+      await instances.get(name)?.alarm?.();
+    },
+    async subscriberCount(name: string): Promise<number> {
+      const rows = await states.get(name)?.storage.list({ prefix: 'sub:' });
+      return rows?.size ?? 0;
+    },
     stub(name: string): DurableObjectStub {
       return namespace.get(namespace.idFromName(name));
     },
@@ -513,6 +619,25 @@ function createHarness(options?: {
       );
     },
   };
+}
+
+async function registerSubscribers(topic: DurableObjectStub, count: number): Promise<void> {
+  for (let index = 0; index < count; index++) {
+    const response = await topic.fetch(
+      jsonRequest('/register', {
+        streamId: 'app',
+        topic: 'post:12',
+        topicKey: 'topic-key',
+        connectionId: `connection-${index}`,
+        subscriptionId: 'card',
+        generation: 1,
+        revision: 1,
+        lastSeenAt: Date.now(),
+        limits: LIMITS,
+      }),
+    );
+    expect(response.ok).toBe(true);
+  }
 }
 
 function liveContext(env: unknown, url: string, body?: unknown): CloudContext {

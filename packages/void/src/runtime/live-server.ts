@@ -95,6 +95,7 @@ export type LiveDurableObjectClass = {
 
 const GENERATION_KEY = 'connection:generation';
 const TOPIC_PRUNE_ALARM_DELAY_MS = 60_000;
+const LIVE_FANOUT_CONCURRENCY = 6;
 const textEncoder = new TextEncoder();
 
 export function createLiveDurableObject(): LiveDurableObjectClass {
@@ -427,37 +428,50 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
           return payloadTooLargeResponse(message.limits.maxEncodedEventSize);
         }
       }
-      for (const [connectionId, items] of grouped) {
-        const response = await fetchWithTimeout(
-          this.connectionStub(message.streamId, connectionId),
-          internalUrl('/deliver'),
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              streamId: message.streamId,
-              topic: message.topic,
-              data: message.data,
-              type: message.type,
-              eventId: message.eventId,
-              subscriptions: items.map((item) => item.row),
-            } satisfies DeliveryRequest),
-          },
-          message.limits.deliveryAttemptTimeoutMs,
+      const groups = [...grouped];
+      for (let offset = 0; offset < groups.length; offset += LIVE_FANOUT_CONCURRENCY) {
+        const batch = groups.slice(offset, offset + LIVE_FANOUT_CONCURRENCY);
+        const responses = await Promise.allSettled(
+          batch.map(([connectionId, items]) =>
+            fetchWithTimeout(
+              this.connectionStub(message.streamId, connectionId),
+              internalUrl('/deliver'),
+              {
+                method: 'POST',
+                body: JSON.stringify({
+                  streamId: message.streamId,
+                  topic: message.topic,
+                  data: message.data,
+                  type: message.type,
+                  eventId: message.eventId,
+                  subscriptions: items.map((item) => item.row),
+                } satisfies DeliveryRequest),
+              },
+              message.limits.deliveryAttemptTimeoutMs,
+            ),
+          ),
         );
-        if (!response || response.status === 410 || response.status === 404) {
-          await this.state.storage.delete(items.map((item) => item.key));
-          continue;
-        }
-        if (response.status === 413) {
-          return response;
-        }
-        if (response.ok) {
-          const result = (await response.json().catch(() => null)) as DeliveryResponse | null;
-          const staleKeys = result?.stale
-            .map((index) => items[index]?.key)
-            .filter((key): key is string => typeof key === 'string');
-          if (staleKeys?.length) {
-            await this.state.storage.delete(staleKeys);
+        for (const [index, outcome] of responses.entries()) {
+          if (outcome.status === 'rejected') {
+            throw outcome.reason;
+          }
+          const response = outcome.value;
+          const items = batch[index]![1];
+          if (!response || response.status === 410 || response.status === 404) {
+            await this.state.storage.delete(items.map((item) => item.key));
+            continue;
+          }
+          if (response.status === 413) {
+            return response;
+          }
+          if (response.ok) {
+            const result = (await response.json().catch(() => null)) as DeliveryResponse | null;
+            const staleKeys = result?.stale
+              .map((staleIndex) => items[staleIndex]?.key)
+              .filter((key): key is string => typeof key === 'string');
+            if (staleKeys?.length) {
+              await this.state.storage.delete(staleKeys);
+            }
           }
         }
       }
@@ -489,28 +503,41 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
       }
 
       const staleKeys: Array<string> = [];
-      for (const [connectionId, items] of grouped) {
-        const response = await fetchWithTimeout(
-          this.connectionStub(items[0]!.row.streamId, connectionId),
-          internalUrl('/check'),
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              subscriptions: items.map((item) => item.row),
-            } satisfies StaleCheckRequest),
-          },
-          limits.deliveryAttemptTimeoutMs,
+      const groups = [...grouped];
+      for (let offset = 0; offset < groups.length; offset += LIVE_FANOUT_CONCURRENCY) {
+        const batch = groups.slice(offset, offset + LIVE_FANOUT_CONCURRENCY);
+        const responses = await Promise.allSettled(
+          batch.map(([connectionId, items]) =>
+            fetchWithTimeout(
+              this.connectionStub(items[0]!.row.streamId, connectionId),
+              internalUrl('/check'),
+              {
+                method: 'POST',
+                body: JSON.stringify({
+                  subscriptions: items.map((item) => item.row),
+                } satisfies StaleCheckRequest),
+              },
+              limits.deliveryAttemptTimeoutMs,
+            ),
+          ),
         );
-        if (!response || response.status === 410 || response.status === 404) {
-          staleKeys.push(...items.map((item) => item.key));
-          continue;
-        }
-        if (response.ok) {
-          const result = (await response.json().catch(() => null)) as StaleCheckResponse | null;
-          for (const index of result?.stale ?? []) {
-            const key = items[index]?.key;
-            if (key) {
-              staleKeys.push(key);
+        for (const [index, outcome] of responses.entries()) {
+          if (outcome.status === 'rejected') {
+            throw outcome.reason;
+          }
+          const response = outcome.value;
+          const items = batch[index]![1];
+          if (!response || response.status === 410 || response.status === 404) {
+            staleKeys.push(...items.map((item) => item.key));
+            continue;
+          }
+          if (response.ok) {
+            const result = (await response.json().catch(() => null)) as StaleCheckResponse | null;
+            for (const staleIndex of result?.stale ?? []) {
+              const key = items[staleIndex]?.key;
+              if (key) {
+                staleKeys.push(key);
+              }
             }
           }
         }
