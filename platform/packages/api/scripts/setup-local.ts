@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as p from '@clack/prompts';
@@ -107,8 +107,17 @@ function upsertLocalAdmin(email: string): void {
   );
 }
 
-function upsertDevVars(filePath: string, entries: Record<string, string>): void {
-  const lines = existsSync(filePath) ? readFileSync(filePath, 'utf8').split('\n') : [];
+function upsertLocalEnvFile(
+  filePath: string,
+  entries: Record<string, string>,
+  omitKeys: ReadonlyArray<string> = [],
+): void {
+  const omitted = new Set(omitKeys);
+  const lines = existsSync(filePath)
+    ? readFileSync(filePath, 'utf8')
+        .split('\n')
+        .filter((line) => !omitted.has(/^([A-Z0-9_]+)=/.exec(line)?.[1] ?? ''))
+    : [];
   const nextLines = [...lines];
   const seen = new Set<string>();
 
@@ -137,24 +146,41 @@ function upsertDevVars(filePath: string, entries: Record<string, string>): void 
 }
 
 function ensureLocalDevVars(): void {
-  const localDevVars = {
+  const apiDevVars = {
     DEV_AUTH_BYPASS: 'true',
     PLATFORM_ENV: 'staging',
     JWT_SECRET: 'dev',
     EMAIL_SIGNING_SECRET: 'dev-email-signing-key-not-for-production',
     CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: localDbUrl,
   };
-  const devVarsDirs = [platformDir, resolve(platformDir, '../dashboard')];
-  for (const dir of devVarsDirs) {
-    const devVarsPath = resolve(dir, '.dev.vars');
-    const existed = existsSync(devVarsPath);
-    upsertDevVars(devVarsPath, localDevVars);
-    if (existed) {
-      p.log.success(`Updated ${devVarsPath}`);
-    } else {
-      p.log.success(`Created ${devVarsPath}`);
+  const apiDevVarsPath = resolve(platformDir, '.dev.vars');
+  const apiDevVarsExisted = existsSync(apiDevVarsPath);
+  upsertLocalEnvFile(apiDevVarsPath, apiDevVars);
+  p.log.success(`${apiDevVarsExisted ? 'Updated' : 'Created'} ${apiDevVarsPath}`);
+
+  const dashboardDir = resolve(platformDir, '../dashboard');
+  const dashboardEnvPath = resolve(dashboardDir, '.env');
+  const legacyDashboardDevVarsPath = resolve(dashboardDir, '.dev.vars');
+  if (existsSync(legacyDashboardDevVarsPath)) {
+    if (existsSync(dashboardEnvPath)) {
+      throw new Error(
+        `Both ${dashboardEnvPath} and ${legacyDashboardDevVarsPath} exist. Merge them into .env and remove .dev.vars before setup.`,
+      );
     }
+    renameSync(legacyDashboardDevVarsPath, dashboardEnvPath);
+    p.log.info(`Moved ${legacyDashboardDevVarsPath} to ${dashboardEnvPath}`);
   }
+  const dashboardEnvExisted = existsSync(dashboardEnvPath);
+  upsertLocalEnvFile(
+    dashboardEnvPath,
+    {
+      API_URL: 'http://localhost:8787',
+      SITE_DOMAIN: 'apps.example.com',
+    },
+    Object.keys(apiDevVars),
+  );
+  chmodSync(dashboardEnvPath, 0o600);
+  p.log.success(`${dashboardEnvExisted ? 'Updated' : 'Created'} ${dashboardEnvPath}`);
 }
 
 function showNextSteps(): void {
@@ -163,6 +189,7 @@ function showNextSteps(): void {
       'From the repository root:',
       '  1. vp run --filter @voidcloud/api dev --local --enable-containers=false --host localhost --port 8787',
       '  2. Open http://localhost:8787/admin/',
+      '  3. For the separate user dashboard: vp run --filter @voidcloud/dashboard dev',
     ].join('\n'),
     'Next steps',
   );

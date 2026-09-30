@@ -22,7 +22,7 @@ afterEach(() => {
 });
 
 function run(contents: string, env: Record<string, string> = {}) {
-  writeFileSync(join(root, '.dev.vars'), contents);
+  writeFileSync(join(root, '.env'), contents);
   return spawnSync(process.execPath, [script], {
     cwd: root,
     encoding: 'utf8',
@@ -37,7 +37,7 @@ describe('dashboard Access token refresh', () => {
   it('leaves an ordinary self-hosted API alone without Access opt-in', () => {
     const contents = 'API_URL=https://platform.example.com\n';
     expect(run(contents).status).toBe(0);
-    expect(readFileSync(join(root, '.dev.vars'), 'utf8')).toBe(contents);
+    expect(readFileSync(join(root, '.env'), 'utf8')).toBe(contents);
   });
 
   it('refreshes a token for an explicitly selected self-hosted API origin', () => {
@@ -45,14 +45,14 @@ describe('dashboard Access token refresh', () => {
       'API_URL=https://platform.example.com\nCF_ACCESS_APP_URL=https://platform.example.com\n',
     );
     expect(result.status, result.stderr).toBe(0);
-    expect(readFileSync(join(root, '.dev.vars'), 'utf8')).toContain(`CF_ACCESS_TOKEN="${jwt}"`);
+    expect(readFileSync(join(root, '.env'), 'utf8')).toContain(`CF_ACCESS_TOKEN="${jwt}"`);
   });
 
   it('rejects an Access origin that differs from the API destination', () => {
     const contents =
       'API_URL=https://platform.example.com\nCF_ACCESS_APP_URL=https://other.example.com\n';
     expect(run(contents).status).toBe(1);
-    expect(readFileSync(join(root, '.dev.vars'), 'utf8')).toBe(contents);
+    expect(readFileSync(join(root, '.env'), 'utf8')).toBe(contents);
   });
 
   it('rejects insecure Access configuration before requesting a token', () => {
@@ -62,17 +62,17 @@ describe('dashboard Access token refresh', () => {
     ).toBe(1);
   });
 
-  it('uses an existing service-token pair from .dev.vars without refreshing', () => {
+  it('uses an existing service-token pair from .env without refreshing', () => {
     const contents =
       'API_URL=https://platform.example.com\nCF_ACCESS_APP_URL=https://platform.example.com\nCF_ACCESS_CLIENT_ID=test-id\nCF_ACCESS_CLIENT_SECRET=test-secret\n';
     expect(run(contents).status).toBe(0);
-    expect(readFileSync(join(root, '.dev.vars'), 'utf8')).toBe(contents);
+    expect(readFileSync(join(root, '.env'), 'utf8')).toBe(contents);
   });
 
   it('preserves automatic Void Cloud staging authentication', () => {
     const result = run('API_URL=https://api.staging.void.cloud\n');
     expect(result.status, result.stderr).toBe(0);
-    expect(readFileSync(join(root, '.dev.vars'), 'utf8')).toContain('CF_ACCESS_TOKEN=');
+    expect(readFileSync(join(root, '.env'), 'utf8')).toContain('CF_ACCESS_TOKEN=');
   });
 
   it('records the origin and restricts permissions when persisting a refreshed token', () => {
@@ -80,16 +80,16 @@ describe('dashboard Access token refresh', () => {
       'API_URL=https://platform.example.com\nCF_ACCESS_APP_URL=https://platform.example.com\n',
     );
     expect(result.status, result.stderr).toBe(0);
-    expect(readFileSync(join(root, '.dev.vars'), 'utf8')).toContain(
+    expect(readFileSync(join(root, '.env'), 'utf8')).toContain(
       'CF_ACCESS_TOKEN_ORIGIN="https://platform.example.com"',
     );
-    expect(statSync(join(root, '.dev.vars')).mode & 0o777).toBe(0o600);
+    expect(statSync(join(root, '.env')).mode & 0o777).toBe(0o600);
   });
 
   it('reuses an unexpired file token only for its recorded origin', () => {
     const contents = `API_URL=https://platform.example.com\nCF_ACCESS_APP_URL=https://platform.example.com\nCF_ACCESS_TOKEN=${jwt}\nCF_ACCESS_TOKEN_ORIGIN=https://platform.example.com\n`;
     expect(run(contents).status).toBe(0);
-    expect(readFileSync(join(root, '.dev.vars'), 'utf8')).toBe(contents);
+    expect(readFileSync(join(root, '.env'), 'utf8')).toBe(contents);
     expect(existsSync(join(root, 'probe.json'))).toBe(false);
   });
 
@@ -104,7 +104,7 @@ describe('dashboard Access token refresh', () => {
       'token',
       '-app=https://b.example.com',
     ]);
-    const contents = readFileSync(join(root, '.dev.vars'), 'utf8');
+    const contents = readFileSync(join(root, '.env'), 'utf8');
     expect(contents).not.toContain(oldJwt);
     expect(contents).toContain(`CF_ACCESS_TOKEN="${jwt}"`);
     expect(contents).toContain('CF_ACCESS_TOKEN_ORIGIN="https://b.example.com"');
@@ -115,7 +115,7 @@ describe('dashboard Access token refresh', () => {
       `API_URL=https://b.example.com\nCF_ACCESS_TOKEN=${jwt}\nCF_ACCESS_TOKEN_ORIGIN=https://a.example.com\n`,
     );
     expect(result.status, result.stderr).toBe(0);
-    const contents = readFileSync(join(root, '.dev.vars'), 'utf8');
+    const contents = readFileSync(join(root, '.env'), 'utf8');
     expect(contents).not.toContain('CF_ACCESS_TOKEN');
     expect(existsSync(join(root, 'probe.json'))).toBe(false);
   });
@@ -126,7 +126,7 @@ describe('dashboard Access token refresh', () => {
     );
     expect(result.status, result.stderr).toBe(0);
     expect(existsSync(join(root, 'probe.json'))).toBe(true);
-    expect(readFileSync(join(root, '.dev.vars'), 'utf8')).toContain(
+    expect(readFileSync(join(root, '.env'), 'utf8')).toContain(
       'CF_ACCESS_TOKEN_ORIGIN="https://platform.example.com"',
     );
   });
@@ -138,6 +138,6 @@ describe('dashboard Access token refresh', () => {
     );
     expect(result.status, result.stderr).toBe(0);
     expect(existsSync(join(root, 'probe.json'))).toBe(false);
-    expect(readFileSync(join(root, '.dev.vars'), 'utf8')).not.toContain('CF_ACCESS_TOKEN');
+    expect(readFileSync(join(root, '.env'), 'utf8')).not.toContain('CF_ACCESS_TOKEN');
   });
 });

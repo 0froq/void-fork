@@ -39,8 +39,8 @@ In another terminal:
 vp run --filter @voidcloud/dashboard dev
 ```
 
-Setup creates ignored `.dev.vars` files. Set the dashboard's
-`platform/packages/dashboard/.dev.vars` to use the local API:
+Setup creates an ignored API `.dev.vars` file and a dashboard `.env` file.
+The dashboard's `platform/packages/dashboard/.env` points to the local API:
 
 ```dotenv
 API_URL=http://localhost:8787

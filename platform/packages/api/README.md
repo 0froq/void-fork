@@ -369,7 +369,7 @@ vp run --filter @voidcloud/api dev --local --enable-containers=false --host loca
 
 Open `http://localhost:8787/admin/`. Setup creates the local database, applies
 migrations, and seeds the administrator. It writes development-only configuration
-to ignored `.dev.vars` files in the API and dashboard packages. See
+to the ignored API `.dev.vars` and dashboard `.env` files. See
 [Platform Development](../../../docs/guide/platform-development.md) for local
 frontend setup and installing a runtime built from a fork.
 

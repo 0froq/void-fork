@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DEV_VARS = join(process.cwd(), '.dev.vars');
+const ENV_FILE = join(process.cwd(), '.env');
 
 function parseDotenv(contents) {
   const out = {};
@@ -79,12 +79,12 @@ function setDevVar(contents, key, value) {
   return `${removeDevVar(contents, key).replace(/\s*$/, '')}\n${line}\n`;
 }
 
-function writeDevVars(contents) {
-  writeFileSync(DEV_VARS, contents, { mode: 0o600 });
-  chmodSync(DEV_VARS, 0o600);
+function writeEnvFile(contents) {
+  writeFileSync(ENV_FILE, contents, { mode: 0o600 });
+  chmodSync(ENV_FILE, 0o600);
 }
 
-const devVarsContents = existsSync(DEV_VARS) ? readFileSync(DEV_VARS, 'utf8') : '';
+const devVarsContents = existsSync(ENV_FILE) ? readFileSync(ENV_FILE, 'utf8') : '';
 const devVars = parseDotenv(devVarsContents);
 const apiUrl = process.env.API_URL ?? devVars.API_URL;
 // A persisted token belongs only to the API origin for which cloudflared
@@ -97,7 +97,7 @@ try {
   selectedOrigin = null;
 }
 if (devVars.CF_ACCESS_TOKEN && devVars.CF_ACCESS_TOKEN_ORIGIN !== selectedOrigin) {
-  writeDevVars(
+  writeEnvFile(
     removeDevVar(removeDevVar(devVarsContents, 'CF_ACCESS_TOKEN'), 'CF_ACCESS_TOKEN_ORIGIN'),
   );
   delete devVars.CF_ACCESS_TOKEN;
@@ -172,8 +172,8 @@ if (!token || !isUsableToken(token)) {
   process.exit(1);
 }
 
-const current = existsSync(DEV_VARS) ? readFileSync(DEV_VARS, 'utf8') : '';
-writeDevVars(
+const current = existsSync(ENV_FILE) ? readFileSync(ENV_FILE, 'utf8') : '';
+writeEnvFile(
   setDevVar(setDevVar(current, 'CF_ACCESS_TOKEN', token), 'CF_ACCESS_TOKEN_ORIGIN', app),
 );
 console.log(`[dashboard] Refreshed Cloudflare Access token for ${app}.`);
