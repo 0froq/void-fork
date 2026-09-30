@@ -232,7 +232,7 @@ async function output(config: Record<string, unknown> = {}, additionalAsset = fa
   return prepared!;
 }
 
-it('uploads live secrets and multiple asset batches when the latest upload is inactive', async () => {
+async function verifyPinnedUpload(atomic: boolean): Promise<void> {
   const prepared = await output(
     {
       secrets: { required: ['AUTH_SECRET'] },
@@ -316,11 +316,13 @@ it('uploads live secrets and multiple asset batches when the latest upload is in
         apiBaseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`,
         workerName: 'void-test',
         token: 'synthetic-token',
-        atomic: false,
+        atomic,
         verifyUploader: () => true,
       });
       expect(uploaded.id).toBe('22222222-2222-4222-8222-222222222222');
-      const upload = requests.find(({ url }) => url.endsWith('/versions'));
+      const upload = requests.find(({ url }) =>
+        url.endsWith(atomic ? '/versions?deploy=true' : '/versions'),
+      );
       expect(upload).toBeDefined();
       const body = JSON.parse(upload!.body);
       expect(body.bindings).toEqual(
@@ -354,7 +356,13 @@ it('uploads live secrets and multiple asset batches when the latest upload is in
   } finally {
     prepared.dispose();
   }
-});
+}
+
+it('uploads live secrets and multiple asset batches when the latest upload is inactive', () =>
+  verifyPinnedUpload(false));
+
+it('uploads live secrets and multiple asset batches for atomic publication', () =>
+  verifyPinnedUpload(true));
 
 it('does not pin active secrets during an existing-Worker handoff', async () => {
   const prepared = await output();
