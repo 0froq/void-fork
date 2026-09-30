@@ -1,0 +1,113 @@
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { join } from 'pathslash';
+
+const CANDIDATE_FILE = '.void/cloudflare-candidate.json';
+
+export type CloudflareCandidateReceipt = {
+  accountId: string;
+  workerName: string;
+  parentVersionId: string;
+  versionIds: Array<string>;
+};
+
+/** A failed normal deploy keeps its locally verified upload chain across retries. */
+export function readCloudflareCandidate(root: string): CloudflareCandidateReceipt | null {
+  const path = join(root, CANDIDATE_FILE);
+  if (!existsSync(path)) {
+    return null;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    throw new Error(
+      'The saved Cloudflare candidate receipt is invalid. Restore or remove .void/cloudflare-candidate.json before retrying.',
+    );
+  }
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value) ||
+    !('accountId' in value) ||
+    typeof value.accountId !== 'string' ||
+    !value.accountId ||
+    !('workerName' in value) ||
+    typeof value.workerName !== 'string' ||
+    !value.workerName ||
+    !('parentVersionId' in value) ||
+    typeof value.parentVersionId !== 'string' ||
+    !value.parentVersionId ||
+    !('versionIds' in value) ||
+    !Array.isArray(value.versionIds) ||
+    !value.versionIds.length ||
+    !value.versionIds.every((id: unknown) => typeof id === 'string' && id.length > 0) ||
+    new Set(value.versionIds).size !== value.versionIds.length
+  ) {
+    throw new Error(
+      'The saved Cloudflare candidate receipt is invalid. Restore or remove .void/cloudflare-candidate.json before retrying.',
+    );
+  }
+  return value as CloudflareCandidateReceipt;
+}
+
+export function assertCloudflareCandidateUnchanged(
+  root: string,
+  expected: CloudflareCandidateReceipt | null,
+): void {
+  if (JSON.stringify(readCloudflareCandidate(root)) !== JSON.stringify(expected)) {
+    throw new Error(
+      'The Cloudflare candidate receipt changed while project code was running. Retry from a trusted checkout.',
+    );
+  }
+}
+
+export function recordCloudflareCandidateUpload(
+  root: string,
+  expected: CloudflareCandidateReceipt | null,
+  accountId: string,
+  workerName: string,
+  parentVersionId: string,
+  versionId: string,
+): void {
+  assertCloudflareCandidateUnchanged(root, expected);
+  if (
+    expected &&
+    (expected.accountId !== accountId ||
+      expected.workerName !== workerName ||
+      expected.parentVersionId !== parentVersionId)
+  ) {
+    throw new Error(
+      'The saved Cloudflare candidate belongs to a different Worker or live version. Inspect the deployment before retrying.',
+    );
+  }
+  const versionIds = [...(expected?.versionIds ?? []), versionId];
+  mkdirSync(join(root, '.void'), { recursive: true });
+  const path = join(root, CANDIDATE_FILE);
+  const temp = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(
+      temp,
+      `${JSON.stringify({ accountId, workerName, parentVersionId, versionIds })}\n`,
+      { mode: 0o600 },
+    );
+    renameSync(temp, path);
+  } finally {
+    if (existsSync(temp)) {
+      unlinkSync(temp);
+    }
+  }
+}
+
+export function clearCloudflareCandidate(root: string): void {
+  const path = join(root, CANDIDATE_FILE);
+  if (existsSync(path)) {
+    unlinkSync(path);
+  }
+}

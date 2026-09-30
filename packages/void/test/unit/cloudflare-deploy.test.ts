@@ -702,7 +702,7 @@ describe('existing Cloudflare site handoff', () => {
       .fn<NonNullable<CloudflareDeployDeps['activateVersion']>>()
       .mockImplementationOnce(async (options) => {
         await options.validateUploadedVersion?.('candidate');
-        await options.recordVerifiedCandidate?.('candidate');
+        await options.recordVerifiedCandidate?.('candidate', 'original');
         return {
           ok: false,
           reason: 'readiness-failed',
@@ -735,6 +735,38 @@ describe('existing Cloudflare site handoff', () => {
     await runCloudflareDeploy(root, {}, silentCliLog, deps);
     expect(activateVersion).toHaveBeenCalledTimes(2);
     expect(readCloudflareLink(root)).toBeNull();
+  });
+
+  it('keeps a normal Cloudflare upload receipt after staging fails and clears it on retry', async () => {
+    const root = site();
+    const activateVersion = vi
+      .fn<NonNullable<CloudflareDeployDeps['activateVersion']>>()
+      .mockImplementationOnce(async (options) => {
+        await options.recordVerifiedCandidate?.('candidate', 'original');
+        return {
+          ok: false,
+          reason: 'readiness-staging-failed',
+          versionId: 'candidate',
+          previousVersionId: 'original',
+          rollback: 'not-needed',
+        };
+      })
+      .mockImplementationOnce(async (options) => {
+        expect(options.trustedInheritanceVersionIds).toEqual(['candidate']);
+        return {
+          ok: true,
+          versionId: 'retry',
+          previousVersionId: 'original',
+          previewUrl: 'https://site.example.com',
+        };
+      });
+    const { deps } = harness({ runBuild: () => build(root), activateVersion });
+    await expect(
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(existsSync(join(root, '.void/cloudflare-candidate.json'))).toBe(true);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
+    expect(existsSync(join(root, '.void/cloudflare-candidate.json'))).toBe(false);
   });
   it('rejects a forged candidate receipt written by the Worker schema probe', async () => {
     const root = site();
@@ -1957,7 +1989,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
           assets: { binding: 'ASSETS', not_found_handling: 'single-page-application' },
         });
         await options.validateUploadedVersion!('new');
-        await options.recordVerifiedCandidate!('new');
+        await options.recordVerifiedCandidate!('new', 'original');
         if (attempts++ === 0) {
           return { ok: false, reason: 'readiness-failed', rollback: 'succeeded' };
         }

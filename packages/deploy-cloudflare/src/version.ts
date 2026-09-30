@@ -721,7 +721,10 @@ export type CloudflareVersionActivationOptions = {
   preserveTriggers?: boolean;
   expectedPreviousVersionId?: string;
   trustedInheritanceVersionIds?: ReadonlyArray<string>;
-  recordVerifiedCandidate?: (versionId: string) => void | Promise<void>;
+  recordVerifiedCandidate?: (
+    versionId: string,
+    parentVersionId: string | null,
+  ) => void | Promise<void>;
   validateUploadedVersion?: (versionId: string) => Promise<void>;
   runWrangler: CloudflareCommandRunner;
   verifyUploader: () => boolean;
@@ -831,7 +834,10 @@ async function activateCloudflareVersionWithSecretsFile(
       return { ok: false, reason: 'inheritance-source-unavailable' };
     }
     const latestVersionId = recent.at(-1)?.id ?? null;
-    if (options.expectedPreviousVersionId !== undefined) {
+    if (
+      options.expectedPreviousVersionId !== undefined ||
+      options.trustedInheritanceVersionIds !== undefined
+    ) {
       const activeIndex = recent.findIndex((version) => version.id === previous.versionId);
       const inheritedChain = activeIndex < 0 ? [] : recent.slice(activeIndex);
       const inheritedCandidates = inheritedChain.slice(1).map((version) => version.id);
@@ -851,7 +857,15 @@ async function activateCloudflareVersionWithSecretsFile(
         };
       }
     }
-    if (options.verifyInheritedSecrets === true && previous.versionId !== latestVersionId) {
+    const trustedCandidateChain =
+      options.trustedInheritanceVersionIds !== undefined &&
+      options.trustedInheritanceVersionIds.length > 0 &&
+      previous.versionId !== latestVersionId;
+    if (
+      options.verifyInheritedSecrets === true &&
+      previous.versionId !== latestVersionId &&
+      !trustedCandidateChain
+    ) {
       const replacesAllRemoteSecrets = await candidateReplacesAllRemoteSecrets(
         options,
         commonArgs,
@@ -1056,10 +1070,12 @@ async function activateCloudflareVersionWithSecretsFile(
   }
   await options.validateUploadedVersion?.(versionId);
   if (options.recordVerifiedCandidate) {
-    if (!options.validateUploadedVersion) {
-      throw new Error('A Worker candidate cannot be recorded without validating its upload.');
+    if (!options.validateUploadedVersion && !inheritanceBaseline) {
+      throw new Error(
+        'A Worker candidate cannot be recorded without validating its upload and version sequence.',
+      );
     }
-    await options.recordVerifiedCandidate(versionId);
+    await options.recordVerifiedCandidate(versionId, previous.versionId);
   }
   const reportedPreviewUrl = output.match(PREVIEW_URL_RE)?.[1];
   let authenticatedWorkersDevSubdomain = reportedPreviewUrl

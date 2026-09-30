@@ -146,6 +146,13 @@ import {
   cloudflareAuthNeedsTerminal,
   ensureCloudflareAuthentication,
 } from './cloudflare-auth.ts';
+import {
+  assertCloudflareCandidateUnchanged,
+  clearCloudflareCandidate,
+  readCloudflareCandidate,
+  recordCloudflareCandidateUpload,
+  type CloudflareCandidateReceipt,
+} from './cloudflare-candidate.ts';
 import { classifyCloudflareDeployApp } from './cloudflare-deploy/classify.ts';
 import { approvedCloudflareIsrBinding, chooseCloudflareIsr } from './cloudflare-isr.ts';
 import {
@@ -4706,6 +4713,7 @@ export async function runCloudflareDeploy(
   deps: CloudflareDeployDeps = {},
 ): Promise<void> {
   const initialCloudflareLink = readCloudflareLink(root);
+  const initialCloudflareCandidate = readCloudflareCandidate(root);
   const exit = deps.exit ?? ((code: number): never => process.exit(code));
   const voidConfig = readConfig(root);
   const detectedFramework = detectFramework(root);
@@ -4752,6 +4760,7 @@ export async function runCloudflareDeploy(
       cliLog,
       deps,
       initialCloudflareLink,
+      initialCloudflareCandidate,
     );
   }
 
@@ -5908,6 +5917,16 @@ export async function runCloudflareDeploy(
   if (existingWorker) {
     assertCloudflareLinkUnchanged(root, pinnedHandoffLink);
   }
+  assertCloudflareCandidateUnchanged(root, initialCloudflareCandidate);
+  if (
+    initialCloudflareCandidate &&
+    (initialCloudflareCandidate.accountId !== accountId ||
+      initialCloudflareCandidate.workerName !== workerName)
+  ) {
+    throw new Error(
+      'The saved Cloudflare candidate belongs to a different account or Worker. Inspect its receipt before retrying.',
+    );
+  }
   const candidateReceipt = pinnedHandoffLink?.candidateReceipt;
   if (!deps.activateVersion && !deps.runWrangler && !cfUploaderIsPinned()) {
     return exit(1);
@@ -5951,7 +5970,7 @@ export async function runCloudflareDeploy(
       trustedInheritanceVersionIds:
         existingWorker && candidateReceipt?.parentVersionId === existingWorker.versionId
           ? candidateReceipt.versionIds
-          : undefined,
+          : initialCloudflareCandidate?.versionIds,
       validateUploadedVersion: existingWorker
         ? async (versionId) => {
             if (!assertUploaderStillPinned()) {
@@ -5969,7 +5988,18 @@ export async function runCloudflareDeploy(
       recordVerifiedCandidate: existingWorker
         ? (versionId) =>
             recordCloudflareCandidate(root, pinnedHandoffLink!, existingWorker.versionId, versionId)
-        : undefined,
+        : (versionId, parentVersionId) => {
+            if (parentVersionId) {
+              recordCloudflareCandidateUpload(
+                root,
+                initialCloudflareCandidate,
+                accountId,
+                workerName,
+                parentVersionId,
+                versionId,
+              );
+            }
+          },
       message: encodeCloudflareVersionMessage(
         migrations.map((migration) => migration.name),
         {
@@ -6014,6 +6044,7 @@ export async function runCloudflareDeploy(
     );
     return exit(1);
   }
+  clearCloudflareCandidate(root);
   if (existingWorker) {
     completeCloudflareLink(root);
   }
@@ -6417,6 +6448,7 @@ async function runCloudflareStaticDeploy(
   cliLog: CliLogger,
   deps: CloudflareDeployDeps,
   initialCloudflareLink: CloudflareLink | null,
+  initialCloudflareCandidate: CloudflareCandidateReceipt | null,
 ): Promise<void> {
   const exit = deps.exit ?? ((code: number): never => process.exit(code));
   const configPath = discoverRootWranglerConfig(root);
@@ -6617,6 +6649,16 @@ async function runCloudflareStaticDeploy(
   if (existingWorker) {
     assertCloudflareLinkUnchanged(root, pinnedHandoffLink);
   }
+  assertCloudflareCandidateUnchanged(root, initialCloudflareCandidate);
+  if (
+    initialCloudflareCandidate &&
+    (initialCloudflareCandidate.accountId !== accountId ||
+      initialCloudflareCandidate.workerName !== workerName)
+  ) {
+    throw new Error(
+      'The saved Cloudflare candidate belongs to a different account or Worker. Inspect its receipt before retrying.',
+    );
+  }
   const candidateReceipt = pinnedHandoffLink?.candidateReceipt;
   if (!deps.activateVersion && !deps.runWrangler && !cfUploaderIsPinned()) {
     return exit(1);
@@ -6667,7 +6709,7 @@ async function runCloudflareStaticDeploy(
       trustedInheritanceVersionIds:
         existingWorker && candidateReceipt?.parentVersionId === existingWorker.versionId
           ? candidateReceipt.versionIds
-          : undefined,
+          : initialCloudflareCandidate?.versionIds,
       validateUploadedVersion: existingWorker
         ? async (versionId) => {
             if (!uploaderIsPinned()) {
@@ -6687,7 +6729,18 @@ async function runCloudflareStaticDeploy(
       recordVerifiedCandidate: existingWorker
         ? (versionId) =>
             recordCloudflareCandidate(root, pinnedHandoffLink!, existingWorker.versionId, versionId)
-        : undefined,
+        : (versionId, parentVersionId) => {
+            if (parentVersionId) {
+              recordCloudflareCandidateUpload(
+                root,
+                initialCloudflareCandidate,
+                accountId,
+                workerName,
+                parentVersionId,
+                versionId,
+              );
+            }
+          },
       workerName,
       message: encodeCloudflareVersionMessage([], {
         ...readCloudflareTriggerConfig(staticConfigPath, configPath),
@@ -6721,6 +6774,7 @@ async function runCloudflareStaticDeploy(
     await reportCloudflareActivationFailure(cliLog, formatCloudflareActivationError(execution));
     return exit(1);
   }
+  clearCloudflareCandidate(root);
   if (existingWorker) {
     completeCloudflareLink(root);
   }

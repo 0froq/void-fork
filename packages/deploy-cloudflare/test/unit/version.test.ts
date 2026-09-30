@@ -312,6 +312,41 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls.some(([args]) => args[1] === 'upload')).toBe(false);
   });
 
+  it('retries across its own recorded unpublished version without requiring secret values', async () => {
+    const draft = '44444444-4444-4444-8444-444444444444';
+    const base = runner();
+    let uploaded = false;
+    const runWrangler = vi.fn((args: Array<string>) => {
+      if (args[0] === 'versions' && args[1] === 'list') {
+        return ok(
+          JSON.stringify([
+            { id: CURRENT, number: 1 },
+            { id: draft, number: 2 },
+            ...(uploaded ? [{ id: NEXT, number: 3 }] : []),
+          ]),
+        );
+      }
+      if (args[0] === 'versions' && args[1] === 'upload') {
+        uploaded = true;
+      }
+      if (args[0] === 'versions' && args[1] === 'view') {
+        throw new Error('Trusted chain should not need plaintext secret replacement');
+      }
+      return base(args);
+    });
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        workerName: 'my-worker',
+        verifyUploader: () => true,
+        verifyInheritedSecrets: true,
+        trustedInheritanceVersionIds: [draft],
+        message: encodeCloudflareVersionMessage([]),
+        fetch: async () => Response.json({ ready: true }),
+      }),
+    ).resolves.toMatchObject({ ok: true, versionId: NEXT });
+  });
+
   it('does not inherit any remote secret from a failed candidate newer than production', async () => {
     const failed = '44444444-4444-4444-8444-444444444444';
     const directory = mkdtempSync(join(tmpdir(), 'void-active-secret-inheritance-'));
