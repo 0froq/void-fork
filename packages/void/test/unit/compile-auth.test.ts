@@ -73,6 +73,18 @@ describe('compileRouteTable auth integration', () => {
     expect(code).not.toContain('app.post("/auth/logout"');
   });
 
+  it('bakes the build mode into auth options independently of requests', () => {
+    const compile = (dev: boolean) =>
+      compileRouteTable(emptyScan, '/routes', '/middleware', '/crons', '/queues', null, {
+        ...baseOptions,
+        auth: sqliteAuth,
+        dev,
+      });
+
+    expect(compile(true)).toContain('userConfig: undefined, dev: true };');
+    expect(compile(false)).toContain('userConfig: undefined, dev: false };');
+  });
+
   it('passes the detected dialect into the auth helpers', () => {
     const code = compileRouteTable(emptyScan, '/routes', '/middleware', '/crons', '/queues', null, {
       ...baseOptions,

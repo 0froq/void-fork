@@ -56,7 +56,9 @@ describe('runVoidAuthMiddleware response headers', () => {
 
     app.get('/public', () => fetch('data:text/plain,public%20content'));
 
-    const response = await app.request('http://localhost/public', undefined, {});
+    const response = await app.request('http://localhost/public', undefined, {
+      BETTER_AUTH_SECRET: 'test-secret',
+    });
 
     expect(response.status).toBe(200);
     expect(response.headers.get('x-auth-refresh')).toBe('refreshed');
@@ -85,7 +87,9 @@ describe('runVoidAuthMiddleware response headers', () => {
         }),
     );
 
-    const response = await app.request('http://localhost/response', undefined, {});
+    const response = await app.request('http://localhost/response', undefined, {
+      BETTER_AUTH_SECRET: 'test-secret',
+    });
 
     expect(response.status).toBe(202);
     expect(response.headers.get('cache-control')).toBe('private, no-store');

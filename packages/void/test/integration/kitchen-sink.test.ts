@@ -552,6 +552,7 @@ function preparePreviewWranglerConfig(pg: string): string {
     dev?: Record<string, unknown>;
     ai?: unknown;
     d1_databases?: Array<{ binding?: unknown; database_id?: unknown }>;
+    vars?: Record<string, unknown>;
   };
   const databaseId = wranglerConfig.d1_databases?.find(
     (binding) => binding.binding === 'DB',
@@ -562,6 +563,11 @@ function preparePreviewWranglerConfig(pg: string): string {
   wranglerConfig.dev = {
     ...(wranglerConfig.dev ?? {}),
     enable_containers: false,
+  };
+  // Preview executes the production build, which requires an auth secret.
+  wranglerConfig.vars = {
+    ...(wranglerConfig.vars ?? {}),
+    BETTER_AUTH_SECRET: 'void-preview-test-secret-1234567890',
   };
   delete wranglerConfig.ai;
   writeFileSync(wranglerPath, `${JSON.stringify(wranglerConfig, null, 2)}\n`);

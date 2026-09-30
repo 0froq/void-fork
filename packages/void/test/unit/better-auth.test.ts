@@ -148,7 +148,7 @@ describe('resolveVoidAuthOptions', () => {
     ).rejects.toThrow("auth: Missing credentials for provider 'google'");
   });
 
-  it('requires BETTER_AUTH_SECRET outside localhost', async () => {
+  it('requires BETTER_AUTH_SECRET in production when none is set', async () => {
     await expect(
       resolveVoidAuthOptions(
         new Request('https://example.com/api/auth'),
@@ -164,18 +164,41 @@ describe('resolveVoidAuthOptions', () => {
     ).rejects.toThrow('auth: Missing Better Auth secret. Set BETTER_AUTH_SECRET.');
   });
 
-  it('uses the localhost fallback when BETTER_AUTH_SECRET is missing', async () => {
+  it('rejects a localhost request without BETTER_AUTH_SECRET in production', async () => {
+    await expect(
+      resolveVoidAuthOptions(
+        new Request('http://localhost:3000/api/auth'),
+        {},
+        { dialect: 'sqlite', providers: null },
+        {} as never,
+      ),
+    ).rejects.toThrow('auth: Missing Better Auth secret. Set BETTER_AUTH_SECRET.');
+  });
+
+  it('uses the fallback only in dev, regardless of the request host', async () => {
     const { options } = await resolveVoidAuthOptions(
-      new Request('http://localhost:3000/api/auth'),
+      new Request('https://example.com/api/auth'),
       {},
       {
         dialect: 'sqlite',
         providers: null,
+        dev: true,
       },
       {} as never,
     );
 
     expect(options.secret).toBe('void-dev-better-auth-secret-1234567890');
+  });
+
+  it('prefers BETTER_AUTH_SECRET over the dev fallback', async () => {
+    const { options } = await resolveVoidAuthOptions(
+      new Request('http://localhost:3000/api/auth'),
+      { BETTER_AUTH_SECRET: 'configured-secret' },
+      { dialect: 'sqlite', providers: null, dev: true },
+      {} as never,
+    );
+
+    expect(options.secret).toBe('configured-secret');
   });
 
   it('uses a native scrypt password handler compatible with Better Auth hashes', async () => {
