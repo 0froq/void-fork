@@ -4593,6 +4593,212 @@ async function reconcileR2(
   }
 }
 
+async function reconcileHyperdrive(
+  desired: DesiredResourceSet,
+  configPath: string,
+  runWrangler: PinnedRunWrangler,
+  write: ProvisionConfigWriter,
+  persistCreatedConfig: () => void,
+  resources: Array<ProvisionOutcome>,
+  log: ProvisionLogger,
+  transportAccountId: string,
+  transportApiBaseUrl: string,
+  redactSecrets: (value: string) => string,
+  opts?: ProvisionOptions,
+): Promise<void> {
+  // --- Hyperdrive ----------------------------------------------------------
+  // wrangler 4.131 has NO machine-readable Hyperdrive list (`hyperdrive list`
+  // prints a cli-table3 box table; there is no `--json`, and `hyperdrive get`
+  // takes an id, not a name). `hyperdrive create` on a NON-UNIQUE name silently
+  // mints a DUPLICATE config (new UUID), so a re-run without the id in config
+  // would keep minting duplicates. Existence is therefore checked via an
+  // INJECTABLE Cloudflare REST seam (GET …/hyperdrive/configs, matched by name):
+  // reliable + fully testable (unit tests stub it, no real network). Adoption is
+  // attempted BEFORE the connection-string gate (it needs no connection string).
+  if (desired.hyperdrive) {
+    const { binding, name, connectionString } = desired.hyperdrive;
+    // The whole-provision lock already serializes this unguarded list→create
+    // across processes: the read-first check below runs UNDER that lock, so a second
+    // concurrent provision sees the id the first wrote and SKIPS (no duplicate).
+    const entry = readBindingEntry(configPath, 'hyperdrive', binding);
+    if (entry && isRealHyperdriveId(entry.id)) {
+      resources.push({ kind: 'hyperdrive', binding, name, action: 'reused', id: entry.id });
+    } else {
+      const lister =
+        opts?.listHyperdriveConfigs ?? createDefaultListHyperdriveConfigs(opts?.apiToken);
+      // Treat the seam result as UNKNOWN until PROVEN a real array. The OUTER
+      // result is validated (`Array.isArray`) BEFORE existence is marked known, so a
+      // runtime `null`/`undefined`/non-array is NEVER coerced to "empty" (confirmed
+      // absence) — which would authorize a blind create. A malformed outer result and a
+      // failed async lister BOTH leave existence UNKNOWN → fail closed if we WOULD create.
+      let validatedConfigs: Array<unknown> | undefined;
+      let existenceUnknown = true;
+      if (lister) {
+        try {
+          // Always invoke the lister WITH the reconciled account, so an injected
+          // lister can never query a DIFFERENT account than the config is pinned to.
+          // Bound the WHOLE call by an overall deadline threaded as an `AbortSignal`.
+          // `withListerDeadline` aborts the signal AND rejects at the deadline, so even a
+          // seam that ignores the signal (a stalled body / never-settling promise) can NEVER
+          // keep the heartbeat refreshing the whole-provision lock forever — it fails closed
+          // (→ existence unknown → a create attempt throws below → the lock is released).
+          const result = await withListerDeadline(
+            (signal) =>
+              lister({
+                accountId: transportAccountId,
+                apiBaseUrl: transportApiBaseUrl,
+                signal,
+              }),
+            opts?.listTimeoutMs ?? HYPERDRIVE_LIST_TIMEOUT_MS,
+          );
+          if (!Array.isArray(result)) {
+            throw new Error(
+              `the existence check returned a ${result === null ? 'null' : typeof result} result ` +
+                `instead of an array`,
+            );
+          }
+          validatedConfigs = result;
+          existenceUnknown = false;
+        } catch (error) {
+          // Never coerce the unknown rejection (`String()`/template
+          // would invoke an arbitrary — possibly hostile — `toString`, and a lister/
+          // network error could echo a URL carrying userinfo credentials): log ONLY a
+          // safely-extracted, redacted message from inside the no-throw boundary.
+          log.warn(
+            `Hyperdrive existence check for ${name} failed: ` +
+              safeRedactedErrorMessage(error, redactSecrets),
+          );
+          existenceUnknown = true;
+          validatedConfigs = undefined;
+        }
+      }
+      // The ONE strict per-entry validator runs OUTSIDE the try, on a PROVEN array
+      // only, so its malformed-member / duplicate-id / ambiguous-name throws stay HARD
+      // failures (never swallowed into "unknown"). It requires EXACTLY 0 or 1 exact-name
+      // match (>1 → fail closed) BEFORE matching or writing, so no injected list can be
+      // adopted with an empty/garbage id.
+      const existing =
+        validatedConfigs !== undefined
+          ? selectHyperdriveMatch(validatedConfigs, name, configPath)
+          : undefined;
+      if (existing) {
+        log.info(`adopted existing Hyperdrive config ${name} (${existing.id})`);
+        write({ hyperdrive: { binding, id: existing.id } });
+        resources.push({ kind: 'hyperdrive', binding, name, action: 'adopted', id: existing.id });
+      } else if (!connectionString) {
+        // No connection string → we can never CREATE, so there is no duplicate
+        // risk whether or not existence is known: skip (structured, never prompts).
+        const reason = 'no connection string provided';
+        log.warn(`skipping Hyperdrive config ${name}: ${reason}`);
+        resources.push({ kind: 'hyperdrive', binding, name, action: 'skipped', reason });
+      } else if (existenceUnknown) {
+        // A connection string is present (we WOULD create) but existence is
+        // unverifiable → FAIL CLOSED. Blindly creating duplicates a same-named config.
+        throw new Error(
+          `provision: cannot verify whether Hyperdrive config ${JSON.stringify(name)} already ` +
+            `exists (no existence check available — provide an accountId + API token, or inject a ` +
+            `listHyperdriveConfigs seam). "wrangler hyperdrive create" silently duplicates a ` +
+            `same-named config, so provisioning refuses to create it blindly.`,
+        );
+      } else {
+        // Confirmed absent + connection string present → create.
+        const created = await runWrangler([
+          'hyperdrive',
+          'create',
+          name,
+          `--connection-string=${connectionString}`,
+          '--binding',
+          binding,
+          '--update-config',
+          ...wranglerConfigArgs(configPath),
+        ]);
+        if (!isCleanSuccess(created)) {
+          throw new Error(
+            `provision: "wrangler hyperdrive create ${name}" failed: ${created.stderr || created.stdout}`,
+          );
+        }
+        // Postcondition: confirm --update-config wrote a REAL Hyperdrive id.
+        assertCreateWroteRealId(
+          configPath,
+          {
+            field: 'hyperdrive',
+            idField: 'id',
+            idValidator: isRealHyperdriveId,
+            resource: 'Hyperdrive config',
+            command: 'wrangler hyperdrive create',
+          },
+          binding,
+          name,
+        );
+        persistCreatedConfig();
+        resources.push({ kind: 'hyperdrive', binding, name, action: 'created' });
+      }
+    }
+  }
+}
+
+async function reconcileQueues(
+  desired: DesiredResourceSet,
+  configPath: string,
+  runWrangler: PinnedRunWrangler,
+  resources: Array<ProvisionOutcome>,
+): Promise<void> {
+  // --- Queues (resource only; NEVER writes queue config entries) -----------
+  // `wrangler queues list` is a human table, not JSON, and `queues create` has
+  // no `--update-config`. So probe each queue by name: `queues info` exits
+  // non-zero (`Queue "x" does not exist`) when absent. Task 4 only ensures the
+  // queue RESOURCE exists — binding the producers/consumers into the config is
+  // app-class-aware and belongs to Task 6.
+  for (const name of desired.queues) {
+    const info = await runWrangler(['queues', 'info', name, ...wranglerConfigArgs(configPath)]);
+    // "Exists → reuse" ONLY when the probe POSITIVELY names THIS queue. A bare
+    // clean 0 is NOT trusted: the bin wrapper can mask a signal-killed inner CLI as
+    // exit 0 with empty output, which a plain `isCleanSuccess` would misread as
+    // reused though nothing was verified.
+    if (queueInfoConfirmsExists(info, name)) {
+      resources.push({ kind: 'queue', name, action: 'reused' });
+      continue;
+    }
+    // Not confirmed-present. It is "absent" (→ create) ONLY on a CLEAN non-zero exit
+    // carrying the EXACT, name-aware not-found signal (`Queue "<name>" does not
+    // exist`). Everything else — a signal/spawn failure, an auth error, a generic
+    // `Account not found`, OR a masked-kill clean-0 that did NOT positively identify
+    // the queue — fails closed (never a blind create, never a false reuse).
+    if (!isConfirmedAbsent(info, 'queue', name)) {
+      throw new Error(
+        `provision: "wrangler queues info ${name}" failed or did not confirm the queue exists: ` +
+          `${info.stderr || info.stdout || 'no output'}`,
+      );
+    }
+    const created = await runWrangler([
+      'queues',
+      'create',
+      name,
+      ...wranglerConfigArgs(configPath),
+    ]);
+    if (!isCleanSuccess(created)) {
+      throw new Error(
+        `provision: "wrangler queues create ${name}" failed: ${created.stderr || created.stdout}`,
+      );
+    }
+    // Verify probe — queues write NO config, so `assertCreateWroteRealId` cannot
+    // cover them. A create reporting clean 0 is NOT enough (the bin wrapper masks a
+    // signal-killed inner CLI as exit 0, creating nothing). RE-RUN the SAME positive
+    // `queues info` probe and only record `created` if it now confirms THIS queue;
+    // otherwise fail closed (a killed create self-heals on the next run's probe).
+    const verify = await runWrangler(['queues', 'info', name, ...wranglerConfigArgs(configPath)]);
+    if (!queueInfoConfirmsExists(verify, name)) {
+      throw new Error(
+        `provision: "wrangler queues create ${name}" reported success but "wrangler queues info ` +
+          `${name}" did not confirm the queue exists afterward. The create may have been ` +
+          `interrupted — wrangler's launcher can mask a signal-killed child as exit 0. Refusing to ` +
+          `record an unprovisioned queue; inspect the account and retry.`,
+      );
+    }
+    resources.push({ kind: 'queue', name, action: 'created' });
+  }
+}
+
 /**
  * The provision body, run entirely UNDER the whole-provision lock (see
  * {@link provisionCloudflareResources}). `configPath` is the ONE resolved absolute
@@ -4886,190 +5092,21 @@ async function provisionCloudflareResourcesLocked(
 
   await reconcileR2(desired, configPath, runWrangler, write, persistCreatedConfig, resources, log);
 
-  // --- Hyperdrive ----------------------------------------------------------
-  // wrangler 4.131 has NO machine-readable Hyperdrive list (`hyperdrive list`
-  // prints a cli-table3 box table; there is no `--json`, and `hyperdrive get`
-  // takes an id, not a name). `hyperdrive create` on a NON-UNIQUE name silently
-  // mints a DUPLICATE config (new UUID), so a re-run without the id in config
-  // would keep minting duplicates. Existence is therefore checked via an
-  // INJECTABLE Cloudflare REST seam (GET …/hyperdrive/configs, matched by name):
-  // reliable + fully testable (unit tests stub it, no real network). Adoption is
-  // attempted BEFORE the connection-string gate (it needs no connection string).
-  if (desired.hyperdrive) {
-    const { binding, name, connectionString } = desired.hyperdrive;
-    // The whole-provision lock already serializes this unguarded list→create
-    // across processes: the read-first check below runs UNDER that lock, so a second
-    // concurrent provision sees the id the first wrote and SKIPS (no duplicate).
-    const entry = readBindingEntry(configPath, 'hyperdrive', binding);
-    if (entry && isRealHyperdriveId(entry.id)) {
-      resources.push({ kind: 'hyperdrive', binding, name, action: 'reused', id: entry.id });
-    } else {
-      const lister =
-        opts?.listHyperdriveConfigs ?? createDefaultListHyperdriveConfigs(opts?.apiToken);
-      // Treat the seam result as UNKNOWN until PROVEN a real array. The OUTER
-      // result is validated (`Array.isArray`) BEFORE existence is marked known, so a
-      // runtime `null`/`undefined`/non-array is NEVER coerced to "empty" (confirmed
-      // absence) — which would authorize a blind create. A malformed outer result and a
-      // failed async lister BOTH leave existence UNKNOWN → fail closed if we WOULD create.
-      let validatedConfigs: Array<unknown> | undefined;
-      let existenceUnknown = true;
-      if (lister) {
-        try {
-          // Always invoke the lister WITH the reconciled account, so an injected
-          // lister can never query a DIFFERENT account than the config is pinned to.
-          // Bound the WHOLE call by an overall deadline threaded as an `AbortSignal`.
-          // `withListerDeadline` aborts the signal AND rejects at the deadline, so even a
-          // seam that ignores the signal (a stalled body / never-settling promise) can NEVER
-          // keep the heartbeat refreshing the whole-provision lock forever — it fails closed
-          // (→ existence unknown → a create attempt throws below → the lock is released).
-          const result = await withListerDeadline(
-            (signal) =>
-              lister({
-                accountId: transportAccountId,
-                apiBaseUrl: transportApiBaseUrl,
-                signal,
-              }),
-            opts?.listTimeoutMs ?? HYPERDRIVE_LIST_TIMEOUT_MS,
-          );
-          if (!Array.isArray(result)) {
-            throw new Error(
-              `the existence check returned a ${result === null ? 'null' : typeof result} result ` +
-                `instead of an array`,
-            );
-          }
-          validatedConfigs = result;
-          existenceUnknown = false;
-        } catch (error) {
-          // Never coerce the unknown rejection (`String()`/template
-          // would invoke an arbitrary — possibly hostile — `toString`, and a lister/
-          // network error could echo a URL carrying userinfo credentials): log ONLY a
-          // safely-extracted, redacted message from inside the no-throw boundary.
-          log.warn(
-            `Hyperdrive existence check for ${name} failed: ` +
-              safeRedactedErrorMessage(error, redactSecrets),
-          );
-          existenceUnknown = true;
-          validatedConfigs = undefined;
-        }
-      }
-      // The ONE strict per-entry validator runs OUTSIDE the try, on a PROVEN array
-      // only, so its malformed-member / duplicate-id / ambiguous-name throws stay HARD
-      // failures (never swallowed into "unknown"). It requires EXACTLY 0 or 1 exact-name
-      // match (>1 → fail closed) BEFORE matching or writing, so no injected list can be
-      // adopted with an empty/garbage id.
-      const existing =
-        validatedConfigs !== undefined
-          ? selectHyperdriveMatch(validatedConfigs, name, configPath)
-          : undefined;
-      if (existing) {
-        log.info(`adopted existing Hyperdrive config ${name} (${existing.id})`);
-        write({ hyperdrive: { binding, id: existing.id } });
-        resources.push({ kind: 'hyperdrive', binding, name, action: 'adopted', id: existing.id });
-      } else if (!connectionString) {
-        // No connection string → we can never CREATE, so there is no duplicate
-        // risk whether or not existence is known: skip (structured, never prompts).
-        const reason = 'no connection string provided';
-        log.warn(`skipping Hyperdrive config ${name}: ${reason}`);
-        resources.push({ kind: 'hyperdrive', binding, name, action: 'skipped', reason });
-      } else if (existenceUnknown) {
-        // A connection string is present (we WOULD create) but existence is
-        // unverifiable → FAIL CLOSED. Blindly creating duplicates a same-named config.
-        throw new Error(
-          `provision: cannot verify whether Hyperdrive config ${JSON.stringify(name)} already ` +
-            `exists (no existence check available — provide an accountId + API token, or inject a ` +
-            `listHyperdriveConfigs seam). "wrangler hyperdrive create" silently duplicates a ` +
-            `same-named config, so provisioning refuses to create it blindly.`,
-        );
-      } else {
-        // Confirmed absent + connection string present → create.
-        const created = await runWrangler([
-          'hyperdrive',
-          'create',
-          name,
-          `--connection-string=${connectionString}`,
-          '--binding',
-          binding,
-          '--update-config',
-          ...wranglerConfigArgs(configPath),
-        ]);
-        if (!isCleanSuccess(created)) {
-          throw new Error(
-            `provision: "wrangler hyperdrive create ${name}" failed: ${created.stderr || created.stdout}`,
-          );
-        }
-        // Postcondition: confirm --update-config wrote a REAL Hyperdrive id.
-        assertCreateWroteRealId(
-          configPath,
-          {
-            field: 'hyperdrive',
-            idField: 'id',
-            idValidator: isRealHyperdriveId,
-            resource: 'Hyperdrive config',
-            command: 'wrangler hyperdrive create',
-          },
-          binding,
-          name,
-        );
-        persistCreatedConfig();
-        resources.push({ kind: 'hyperdrive', binding, name, action: 'created' });
-      }
-    }
-  }
+  await reconcileHyperdrive(
+    desired,
+    configPath,
+    runWrangler,
+    write,
+    persistCreatedConfig,
+    resources,
+    log,
+    transportAccountId,
+    transportApiBaseUrl,
+    redactSecrets,
+    opts,
+  );
 
-  // --- Queues (resource only; NEVER writes queue config entries) -----------
-  // `wrangler queues list` is a human table, not JSON, and `queues create` has
-  // no `--update-config`. So probe each queue by name: `queues info` exits
-  // non-zero (`Queue "x" does not exist`) when absent. Task 4 only ensures the
-  // queue RESOURCE exists — binding the producers/consumers into the config is
-  // app-class-aware and belongs to Task 6.
-  for (const name of desired.queues) {
-    const info = await runWrangler(['queues', 'info', name, ...wranglerConfigArgs(configPath)]);
-    // "Exists → reuse" ONLY when the probe POSITIVELY names THIS queue. A bare
-    // clean 0 is NOT trusted: the bin wrapper can mask a signal-killed inner CLI as
-    // exit 0 with empty output, which a plain `isCleanSuccess` would misread as
-    // reused though nothing was verified.
-    if (queueInfoConfirmsExists(info, name)) {
-      resources.push({ kind: 'queue', name, action: 'reused' });
-      continue;
-    }
-    // Not confirmed-present. It is "absent" (→ create) ONLY on a CLEAN non-zero exit
-    // carrying the EXACT, name-aware not-found signal (`Queue "<name>" does not
-    // exist`). Everything else — a signal/spawn failure, an auth error, a generic
-    // `Account not found`, OR a masked-kill clean-0 that did NOT positively identify
-    // the queue — fails closed (never a blind create, never a false reuse).
-    if (!isConfirmedAbsent(info, 'queue', name)) {
-      throw new Error(
-        `provision: "wrangler queues info ${name}" failed or did not confirm the queue exists: ` +
-          `${info.stderr || info.stdout || 'no output'}`,
-      );
-    }
-    const created = await runWrangler([
-      'queues',
-      'create',
-      name,
-      ...wranglerConfigArgs(configPath),
-    ]);
-    if (!isCleanSuccess(created)) {
-      throw new Error(
-        `provision: "wrangler queues create ${name}" failed: ${created.stderr || created.stdout}`,
-      );
-    }
-    // Verify probe — queues write NO config, so `assertCreateWroteRealId` cannot
-    // cover them. A create reporting clean 0 is NOT enough (the bin wrapper masks a
-    // signal-killed inner CLI as exit 0, creating nothing). RE-RUN the SAME positive
-    // `queues info` probe and only record `created` if it now confirms THIS queue;
-    // otherwise fail closed (a killed create self-heals on the next run's probe).
-    const verify = await runWrangler(['queues', 'info', name, ...wranglerConfigArgs(configPath)]);
-    if (!queueInfoConfirmsExists(verify, name)) {
-      throw new Error(
-        `provision: "wrangler queues create ${name}" reported success but "wrangler queues info ` +
-          `${name}" did not confirm the queue exists afterward. The create may have been ` +
-          `interrupted — wrangler's launcher can mask a signal-killed child as exit 0. Refusing to ` +
-          `record an unprovisioned queue; inspect the account and retry.`,
-      );
-    }
-    resources.push({ kind: 'queue', name, action: 'created' });
-  }
+  await reconcileQueues(desired, configPath, runWrangler, resources);
 
   // account_id was persisted up front (before any remote side effect) — see the
   // account_id block near the top of this function (fail-closed pin).
