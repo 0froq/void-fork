@@ -1110,7 +1110,9 @@ void db export [--output <path>] [--no-data] [--no-schema] [--table <name>]
 
 Dump the local database as SQL. Outputs to stdout by default (pipeable), or to a file with `--output`.
 
-Data exports preserve SQLite AUTOINCREMENT and PostgreSQL SERIAL counters, including IDs consumed by deleted rows. PostgreSQL schema exports create serial sequences before their tables and restore ownership, constraints, and indexes afterward. `--no-schema` restores counter values into an existing schema; `--no-data` starts counters at their schema-defined starting values.
+Data exports preserve SQLite AUTOINCREMENT and PostgreSQL SERIAL and identity counters, including IDs consumed by deleted rows. SQLite schema exports include indexes, views, and triggers. PostgreSQL schema exports preserve column types, generated columns, identity definitions, serial sequences, constraints, and indexes. `--no-schema` restores counter values into an existing schema; `--no-data` starts counters at their schema-defined starting values.
+
+For PostgreSQL schemas with views, triggers, custom types, functions, or standalone sequences, use `pg_dump` for a complete backup. `void db export` reports these objects before writing a schema dump.
 
 | Flag              | Purpose                            |
 | ----------------- | ---------------------------------- |

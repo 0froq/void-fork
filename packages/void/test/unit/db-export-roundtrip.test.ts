@@ -62,6 +62,119 @@ function project(pg = false) {
 }
 
 describe('SQL export restore', () => {
+  it('rejects PostgreSQL schema objects the exporter cannot restore', async () => {
+    const pg = state.pg!;
+    const root = project(true);
+    await pg.exec(
+      'CREATE TABLE entries (id integer); CREATE VIEW entry_ids AS SELECT id FROM entries;',
+    );
+    await expect(runDbCommand(root, { action: 'export', output: 'dump.sql' })).rejects.toThrow(
+      /pg_dump/,
+    );
+  });
+
+  it('preserves PostgreSQL column modifiers and generated columns', async () => {
+    const pg = state.pg!;
+    const root = project(true);
+    await pg.exec(`CREATE TABLE products (
+      code varchar(8) NOT NULL,
+      price numeric(9,2) NOT NULL,
+      display text GENERATED ALWAYS AS (code || ':' || price::text) STORED
+    ); INSERT INTO products (code, price) VALUES ('widget', 12.50);`);
+    await runDbCommand(root, { action: 'export', output: 'dump.sql' });
+    const dump = readFileSync(join(root, 'dump.sql'), 'utf8');
+    await pg.exec('DROP TABLE products');
+    await pg.exec(dump);
+    expect((await pg.query('SELECT display FROM products')).rows).toEqual([
+      { display: 'widget:12.50' },
+    ]);
+    await expect(
+      pg.exec("INSERT INTO products (code, price, display) VALUES ('x', 1, 'manual')"),
+    ).rejects.toThrow();
+    await expect(
+      pg.exec("INSERT INTO products (code, price) VALUES ('too-long-code', 1)"),
+    ).rejects.toThrow();
+    await expect(
+      pg.exec("INSERT INTO products (code, price) VALUES ('short', 123456789)"),
+    ).rejects.toThrow();
+  });
+
+  it('preserves PostgreSQL identity columns and their next value', async () => {
+    const pg = state.pg!;
+    const root = project(true);
+    await pg.exec(
+      "CREATE TABLE entries (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, title text); INSERT INTO entries (title) VALUES ('first');",
+    );
+    await runDbCommand(root, { action: 'export', output: 'dump.sql' });
+    const dump = readFileSync(join(root, 'dump.sql'), 'utf8');
+    expect(dump).toContain('setval');
+    await pg.exec('DROP TABLE entries');
+    await pg.exec(dump);
+    expect(
+      (await pg.query("INSERT INTO entries (title) VALUES ('second') RETURNING id::text AS id"))
+        .rows,
+    ).toEqual([{ id: '2' }]);
+  });
+
+  it('restores SQLite indexes, triggers, and views after data', async () => {
+    const root = project();
+    const { databasePath } = getLocalD1Target(root);
+    mkdirSync(join(databasePath, '..'), { recursive: true });
+    const source = new Database(databasePath);
+    source.exec(`CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT);
+      CREATE TABLE audit (title TEXT);
+      CREATE UNIQUE INDEX notes_title ON notes (title);
+      CREATE TRIGGER notes_audit AFTER INSERT ON notes BEGIN INSERT INTO audit (title) VALUES (new.title); END;
+      CREATE VIEW note_titles AS SELECT title FROM notes;
+      INSERT INTO notes VALUES (1, 'first');`);
+    source.close();
+    await runDbCommand(root, { action: 'export', output: 'dump.sql' });
+    const dump = readFileSync(join(root, 'dump.sql'), 'utf8');
+    const restored = new Database(':memory:');
+    try {
+      restored.exec(dump);
+      expect(restored.prepare('SELECT * FROM note_titles').all()).toEqual([{ title: 'first' }]);
+      expect(restored.prepare('SELECT * FROM audit').all()).toEqual([{ title: 'first' }]);
+      restored.prepare('INSERT INTO notes (title) VALUES (?)').run('second');
+      expect(restored.prepare('SELECT * FROM audit').all()).toEqual([
+        { title: 'first' },
+        { title: 'second' },
+      ]);
+      expect(() =>
+        restored.prepare('INSERT INTO notes (title) VALUES (?)').run('second'),
+      ).toThrow();
+    } finally {
+      restored.close();
+    }
+  });
+
+  it('round-trips SQLite blobs and generated columns', async () => {
+    const root = project();
+    const { databasePath } = getLocalD1Target(root);
+    mkdirSync(join(databasePath, '..'), { recursive: true });
+    const source = new Database(databasePath);
+    source.exec(
+      'CREATE TABLE files (id INTEGER PRIMARY KEY, payload BLOB, label TEXT GENERATED ALWAYS AS (hex(payload)) STORED)',
+    );
+    source
+      .prepare('INSERT INTO files (id, payload) VALUES (?, ?)')
+      .run(1, Buffer.from([0, 255, 39]));
+    source.close();
+    await runDbCommand(root, { action: 'export', output: 'dump.sql' });
+    const restored = new Database(':memory:');
+    try {
+      restored.exec(readFileSync(join(root, 'dump.sql'), 'utf8'));
+      expect(restored.prepare('SELECT id, payload, label FROM files').all()).toEqual([
+        { id: 1, payload: Buffer.from([0, 255, 39]), label: '00FF27' },
+      ]);
+      expect(() =>
+        restored.prepare("INSERT INTO files (id, payload, label) VALUES (2, X'01', 'bad')").run(),
+      ).toThrow();
+    } finally {
+      restored.close();
+    }
+  });
+
   it('round-trips generated PostgreSQL timestamp defaults without locale or time-zone conversion', async () => {
     const pg = state.pg!;
     const root = project(true);

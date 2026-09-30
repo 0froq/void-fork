@@ -37,6 +37,7 @@ import {
 import { PlatformApiError, PlatformClient } from './client.ts';
 import type { DbArgs } from './db-args.ts';
 import {
+  assertPgExportableSchema,
   exportPgConstraints,
   exportPgSequences,
   quoteSqlIdentifier,
@@ -1931,6 +1932,19 @@ function formatMySqlExportValue(value: unknown): string {
   return `'${serialized.replaceAll('\\', '\\\\').replaceAll("'", "''")}'`;
 }
 
+function formatSqliteExportValue(value: unknown): string {
+  if (value === null) {
+    return 'NULL';
+  }
+  if (value instanceof Uint8Array) {
+    return `X'${Array.from(value, (byte) => byte.toString(16).padStart(2, '0')).join('')}'`;
+  }
+  if (typeof value === 'number' || typeof value === 'bigint') {
+    return String(value);
+  }
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
 async function runExport(
   root: string,
   args: { output?: string; noData?: boolean; noSchema?: boolean; table?: string },
@@ -1958,24 +1972,43 @@ async function runExport(
         tables = result.rows.map((row) => String(row.tablename));
       }
 
+      if (!args.noSchema) {
+        await assertPgExportableSchema(client, tables, !args.table);
+      }
       const sequences = await exportPgSequences(client, tables, args);
       parts.push(...sequences.before);
       for (const table of tables) {
         const cols = await client.query(
-          `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = $1 AND table_schema = 'public' ORDER BY ordinal_position`,
+          `SELECT a.attname AS column_name,
+            pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
+            a.attnotnull AS not_null,
+            pg_get_expr(def.adbin, def.adrelid) AS column_default,
+            a.attidentity AS identity,
+            a.attgenerated AS generated
+          FROM pg_attribute a
+          JOIN pg_class tbl ON tbl.oid = a.attrelid
+          JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+          LEFT JOIN pg_attrdef def ON def.adrelid = tbl.oid AND def.adnum = a.attnum
+          WHERE ns.nspname = 'public' AND tbl.relname = $1
+            AND a.attnum > 0 AND NOT a.attisdropped
+          ORDER BY a.attnum`,
           [table],
         );
-        const names = cols.rows.map((column) => quoteSqlIdentifier(String(column.column_name)));
+        const dataColumns = cols.rows.filter((column) => !column.generated);
+        const names = dataColumns.map((column) => quoteSqlIdentifier(String(column.column_name)));
         const tableName = `"public".${quoteSqlIdentifier(table)}`;
         if (!args.noSchema) {
-          // Get CREATE TABLE statement (simplified — pg_dump would be more complete)
           const colDefs = cols.rows.map((column) => {
             let def = `  ${quoteSqlIdentifier(String(column.column_name))} ${String(column.data_type)}`;
-            if (column.is_nullable === 'NO') {
-              def += ' NOT NULL';
-            }
-            if (column.column_default) {
+            if (column.generated) {
+              def += ` GENERATED ALWAYS AS (${String(column.column_default)}) STORED`;
+            } else if (column.identity) {
+              def += ` GENERATED ${column.identity === 'a' ? 'ALWAYS' : 'BY DEFAULT'} AS IDENTITY`;
+            } else if (column.column_default) {
               def += ` DEFAULT ${String(column.column_default)}`;
+            }
+            if (column.not_null) {
+              def += ' NOT NULL';
             }
             return def;
           });
@@ -1989,6 +2022,9 @@ async function runExport(
           const rows = await client.query(
             `SELECT ${names.map((name) => `${name}::text AS ${name}`).join(', ')} FROM ${tableName}`,
           );
+          const overriding = cols.rows.some((column) => column.identity === 'a')
+            ? ' OVERRIDING SYSTEM VALUE'
+            : '';
           for (const row of rows.rows) {
             const cols = Object.keys(row);
             const vals = cols.map((column) => {
@@ -2002,7 +2038,7 @@ async function runExport(
               return `'${String(value).replace(/'/g, "''")}'`;
             });
             parts.push(
-              `INSERT INTO ${tableName} (${cols.map(quoteSqlIdentifier).join(', ')}) VALUES (${vals.join(', ')});`,
+              `INSERT INTO ${tableName} (${cols.map(quoteSqlIdentifier).join(', ')})${overriding} VALUES (${vals.join(', ')});`,
             );
           }
         }
@@ -2125,21 +2161,21 @@ async function runExport(
       }
 
       if (!args.noData) {
+        const insertableColumns = new Set(
+          db
+            .prepare<{ name: string; hidden: number }>(
+              `PRAGMA table_xinfo(${quoteSqlIdentifier(table)})`,
+            )
+            .all()
+            .filter((column) => column.hidden === 0)
+            .map((column) => column.name),
+        );
         const rows = db.prepare(`SELECT * FROM ${quoteSqlIdentifier(table)}`).all() as Array<
           Record<string, unknown>
         >;
         for (const row of rows) {
-          const cols = Object.keys(row);
-          const vals = cols.map((column) => {
-            const value = row[column];
-            if (value === null) {
-              return 'NULL';
-            }
-            if (typeof value === 'number') {
-              return String(value);
-            }
-            return `'${String(value).replace(/'/g, "''")}'`;
-          });
+          const cols = Object.keys(row).filter((column) => insertableColumns.has(column));
+          const vals = cols.map((column) => formatSqliteExportValue(row[column]));
           parts.push(
             `INSERT INTO ${quoteSqlIdentifier(table)} (${cols.map(quoteSqlIdentifier).join(', ')}) VALUES (${vals.join(', ')});`,
           );
@@ -2164,6 +2200,29 @@ async function runExport(
           const name = quoteSqlString(sequence.name);
           parts.push(`DELETE FROM sqlite_sequence WHERE name = ${name};`);
           parts.push(`INSERT INTO sqlite_sequence (name, seq) VALUES (${name}, ${sequence.seq});`);
+        }
+      }
+    }
+
+    if (!args.noSchema) {
+      const schemaObjects = db
+        .prepare<{ type: string; name: string; tbl_name: string; sql: string }>(
+          "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('index','trigger','view') AND sql IS NOT NULL ORDER BY rowid",
+        )
+        .all();
+      for (const type of ['index', 'view', 'trigger']) {
+        for (const object of schemaObjects) {
+          if (object.type !== type) {
+            continue;
+          }
+          if (type === 'view') {
+            if (args.table || object.name.startsWith('_')) {
+              continue;
+            }
+          } else if (!tables.includes(object.tbl_name)) {
+            continue;
+          }
+          parts.push(object.sql.trim().replace(/;?$/, ';'));
         }
       }
     }
