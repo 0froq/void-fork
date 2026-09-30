@@ -24,6 +24,8 @@ const noSuggestions: ReadonlyArray<string | SearchSuggestion | null | undefined>
 export function SearchTypeahead({
   label,
   onChange,
+  onSelect,
+  onClear,
   suggestions = noSuggestions,
   remoteSearch,
   initialValue = '',
@@ -32,6 +34,8 @@ export function SearchTypeahead({
 }: {
   label: string;
   onChange: (value: string) => void;
+  onSelect?: (id: string) => void;
+  onClear?: () => void;
   suggestions?: ReadonlyArray<string | SearchSuggestion | null | undefined>;
   remoteSearch?: (query: string) => Promise<ReadonlyArray<SearchSuggestion>>;
   initialValue?: string;
@@ -78,12 +82,18 @@ export function SearchTypeahead({
       onChange={(item: SearchItem | null) => {
         setSelected(item);
         onChange(item?.id ?? '');
+        if (item) {
+          onSelect?.(item.id);
+        } else {
+          onClear?.();
+        }
       }}
       onChangeQuery={(query: string) => {
         setSelected(null);
         onChange(query);
       }}
       hasEntriesOnFocus={!remoteSearch}
+      hasClear
       minQueryLength={remoteSearch ? 2 : 1}
       debounceMs={remoteSearch ? 200 : 0}
       width={width}

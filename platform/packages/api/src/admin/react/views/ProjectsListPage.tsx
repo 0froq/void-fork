@@ -40,7 +40,6 @@ export function ProjectsListPage({ path, platformName, username }: AdminPageProp
               }
             : undefined
         }
-        showClear={Boolean(search)}
       />
       <ProjectsTable projects={projects} siteDomain={siteDomain} tz={tz} />
       {page != null && totalPages != null && (

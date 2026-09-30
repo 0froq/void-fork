@@ -47,7 +47,6 @@ export function UsersListPage({ path, platformName, username }: AdminPageProps) 
               }
             : undefined
         }
-        showClear={Boolean(search)}
       />
       <Table hasHover>
         <TableHeader>

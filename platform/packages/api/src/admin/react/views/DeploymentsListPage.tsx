@@ -42,7 +42,6 @@ export function DeploymentsListPage({ path, platformName, username }: AdminPageP
               }
             : undefined
         }
-        showClear={Boolean(search)}
       />
       <DeploymentTable deployments={deployments} showProject tz={tz} />
       {page != null && totalPages != null && (

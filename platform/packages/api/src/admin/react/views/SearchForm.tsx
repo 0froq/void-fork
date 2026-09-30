@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { Button } from '@astryxdesign/core/Button';
-import { Link } from '@astryxdesign/core/Link';
+import { useRouter } from '@void/react';
 import { useCallback } from 'react';
 import { useFateClient } from 'react-fate';
 import type { Deployment, User } from '../../../types.ts';
@@ -22,7 +22,6 @@ export function SearchForm({
   onChange,
   initialValue,
   initialSelection,
-  showClear,
 }: {
   action: string;
   kind: 'users' | 'projects' | 'deployments';
@@ -31,9 +30,9 @@ export function SearchForm({
   onChange: (value: string) => void;
   initialValue?: string;
   initialSelection?: SearchSuggestion;
-  showClear: boolean;
 }) {
   const fate = useFateClient();
+  const router = useRouter();
   const remoteSearch = useCallback(
     async (query: string): Promise<ReadonlyArray<SearchSuggestion>> => {
       const path = `${action}?search=${encodeURIComponent(query)}`;
@@ -96,12 +95,17 @@ export function SearchForm({
         key={initialValue ?? ''}
         label={label}
         onChange={onChange}
+        onSelect={(id) => void router.visit(`${action}/${encodeURIComponent(id)}`)}
+        onClear={() => {
+          if (initialValue) {
+            void router.visit(action);
+          }
+        }}
         remoteSearch={remoteSearch}
         initialValue={initialValue}
         initialSelection={initialSelection}
       />
       <Button type="submit" label="Search" />
-      {showClear && <Link href={action}>Clear</Link>}
     </form>
   );
 }
