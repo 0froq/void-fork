@@ -2027,6 +2027,9 @@ export async function installPlatform(
         ? await dependencies.deployWorker(workerConfig, workerSecrets, previousWorkerConfig)
         : await deployPlatformWorker(workerConfig, workerSecrets, {
             apiBaseUrl: cloudflareApiBaseUrl,
+            ...(dependencies.client.request
+              ? { readCloudflare: (path) => dependencies.client.request!(path) }
+              : {}),
             onStaged: async (previousVersionId, stagedVersionId, previousTriggers) => {
               manifest = recordWorkerCutoverStage(
                 manifest!,
@@ -2385,6 +2388,9 @@ export async function installPlatform(
           ? await dependencies.deployWorker(workerConfig, workerSecrets, previousWorkerConfig)
           : await deployPlatformWorker(workerConfig, workerSecrets, {
               apiBaseUrl: cloudflareApiBaseUrl,
+              ...(dependencies.client.request
+                ? { readCloudflare: (path) => dependencies.client.request!(path) }
+                : {}),
               onStaged: async (previousVersionId, stagedVersionId, previousTriggers) => {
                 manifest = recordWorkerCutoverStage(
                   manifest!,
@@ -4098,6 +4104,7 @@ export async function claimPlatformDatabaseConnection(
 
 type PlatformWorkerDeploymentOptions = Readonly<{
   apiBaseUrl: string;
+  readCloudflare?: (path: string) => Promise<unknown>;
   inspectNewWorker: () => Promise<'missing' | 'owned'>;
   onStaged: (
     previousVersionId: string | null,
@@ -4245,6 +4252,39 @@ export function platformWorkerUploadFingerprint(
   }
 }
 
+function platformWorkerApiReadRunner(
+  accountId: string,
+  workerName: string,
+  readCloudflare: (path: string) => Promise<unknown>,
+  fallback: typeof runPlatformWrangler,
+): typeof runPlatformWrangler {
+  const base = `/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(workerName)}`;
+  return async (args, account, cwd, capture) => {
+    if (args[0] === 'deployments' && (args[1] === 'status' || args[1] === 'list')) {
+      const response = await readCloudflare(`${base}/deployments`);
+      const deployments =
+        response && typeof response === 'object' && !Array.isArray(response)
+          ? (response as { deployments?: unknown }).deployments
+          : null;
+      if (!Array.isArray(deployments)) {
+        throw new Error(
+          `platform: Cloudflare returned malformed deployment history for ${workerName}.`,
+        );
+      }
+      return {
+        status: args[1] === 'status' && deployments.length === 0 ? 1 : 0,
+        stderr: '',
+        stdout: JSON.stringify(args[1] === 'status' ? deployments[0] : deployments),
+      };
+    }
+    if (args[0] === 'versions' && args[1] === 'view' && args[2]) {
+      const version = await readCloudflare(`${base}/versions/${encodeURIComponent(args[2])}`);
+      return { status: 0, stderr: '', stdout: JSON.stringify(version) };
+    }
+    return fallback(args, account, cwd, capture);
+  };
+}
+
 export async function deployPlatformWorker(
   config: Record<string, unknown>,
   secrets: Record<string, string> | null,
@@ -4271,6 +4311,135 @@ export async function deployPlatformWorker(
     writeFileSync(configPath, `${JSON.stringify(uploadConfig, null, 2)}\n`, {
       mode: 0o600,
     });
+    const reconcileExistingVersion = async (
+      versionId: string,
+      triggerConfig: CloudflareTriggerConfig,
+      runner: typeof runPlatformWrangler,
+      deploymentId?: string,
+    ): Promise<null> => {
+      // A reused version still needs its mutable traffic state reconciled.
+      try {
+        const triggers = await stabilizeCloudflareVersionTriggers({
+          configPath,
+          knownTriggerConfigs: { [versionId]: nextTriggers },
+          manageRoutes: false,
+          previousTriggerConfig: triggerConfig,
+          publishEmptyCustomDomains: async () => {
+            await options.removeCustomDomains();
+            return cleanPlatformCommandResult();
+          },
+          runWrangler: platformWorkerCommandRunner(accountId, directory, runner),
+          targetTriggerConfig: nextTriggers,
+          targetVersionId: versionId,
+          workerName,
+        });
+        assertPlatformTriggerStabilization(triggers, workerName, versionId, 'publish');
+        if (nextTraffic.customDomains.length > 0) {
+          await options.publishCustomDomains(workerName, nextTraffic.customDomains);
+        }
+        if (options.managedRoutes.length > 0) {
+          await options.publishRoutes(workerName, options.managedRoutes);
+        }
+        await options.onTrafficPublished();
+        if (
+          (await readActivePlatformWorkerVersion(configPath, accountId, workerName, runner)) !==
+          versionId
+        ) {
+          throw new Error(`platform: Worker ${workerName} changed during traffic reconciliation.`);
+        }
+        if (deploymentId) {
+          const after = await readPlatformWorkerDeployments(
+            configPath,
+            accountId,
+            workerName,
+            runner,
+          );
+          if (after[0]?.id !== deploymentId || !deploymentRunsOnlyVersion(after[0], versionId)) {
+            throw new Error(
+              `platform: Worker ${workerName} changed deployment lineage during reconciliation.`,
+            );
+          }
+        }
+        return null;
+      } catch (error) {
+        const failures = await recoverFailedPlatformWorkerDeployment({
+          checkpointUnsafeTraffic: options.onUnsafeTraffic,
+          closeRoutingGate: options.retainNewWorker,
+          rollback: null,
+          unsafeTraffic: true,
+        });
+        throw new PlatformWorkerRecoveryIncompleteError(
+          `platform: Worker ${workerName} traffic reconciliation failed: ${errorMessage(error)}${
+            failures.length > 0 ? ` Safety recovery also failed: ${failures.join('; ')}` : ''
+          }`,
+          { cause: error },
+        );
+      }
+    };
+    if (options.workerExisted && contentHash && options.readCloudflare) {
+      const directRunner = platformWorkerApiReadRunner(
+        accountId,
+        workerName,
+        options.readCloudflare,
+        options.runner,
+      );
+      let candidate:
+        | {
+            deploymentId: string;
+            snapshot: Awaited<ReturnType<typeof readActivePlatformWorkerSnapshot>>;
+          }
+        | undefined;
+      let changedDuringRead = false;
+      try {
+        const before = await readPlatformWorkerDeployments(
+          configPath,
+          accountId,
+          workerName,
+          directRunner,
+        );
+        const snapshot = await readActivePlatformWorkerSnapshot(
+          configPath,
+          accountId,
+          workerName,
+          readPlatformWorkerOwnershipMarker(config),
+          directRunner,
+        );
+        const after = await readPlatformWorkerDeployments(
+          configPath,
+          accountId,
+          workerName,
+          directRunner,
+        );
+        changedDuringRead =
+          before[0]?.id !== after[0]?.id ||
+          !deploymentRunsOnlyVersion(after[0], snapshot.versionId);
+        if (!changedDuringRead && snapshot.contentHash === contentHash) {
+          candidate = { deploymentId: after[0]!.id, snapshot };
+        }
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          (error.message.includes('changed concurrently') ||
+            error.message.includes('does not belong to this installation'))
+        ) {
+          throw error;
+        }
+        // A read error is not evidence of equality; use the established upload path.
+      }
+      if (changedDuringRead) {
+        throw new Error(
+          `platform: Worker ${workerName} changed concurrently while its deployment lineage was inspected.`,
+        );
+      }
+      if (candidate) {
+        return await reconcileExistingVersion(
+          candidate.snapshot.versionId,
+          candidate.snapshot.triggerConfig,
+          directRunner,
+          candidate.deploymentId,
+        );
+      }
+    }
     if (options.workerExisted) {
       const previous = await readActivePlatformWorkerSnapshot(
         configPath,
@@ -4294,58 +4463,11 @@ export async function deployPlatformWorker(
       previousDeployment = deployments[0]!;
       previousDeploymentId = previousDeployment.id;
       if (contentHash && previous.contentHash === contentHash) {
-        // The active immutable version contains the exact upload input. Reconcile
-        // mutable triggers and traffic even when no new version is necessary.
-        try {
-          const triggers = await stabilizeCloudflareVersionTriggers({
-            configPath,
-            knownTriggerConfigs: { [previousVersionId]: nextTriggers },
-            manageRoutes: false,
-            previousTriggerConfig: previous.triggerConfig,
-            publishEmptyCustomDomains: async () => {
-              await options.removeCustomDomains();
-              return cleanPlatformCommandResult();
-            },
-            runWrangler: platformWorkerCommandRunner(accountId, directory, options.runner),
-            targetTriggerConfig: nextTriggers,
-            targetVersionId: previousVersionId,
-            workerName,
-          });
-          assertPlatformTriggerStabilization(triggers, workerName, previousVersionId, 'publish');
-          if (nextTraffic.customDomains.length > 0) {
-            await options.publishCustomDomains(workerName, nextTraffic.customDomains);
-          }
-          if (options.managedRoutes.length > 0) {
-            await options.publishRoutes(workerName, options.managedRoutes);
-          }
-          await options.onTrafficPublished();
-          if (
-            (await readActivePlatformWorkerVersion(
-              configPath,
-              accountId,
-              workerName,
-              options.runner,
-            )) !== previousVersionId
-          ) {
-            throw new Error(
-              `platform: Worker ${workerName} changed during traffic reconciliation.`,
-            );
-          }
-          return null;
-        } catch (error) {
-          const failures = await recoverFailedPlatformWorkerDeployment({
-            checkpointUnsafeTraffic: options.onUnsafeTraffic,
-            closeRoutingGate: options.retainNewWorker,
-            rollback: null,
-            unsafeTraffic: true,
-          });
-          throw new PlatformWorkerRecoveryIncompleteError(
-            `platform: Worker ${workerName} traffic reconciliation failed: ${errorMessage(error)}${
-              failures.length > 0 ? ` Safety recovery also failed: ${failures.join('; ')}` : ''
-            }`,
-            { cause: error },
-          );
-        }
+        return await reconcileExistingVersion(
+          previousVersionId,
+          previous.triggerConfig,
+          options.runner,
+        );
       }
       uploadConfig = withoutCompletedPlatformWorkerMigrations(uploadConfig, previous.migrationTag);
       writeFileSync(configPath, `${JSON.stringify(uploadConfig, null, 2)}\n`, {

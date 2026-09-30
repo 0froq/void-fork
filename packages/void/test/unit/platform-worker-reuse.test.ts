@@ -18,6 +18,8 @@ async function attemptReuse(input: {
   missingAnnotationHash?: boolean;
   changeConfig?: boolean;
   changeScript?: boolean;
+  directApi?: boolean;
+  directDeploymentDrift?: boolean;
   secrets?: Record<string, string> | null;
   triggerFailure?: boolean;
   lateVersionDrift?: boolean;
@@ -52,6 +54,40 @@ async function attemptReuse(input: {
     const desiredConfig = input.changeConfig
       ? { ...config, vars: { ...config.vars, VERSION: 'two' } }
       : config;
+    const version = {
+      annotations: {
+        'workers/message': encodeCloudflareVersionMessage(
+          [],
+          triggers,
+          input.missingAnnotationHash ? undefined : (input.annotationHash ?? originalHash!),
+        ),
+      },
+      resources: {
+        bindings: [{ name: 'PLATFORM_OWNERSHIP_MARKER', type: 'plain_text', text: marker }],
+      },
+    };
+    const deployment = {
+      created_on: '2026-09-30T00:00:00.000Z',
+      id: 'deployment-one',
+      versions: [{ percentage: 100, version_id: VERSION }],
+    };
+    let directDeploymentReads = 0;
+    const readCloudflare = vi.fn(async (path: string): Promise<unknown> => {
+      if (path.endsWith('/deployments')) {
+        directDeploymentReads++;
+        return {
+          deployments: [
+            input.directDeploymentDrift && directDeploymentReads > 1
+              ? { ...deployment, id: 'deployment-two' }
+              : deployment,
+          ],
+        };
+      }
+      if (path.endsWith(`/versions/${VERSION}`)) {
+        return version;
+      }
+      throw new Error(`Unexpected Cloudflare API read: ${path}`);
+    });
     let statusReads = 0;
     const runner = async (args: ReadonlyArray<string>) => {
       calls.push(args.slice(0, 2).join(' '));
@@ -78,31 +114,14 @@ async function attemptReuse(input: {
         return {
           status: 0,
           stderr: '',
-          stdout: JSON.stringify({
-            annotations: {
-              'workers/message': encodeCloudflareVersionMessage(
-                [],
-                triggers,
-                input.missingAnnotationHash ? undefined : (input.annotationHash ?? originalHash!),
-              ),
-            },
-            resources: {
-              bindings: [{ name: 'PLATFORM_OWNERSHIP_MARKER', type: 'plain_text', text: marker }],
-            },
-          }),
+          stdout: JSON.stringify(version),
         };
       }
       if (args[0] === 'deployments' && args[1] === 'list') {
         return {
           status: 0,
           stderr: '',
-          stdout: JSON.stringify([
-            {
-              created_on: '2026-09-30T00:00:00.000Z',
-              id: 'deployment-one',
-              versions: [{ percentage: 100, version_id: VERSION }],
-            },
-          ]),
+          stdout: JSON.stringify([deployment]),
         };
       }
       if (args[0] === 'triggers' && args[1] === 'deploy') {
@@ -115,6 +134,7 @@ async function attemptReuse(input: {
     };
     const operation = deployPlatformWorker(desiredConfig, input.secrets ?? null, {
       apiBaseUrl: 'https://api.cloudflare.com/client/v4',
+      ...(input.directApi ? { readCloudflare } : {}),
       inspectNewWorker: async () => 'owned',
       managedRoutes: [],
       onStaged: async () => {},
@@ -134,7 +154,14 @@ async function attemptReuse(input: {
       (value) => ({ error: null, value }),
       (error: unknown) => ({ error, value: null }),
     );
-    return { calls, onTrafficPublished, onUnsafeTraffic, retainNewWorker, ...outcome };
+    return {
+      calls,
+      onTrafficPublished,
+      onUnsafeTraffic,
+      readCloudflare,
+      retainNewWorker,
+      ...outcome,
+    };
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -147,6 +174,19 @@ it('reconciles traffic without uploading an identical active Worker version', as
   expect(run.calls).not.toContain('versions upload');
   expect(run.calls).toContain('triggers deploy');
   expect(run.onTrafficPublished).toHaveBeenCalledOnce();
+});
+
+it('uses direct Cloudflare reads for a verified matching version', async () => {
+  const run = await attemptReuse({ directApi: true });
+  expect(run.error).toBeNull();
+  expect(run.calls).toEqual(['triggers deploy']);
+  expect(run.readCloudflare).toHaveBeenCalled();
+});
+
+it('refuses reuse when direct Cloudflare reads observe a deployment change', async () => {
+  const run = await attemptReuse({ directApi: true, directDeploymentDrift: true });
+  expect(String(run.error)).toContain('changed concurrently');
+  expect(run.calls).not.toContain('versions upload');
 });
 
 it.each([
