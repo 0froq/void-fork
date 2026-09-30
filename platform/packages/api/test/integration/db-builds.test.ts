@@ -357,6 +357,16 @@ describe('builds', () => {
       status: 'deploying',
     });
     await createBuild(env.db, { projectId: projWith2.id, userId: withQueued.id });
+    await createBuild(env.db, {
+      projectId: projWith.id,
+      userId: withQueued.id,
+      status: 'complete',
+    });
+    await createBuild(env.db, {
+      projectId: projWith.id,
+      userId: withQueued.id,
+      status: 'failed',
+    });
 
     // noQueued: only a completed build — must NOT appear (no queued container work).
     await createBuild(env.db, {

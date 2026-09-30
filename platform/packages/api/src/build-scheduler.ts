@@ -9,7 +9,7 @@ import {
   getGitHubConnection,
   getProject,
   getQueuedBuilds,
-  getUser,
+  getUsersByIds,
   getUsersWithQueuedContainerBuilds,
   hasGitHubConnectionAuthority,
   hasQueuedContainerBuilds,
@@ -99,6 +99,15 @@ export class BuildScheduler extends DurableObject<ApiEnv['Bindings']> {
       return;
     }
 
+    // Read the selected owners in one query after the queue scan. Admission
+    // checks plan and suspension again under the owner lock before any start.
+    const usersById = new Map(
+      (await getUsersByIds(db, [...new Set(queued.map((build) => build.user_id))])).map((user) => [
+        user.id,
+        user,
+      ]),
+    );
+
     // Container namespaces (fleets) found AT capacity THIS tick. There are now
     // two independent container apps — base `BUILD_MANAGER` (free) and
     // `BUILD_MANAGER_LARGE` (paid `standard-4`) — each with its own
@@ -111,7 +120,7 @@ export class BuildScheduler extends DurableObject<ApiEnv['Bindings']> {
     // GitHub/token calls every 2s while a fleet is full.
     const saturatedNamespaces = new Set<DurableObjectNamespace>();
     for (const build of queued) {
-      const user = await getUser(db, build.user_id);
+      const user = usersById.get(build.user_id);
       if (!user) {
         // Orphaned build with no owning user — can't attribute concurrency or
         // mint a token. Fail it so it leaves the queue and never blocks.

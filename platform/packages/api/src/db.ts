@@ -4224,16 +4224,19 @@ export async function getUsersWithQueuedContainerBuilds(db: Db): Promise<
     activeBuilds: number;
   }>
 > {
+  const activeBuilds = alias(builds, 'active_builds');
   const rows = await db
     .select({
       userId: users.id,
       plan: users.plan,
       suspendedReason: users.suspended_reason,
-      // Correlated count of this user's in-flight builds (any executor). The
-      // FILTER over a LEFT JOIN keeps users whose only builds are queued
-      // (activeBuilds = 0) in the result.
-      activeBuilds: sql<number>`count(${builds.id}) filter (
-        where ${inArray(builds.status, ACTIVE_BUILD_STATUSES)}
+      // Count only active rows through idx_builds_user_status. Joining the
+      // entire builds table here would touch every historical build belonging
+      // to each queued owner on every scheduler tick.
+      activeBuilds: sql<number>`(
+        select count(*) from ${builds} as active_builds
+        where ${activeBuilds.user_id} = ${users.id}
+          and ${inArray(activeBuilds.status, ACTIVE_BUILD_STATUSES)}
       )`,
     })
     .from(users)
@@ -4245,9 +4248,7 @@ export async function getUsersWithQueuedContainerBuilds(db: Db): Promise<
         where ${builds.status} = 'queued' and ${builds.executor} = 'container'
       ) as queued_owners`,
       sql`queued_owners.user_id = ${users.id}`,
-    )
-    .leftJoin(builds, eq(builds.user_id, users.id))
-    .groupBy(users.id, users.plan);
+    );
   return rows.map((r) => ({
     userId: r.userId,
     plan: r.plan,

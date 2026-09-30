@@ -130,11 +130,13 @@ vi.mock('../../src/db.ts', () => ({
     },
   ),
   hasQueuedContainerBuilds: vi.fn(async (_db: unknown) => db.queued.length > 0),
-  getUser: vi.fn(async (_db: unknown, id: string) => {
-    const u = db.users.get(id);
-    return u
-      ? { id, plan: u.plan, login: u.login, suspended_reason: u.suspended_reason ?? null }
-      : null;
+  getUsersByIds: vi.fn(async (_db: unknown, ids: ReadonlyArray<string>) => {
+    return ids.flatMap((id) => {
+      const u = db.users.get(id);
+      return u
+        ? [{ id, plan: u.plan, login: u.login, suspended_reason: u.suspended_reason ?? null }]
+        : [];
+    });
   }),
   claimBuildForStartWithinLimit: vi.fn(
     async (
@@ -230,6 +232,7 @@ import {
   claimBuildForStartWithinLimit,
   getGitHubConnection,
   getQueuedBuilds,
+  getUsersByIds,
   markBuildTerminalIfActive,
   requeueBuildIfStarting,
 } from '../../src/db.ts';
@@ -517,6 +520,8 @@ describe('BuildScheduler.alarm', () => {
     expect(startBuild).toHaveBeenCalledOnce();
     expect((startBuild.mock.calls[0][0] as { buildId: string }).buildId).toBe('b1');
     expect(db.failed.some((f) => f.id === 'b2')).toBe(false);
+    expect(getUsersByIds).toHaveBeenCalledOnce();
+    expect(getUsersByIds).toHaveBeenCalledWith(expect.anything(), ['u1']);
   });
 
   it('allows pro plan to start up to 3 concurrent builds', async () => {
