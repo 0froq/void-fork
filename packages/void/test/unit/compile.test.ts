@@ -2901,6 +2901,7 @@ describe('shared pattern compiler in generated routes', () => {
   it('uses the shared cached pattern and redirect helpers', () => {
     expect(code).toContain('compilePattern as __compilePattern');
     expect(code).toContain('mergeQueryIntoLocation as __mergeQueryIntoLocation');
+    expect(code).not.toContain('from "@void/edge"');
     expect(code).not.toContain('function __compilePattern(source)');
     expect(code).not.toContain('function __mergeQueryIntoLocation(destination, search)');
   });

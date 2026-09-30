@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import type { VoidAuthProvider } from '../auth/providers.ts';
 import type { DevRedirectRule, HeaderRule } from '../cli/types.ts';
 import type { NotFoundHandling } from '../config.ts';
@@ -15,6 +16,7 @@ import type { ScanResult } from './scan.ts';
 const BINDING_HINT_SCRIPT = `<script type="module" src="/@id/virtual:void/binding-hint"></script>`;
 const DEFAULT_ERROR_PAGE_FONT_STACK =
   'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+const EDGE_MODULE_PATH = fileURLToPath(import.meta.resolve('@void/edge'));
 
 function pushDefaultErrorPageHelpers(lines: Array<string>, options: CompileOptions): void {
   const dev = options.dev === true;
@@ -3198,7 +3200,7 @@ function ensureCompilePatternEmitted(lines: Array<string>): void {
     return;
   }
   lines.push(
-    'import { compilePattern as __compilePattern, substituteParams as __substituteParams } from "@void/edge";',
+    `import { compilePattern as __compilePattern, substituteParams as __substituteParams } from ${JSON.stringify(EDGE_MODULE_PATH)};`,
   );
   lines.push('const __matchPatternWarned = new Set();');
   lines.push('function __matchPattern(pattern, pathname) {');
@@ -3221,7 +3223,9 @@ function ensureMergeQueryHelperEmitted(lines: Array<string>): void {
   if (lines.some((line) => line.includes('mergeQueryIntoLocation as __mergeQueryIntoLocation'))) {
     return;
   }
-  lines.push('import { mergeQueryIntoLocation as __mergeQueryIntoLocation } from "@void/edge";');
+  lines.push(
+    `import { mergeQueryIntoLocation as __mergeQueryIntoLocation } from ${JSON.stringify(EDGE_MODULE_PATH)};`,
+  );
 }
 
 /**
