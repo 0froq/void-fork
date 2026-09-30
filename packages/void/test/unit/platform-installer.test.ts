@@ -5198,6 +5198,15 @@ describe('platform installer', () => {
         ...enabledUpgrade.manifest.steps,
         {
           completedAt: '2026-09-14T00:00:06.000Z',
+          key: 'worker-cutover:999:staged:emailGateway',
+          resultHash: cutoverSnapshot(
+            deployment.resources.emailGatewayWorker,
+            'previous-email',
+            'staged-email',
+          ),
+        },
+        {
+          completedAt: '2026-09-14T00:00:06.000Z',
           key: 'worker-cutover:999:staged:api',
           resultHash: cutoverSnapshot(deployment.resources.apiWorker, 'previous-api', 'staged-api'),
         },
@@ -5208,15 +5217,6 @@ describe('platform installer', () => {
             deployment.resources.proxyWorker,
             'previous-proxy',
             'staged-proxy',
-          ),
-        },
-        {
-          completedAt: '2026-09-14T00:00:06.000Z',
-          key: 'worker-cutover:999:staged:emailGateway',
-          resultHash: cutoverSnapshot(
-            deployment.resources.emailGatewayWorker,
-            'previous-email',
-            'staged-email',
           ),
         },
         {

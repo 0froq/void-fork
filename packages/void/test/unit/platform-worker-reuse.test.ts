@@ -15,9 +15,12 @@ import {
 const VERSION = '11111111-1111-4111-8111-111111111111';
 
 async function attemptReuse(input: {
+  acquireUploadSlot?: () => Promise<(failure?: unknown) => void>;
   annotationHash?: string;
   missingAnnotationHash?: boolean;
   mutateScriptAtUpload?: boolean;
+  onCommand?: (command: string) => void;
+  onReadyForActivation?: () => Promise<void>;
   changeConfig?: boolean;
   changeScript?: boolean;
   directApi?: boolean;
@@ -30,6 +33,7 @@ async function attemptReuse(input: {
   triggerFailure?: boolean;
   lateVersionDrift?: boolean;
   versionDrift?: boolean;
+  waitForPriorWorker?: () => Promise<void>;
 }) {
   const directory = mkdtempSync(join(tmpdir(), 'void-worker-reuse-'));
   const calls: Array<string> = [];
@@ -121,6 +125,7 @@ async function attemptReuse(input: {
     let statusReads = 0;
     const runner = async (args: ReadonlyArray<string>) => {
       calls.push(args.slice(0, 2).join(' '));
+      input.onCommand?.(calls.at(-1)!);
       if (args[0] === 'deployments' && args[1] === 'status') {
         statusReads++;
         return {
@@ -173,7 +178,10 @@ async function attemptReuse(input: {
     };
     const operation = deployPlatformWorker(desiredConfig, input.secrets ?? null, {
       apiBaseUrl: 'https://api.cloudflare.com/client/v4',
+      ...(input.acquireUploadSlot ? { acquireUploadSlot: input.acquireUploadSlot } : {}),
       ...(input.directApi ? { readCloudflare } : {}),
+      ...(input.onReadyForActivation ? { onReadyForActivation: input.onReadyForActivation } : {}),
+      ...(input.waitForPriorWorker ? { waitForPriorWorker: input.waitForPriorWorker } : {}),
       inspectNewWorker: async () => 'owned',
       managedRoutes: [],
       onStaged: async () => {},
@@ -236,11 +244,78 @@ it('uses direct Cloudflare reads for a verified matching version', async () => {
   ]);
 });
 
+it('waits for the preceding Worker before changing reused Worker traffic', async () => {
+  let release!: () => void;
+  let reachedBarrier!: () => void;
+  const barrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const waiting = new Promise<void>((resolve) => {
+    reachedBarrier = resolve;
+  });
+  const commands: Array<string> = [];
+  const result = attemptReuse({
+    directApi: true,
+    onCommand: (command) => commands.push(command),
+    waitForPriorWorker: async () => {
+      reachedBarrier();
+      await barrier;
+    },
+  });
+  await waiting;
+  expect(commands).toEqual([]);
+  release();
+  expect((await result).error).toBeNull();
+  expect(commands).toContain('triggers deploy');
+});
+
+it('waits for the upload batch before changing reused Worker traffic', async () => {
+  let release!: () => void;
+  let reachedBatch!: () => void;
+  const barrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const waiting = new Promise<void>((resolve) => {
+    reachedBatch = resolve;
+  });
+  const commands: Array<string> = [];
+  const result = attemptReuse({
+    directApi: true,
+    onCommand: (command) => commands.push(command),
+    onReadyForActivation: async () => {
+      reachedBatch();
+      await barrier;
+    },
+  });
+  await waiting;
+  expect(commands).toEqual([]);
+  release();
+  expect((await result).error).toBeNull();
+  expect(commands).toContain('triggers deploy');
+});
+
 it('uses direct reads while preparing a changed Worker upload', async () => {
   const run = await attemptReuse({ changeConfig: true, directApi: true });
   expect(String(run.error)).toContain('upload reached');
   expect(run.calls).toEqual(['versions upload']);
   expect(run.readCloudflare).toHaveBeenCalled();
+});
+
+it('releases an upload slot when the upload fails', async () => {
+  const events: Array<string> = [];
+  const run = await attemptReuse({
+    acquireUploadSlot: async () => {
+      events.push('acquired');
+      return (failure?: unknown) => {
+        events.push(failure instanceof Error ? 'failed' : 'released');
+      };
+    },
+    changeConfig: true,
+    directApi: true,
+    onCommand: (command) => events.push(command),
+  });
+  expect(String(run.error)).toContain('upload reached');
+  expect(events).toEqual(['acquired', 'versions upload', 'failed']);
 });
 
 it('falls back to cf reads when the direct API is unavailable', async () => {

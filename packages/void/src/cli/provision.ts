@@ -927,12 +927,13 @@ interface TerminationRegistrant {
 
 /**
  * A registration binds the registrant to ITS OWNING provision lock's
- * quarantine hook (captured from the single active provision at registration time), so
+ * quarantine hook (captured from the active provision at registration time), so
  * an unresolved teardown quarantines exactly that lock with exactly this pair's pid.
  */
 interface ActiveRegistration {
   registrant: TerminationRegistrant;
   lockQuarantine: ((info: QuarantineInfo) => void) | undefined;
+  parallelWorkerUpload: boolean;
 }
 
 interface CoordinatorTeardown {
@@ -945,12 +946,12 @@ interface CoordinatorTeardown {
   finished: boolean;
   /** The coordinator-wide deadline backstop (referenced; cleared at finish). */
   deadlineTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Expire the still-pending pair at the deadline (idempotent via its done flag). */
-  expirePendingPair: ((detail: string) => void) | undefined;
+  /** Expire every still-pending pair at the deadline (each has its own done flag). */
+  expirePendingPairs: Array<(detail: string) => void>;
 }
 
-/** The (at most one) currently-registered {runner, owning-lock} pair. */
-let activeRegistration: ActiveRegistration | undefined;
+/** Concurrent registrations are allowed only for two immutable Worker uploads. */
+const activeRegistrations = new Map<TerminationRegistrant, ActiveRegistration>();
 let coordinatorListenersInstalled = false;
 let activeTeardown: CoordinatorTeardown | undefined;
 let reRaisedOnce = false;
@@ -976,35 +977,41 @@ function removeCoordinatorListeners(): void {
   process.removeListener('SIGTERM', onCoordinatorSigterm);
 }
 
-function registerRunner(registrant: TerminationRegistrant): void {
-  // Unreachable backstop: the runner REJECTS pre-spawn while another child is active or
-  // a teardown is in progress (same synchronous block as the spawn, so no signal can
-  // interleave), which is what makes this invariant structural rather than checked-late.
-  if (activeRegistration !== undefined) {
+function canRegisterRunner(parallelWorkerUpload: boolean): boolean {
+  return (
+    activeRegistrations.size === 0 ||
+    (parallelWorkerUpload &&
+      activeProvisionQuarantineHook === undefined &&
+      activeRegistrations.size < 2 &&
+      [...activeRegistrations.values()].every((entry) => entry.parallelWorkerUpload))
+  );
+}
+
+function registerRunner(registrant: TerminationRegistrant, parallelWorkerUpload: boolean): void {
+  // The pre-spawn check and registration run in one synchronous block.
+  if (!canRegisterRunner(parallelWorkerUpload)) {
     throw new Error(
-      'provision: internal invariant violated — a second wrangler child tried to register ' +
-        'while one is already active in this process',
+      'provision: internal invariant violated — a Cloudflare child tried to register outside its concurrency limit',
     );
   }
-  activeRegistration = {
+  activeRegistrations.set(registrant, {
     registrant,
     // Bind the OWNING provision lock at registration (1:1). Undefined
     // for a bare runner used outside a provision (unit tests): there is no lock to
     // retain, so an unresolved pair only rejects its own promise.
     lockQuarantine: activeProvisionQuarantineHook,
-  };
+    parallelWorkerUpload,
+  });
   installCoordinatorListeners();
 }
 
 function deregisterRunner(registrant: TerminationRegistrant): void {
-  if (activeRegistration?.registrant === registrant) {
-    activeRegistration = undefined;
-  }
+  activeRegistrations.delete(registrant);
   // Keep the listeners through an active teardown (they COALESCE repeated signals) and
   // while a retention watchdog is unresolved (a default-action death would sweep
   // the still-tracked mutex under the possibly-live child).
   if (
-    activeRegistration === undefined &&
+    activeRegistrations.size === 0 &&
     activeTeardown === undefined &&
     retentionWatchdog === undefined
   ) {
@@ -1023,7 +1030,7 @@ function coordinatorHandleSignal(signal: NodeJS.Signals): void {
   // the process must NOT die of a re-raise: the exit sweep would release the tracked
   // mutex under the possibly-live child. Swallow the signal with a warning; the
   // watchdog resolves by confirming the child dead or persisting the sidecar.
-  if (retentionWatchdog !== undefined && activeRegistration === undefined) {
+  if (retentionWatchdog !== undefined && activeRegistrations.size === 0) {
     process.stderr.write(
       `provision: ignoring ${signal} — a provision lock is retained while an unconfirmed ` +
         `wrangler child may live and its quarantine metadata is not yet durable. The ` +
@@ -1038,16 +1045,15 @@ function coordinatorHandleSignal(signal: NodeJS.Signals): void {
     persistFailed: false,
     finished: false,
     deadlineTimer: undefined,
-    expirePendingPair: undefined,
+    expirePendingPairs: [],
   };
   activeTeardown = teardown;
   // Snapshot + PRE-ACCOUNT the barrier BEFORE dispatch: `pending` is
   // initialized from the snapshot size, so a registrant that fails/settles
   // SYNCHRONOUSLY during dispatch can never drop it to 0 and finish the teardown while
-  // the dispatch loop is still outstanding (the at-most-one guard makes the snapshot
-  // ≤ 1; the barrier stays structurally sound regardless), and the `dispatching` latch
+  // the dispatch loop is still outstanding, and the `dispatching` latch
   // defers the finish until the loop below has fully completed.
-  const snapshot = activeRegistration !== undefined ? [activeRegistration] : [];
+  const snapshot = [...activeRegistrations.values()];
   teardown.pending = snapshot.length;
   if (snapshot.length > 0) {
     // The coordinator-WIDE deadline backstop: even if a pair's bounded
@@ -1055,10 +1061,12 @@ function coordinatorHandleSignal(signal: NodeJS.Signals): void {
     // this bound. REFERENCED — the teardown must hold the loop open until resolved.
     const deadlineMs = Math.max(...snapshot.map((r) => r.registrant.teardownDeadlineMs));
     teardown.deadlineTimer = setTimeout(() => {
-      teardown.expirePendingPair?.(
-        `the coordinator-wide ${deadlineMs}ms teardown deadline expired before the process ` +
-          `group's termination was confirmed`,
-      );
+      for (const expire of teardown.expirePendingPairs) {
+        expire(
+          `the coordinator-wide ${deadlineMs}ms teardown deadline expired before the process ` +
+            `group's termination was confirmed`,
+        );
+      }
     }, deadlineMs);
   }
   for (const registration of snapshot) {
@@ -1126,7 +1134,7 @@ function coordinatorTearDownRegistrant(
     complete();
   };
   // The coordinator-wide deadline expires the pair through the same idempotent path.
-  teardown.expirePendingPair = quarantinePair;
+  teardown.expirePendingPairs.push(quarantinePair);
   const outcome = registrant.signalGroup(teardown.signal);
   if (typeof outcome === 'object') {
     quarantinePair(`the process group could not be signalled: ${outcome.error.message}`);
@@ -1246,7 +1254,7 @@ function armRetentionWatchdog(lock: ProvisionLock, info: QuarantineInfo): void {
       clearTimeout(retentionWatchdog.timer);
     }
     retentionWatchdog = undefined;
-    if (activeRegistration === undefined && activeTeardown === undefined) {
+    if (activeRegistrations.size === 0 && activeTeardown === undefined) {
       removeCoordinatorListeners();
     }
   };
@@ -1310,6 +1318,8 @@ function armRetentionWatchdog(lock: ProvisionLock, info: QuarantineInfo): void {
 export function createDefaultRunWrangler(
   root: string,
   options?: {
+    /** Only immutable platform Worker version uploads may share the process with another upload. */
+    parallelWorkerUpload?: boolean;
     /** Test seam — the argv launcher. Defaults to the real wrangler CLI entry. */
     launcher?: Array<string>;
     /** Test seam — the per-command timeout. Defaults to {@link COMMAND_TIMEOUT_MS}. */
@@ -1359,6 +1369,8 @@ export function createDefaultRunWrangler(
     options?.signalTeardownDeadlineMs ?? confirmGraceMs + SIGNAL_TEARDOWN_DEADLINE_MARGIN_MS;
   return (args, opts) =>
     new Promise<RunWranglerResult>((resolvePromise, rejectPromise) => {
+      const parallelWorkerUpload =
+        options?.parallelWorkerUpload === true && args[0] === 'versions' && args[1] === 'upload';
       // Once a fatal-signal teardown has begun, this process is
       // terminating: REJECT new wrangler work outright BEFORE spawning (fail fast — no
       // child spawned means nothing to confirm), never join the teardown late with a
@@ -1372,17 +1384,15 @@ export function createDefaultRunWrangler(
         );
         return;
       }
-      // The at-most-one invariant, enforced BEFORE the spawn: within one
-      // provision every wrangler call is awaited sequentially (and at most one
-      // provision runs per process), so a second concurrently-active child is always a
-      // caller bug. This check and the spawn+registration below run in ONE synchronous
-      // block, so no signal dispatch can interleave between them.
-      if (activeRegistration !== undefined) {
+      // Ordinary commands stay serial. Only two immutable platform Worker uploads
+      // can overlap outside provisioning. This check and the spawn+registration below
+      // run in ONE synchronous block, so no signal dispatch can interleave between them.
+      if (!canRegisterRunner(parallelWorkerUpload)) {
         rejectPromise(
           new Error(
             'provision: refusing to spawn wrangler — another wrangler child is already active ' +
-              'in this process (wrangler calls must run sequentially; provisions run at most ' +
-              'one per process).',
+              'in this process (only two immutable Worker uploads may overlap; all other ' +
+              'Cloudflare commands and provisions remain sequential).',
           ),
         );
         return;
@@ -1538,7 +1548,7 @@ export function createDefaultRunWrangler(
           .filter(Boolean)
           .join('\n');
 
-      // This runner's pair is registered with the ONE process-wide
+      // This runner's pair is registered with the process-wide
       // signal coordinator (below) for the child's lifetime; settling deregisters it.
       const deregisterSelf = (): void => deregisterRunner(registrant);
 
@@ -1625,8 +1635,7 @@ export function createDefaultRunWrangler(
       // Forward a parent SIGINT/SIGTERM to the child's process GROUP so a Ctrl-C /
       // termination tears the DETACHED child (+ grandchildren) down instead of orphaning it.
       // Signal handling lives in the ONE process-wide coordinator (see
-      // {@link registerRunner}); this runner only registers its pair (at most one exists
-      // — the pre-spawn checks above enforce it). The coordinator forwards the first
+      // {@link registerRunner}); this runner registers its own pair. The coordinator forwards the first
       // SIGINT/SIGTERM to the registered group, awaits its bounded both-facts
       // confirmation (via this registrant's `awaitConfirmedDead`), quarantines it if
       // unresolved, coalesces repeated signals during the teardown, and re-raises
@@ -1785,7 +1794,7 @@ export function createDefaultRunWrangler(
       // every handler exists). The pre-spawn checks at the top of this executor ran in
       // the SAME synchronous block, so no teardown can have begun and no other
       // registration can exist by the time this runs.
-      registerRunner(registrant);
+      registerRunner(registrant, parallelWorkerUpload);
       options?.onSpawnedChild?.(child);
     });
 }

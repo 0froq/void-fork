@@ -6896,6 +6896,84 @@ describe('createDefaultRunWrangler — ONE signal coordinator: repeated signals 
     expect(result.signal).toBeNull();
   }, 15_000);
 
+  it('permits two immutable Worker uploads while rejecting a third upload or traffic mutation', async () => {
+    const slowChild = join(COORDINATOR_TMP, 'parallel-upload.cjs');
+    writeFileSync(slowChild, `setTimeout(() => process.exit(0), 400);\n`);
+    const spawned: Array<number | undefined> = [];
+    const run = createDefaultRunWrangler(COORDINATOR_TMP, {
+      launcher: [process.execPath, slowChild],
+      onSpawnedChild: (child) => spawned.push(child.pid),
+      parallelWorkerUpload: true,
+      timeoutMs: 30_000,
+    });
+    const first = run(['versions', 'upload'], { accountId: 'acct' });
+    const second = run(['versions', 'upload'], { accountId: 'acct' });
+    expect(spawned).toHaveLength(2);
+    await expect(run(['versions', 'upload'], { accountId: 'acct' })).rejects.toThrow(
+      /another wrangler child is already active in this process/,
+    );
+    await expect(run(['versions', 'deploy'], { accountId: 'acct' })).rejects.toThrow(
+      /another wrangler child is already active in this process/,
+    );
+    expect(spawned).toHaveLength(2);
+    expect((await Promise.all([first, second])).map((result) => result.status)).toEqual([0, 0]);
+    expect((await run(['versions', 'deploy'], { accountId: 'acct' })).status).toBe(0);
+  }, 15_000);
+
+  it('confirms both parallel upload process groups have exited before forwarding SIGTERM', async (ctx) => {
+    ctx.skip(process.platform === 'win32', WINDOWS_NO_SIGNALS);
+    const pidFiles = [join(COORDINATOR_TMP, 'upload-a.pid'), join(COORDINATOR_TMP, 'upload-b.pid')];
+    const childScript = join(COORDINATOR_TMP, 'upload-slow-exit.cjs');
+    writeFileSync(
+      childScript,
+      `require('fs').writeFileSync(process.argv[2], String(process.pid));\n` +
+        `process.on('SIGTERM', () => setTimeout(() => process.exit(0), 500));\n` +
+        `setInterval(() => {}, 1 << 30);\n`,
+    );
+    const parentScript = join(COORDINATOR_TMP, 'parallel-upload-parent.mjs');
+    const provisionUrl = `file://${join(import.meta.dirname, '../../src/cli/provision.ts')}`;
+    writeFileSync(
+      parentScript,
+      `import { createDefaultRunWrangler } from ${JSON.stringify(provisionUrl)};\n` +
+        pidFiles
+          .map(
+            (pidFile) =>
+              `createDefaultRunWrangler(process.cwd(), { launcher: [process.execPath, ${JSON.stringify(childScript)}, ${JSON.stringify(pidFile)}], parallelWorkerUpload: true })(['versions', 'upload'], { accountId: 'acct' }).catch(() => {});\n`,
+          )
+          .join(''),
+    );
+    const { spawn } = await import('node:child_process');
+    const parent = spawn(process.execPath, [parentScript], {
+      cwd: COORDINATOR_TMP,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const pids: Array<number> = [];
+    try {
+      for (const file of pidFiles) {
+        const pid = await waitForPid(file, 10_000);
+        expect(pid).toBeDefined();
+        pids.push(pid!);
+      }
+      parent.kill('SIGTERM');
+      const signal = await new Promise<NodeJS.Signals | null>((resolve) => {
+        parent.on('exit', (_code, received) => resolve(received));
+      });
+      expect(signal).toBe('SIGTERM');
+      for (const pid of pids) {
+        expect(() => process.kill(pid, 0)).toThrow();
+      }
+    } finally {
+      parent.kill('SIGKILL');
+      for (const pid of pids) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // already gone
+        }
+      }
+    }
+  }, 20_000);
+
   it('one SIGTERM (+ a repeat mid-teardown) is coalesced: the parent re-raises only after the group is dead', async (ctx) => {
     ctx.skip(process.platform === 'win32', WINDOWS_NO_SIGNALS);
     // Previously, runners installed per-runner listeners that detached themselves at

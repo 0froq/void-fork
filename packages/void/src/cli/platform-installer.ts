@@ -1033,7 +1033,14 @@ async function recoverInterruptedPlatformWorkerCutover(
   workerActions: ReadonlyArray<PlatformInstallPlanAction>;
 }> {
   if (interruptedCutover) {
-    for (const key of [...interruptedCutover.staged.keys()].reverse()) {
+    const recoveryOrder: ReadonlyArray<PlatformWorkerKey> = [
+      'dispatch',
+      'tail',
+      'emailGateway',
+      'proxy',
+      'api',
+    ];
+    for (const key of recoveryOrder.filter((key) => interruptedCutover.staged.has(key))) {
       const snapshot = interruptedCutover.staged.get(key)!;
       const preservedRoutes = dependencies.recoverWorkerCutover
         ? []
@@ -1257,6 +1264,12 @@ export async function installPlatform(
   const cloudflareApiBaseUrl = dependencies.client.apiBaseUrl ?? resolvePinnedApiBaseUrl();
   const runPinnedPlatformWrangler: typeof runPlatformWrangler = (args, accountId, cwd, capture) =>
     runPlatformWranglerAtApiBase(args, accountId, cwd, capture, cloudflareApiBaseUrl);
+  const runParallelPinnedPlatformWrangler: typeof runPlatformWrangler = (
+    args,
+    accountId,
+    cwd,
+    capture,
+  ) => runPlatformWranglerAtApiBase(args, accountId, cwd, capture, cloudflareApiBaseUrl, true);
   const resolvedRuntime = dependencies.runtime ?? resolvePlatformRuntime();
   const runtimeDirectory = resolvedRuntime.directory;
   const runtime = resolvedRuntime.manifest;
@@ -1996,7 +2009,89 @@ export async function installPlatform(
         secretCheckpoint(secrets, workerSecretUpdateIntent),
       );
     }
-    for (const key of workerKeys) {
+    const parallelWorkerUploads =
+      !dependencies.deployWorker &&
+      !requiresStagedCommit &&
+      !workerSecretUpdateIntent &&
+      !recoveringUnsafeTraffic &&
+      workerActions.length === workerKeys.length &&
+      workerActions.every((action) => action.action === 'update');
+    let workerManifestQueue = Promise.resolve();
+    let workerManifestFailed = false;
+    let workerManifestFailure: unknown;
+    const checkpointWorkerManifest = (
+      update: () => Promise<void>,
+      safetyRecovery = false,
+    ): Promise<void> => {
+      if (!parallelWorkerUploads) {
+        return update();
+      }
+      const result = workerManifestQueue.then(async () => {
+        if (workerManifestFailed && !safetyRecovery) {
+          throw workerManifestFailure;
+        }
+        try {
+          await update();
+        } catch (error) {
+          workerManifestFailed = true;
+          workerManifestFailure = error;
+          throw error;
+        }
+      });
+      workerManifestQueue = result.then(
+        () => undefined,
+        () => undefined,
+      );
+      return result;
+    };
+    let availableUploadSlots = 2;
+    let uploadFailure: unknown;
+    const uploadWaiters: Array<{
+      resolve: () => void;
+      reject: (error: unknown) => void;
+    }> = [];
+    const acquireUploadSlot = async (): Promise<(failure?: unknown) => void> => {
+      if (uploadFailure !== undefined) {
+        throw uploadFailure;
+      }
+      if (availableUploadSlots === 0) {
+        await new Promise<void>((resolve, reject) => uploadWaiters.push({ resolve, reject }));
+      } else {
+        availableUploadSlots--;
+      }
+      return (failure) => {
+        if (failure !== undefined && uploadFailure === undefined) {
+          uploadFailure = failure;
+          for (const waiter of uploadWaiters.splice(0)) {
+            waiter.reject(failure);
+          }
+        }
+        const next = uploadFailure === undefined ? uploadWaiters.shift() : undefined;
+        if (next) {
+          next.resolve();
+        } else {
+          availableUploadSlots++;
+        }
+      };
+    };
+    const workerReady = (parallelWorkerUploads ? workerKeys : []).map(() => {
+      let resolve!: () => void;
+      let reject!: (error: unknown) => void;
+      const promise = new Promise<void>((onResolve, onReject) => {
+        resolve = onResolve;
+        reject = onReject;
+      });
+      return { promise, resolve, reject };
+    });
+    const uploadBatch = Promise.all(workerReady.map((ready) => ready.promise)).then(
+      () => ({ error: null }),
+      (error: unknown) => ({ error }),
+    );
+    const deployOneWorker = async (
+      key: PlatformWorkerKey,
+      waitForPriorWorker?: () => Promise<void>,
+      onReadyForActivation?: () => Promise<void>,
+    ): Promise<void> => {
       dependencies.onProgress?.(`Deploying the ${key} service`);
       let workerStepStarted = performance.now();
       const markWorkerStep = (step: string) => {
@@ -2018,13 +2113,15 @@ export async function installPlatform(
         zoneId,
         action.action !== 'create',
       );
-      const intended = recordProvisionIntent(manifest, action, now());
-      if (intended !== manifest) {
-        manifest = intended;
-        writeInstallationManifest(manifest);
-        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-      }
-      await dependencies.revalidateBeforeWorkerDeploy(manifest, action);
+      await checkpointWorkerManifest(async () => {
+        const intended = recordProvisionIntent(manifest!, action, now());
+        if (intended !== manifest) {
+          manifest = intended;
+          writeInstallationManifest(manifest);
+          await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+        }
+      });
+      await dependencies.revalidateBeforeWorkerDeploy(manifest!, action);
       markWorkerStep('revalidate');
       const preservedRoutes = dependencies.deployWorker
         ? []
@@ -2041,22 +2138,27 @@ export async function installPlatform(
         ? await dependencies.deployWorker(workerConfig, workerSecrets, previousWorkerConfig)
         : await deployPlatformWorker(workerConfig, workerSecrets, {
             apiBaseUrl: cloudflareApiBaseUrl,
+            ...(parallelWorkerUploads
+              ? { acquireUploadSlot, onReadyForActivation, waitForPriorWorker }
+              : {}),
             ...(dependencies.client.request
               ? { readCloudflare: (path) => dependencies.client.request!(path) }
               : {}),
             onStaged: async (previousVersionId, stagedVersionId, previousTriggers) => {
-              manifest = recordWorkerCutoverStage(
-                manifest!,
-                workerCutoverGeneration,
-                key,
-                previousVersionId,
-                stagedVersionId,
-                action.name,
-                previousTriggers,
-                now(),
-              );
-              writeInstallationManifest(manifest);
-              await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+              await checkpointWorkerManifest(async () => {
+                manifest = recordWorkerCutoverStage(
+                  manifest!,
+                  workerCutoverGeneration,
+                  key,
+                  previousVersionId,
+                  stagedVersionId,
+                  action.name,
+                  previousTriggers,
+                  now(),
+                );
+                writeInstallationManifest(manifest);
+                await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+              });
             },
             onTrafficPublished: async () => {
               if (!dependencies.client.listWorkerDomains || !dependencies.client.listWorkerRoutes) {
@@ -2066,28 +2168,32 @@ export async function installPlatform(
                 dependencies.client.listWorkerDomains(plan.account.id),
                 zoneId ? dependencies.client.listWorkerRoutes(zoneId) : Promise.resolve([]),
               ]);
-              const next = recordPlatformWorkerTraffic(
-                manifest!,
-                action.name,
-                { customDomains, routes },
-                now(),
-              );
-              if (JSON.stringify(next.resources) !== JSON.stringify(manifest!.resources)) {
-                manifest = next;
-                writeInstallationManifest(manifest);
-                await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-              }
+              await checkpointWorkerManifest(async () => {
+                const next = recordPlatformWorkerTraffic(
+                  manifest!,
+                  action.name,
+                  { customDomains, routes },
+                  now(),
+                );
+                if (JSON.stringify(next.resources) !== JSON.stringify(manifest!.resources)) {
+                  manifest = next;
+                  writeInstallationManifest(manifest);
+                  await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+                }
+              });
             },
             onUnsafeTraffic: async () => {
-              manifest = recordWorkerUnsafeTraffic(
-                manifest!,
-                workerCutoverGeneration,
-                key,
-                action.name,
-                now(),
-              );
-              writeInstallationManifest(manifest);
-              await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+              await checkpointWorkerManifest(async () => {
+                manifest = recordWorkerUnsafeTraffic(
+                  manifest!,
+                  workerCutoverGeneration,
+                  key,
+                  action.name,
+                  now(),
+                );
+                writeInstallationManifest(manifest);
+                await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+              }, true);
             },
             managedRoutes: preserveDisabled
               ? []
@@ -2142,24 +2248,58 @@ export async function installPlatform(
                 PLATFORM_DISABLED_VALUE,
               );
             },
-            runner: runPinnedPlatformWrangler,
+            runner: parallelWorkerUploads
+              ? runParallelPinnedPlatformWrangler
+              : runPinnedPlatformWrangler,
             workerExisted: action.action !== 'create',
           });
       markWorkerStep('deploy');
       if (rollback) {
         workerRollbacks.push(rollback);
       }
-      const recorded = recordResource(manifest, action, action.name, 'created', now());
-      if (
-        rollback ||
-        dependencies.deployWorker ||
-        JSON.stringify(recorded.resources) !== JSON.stringify(manifest.resources)
-      ) {
-        manifest = recorded;
-        writeInstallationManifest(manifest);
-        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-      }
+      await checkpointWorkerManifest(async () => {
+        const recorded = recordResource(manifest!, action, action.name, 'created', now());
+        if (
+          rollback ||
+          dependencies.deployWorker ||
+          JSON.stringify(recorded.resources) !== JSON.stringify(manifest!.resources)
+        ) {
+          manifest = recorded;
+          writeInstallationManifest(manifest);
+          await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+        }
+      });
       markWorkerStep('record');
+    };
+    if (parallelWorkerUploads) {
+      const tasks: Array<Promise<void>> = [];
+      for (const [index, key] of workerKeys.entries()) {
+        const priorWorker = tasks.at(-1);
+        const ready = workerReady[index]!;
+        const task = deployOneWorker(key, priorWorker ? () => priorWorker : undefined, async () => {
+          ready.resolve();
+          const batch = await uploadBatch;
+          if (batch.error !== null) {
+            throw batch.error;
+          }
+        });
+        task.then(
+          () => ready.resolve(),
+          (error: unknown) => ready.reject(error),
+        );
+        tasks.push(task);
+      }
+      const results = await Promise.allSettled(tasks);
+      const firstFailure = results.find(
+        (result): result is PromiseRejectedResult => result.status === 'rejected',
+      );
+      if (firstFailure) {
+        throw firstFailure.reason;
+      }
+    } else {
+      for (const key of workerKeys) {
+        await deployOneWorker(key);
+      }
     }
 
     manifest = setInstallationEndpoints(
@@ -4121,6 +4261,9 @@ export async function claimPlatformDatabaseConnection(
 type PlatformWorkerDeploymentOptions = Readonly<{
   apiBaseUrl: string;
   readCloudflare?: (path: string) => Promise<unknown>;
+  acquireUploadSlot?: () => Promise<(failure?: unknown) => void>;
+  onReadyForActivation?: () => Promise<void>;
+  waitForPriorWorker?: () => Promise<void>;
   inspectNewWorker: () => Promise<'missing' | 'owned'>;
   onStaged: (
     previousVersionId: string | null,
@@ -4526,6 +4669,8 @@ export async function deployPlatformWorker(
         candidate &&
         platformWorkerUploadFingerprint(config, options.managedRoutes) === contentHash
       ) {
+        await options.onReadyForActivation?.();
+        await options.waitForPriorWorker?.();
         return await reconcileExistingVersion(
           candidate.snapshot.versionId,
           candidate.snapshot.triggerConfig,
@@ -4561,6 +4706,8 @@ export async function deployPlatformWorker(
         previous.contentHash === contentHash &&
         platformWorkerUploadFingerprint(config, options.managedRoutes) === contentHash
       ) {
+        await options.onReadyForActivation?.();
+        await options.waitForPriorWorker?.();
         return await reconcileExistingVersion(
           previousVersionId,
           previous.triggerConfig,
@@ -4610,32 +4757,44 @@ export async function deployPlatformWorker(
       writeFileSync(secretsPath, JSON.stringify(secrets), { mode: 0o600 });
       argv.push('--secrets-file', secretsPath);
     }
-    const uploaded = options.workerExisted
-      ? await options.runner(argv, accountId, directory, true)
-      : await runPlatformWranglerForConditionalCreate(
-          argv,
-          accountId,
-          directory,
-          true,
-          workerName,
-          options.apiBaseUrl,
-        );
+    const releaseUploadSlot = await options.acquireUploadSlot?.();
+    let uploaded: CloudflareCommandResult;
+    let uploadError: unknown;
+    try {
+      uploaded = options.workerExisted
+        ? await options.runner(argv, accountId, directory, true)
+        : await runPlatformWranglerForConditionalCreate(
+            argv,
+            accountId,
+            directory,
+            true,
+            workerName,
+            options.apiBaseUrl,
+          );
+      assertCleanPlatformWrangler(
+        uploaded,
+        `${options.workerExisted ? 'upload' : 'bootstrap'} ${workerName}`,
+      );
+    } catch (error) {
+      uploadError = error;
+      throw error;
+    } finally {
+      releaseUploadSlot?.(uploadError);
+    }
     uploadedVersionId = parseUploadedPlatformWorkerVersion(
       `${uploaded.stdout}\n${uploaded.stderr}`,
     );
     if (!options.workerExisted) {
       activatedVersionId = uploadedVersionId;
     }
-    assertCleanPlatformWrangler(
-      uploaded,
-      `${options.workerExisted ? 'upload' : 'bootstrap'} ${workerName}`,
-    );
     if (!uploadedVersionId) {
       throw new Error(
         `platform: Wrangler uploaded ${workerName} without reporting its immutable version id.`,
       );
     }
     await options.onStaged(previousVersionId, uploadedVersionId, previousTriggers);
+    await options.onReadyForActivation?.();
+    await options.waitForPriorWorker?.();
     if (options.workerExisted) {
       const deploymentsBeforeActivation = await readPlatformWorkerDeployments(
         configPath,
@@ -5023,10 +5182,12 @@ async function runPlatformWranglerAtApiBase(
   cwd: string,
   capture: boolean,
   apiBaseUrl = resolvePinnedApiBaseUrl(),
+  parallelWorkerUpload = false,
 ): Promise<CloudflareCommandResult> {
   const startedAt = performance.now();
   const runner = createDefaultRunWrangler(process.cwd(), {
     launcher: resolveWranglerArgv(process.cwd()),
+    parallelWorkerUpload,
     timeoutMs: PLATFORM_WRANGLER_TIMEOUT_MS,
   });
   const result = await runner([...args], {
