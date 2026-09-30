@@ -1,6 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'pathslash';
 import { glob, globSync } from 'tinyglobby';
+import {
+  staticExportInitializers,
+  staticLiteral,
+  unwrapStaticExpression,
+} from '../shared/static-exports.ts';
 
 const JOB_EXTENSIONS = ['ts', 'mts', 'js', 'mjs'];
 
@@ -18,32 +23,31 @@ function extractJobName(filePath: string): string {
 }
 
 function extractCronExpressions(source: string, filePath: string): Array<string> {
-  // Try single string: export const cron = "..."
-  const singleMatch = source.match(/export\s+const\s+cron\s*=\s*(['"`])([^'"`]+)\1/);
-  if (singleMatch) {
-    const cron = singleMatch[2].trim();
-    if (!cron) {
-      throw new Error(`cron: Invalid job file '${filePath}'. Cron expression cannot be empty.`);
-    }
-    return [cron];
-  }
-
-  // Try array: export const cron = ["...", "..."]
-  const arrayMatch = source.match(/export\s+const\s+cron\s*=\s*\[([^\]]+)\]/);
-  if (arrayMatch) {
-    const items = arrayMatch[1].match(/(['"`])([^'"`]+)\1/g);
-    if (!items || items.length === 0) {
-      throw new Error(`cron: Invalid job file '${filePath}'. Cron array cannot be empty.`);
-    }
-    return items.map((item) => {
-      const cronMatch = item.match(/['"`]([^'"`]+)['"`]/);
-      return cronMatch![1].trim();
-    });
-  }
-
-  throw new Error(
-    `cron: Invalid job file '${filePath}'. Add \`export const cron = "<schedule>"\`.`,
+  const initializer = unwrapStaticExpression(
+    staticExportInitializers(filePath, source, new Set(['cron'])).get('cron'),
   );
+  if (!initializer) {
+    throw new Error(
+      `cron: Invalid job file '${filePath}'. Add \`export const cron = "<schedule>"\`.`,
+    );
+  }
+  const values =
+    initializer.type === 'ArrayExpression'
+      ? ((initializer.elements as Array<import('../shared/ast.ts').AstNode | null> | undefined) ??
+        [])
+      : [initializer];
+  if (values.length === 0) {
+    throw new Error(`cron: Invalid job file '${filePath}'. Cron array cannot be empty.`);
+  }
+  return values.map((value) => {
+    const cron = staticLiteral(value ?? undefined);
+    if (typeof cron !== 'string' || !cron.trim()) {
+      throw new Error(
+        `cron: Invalid job file '${filePath}'. Cron expression must be a nonempty string literal.`,
+      );
+    }
+    return cron.trim();
+  });
 }
 
 function resolveDir(root: string, dir: string): string {

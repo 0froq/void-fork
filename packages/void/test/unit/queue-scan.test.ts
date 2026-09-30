@@ -63,6 +63,27 @@ export default defineQueue(async (batch, env) => {});`,
     expect(queues[0].retryDelay).toBe(60);
   });
 
+  it('ignores options mentioned only in comments and strings', () => {
+    writeFileSync(
+      join(root, 'queues', 'basic.ts'),
+      `// export const maxBatchSize = 99;
+const example = 'export const retryDelay = 50';
+export const maxRetries = 3 as const;
+export default async () => {};`,
+    );
+    expect(scanQueuesSync(root)).toMatchObject([
+      { maxBatchSize: undefined, maxRetries: 3, retryDelay: undefined },
+    ]);
+  });
+
+  it('rejects a nonliteral consumer option instead of reading a numeric prefix', () => {
+    writeFileSync(
+      join(root, 'queues', 'basic.ts'),
+      'export const maxBatchSize = 2 + 3; export default async () => {};',
+    );
+    expect(() => scanQueuesSync(root)).toThrow('maxBatchSize');
+  });
+
   it('normalizes nested paths while preserving binding derivation', () => {
     mkdirSync(join(root, 'queues', 'order'), { recursive: true });
     writeFileSync(

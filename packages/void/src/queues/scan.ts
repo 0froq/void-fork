@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'pathslash';
 import { glob, globSync } from 'tinyglobby';
+import { staticExportInitializers, staticLiteral } from '../shared/static-exports.ts';
 
 const QUEUE_EXTENSIONS = ['ts', 'mts', 'js', 'mjs'];
 
@@ -29,11 +30,7 @@ export function deriveQueueBindingName(name: string): string {
   return 'QUEUE_' + name.toUpperCase().replace(/[^A-Z0-9]/g, '_');
 }
 
-function extractConsumerOption(source: string, name: string): number | undefined {
-  const optionRe = new RegExp(`export\\s+const\\s+${name}\\s*=\\s*(\\d+)`);
-  const match = source.match(optionRe);
-  return match ? Number(match[1]) : undefined;
-}
+const OPTION_NAMES = ['maxBatchSize', 'maxBatchTimeout', 'maxRetries', 'retryDelay'] as const;
 
 function parseQueueFiles(
   root: string,
@@ -48,14 +45,30 @@ function parseQueueFiles(
       const absPath = join(queuesDirPath, filePath);
       const source = readFileSync(absPath, 'utf-8');
       const name = extractName(filePath);
+      const options = OPTION_NAMES.some((option) => source.includes(option))
+        ? staticExportInitializers(absPath, source, new Set(OPTION_NAMES))
+        : new Map();
+      const optionValue = (option: (typeof OPTION_NAMES)[number]): number | undefined => {
+        const initializer = options.get(option);
+        if (!initializer) {
+          return undefined;
+        }
+        const value = staticLiteral(initializer);
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+          throw new Error(
+            `queue: ${option} in '${filePath}' must be a nonnegative integer literal.`,
+          );
+        }
+        return value;
+      };
       return {
         filePath,
         name,
         bindingName: deriveQueueBindingName(name),
-        maxBatchSize: extractConsumerOption(source, 'maxBatchSize'),
-        maxBatchTimeout: extractConsumerOption(source, 'maxBatchTimeout'),
-        maxRetries: extractConsumerOption(source, 'maxRetries'),
-        retryDelay: extractConsumerOption(source, 'retryDelay'),
+        maxBatchSize: optionValue('maxBatchSize'),
+        maxBatchTimeout: optionValue('maxBatchTimeout'),
+        maxRetries: optionValue('maxRetries'),
+        retryDelay: optionValue('retryDelay'),
       };
     });
 

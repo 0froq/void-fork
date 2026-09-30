@@ -144,6 +144,20 @@ describe('scanRoutes', () => {
     ]);
   });
 
+  it('reads the exported cron rather than matching comments or string contents', async () => {
+    createFile(
+      'crons/actual.ts',
+      `// export const cron = "1 * * * *";
+const example = 'export const cron = "2 * * * *"';
+export const cron = ["0 * * * *", \`30 * * * *\`] as const;
+export default () => {};`,
+    );
+    const result = await scanRoutes(TMP);
+    expect(result.jobs).toEqual([
+      { filePath: 'actual.ts', name: 'actual', crons: ['0 * * * *', '30 * * * *'] },
+    ]);
+  });
+
   it('ignores underscored job files and directories', async () => {
     createFile('routes/api/hello.ts');
     createFile('crons/_internal.ts', 'export const cron = "0 * * * *"');
