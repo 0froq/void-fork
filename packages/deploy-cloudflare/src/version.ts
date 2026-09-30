@@ -840,6 +840,7 @@ async function activateCloudflareVersionWithSecretsFile(
   const previousVersionId = previous.versionId;
   let inheritanceBaseline: Array<RecentCloudflareVersion> | undefined;
   let trustedCandidateChain = false;
+  let activeSecretsPinned = false;
   if (options.expectedPreviousVersionId !== undefined || options.verifyInheritedSecrets === true) {
     const recent = await readRecentCloudflareVersionIds(options, commonArgs);
     if (recent === null) {
@@ -904,6 +905,7 @@ async function activateCloudflareVersionWithSecretsFile(
             rollback: 'not-needed',
           };
         }
+        activeSecretsPinned = true;
       }
     }
     inheritanceBaseline = recent;
@@ -999,6 +1001,18 @@ async function activateCloudflareVersionWithSecretsFile(
 
   const alias = `void-ready-${Date.now().toString(36)}`;
   if (options.atomic && previous.versionId !== null) {
+    // Pinning the active secrets selects the version-aware uploader for atomic
+    // publication, including when the active version is the latest upload.
+    if (!activeSecretsPinned && options.pinActiveSecrets) {
+      const activeSecrets = await readCloudflareVersionSecretBindings(
+        options,
+        commonArgs,
+        previous.versionId,
+      );
+      if (activeSecrets?.length) {
+        await options.pinActiveSecrets(previous.versionId, activeSecrets);
+      }
+    }
     return bootstrapFirstDeployment({ ...options, message }, commonArgs, previous.versionId, true);
   }
   options.onProgress?.('Uploading the Worker and assets...');

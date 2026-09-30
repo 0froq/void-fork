@@ -186,6 +186,37 @@ describe('Cloudflare version activation', () => {
       runWrangler.mock.calls.some(([args]) => args[0] === 'versions' && args[1] === 'deploy'),
     ).toBe(false);
   });
+  it('pins active secrets for atomic publication when the active version is the latest', async () => {
+    const base = runner({
+      bootstrap: ok(`Worker Version ID: ${NEXT}\nhttps://my-worker.example.workers.dev`),
+    });
+    const runWrangler = vi.fn((args: Array<string>) =>
+      args[0] === 'versions' && args[1] === 'view'
+        ? ok(
+            JSON.stringify({
+              id: CURRENT,
+              resources: { bindings: [{ name: 'AUTH_SECRET', type: 'secret_text' }] },
+            }),
+          )
+        : base(args),
+    );
+    const pinActiveSecrets = vi.fn().mockResolvedValue(true);
+    const result = await activateCloudflareVersion({
+      runWrangler,
+      workerName: 'my-worker',
+      verifyUploader: () => true,
+      verifyInheritedSecrets: true,
+      pinActiveSecrets,
+      atomic: true,
+      workersDevSubdomain: 'example',
+      message: encodeCloudflareVersionMessage([]),
+      fetch: async () => Response.json({ ready: true }),
+    });
+    expect(result).toMatchObject({ ok: true, versionId: NEXT });
+    expect(pinActiveSecrets).toHaveBeenCalledWith(CURRENT, [
+      { name: 'AUTH_SECRET', type: 'secret_text' },
+    ]);
+  });
   it('returns the Cloudflare error when zero-percent staging fails', async () => {
     const runWrangler = runner({
       upload: ok(`Worker Version ID: ${NEXT}`),
