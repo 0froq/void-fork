@@ -19,11 +19,15 @@ async function attemptReuse(input: {
   changeConfig?: boolean;
   changeScript?: boolean;
   secrets?: Record<string, string> | null;
+  triggerFailure?: boolean;
+  lateVersionDrift?: boolean;
   versionDrift?: boolean;
 }) {
   const directory = mkdtempSync(join(tmpdir(), 'void-worker-reuse-'));
   const calls: Array<string> = [];
   const onTrafficPublished = vi.fn(async () => {});
+  const onUnsafeTraffic = vi.fn(async () => {});
+  const retainNewWorker = vi.fn(async () => {});
   try {
     const main = join(directory, 'worker.js');
     const configPath = join(directory, 'wrangler.json');
@@ -61,7 +65,8 @@ async function attemptReuse(input: {
               {
                 percentage: 100,
                 version_id:
-                  input.versionDrift && statusReads > 1
+                  (input.versionDrift && statusReads > 1) ||
+                  (input.lateVersionDrift && statusReads > 4)
                     ? '22222222-2222-4222-8222-222222222222'
                     : VERSION,
               },
@@ -101,7 +106,7 @@ async function attemptReuse(input: {
         };
       }
       if (args[0] === 'triggers' && args[1] === 'deploy') {
-        return { status: 0, stderr: '', stdout: '' };
+        return { status: input.triggerFailure ? 1 : 0, stderr: '', stdout: '' };
       }
       if (args[0] === 'versions' && args[1] === 'upload') {
         return { status: 1, stderr: 'upload reached', stdout: '' };
@@ -114,14 +119,14 @@ async function attemptReuse(input: {
       managedRoutes: [],
       onStaged: async () => {},
       onTrafficPublished,
-      onUnsafeTraffic: async () => {},
+      onUnsafeTraffic,
       preservedRoutes: [],
       previousConfig: config,
       previousPublicEndpoints: true,
       publishCustomDomains: async () => {},
       publishRoutes: async () => {},
       removeCustomDomains: async () => {},
-      retainNewWorker: async () => {},
+      retainNewWorker,
       runner,
       workerExisted: true,
     });
@@ -129,7 +134,7 @@ async function attemptReuse(input: {
       (value) => ({ error: null, value }),
       (error: unknown) => ({ error, value: null }),
     );
-    return { calls, onTrafficPublished, ...outcome };
+    return { calls, onTrafficPublished, onUnsafeTraffic, retainNewWorker, ...outcome };
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -161,3 +166,14 @@ it('fails closed when the active version changes during inspection', async () =>
   expect(String(run.error)).toContain('changed concurrently');
   expect(run.calls).not.toContain('versions upload');
 });
+
+it.each([{ triggerFailure: true }, { lateVersionDrift: true }])(
+  'closes the routing gate if reuse reconciliation becomes unsafe: %j',
+  async (input) => {
+    const run = await attemptReuse(input);
+    expect(String(run.error)).toContain('traffic reconciliation failed');
+    expect(run.calls).not.toContain('versions upload');
+    expect(run.onUnsafeTraffic).toHaveBeenCalledOnce();
+    expect(run.retainNewWorker).toHaveBeenCalledOnce();
+  },
+);
