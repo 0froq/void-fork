@@ -998,6 +998,238 @@ async function preparePlatformDatabaseSchema(
   return manifest;
 }
 
+// Restore staged Workers before starting a new generation, then replan any
+// newly created Worker that recovery had to retain.
+async function recoverInterruptedPlatformWorkerCutover(
+  manifest: PlatformInstallationManifest,
+  interruptedCutover: NonNullable<ReturnType<typeof interruptedWorkerCutover>> | null,
+  workerActions: ReadonlyArray<PlatformInstallPlanAction>,
+  configs: ReturnType<typeof createPlatformWorkerConfigs>,
+  previousConfigs: ReturnType<typeof createPlatformWorkerConfigs>,
+  plan: PlatformInstallPlan,
+  dependencies: PlatformInstallerDependencies,
+  ids: Record<string, string>,
+  zoneId: string,
+  previousPublicEndpoints: boolean,
+  hasEmailGatewayArtifact: boolean,
+  runPinnedPlatformWrangler: typeof runPlatformWrangler,
+  now: () => string,
+  writeRemoteInstallationCheckpoint: InstallationCheckpointWriter,
+  onManifestChange: (manifest: PlatformInstallationManifest) => void,
+): Promise<{
+  manifest: PlatformInstallationManifest;
+  workerActions: ReadonlyArray<PlatformInstallPlanAction>;
+}> {
+  if (interruptedCutover) {
+    for (const key of [...interruptedCutover.staged.keys()].reverse()) {
+      const snapshot = interruptedCutover.staged.get(key)!;
+      const preservedRoutes = dependencies.recoverWorkerCutover
+        ? []
+        : await inventoryUnmanagedPlatformWorkerTraffic(
+            dependencies.client,
+            plan,
+            snapshot.workerName,
+          );
+      const recoveryConfig = mergePlatformWorkerTrafficConfig(
+        { ...configs[key], name: snapshot.workerName },
+        preservedRoutes,
+      );
+      const previousRecoveryConfig = mergePlatformWorkerTrafficConfig(
+        { ...previousConfigs[key], name: snapshot.workerName },
+        preservedRoutes,
+      );
+      if (dependencies.recoverWorkerCutover) {
+        await dependencies.recoverWorkerCutover({
+          key,
+          preserveCustomDomains: interruptedCutover.unsafeTraffic.has(key),
+          previousVersionId: snapshot.previousVersionId,
+          stagedVersionId: snapshot.stagedVersionId,
+          workerName: snapshot.workerName,
+        });
+      } else {
+        const recoveryTraffic = isolatePlatformWorkerCustomDomains(recoveryConfig);
+        const previousRecoveryTraffic = isolatePlatformWorkerCustomDomains(previousRecoveryConfig);
+        await rollbackPlatformWorker({
+          accountId: plan.account.id,
+          activatedDeploymentId: null,
+          activatedVersionId: snapshot.stagedVersionId,
+          config: recoveryConfig,
+          nextTriggers: readTriggerConfigFromObject(recoveryTraffic.wranglerConfig),
+          previousConfig: previousRecoveryConfig,
+          previousCustomDomains: previousRecoveryTraffic.customDomains,
+          previousDeployment: null,
+          previousTriggers: mergePreservedTriggerRoutes(
+            withoutPlatformCustomDomainTriggers(snapshot.previousTriggers),
+            preservedRoutes,
+          ),
+          previousVersionId: snapshot.previousVersionId,
+          preserveCustomDomains: interruptedCutover.unsafeTraffic.has(key),
+          inspectNewWorker: () =>
+            inspectNewPlatformWorker(
+              dependencies.client,
+              plan.account.id,
+              manifest!,
+              key === 'emailGateway' ? 'email-gateway-worker' : `${key}-worker`,
+              snapshot.workerName,
+            ),
+          removeCustomDomains: async () => {
+            if (!dependencies.client.removeRoutes) {
+              throw new Error('platform: Cloudflare route removal is unavailable.');
+            }
+            await dependencies.client.removeRoutes(
+              plan.account.id,
+              zoneId,
+              trackedPlatformWorkerTraffic(manifest!, new Set([snapshot.workerName])),
+            );
+          },
+          publishCustomDomains: (workerName, origins) =>
+            publishPlatformWorkerCustomDomains(
+              dependencies.client,
+              plan.account.id,
+              workerName,
+              origins,
+            ),
+          retainNewWorker: async () => {
+            await dependencies.client.putKvValue(
+              plan.account.id,
+              requireId(ids, 'routing-kv'),
+              PLATFORM_DISABLED_KEY,
+              PLATFORM_DISABLED_VALUE,
+            );
+          },
+          runner: runPinnedPlatformWrangler,
+          workerExisted: snapshot.previousVersionId !== null,
+          workerName: snapshot.workerName,
+        });
+      }
+    }
+    manifest = recordWorkerCutoverResolution(
+      manifest,
+      interruptedCutover.generation,
+      'restored',
+      now(),
+    );
+    manifest = recordWorkerTrafficState(
+      manifest,
+      interruptedCutover.generation,
+      previousPublicEndpoints && interruptedCutover.unsafeTraffic.size === 0,
+      now(),
+    );
+    let retainedNewWorker = false;
+    for (const [, snapshot] of interruptedCutover.staged) {
+      if (snapshot.previousVersionId !== null) {
+        continue;
+      }
+      retainedNewWorker = true;
+    }
+    onManifestChange(manifest);
+    writeInstallationManifest(manifest);
+    await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+    if (retainedNewWorker) {
+      if (!dependencies.replanWorkers) {
+        throw new Error(
+          'platform: Recovering retained Workers requires a fresh Cloudflare installation plan.',
+        );
+      }
+      workerActions = validateReplannedWorkerActions(
+        plan,
+        manifest,
+        await dependencies.replanWorkers(manifest),
+      ).filter((action) => hasEmailGatewayArtifact || action.key !== 'email-gateway-worker');
+    }
+  }
+  return { manifest, workerActions };
+}
+
+// Preserve the routing gate first; rollback and manifest failure checkpoints
+// follow while the database lifecycle lock is still held by the caller.
+async function recoverFailedPlatformInstallation(
+  error: unknown,
+  manifest: PlatformInstallationManifest,
+  plan: PlatformInstallPlan,
+  dependencies: PlatformInstallerDependencies,
+  workerTrafficGuarded: boolean,
+  workerDeploymentCommitted: boolean,
+  workerRollbacks: Array<PlatformWorkerRollback>,
+  authenticationEnforcementActive: boolean,
+  authenticationProtocolTransition: boolean,
+  workerCutoverGeneration: number,
+  previousPublicEndpoints: boolean,
+  now: () => string,
+  writeRemoteInstallationCheckpoint: InstallationCheckpointWriter,
+): Promise<unknown> {
+  let failure: unknown = error;
+  const currentWorkerRecoveryIncomplete = error instanceof PlatformWorkerRecoveryIncompleteError;
+  if (workerTrafficGuarded) {
+    try {
+      await dependencies.client.putKvValue(
+        plan.account.id,
+        requireId(
+          Object.fromEntries(manifest.resources.map((resource) => [resource.key, resource.id])),
+          'routing-kv',
+        ),
+        PLATFORM_DISABLED_KEY,
+        PLATFORM_DISABLED_VALUE,
+      );
+    } catch (guardError) {
+      failure = new Error(
+        `platform: ${errorMessage(error)} The installation also failed to retain its routing safety gate: ${errorMessage(guardError)}`,
+        { cause: error },
+      );
+    }
+  }
+  if (
+    !workerDeploymentCommitted &&
+    workerRollbacks.length > 0 &&
+    !(authenticationEnforcementActive && authenticationProtocolTransition)
+  ) {
+    const rollbackFailures: Array<string> = [];
+    for (const rollback of workerRollbacks.reverse()) {
+      try {
+        await rollback();
+      } catch (rollbackError) {
+        rollbackFailures.push(errorMessage(rollbackError));
+      }
+    }
+    workerRollbacks = [];
+    if (rollbackFailures.length > 0 || currentWorkerRecoveryIncomplete) {
+      failure = new Error(
+        rollbackFailures.length > 0
+          ? `platform: ${errorMessage(error)} Automatic Worker rollback was incomplete: ${rollbackFailures.join('; ')} Inspect the installation before retrying.`
+          : `platform: ${errorMessage(error)} The current Worker rollback was incomplete. The cutover remains unresolved and will be recovered on retry.`,
+        { cause: error },
+      );
+    } else if (workerCutoverGeneration > 0) {
+      manifest = recordWorkerCutoverResolution(
+        manifest,
+        workerCutoverGeneration,
+        'restored',
+        now(),
+      );
+      manifest = recordWorkerTrafficState(
+        manifest,
+        workerCutoverGeneration,
+        previousPublicEndpoints,
+        now(),
+      );
+      writeInstallationManifest(manifest);
+    }
+  } else if (authenticationEnforcementActive && authenticationProtocolTransition) {
+    // Traffic remains closed and retry resumes toward a fully compatible Worker set.
+    workerRollbacks = [];
+  }
+  if (manifest.status !== 'failed' && manifest.status !== 'uninstalled') {
+    try {
+      manifest = transitionInstallation(manifest, 'failed', now());
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+    } catch {
+      // Preserve the original failure when a terminal state cannot transition.
+    }
+  }
+  return failure;
+}
+
 export async function installPlatform(
   plan: PlatformInstallPlan,
   secrets: PlatformInstallationSecrets,
@@ -1713,124 +1945,25 @@ export async function installPlatform(
         action.kind === 'worker' &&
         (hasEmailGatewayArtifact || action.key !== 'email-gateway-worker'),
     );
-    if (interruptedCutover) {
-      for (const key of [...interruptedCutover.staged.keys()].reverse()) {
-        const snapshot = interruptedCutover.staged.get(key)!;
-        const preservedRoutes = dependencies.recoverWorkerCutover
-          ? []
-          : await inventoryUnmanagedPlatformWorkerTraffic(
-              dependencies.client,
-              plan,
-              snapshot.workerName,
-            );
-        const recoveryConfig = mergePlatformWorkerTrafficConfig(
-          { ...configs[key], name: snapshot.workerName },
-          preservedRoutes,
-        );
-        const previousRecoveryConfig = mergePlatformWorkerTrafficConfig(
-          { ...previousConfigs[key], name: snapshot.workerName },
-          preservedRoutes,
-        );
-        if (dependencies.recoverWorkerCutover) {
-          await dependencies.recoverWorkerCutover({
-            key,
-            preserveCustomDomains: interruptedCutover.unsafeTraffic.has(key),
-            previousVersionId: snapshot.previousVersionId,
-            stagedVersionId: snapshot.stagedVersionId,
-            workerName: snapshot.workerName,
-          });
-        } else {
-          const recoveryTraffic = isolatePlatformWorkerCustomDomains(recoveryConfig);
-          const previousRecoveryTraffic =
-            isolatePlatformWorkerCustomDomains(previousRecoveryConfig);
-          await rollbackPlatformWorker({
-            accountId: plan.account.id,
-            activatedDeploymentId: null,
-            activatedVersionId: snapshot.stagedVersionId,
-            config: recoveryConfig,
-            nextTriggers: readTriggerConfigFromObject(recoveryTraffic.wranglerConfig),
-            previousConfig: previousRecoveryConfig,
-            previousCustomDomains: previousRecoveryTraffic.customDomains,
-            previousDeployment: null,
-            previousTriggers: mergePreservedTriggerRoutes(
-              withoutPlatformCustomDomainTriggers(snapshot.previousTriggers),
-              preservedRoutes,
-            ),
-            previousVersionId: snapshot.previousVersionId,
-            preserveCustomDomains: interruptedCutover.unsafeTraffic.has(key),
-            inspectNewWorker: () =>
-              inspectNewPlatformWorker(
-                dependencies.client,
-                plan.account.id,
-                manifest!,
-                key === 'emailGateway' ? 'email-gateway-worker' : `${key}-worker`,
-                snapshot.workerName,
-              ),
-            removeCustomDomains: async () => {
-              if (!dependencies.client.removeRoutes) {
-                throw new Error('platform: Cloudflare route removal is unavailable.');
-              }
-              await dependencies.client.removeRoutes(
-                plan.account.id,
-                zoneId,
-                trackedPlatformWorkerTraffic(manifest!, new Set([snapshot.workerName])),
-              );
-            },
-            publishCustomDomains: (workerName, origins) =>
-              publishPlatformWorkerCustomDomains(
-                dependencies.client,
-                plan.account.id,
-                workerName,
-                origins,
-              ),
-            retainNewWorker: async () => {
-              await dependencies.client.putKvValue(
-                plan.account.id,
-                requireId(ids, 'routing-kv'),
-                PLATFORM_DISABLED_KEY,
-                PLATFORM_DISABLED_VALUE,
-              );
-            },
-            runner: runPinnedPlatformWrangler,
-            workerExisted: snapshot.previousVersionId !== null,
-            workerName: snapshot.workerName,
-          });
-        }
-      }
-      manifest = recordWorkerCutoverResolution(
-        manifest,
-        interruptedCutover.generation,
-        'restored',
-        now(),
-      );
-      manifest = recordWorkerTrafficState(
-        manifest,
-        interruptedCutover.generation,
-        previousPublicEndpoints && interruptedCutover.unsafeTraffic.size === 0,
-        now(),
-      );
-      let retainedNewWorker = false;
-      for (const [, snapshot] of interruptedCutover.staged) {
-        if (snapshot.previousVersionId !== null) {
-          continue;
-        }
-        retainedNewWorker = true;
-      }
-      writeInstallationManifest(manifest);
-      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-      if (retainedNewWorker) {
-        if (!dependencies.replanWorkers) {
-          throw new Error(
-            'platform: Recovering retained Workers requires a fresh Cloudflare installation plan.',
-          );
-        }
-        workerActions = validateReplannedWorkerActions(
-          plan,
-          manifest,
-          await dependencies.replanWorkers(manifest),
-        ).filter((action) => hasEmailGatewayArtifact || action.key !== 'email-gateway-worker');
-      }
-    }
+    ({ manifest, workerActions } = await recoverInterruptedPlatformWorkerCutover(
+      manifest,
+      interruptedCutover,
+      workerActions,
+      configs,
+      previousConfigs,
+      plan,
+      dependencies,
+      ids,
+      zoneId,
+      previousPublicEndpoints,
+      hasEmailGatewayArtifact,
+      runPinnedPlatformWrangler,
+      now,
+      writeRemoteInstallationCheckpoint,
+      (next) => {
+        manifest = next;
+      },
+    ));
     workerCutoverGeneration = nextWorkerCutoverGeneration(manifest);
     if (workerSecretUpdateIntent) {
       manifest = recordWorkerSecretUpdateState(
@@ -2446,76 +2579,21 @@ export async function installPlatform(
       zoneNameServers: zone?.nameServers ?? [],
     };
   } catch (error) {
-    let failure: unknown = error;
-    const currentWorkerRecoveryIncomplete = error instanceof PlatformWorkerRecoveryIncompleteError;
-    if (workerTrafficGuarded) {
-      try {
-        await dependencies.client.putKvValue(
-          plan.account.id,
-          requireId(
-            Object.fromEntries(manifest.resources.map((resource) => [resource.key, resource.id])),
-            'routing-kv',
-          ),
-          PLATFORM_DISABLED_KEY,
-          PLATFORM_DISABLED_VALUE,
-        );
-      } catch (guardError) {
-        failure = new Error(
-          `platform: ${errorMessage(error)} The installation also failed to retain its routing safety gate: ${errorMessage(guardError)}`,
-          { cause: error },
-        );
-      }
-    }
-    if (
-      !workerDeploymentCommitted &&
-      workerRollbacks.length > 0 &&
-      !(authenticationEnforcementActive && authenticationProtocolTransition)
-    ) {
-      const rollbackFailures: Array<string> = [];
-      for (const rollback of workerRollbacks.reverse()) {
-        try {
-          await rollback();
-        } catch (rollbackError) {
-          rollbackFailures.push(errorMessage(rollbackError));
-        }
-      }
-      workerRollbacks = [];
-      if (rollbackFailures.length > 0 || currentWorkerRecoveryIncomplete) {
-        failure = new Error(
-          rollbackFailures.length > 0
-            ? `platform: ${errorMessage(error)} Automatic Worker rollback was incomplete: ${rollbackFailures.join('; ')} Inspect the installation before retrying.`
-            : `platform: ${errorMessage(error)} The current Worker rollback was incomplete. The cutover remains unresolved and will be recovered on retry.`,
-          { cause: error },
-        );
-      } else if (workerCutoverGeneration > 0) {
-        manifest = recordWorkerCutoverResolution(
-          manifest,
-          workerCutoverGeneration,
-          'restored',
-          now(),
-        );
-        manifest = recordWorkerTrafficState(
-          manifest,
-          workerCutoverGeneration,
-          previousPublicEndpoints,
-          now(),
-        );
-        writeInstallationManifest(manifest);
-      }
-    } else if (authenticationEnforcementActive && authenticationProtocolTransition) {
-      // Traffic remains closed and retry resumes toward a fully compatible Worker set.
-      workerRollbacks = [];
-    }
-    if (manifest.status !== 'failed' && manifest.status !== 'uninstalled') {
-      try {
-        manifest = transitionInstallation(manifest, 'failed', now());
-        writeInstallationManifest(manifest);
-        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-      } catch {
-        // Preserve the original failure when a terminal state cannot transition.
-      }
-    }
-    throw failure;
+    throw await recoverFailedPlatformInstallation(
+      error,
+      manifest,
+      plan,
+      dependencies,
+      workerTrafficGuarded,
+      workerDeploymentCommitted,
+      workerRollbacks,
+      authenticationEnforcementActive,
+      authenticationProtocolTransition,
+      workerCutoverGeneration,
+      previousPublicEndpoints,
+      now,
+      writeRemoteInstallationCheckpoint,
+    );
   } finally {
     await releaseDatabaseLock();
   }
