@@ -258,6 +258,15 @@ export interface ProvisionResult {
   accountIdWritten: boolean;
 }
 
+type PinnedRunWrangler = (
+  args: Array<string>,
+  callOpts?: { cwd?: string; captureJson?: boolean; suppressLogs?: boolean },
+) => Promise<RunWranglerResult>;
+
+type ProvisionConfigWriter = (
+  patch: Parameters<typeof writeProvisionedWranglerConfig>[1],
+) => WriteProvisionedWranglerResult;
+
 export interface ProvisionLogger {
   info: (msg: string) => void;
   warn: (msg: string) => void;
@@ -4133,6 +4142,457 @@ export async function enableD1ReadReplicationViaApi(
   }
 }
 
+async function reconcileD1(
+  desired: DesiredResourceSet,
+  configPath: string,
+  runWrangler: PinnedRunWrangler,
+  write: ProvisionConfigWriter,
+  persistCreatedConfig: () => void,
+  resources: Array<ProvisionOutcome>,
+  log: ProvisionLogger,
+  transportAccountId: string,
+  transportApiBaseUrl: string,
+  opts?: ProvisionOptions,
+): Promise<void> {
+  // --- D1 ------------------------------------------------------------------
+  if (desired.d1) {
+    const { binding, name } = desired.d1;
+    // The config-relative `migrations_dir` to stamp on the D1 entry. The orchestrator
+    // passes the sourceDir-aware value; fall back to the default when unset so a direct
+    // provisioner call (no orchestrator) keeps the historical `./db/migrations`.
+    const migrationsDir = desired.d1.migrationsDir ?? D1_MIGRATIONS_DIR;
+    const entry = readBindingEntry(configPath, 'd1_databases', binding);
+    if (entry && isRealD1Id(entry.database_id)) {
+      // Stored-name identity: when the entry
+      // STORES a `database_name`, it must EQUAL the desired name before the id is
+      // reused. A real id under a CONTRADICTING stored name means the binding points at
+      // a DIFFERENT database than this deploy wants — reusing it would silently run the
+      // app (and its migrations) against the wrong database. An entry storing NO name
+      // keeps ID-only reuse (the id alone is the identity then).
+      const storedName = entry.database_name;
+      if (storedName !== undefined && storedName !== name) {
+        throw new Error(
+          `provision: D1 binding ${JSON.stringify(binding)} in "${configPath}" stores ` +
+            `database_name ${JSON.stringify(storedName)} (with a real database_id), but this ` +
+            `deploy wants database ${JSON.stringify(name)}. Refusing to reuse a database that ` +
+            `contradicts the desired name. Fix "${configPath}" — correct the entry's ` +
+            `database_name/database_id (or remove the entry to re-provision) — or rename the ` +
+            `desired database, then retry.`,
+        );
+      }
+      // Read-first hit. A prior run may have created the D1 (id written) then
+      // crashed BEFORE migrations_dir was set, so ensure + verify it here too —
+      // idempotent when already present — so the retry converges rather than
+      // leaving the gap unfilled forever.
+      const res = write({ d1MigrationsDir: { binding, dir: migrationsDir } });
+      assertD1MigrationsDirApplied(res, binding, configPath);
+      resources.push({ kind: 'd1', binding, name, action: 'reused', id: entry.database_id });
+    } else {
+      // Discovery must SUCCEED (gate) before its stdout is parsed, then the whole
+      // list is strictly validated — a nonzero/SIGTERM/spawn-error or a malformed
+      // member never parses as "absent" and mints a duplicate D1.
+      const listResult = await runWrangler(
+        ['d1', 'list', '--json', ...wranglerConfigArgs(configPath)],
+        {
+          captureJson: true,
+        },
+      );
+      assertDiscoverySucceeded(listResult, 'wrangler d1 list');
+      const rawList = parseJsonArrayStrict(listResult.stdout);
+      if (!rawList) {
+        throw new Error(
+          `provision: "wrangler d1 list --json" did not return a JSON array; cannot verify whether ` +
+            `D1 database ${JSON.stringify(name)} exists. Refusing to create a possible duplicate.`,
+        );
+      }
+      const databases = validateResourceList(rawList, {
+        resource: 'D1 database',
+        command: 'wrangler d1 list',
+        // The ONE alias reconciler gates EVERY member (never "any one alias
+        // valid"): a conflicting or malformed secondary alias rejects the whole list.
+        hasValidId: (member) => reconcileD1IdAliases(member).kind === 'id',
+        idRule:
+          'its uuid/database_id aliases must be present, well-formed D1 UUIDs agreeing on one id',
+        nameField: 'name',
+        nameLabel: 'named',
+      });
+      // Run the ONE strict normalizer over EVERY member against the requested
+      // name. Collect the members that CLAIM the requested name (match or ambiguous).
+      // - >1 claimant → ambiguous which to adopt → fail closed;
+      // - 1 ambiguous claimant → fail closed (never adopt an ambiguous id, never
+      //   mistake it for absent and mint a duplicate);
+      // - 1 valid claimant → adopt; 0 → create.
+      const claimants = databases
+        .map((db) => normalizeD1(db, name))
+        .filter((m): m is Exclude<D1Match, { kind: 'other' }> => m.kind !== 'other');
+      if (claimants.length > 1) {
+        throw new Error(
+          `provision: "wrangler d1 list" returned ${claimants.length} D1 databases named ` +
+            `${JSON.stringify(name)}. D1 database names are account-unique, so this is ambiguous; ` +
+            `cannot pick one to adopt and refusing to create a possible duplicate. Inspect the ` +
+            `account and retry.`,
+        );
+      }
+      if (claimants.length === 1 && claimants[0].kind === 'claimed-but-invalid') {
+        throw new Error(
+          `provision: "wrangler d1 list" returned a D1 database named ${JSON.stringify(name)} with ` +
+            `an ambiguous or empty id (conflicting/blank uuid/database_id, or conflicting name ` +
+            `aliases). Cannot adopt it, and refusing to create a possible duplicate; inspect the ` +
+            `account and retry.`,
+        );
+      }
+      // After the guards above, a lone claimant is necessarily a valid `match`.
+      const existing =
+        claimants.length === 1 && claimants[0].kind === 'match' ? claimants[0] : undefined;
+      if (existing) {
+        log.info(`adopted existing D1 database ${name} (${existing.id})`);
+        const res = write({
+          d1: { binding, databaseName: name, databaseId: existing.id },
+          d1MigrationsDir: { binding, dir: migrationsDir },
+        });
+        assertD1MigrationsDirApplied(res, binding, configPath);
+        resources.push({ kind: 'd1', binding, name, action: 'adopted', id: existing.id });
+      } else {
+        const created = await runWrangler([
+          'd1',
+          'create',
+          name,
+          '--binding',
+          binding,
+          '--update-config',
+          ...wranglerConfigArgs(configPath),
+        ]);
+        if (isCleanSuccess(created)) {
+          // wrangler wrote database_id/database_name via --update-config; VERIFY the
+          // real id landed (postcondition), then fill the migrations_dir it does
+          // not write.
+          assertCreateWroteRealId(
+            configPath,
+            {
+              field: 'd1_databases',
+              idField: 'database_id',
+              idValidator: isRealD1Id,
+              nameField: 'database_name',
+              resource: 'D1 database',
+              command: 'wrangler d1 create',
+            },
+            binding,
+            name,
+          );
+          persistCreatedConfig();
+          const res = write({ d1MigrationsDir: { binding, dir: migrationsDir } });
+          assertD1MigrationsDirApplied(res, binding, configPath);
+          resources.push({ kind: 'd1', binding, name, action: 'created' });
+        } else if (isCleanFailure(created) && isAlreadyExistsError(created)) {
+          // TOCTOU: created between our list and create (clean non-zero, code 7502).
+          // Capture the id via `d1 info` — which must SUCCEED (gate) and POSITIVELY
+          // identify THIS database (EXACT name match) before we adopt its id.
+          const infoResult = await runWrangler(
+            ['d1', 'info', name, '--json', ...wranglerConfigArgs(configPath)],
+            { captureJson: true },
+          );
+          assertDiscoverySucceeded(infoResult, `wrangler d1 info ${name}`);
+          // SAME strict normalizer as the list path — must POSITIVELY identify THIS
+          // database by an exact name match with an unambiguous id.
+          const info = normalizeD1(parseJsonObject(infoResult.stdout), name);
+          if (info.kind !== 'match') {
+            throw new Error(
+              `provision: "wrangler d1 create ${name}" reported the database already exists, ` +
+                `but "wrangler d1 info ${name} --json" did not return a database with a matching ` +
+                `name and an unambiguous id. Refusing to adopt an unverified database.`,
+            );
+          }
+          log.info(`adopted existing D1 database ${name} (${info.id})`);
+          const res = write({
+            d1: { binding, databaseName: name, databaseId: info.id },
+            d1MigrationsDir: { binding, dir: migrationsDir },
+          });
+          assertD1MigrationsDirApplied(res, binding, configPath);
+          resources.push({ kind: 'd1', binding, name, action: 'adopted', id: info.id });
+        } else {
+          // Everything else — a hard failure (signal/spawn error) or a clean
+          // non-7502 error — fails closed.
+          throw new Error(
+            `provision: "wrangler d1 create ${name}" failed: ${created.stderr || created.stdout}`,
+          );
+        }
+      }
+    }
+
+    // The database-level setting is separate from the Worker binding. A reused
+    // database may predate this feature, so converge it on every provision run.
+    const databaseId = readBindingEntry(configPath, 'd1_databases', binding)?.database_id;
+    if (!isRealD1Id(databaseId)) {
+      throw new Error(`provision: D1 binding ${binding} has no real database id after setup.`);
+    }
+    const context: D1ReplicationContext = {
+      databaseId,
+      accountId: transportAccountId,
+      apiBaseUrl: transportApiBaseUrl,
+    };
+    if (opts?.enableD1ReadReplication) {
+      await opts.enableD1ReadReplication(context);
+    } else {
+      let token = opts?.apiToken ?? process.env.CLOUDFLARE_API_TOKEN;
+      if (!token) {
+        const auth = await runWrangler(
+          ['auth', 'token', '--json', ...wranglerConfigArgs(configPath)],
+          { captureJson: true, suppressLogs: true },
+        );
+        const start = auth.stdout.indexOf('{');
+        const end = auth.stdout.lastIndexOf('}');
+        let parsed: { type?: unknown; token?: unknown } | undefined;
+        if (isCleanSuccess(auth) && start >= 0 && end > start) {
+          try {
+            parsed = JSON.parse(auth.stdout.slice(start, end + 1)) as typeof parsed;
+          } catch {
+            // A malformed response is handled by the missing-token error below.
+          }
+        }
+        if (
+          (parsed?.type === 'oauth' || parsed?.type === 'api_token') &&
+          typeof parsed.token === 'string'
+        ) {
+          token = parsed.token;
+        }
+      }
+      if (!token) {
+        throw new Error(
+          'provision: D1 read replication requires a Cloudflare API bearer with D1 Edit permission. ' +
+            'Log in with `wrangler login` or set CLOUDFLARE_API_TOKEN, then retry.',
+        );
+      }
+      await enableD1ReadReplicationViaApi(context, token);
+    }
+  }
+}
+
+async function reconcileKv(
+  desired: DesiredResourceSet,
+  configPath: string,
+  runWrangler: PinnedRunWrangler,
+  write: ProvisionConfigWriter,
+  persistCreatedConfig: () => void,
+  resources: Array<ProvisionOutcome>,
+  log: ProvisionLogger,
+): Promise<void> {
+  // --- KV ------------------------------------------------------------------
+  for (const { binding, title } of desired.kvNamespaces) {
+    const entry = readBindingEntry(configPath, 'kv_namespaces', binding);
+    if (entry && isRealKvId(entry.id)) {
+      resources.push({ kind: 'kv', binding, name: title, action: 'reused', id: entry.id });
+      continue;
+    }
+    // KV titles are NOT account-unique and `kv namespace create` never dedupes,
+    // so this list is the ONLY orphan guard. Route it through the SHARED gate +
+    // strict validator: the discovery must exit 0 (nonzero/SIGTERM/spawn-error →
+    // throw), return a real JSON array, and have EVERY member well-formed (a
+    // malformed member — which could BE the target — fails closed rather than being
+    // filtered to a false "absent" that mints a duplicate namespace).
+    const listResult = await runWrangler(
+      ['kv', 'namespace', 'list', ...wranglerConfigArgs(configPath)],
+      {
+        captureJson: true,
+      },
+    );
+    assertDiscoverySucceeded(listResult, 'wrangler kv namespace list');
+    const rawList = parseJsonArrayStrict(listResult.stdout);
+    if (!rawList) {
+      throw new Error(
+        `provision: "wrangler kv namespace list" did not return a JSON array; cannot verify whether ` +
+          `KV namespace ${JSON.stringify(title)} exists. Refusing to create a possible duplicate.`,
+      );
+    }
+    const namespaces = validateResourceList(rawList, {
+      resource: 'KV namespace',
+      command: 'wrangler kv namespace list',
+      hasValidId: (member) => isRealKvId(member.id),
+      idRule: 'its id is missing or not a well-formed 32-hex namespace id',
+      nameField: 'title',
+      nameLabel: 'titled',
+    });
+    const matches = extractKvMatches(namespaces, title);
+    if (matches.length > 0) {
+      // KV titles are NOT account-unique. Tie-break deterministically on the
+      // lexicographically-smallest id so re-runs adopt the same namespace.
+      const chosen = matches.reduce((min, ns) => (ns.id < min.id ? ns : min));
+      if (matches.length > 1) {
+        log.warn(
+          `multiple KV namespaces titled "${title}" (${matches
+            .map((m) => m.id)
+            .join(', ')}); adopting the lexicographically-smallest id ${chosen.id}`,
+        );
+      }
+      log.info(`adopted existing KV namespace ${title} (${chosen.id})`);
+      write({ kv: { binding, id: chosen.id } });
+      resources.push({ kind: 'kv', binding, name: title, action: 'adopted', id: chosen.id });
+    } else {
+      const created = await runWrangler([
+        'kv',
+        'namespace',
+        'create',
+        title,
+        '--binding',
+        binding,
+        '--update-config',
+        ...wranglerConfigArgs(configPath),
+      ]);
+      if (!isCleanSuccess(created)) {
+        throw new Error(
+          `provision: "wrangler kv namespace create ${title}" failed: ${created.stderr || created.stdout}`,
+        );
+      }
+      // Postcondition: confirm --update-config wrote a REAL id (a killed create
+      // masked as exit 0 by wrangler's launcher would leave none).
+      assertCreateWroteRealId(
+        configPath,
+        {
+          field: 'kv_namespaces',
+          idField: 'id',
+          idValidator: isRealKvId,
+          resource: 'KV namespace',
+          command: 'wrangler kv namespace create',
+        },
+        binding,
+        title,
+      );
+      persistCreatedConfig();
+      resources.push({ kind: 'kv', binding, name: title, action: 'created' });
+    }
+  }
+}
+
+async function reconcileR2(
+  desired: DesiredResourceSet,
+  configPath: string,
+  runWrangler: PinnedRunWrangler,
+  write: ProvisionConfigWriter,
+  persistCreatedConfig: () => void,
+  resources: Array<ProvisionOutcome>,
+  log: ProvisionLogger,
+): Promise<void> {
+  // --- R2 ------------------------------------------------------------------
+  if (desired.r2) {
+    const { binding, bucketName } = desired.r2;
+    const entry = readBindingEntry(configPath, 'r2_buckets', binding);
+    // `bucket_name` IS the R2 identity: a stored
+    // REAL (non-placeholder) bucket_name that differs from the desired name is a
+    // CONTRADICTION — reusing it would keep the app bound to a different bucket while
+    // reporting the desired one provisioned. Equal → reuse as before (the desired name
+    // already passed the R2 grammar gate, so an equal stored name is format-valid too).
+    // ONLY R2's own placeholder (`default`) or an absent/non-string name
+    // keeps the discovery path: a stored `local` is a grammar-valid REAL bucket name
+    // (the shared check that also rejected `local` let it bypass this contradiction
+    // gate and be silently rewritten).
+    const storedBucketName = entry?.bucket_name;
+    if (entry && isRealStoredR2BucketName(storedBucketName, bucketName)) {
+      if (storedBucketName !== bucketName) {
+        throw new Error(
+          `provision: R2 binding ${JSON.stringify(binding)} in "${configPath}" stores ` +
+            `bucket_name ${JSON.stringify(storedBucketName)}, but this deploy wants bucket ` +
+            `${JSON.stringify(bucketName)}. bucket_name IS the R2 identity, so this entry ` +
+            `contradicts the desired bucket. Fix "${configPath}" — correct the entry's ` +
+            `bucket_name (or remove the entry to re-provision) — or rename the desired bucket, ` +
+            `then retry.`,
+        );
+      }
+      resources.push({ kind: 'r2', binding, name: bucketName, action: 'reused' });
+    } else {
+      // `wrangler r2 bucket list` is a human table, not JSON. Bucket names ARE
+      // account-unique, so probe the single bucket by name.
+      const info = await runWrangler(
+        ['r2', 'bucket', 'info', bucketName, '--json', ...wranglerConfigArgs(configPath)],
+        { captureJson: true },
+      );
+      if (isCleanSuccess(info)) {
+        // A clean exit 0 is not enough to adopt — the success payload must
+        // POSITIVELY identify the requested bucket (its `name`) before we write the
+        // entry, else a mismatched/garbled 0-exit payload could bind the wrong
+        // bucket. (A signal-killed probe is NOT a clean success — see the rule.)
+        const payload = parseJsonObject(info.stdout);
+        if (!payload || payload.name !== bucketName) {
+          throw new Error(
+            `provision: "wrangler r2 bucket info ${bucketName} --json" exited 0 but did not identify ` +
+              `the requested bucket (expected name ${JSON.stringify(bucketName)}). Refusing to adopt an ` +
+              `unverified bucket. Output: ${info.stdout || info.stderr}`,
+          );
+        }
+        // Adopt it — write the `{binding,bucket_name}` entry via the writer.
+        log.info(`adopted existing R2 bucket ${bucketName}`);
+        write({ r2: { binding, bucketName } });
+        resources.push({ kind: 'r2', binding, name: bucketName, action: 'adopted' });
+      } else if (isConfirmedAbsent(info, 'r2', bucketName)) {
+        // CONFIRMED not-found (clean non-zero + exact signal) → create.
+        // `--update-config` upserts by binding.
+        const created = await runWrangler([
+          'r2',
+          'bucket',
+          'create',
+          bucketName,
+          '--binding',
+          binding,
+          '--update-config',
+          ...wranglerConfigArgs(configPath),
+        ]);
+        if (!isCleanSuccess(created)) {
+          throw new Error(
+            `provision: "wrangler r2 bucket create ${bucketName}" failed: ${created.stderr || created.stdout}`,
+          );
+        }
+        // Postcondition: confirm --update-config wrote the requested bucket_name
+        // (grammar-valid + EXACT name equality — the name IS the R2 identity).
+        // No placeholder heuristic here — a desired bucket genuinely
+        // named `default` must not fail a create that succeeded.
+        assertCreateWroteRealId(
+          configPath,
+          {
+            field: 'r2_buckets',
+            idField: 'bucket_name',
+            idValidator: isValidR2BucketNameFormat,
+            nameField: 'bucket_name',
+            resource: 'R2 bucket',
+            command: 'wrangler r2 bucket create',
+          },
+          binding,
+          bucketName,
+        );
+        // When the DESIRED name IS R2's placeholder string, the config
+        // postcondition is vacuous: a pre-existing placeholder entry is byte-identical
+        // to a real create result, so a masked signal-killed create (wrangler's
+        // launcher can report exit 0) would pass it. Verify via the EXACT remote probe
+        // instead — the same positive identification the adopt path uses.
+        if (bucketName === R2_BUCKET_NAME_PLACEHOLDER) {
+          const verify = await runWrangler(
+            ['r2', 'bucket', 'info', bucketName, '--json', ...wranglerConfigArgs(configPath)],
+            { captureJson: true },
+          );
+          const payload = isCleanSuccess(verify) ? parseJsonObject(verify.stdout) : undefined;
+          if (!payload || payload.name !== bucketName) {
+            throw new Error(
+              `provision: "wrangler r2 bucket create ${bucketName}" reported success but a ` +
+                `follow-up "wrangler r2 bucket info ${bucketName}" did not confirm the bucket ` +
+                `exists. The create may have been interrupted — wrangler's launcher can mask a ` +
+                `signal-killed child as exit 0, and the config entry is indistinguishable from ` +
+                `the local-dev placeholder for this name. Refusing to record an unprovisioned ` +
+                `bucket; inspect the account and retry.`,
+            );
+          }
+        }
+        persistCreatedConfig();
+        resources.push({ kind: 'r2', binding, name: bucketName, action: 'created' });
+      } else {
+        // A non-zero that is NOT the confirmed not-found signal (auth/metrics/
+        // network) — the bucket may well EXIST. Surface the real error instead of
+        // attempting a create that would spuriously fail or risk a duplicate.
+        throw new Error(
+          `provision: "wrangler r2 bucket info ${bucketName}" failed: ${info.stderr || info.stdout}. ` +
+            `Cannot determine whether the bucket exists; refusing to create a possible duplicate.`,
+        );
+      }
+    }
+  }
+}
+
 /**
  * The provision body, run entirely UNDER the whole-provision lock (see
  * {@link provisionCloudflareResources}). `configPath` is the ONE resolved absolute
@@ -4409,423 +4869,22 @@ async function provisionCloudflareResourcesLocked(
       throw redactRejection(error, redactSecrets);
     });
 
-  // --- D1 ------------------------------------------------------------------
-  if (desired.d1) {
-    const { binding, name } = desired.d1;
-    // The config-relative `migrations_dir` to stamp on the D1 entry. The orchestrator
-    // passes the sourceDir-aware value; fall back to the default when unset so a direct
-    // provisioner call (no orchestrator) keeps the historical `./db/migrations`.
-    const migrationsDir = desired.d1.migrationsDir ?? D1_MIGRATIONS_DIR;
-    const entry = readBindingEntry(configPath, 'd1_databases', binding);
-    if (entry && isRealD1Id(entry.database_id)) {
-      // Stored-name identity: when the entry
-      // STORES a `database_name`, it must EQUAL the desired name before the id is
-      // reused. A real id under a CONTRADICTING stored name means the binding points at
-      // a DIFFERENT database than this deploy wants — reusing it would silently run the
-      // app (and its migrations) against the wrong database. An entry storing NO name
-      // keeps ID-only reuse (the id alone is the identity then).
-      const storedName = entry.database_name;
-      if (storedName !== undefined && storedName !== name) {
-        throw new Error(
-          `provision: D1 binding ${JSON.stringify(binding)} in "${configPath}" stores ` +
-            `database_name ${JSON.stringify(storedName)} (with a real database_id), but this ` +
-            `deploy wants database ${JSON.stringify(name)}. Refusing to reuse a database that ` +
-            `contradicts the desired name. Fix "${configPath}" — correct the entry's ` +
-            `database_name/database_id (or remove the entry to re-provision) — or rename the ` +
-            `desired database, then retry.`,
-        );
-      }
-      // Read-first hit. A prior run may have created the D1 (id written) then
-      // crashed BEFORE migrations_dir was set, so ensure + verify it here too —
-      // idempotent when already present — so the retry converges rather than
-      // leaving the gap unfilled forever.
-      const res = write({ d1MigrationsDir: { binding, dir: migrationsDir } });
-      assertD1MigrationsDirApplied(res, binding, configPath);
-      resources.push({ kind: 'd1', binding, name, action: 'reused', id: entry.database_id });
-    } else {
-      // Discovery must SUCCEED (gate) before its stdout is parsed, then the whole
-      // list is strictly validated — a nonzero/SIGTERM/spawn-error or a malformed
-      // member never parses as "absent" and mints a duplicate D1.
-      const listResult = await runWrangler(
-        ['d1', 'list', '--json', ...wranglerConfigArgs(configPath)],
-        {
-          captureJson: true,
-        },
-      );
-      assertDiscoverySucceeded(listResult, 'wrangler d1 list');
-      const rawList = parseJsonArrayStrict(listResult.stdout);
-      if (!rawList) {
-        throw new Error(
-          `provision: "wrangler d1 list --json" did not return a JSON array; cannot verify whether ` +
-            `D1 database ${JSON.stringify(name)} exists. Refusing to create a possible duplicate.`,
-        );
-      }
-      const databases = validateResourceList(rawList, {
-        resource: 'D1 database',
-        command: 'wrangler d1 list',
-        // The ONE alias reconciler gates EVERY member (never "any one alias
-        // valid"): a conflicting or malformed secondary alias rejects the whole list.
-        hasValidId: (member) => reconcileD1IdAliases(member).kind === 'id',
-        idRule:
-          'its uuid/database_id aliases must be present, well-formed D1 UUIDs agreeing on one id',
-        nameField: 'name',
-        nameLabel: 'named',
-      });
-      // Run the ONE strict normalizer over EVERY member against the requested
-      // name. Collect the members that CLAIM the requested name (match or ambiguous).
-      // - >1 claimant → ambiguous which to adopt → fail closed;
-      // - 1 ambiguous claimant → fail closed (never adopt an ambiguous id, never
-      //   mistake it for absent and mint a duplicate);
-      // - 1 valid claimant → adopt; 0 → create.
-      const claimants = databases
-        .map((db) => normalizeD1(db, name))
-        .filter((m): m is Exclude<D1Match, { kind: 'other' }> => m.kind !== 'other');
-      if (claimants.length > 1) {
-        throw new Error(
-          `provision: "wrangler d1 list" returned ${claimants.length} D1 databases named ` +
-            `${JSON.stringify(name)}. D1 database names are account-unique, so this is ambiguous; ` +
-            `cannot pick one to adopt and refusing to create a possible duplicate. Inspect the ` +
-            `account and retry.`,
-        );
-      }
-      if (claimants.length === 1 && claimants[0].kind === 'claimed-but-invalid') {
-        throw new Error(
-          `provision: "wrangler d1 list" returned a D1 database named ${JSON.stringify(name)} with ` +
-            `an ambiguous or empty id (conflicting/blank uuid/database_id, or conflicting name ` +
-            `aliases). Cannot adopt it, and refusing to create a possible duplicate; inspect the ` +
-            `account and retry.`,
-        );
-      }
-      // After the guards above, a lone claimant is necessarily a valid `match`.
-      const existing =
-        claimants.length === 1 && claimants[0].kind === 'match' ? claimants[0] : undefined;
-      if (existing) {
-        log.info(`adopted existing D1 database ${name} (${existing.id})`);
-        const res = write({
-          d1: { binding, databaseName: name, databaseId: existing.id },
-          d1MigrationsDir: { binding, dir: migrationsDir },
-        });
-        assertD1MigrationsDirApplied(res, binding, configPath);
-        resources.push({ kind: 'd1', binding, name, action: 'adopted', id: existing.id });
-      } else {
-        const created = await runWrangler([
-          'd1',
-          'create',
-          name,
-          '--binding',
-          binding,
-          '--update-config',
-          ...wranglerConfigArgs(configPath),
-        ]);
-        if (isCleanSuccess(created)) {
-          // wrangler wrote database_id/database_name via --update-config; VERIFY the
-          // real id landed (postcondition), then fill the migrations_dir it does
-          // not write.
-          assertCreateWroteRealId(
-            configPath,
-            {
-              field: 'd1_databases',
-              idField: 'database_id',
-              idValidator: isRealD1Id,
-              nameField: 'database_name',
-              resource: 'D1 database',
-              command: 'wrangler d1 create',
-            },
-            binding,
-            name,
-          );
-          persistCreatedConfig();
-          const res = write({ d1MigrationsDir: { binding, dir: migrationsDir } });
-          assertD1MigrationsDirApplied(res, binding, configPath);
-          resources.push({ kind: 'd1', binding, name, action: 'created' });
-        } else if (isCleanFailure(created) && isAlreadyExistsError(created)) {
-          // TOCTOU: created between our list and create (clean non-zero, code 7502).
-          // Capture the id via `d1 info` — which must SUCCEED (gate) and POSITIVELY
-          // identify THIS database (EXACT name match) before we adopt its id.
-          const infoResult = await runWrangler(
-            ['d1', 'info', name, '--json', ...wranglerConfigArgs(configPath)],
-            { captureJson: true },
-          );
-          assertDiscoverySucceeded(infoResult, `wrangler d1 info ${name}`);
-          // SAME strict normalizer as the list path — must POSITIVELY identify THIS
-          // database by an exact name match with an unambiguous id.
-          const info = normalizeD1(parseJsonObject(infoResult.stdout), name);
-          if (info.kind !== 'match') {
-            throw new Error(
-              `provision: "wrangler d1 create ${name}" reported the database already exists, ` +
-                `but "wrangler d1 info ${name} --json" did not return a database with a matching ` +
-                `name and an unambiguous id. Refusing to adopt an unverified database.`,
-            );
-          }
-          log.info(`adopted existing D1 database ${name} (${info.id})`);
-          const res = write({
-            d1: { binding, databaseName: name, databaseId: info.id },
-            d1MigrationsDir: { binding, dir: migrationsDir },
-          });
-          assertD1MigrationsDirApplied(res, binding, configPath);
-          resources.push({ kind: 'd1', binding, name, action: 'adopted', id: info.id });
-        } else {
-          // Everything else — a hard failure (signal/spawn error) or a clean
-          // non-7502 error — fails closed.
-          throw new Error(
-            `provision: "wrangler d1 create ${name}" failed: ${created.stderr || created.stdout}`,
-          );
-        }
-      }
-    }
+  await reconcileD1(
+    desired,
+    configPath,
+    runWrangler,
+    write,
+    persistCreatedConfig,
+    resources,
+    log,
+    transportAccountId,
+    transportApiBaseUrl,
+    opts,
+  );
 
-    // The database-level setting is separate from the Worker binding. A reused
-    // database may predate this feature, so converge it on every provision run.
-    const databaseId = readBindingEntry(configPath, 'd1_databases', binding)?.database_id;
-    if (!isRealD1Id(databaseId)) {
-      throw new Error(`provision: D1 binding ${binding} has no real database id after setup.`);
-    }
-    const context: D1ReplicationContext = {
-      databaseId,
-      accountId: transportAccountId,
-      apiBaseUrl: transportApiBaseUrl,
-    };
-    if (opts?.enableD1ReadReplication) {
-      await opts.enableD1ReadReplication(context);
-    } else {
-      let token = opts?.apiToken ?? process.env.CLOUDFLARE_API_TOKEN;
-      if (!token) {
-        const auth = await runWrangler(
-          ['auth', 'token', '--json', ...wranglerConfigArgs(configPath)],
-          { captureJson: true, suppressLogs: true },
-        );
-        const start = auth.stdout.indexOf('{');
-        const end = auth.stdout.lastIndexOf('}');
-        let parsed: { type?: unknown; token?: unknown } | undefined;
-        if (isCleanSuccess(auth) && start >= 0 && end > start) {
-          try {
-            parsed = JSON.parse(auth.stdout.slice(start, end + 1)) as typeof parsed;
-          } catch {
-            // A malformed response is handled by the missing-token error below.
-          }
-        }
-        if (
-          (parsed?.type === 'oauth' || parsed?.type === 'api_token') &&
-          typeof parsed.token === 'string'
-        ) {
-          token = parsed.token;
-        }
-      }
-      if (!token) {
-        throw new Error(
-          'provision: D1 read replication requires a Cloudflare API bearer with D1 Edit permission. ' +
-            'Log in with `wrangler login` or set CLOUDFLARE_API_TOKEN, then retry.',
-        );
-      }
-      await enableD1ReadReplicationViaApi(context, token);
-    }
-  }
+  await reconcileKv(desired, configPath, runWrangler, write, persistCreatedConfig, resources, log);
 
-  // --- KV ------------------------------------------------------------------
-  for (const { binding, title } of desired.kvNamespaces) {
-    const entry = readBindingEntry(configPath, 'kv_namespaces', binding);
-    if (entry && isRealKvId(entry.id)) {
-      resources.push({ kind: 'kv', binding, name: title, action: 'reused', id: entry.id });
-      continue;
-    }
-    // KV titles are NOT account-unique and `kv namespace create` never dedupes,
-    // so this list is the ONLY orphan guard. Route it through the SHARED gate +
-    // strict validator: the discovery must exit 0 (nonzero/SIGTERM/spawn-error →
-    // throw), return a real JSON array, and have EVERY member well-formed (a
-    // malformed member — which could BE the target — fails closed rather than being
-    // filtered to a false "absent" that mints a duplicate namespace).
-    const listResult = await runWrangler(
-      ['kv', 'namespace', 'list', ...wranglerConfigArgs(configPath)],
-      {
-        captureJson: true,
-      },
-    );
-    assertDiscoverySucceeded(listResult, 'wrangler kv namespace list');
-    const rawList = parseJsonArrayStrict(listResult.stdout);
-    if (!rawList) {
-      throw new Error(
-        `provision: "wrangler kv namespace list" did not return a JSON array; cannot verify whether ` +
-          `KV namespace ${JSON.stringify(title)} exists. Refusing to create a possible duplicate.`,
-      );
-    }
-    const namespaces = validateResourceList(rawList, {
-      resource: 'KV namespace',
-      command: 'wrangler kv namespace list',
-      hasValidId: (member) => isRealKvId(member.id),
-      idRule: 'its id is missing or not a well-formed 32-hex namespace id',
-      nameField: 'title',
-      nameLabel: 'titled',
-    });
-    const matches = extractKvMatches(namespaces, title);
-    if (matches.length > 0) {
-      // KV titles are NOT account-unique. Tie-break deterministically on the
-      // lexicographically-smallest id so re-runs adopt the same namespace.
-      const chosen = matches.reduce((min, ns) => (ns.id < min.id ? ns : min));
-      if (matches.length > 1) {
-        log.warn(
-          `multiple KV namespaces titled "${title}" (${matches
-            .map((m) => m.id)
-            .join(', ')}); adopting the lexicographically-smallest id ${chosen.id}`,
-        );
-      }
-      log.info(`adopted existing KV namespace ${title} (${chosen.id})`);
-      write({ kv: { binding, id: chosen.id } });
-      resources.push({ kind: 'kv', binding, name: title, action: 'adopted', id: chosen.id });
-    } else {
-      const created = await runWrangler([
-        'kv',
-        'namespace',
-        'create',
-        title,
-        '--binding',
-        binding,
-        '--update-config',
-        ...wranglerConfigArgs(configPath),
-      ]);
-      if (!isCleanSuccess(created)) {
-        throw new Error(
-          `provision: "wrangler kv namespace create ${title}" failed: ${created.stderr || created.stdout}`,
-        );
-      }
-      // Postcondition: confirm --update-config wrote a REAL id (a killed create
-      // masked as exit 0 by wrangler's launcher would leave none).
-      assertCreateWroteRealId(
-        configPath,
-        {
-          field: 'kv_namespaces',
-          idField: 'id',
-          idValidator: isRealKvId,
-          resource: 'KV namespace',
-          command: 'wrangler kv namespace create',
-        },
-        binding,
-        title,
-      );
-      persistCreatedConfig();
-      resources.push({ kind: 'kv', binding, name: title, action: 'created' });
-    }
-  }
-
-  // --- R2 ------------------------------------------------------------------
-  if (desired.r2) {
-    const { binding, bucketName } = desired.r2;
-    const entry = readBindingEntry(configPath, 'r2_buckets', binding);
-    // `bucket_name` IS the R2 identity: a stored
-    // REAL (non-placeholder) bucket_name that differs from the desired name is a
-    // CONTRADICTION — reusing it would keep the app bound to a different bucket while
-    // reporting the desired one provisioned. Equal → reuse as before (the desired name
-    // already passed the R2 grammar gate, so an equal stored name is format-valid too).
-    // ONLY R2's own placeholder (`default`) or an absent/non-string name
-    // keeps the discovery path: a stored `local` is a grammar-valid REAL bucket name
-    // (the shared check that also rejected `local` let it bypass this contradiction
-    // gate and be silently rewritten).
-    const storedBucketName = entry?.bucket_name;
-    if (entry && isRealStoredR2BucketName(storedBucketName, bucketName)) {
-      if (storedBucketName !== bucketName) {
-        throw new Error(
-          `provision: R2 binding ${JSON.stringify(binding)} in "${configPath}" stores ` +
-            `bucket_name ${JSON.stringify(storedBucketName)}, but this deploy wants bucket ` +
-            `${JSON.stringify(bucketName)}. bucket_name IS the R2 identity, so this entry ` +
-            `contradicts the desired bucket. Fix "${configPath}" — correct the entry's ` +
-            `bucket_name (or remove the entry to re-provision) — or rename the desired bucket, ` +
-            `then retry.`,
-        );
-      }
-      resources.push({ kind: 'r2', binding, name: bucketName, action: 'reused' });
-    } else {
-      // `wrangler r2 bucket list` is a human table, not JSON. Bucket names ARE
-      // account-unique, so probe the single bucket by name.
-      const info = await runWrangler(
-        ['r2', 'bucket', 'info', bucketName, '--json', ...wranglerConfigArgs(configPath)],
-        { captureJson: true },
-      );
-      if (isCleanSuccess(info)) {
-        // A clean exit 0 is not enough to adopt — the success payload must
-        // POSITIVELY identify the requested bucket (its `name`) before we write the
-        // entry, else a mismatched/garbled 0-exit payload could bind the wrong
-        // bucket. (A signal-killed probe is NOT a clean success — see the rule.)
-        const payload = parseJsonObject(info.stdout);
-        if (!payload || payload.name !== bucketName) {
-          throw new Error(
-            `provision: "wrangler r2 bucket info ${bucketName} --json" exited 0 but did not identify ` +
-              `the requested bucket (expected name ${JSON.stringify(bucketName)}). Refusing to adopt an ` +
-              `unverified bucket. Output: ${info.stdout || info.stderr}`,
-          );
-        }
-        // Adopt it — write the `{binding,bucket_name}` entry via the writer.
-        log.info(`adopted existing R2 bucket ${bucketName}`);
-        write({ r2: { binding, bucketName } });
-        resources.push({ kind: 'r2', binding, name: bucketName, action: 'adopted' });
-      } else if (isConfirmedAbsent(info, 'r2', bucketName)) {
-        // CONFIRMED not-found (clean non-zero + exact signal) → create.
-        // `--update-config` upserts by binding.
-        const created = await runWrangler([
-          'r2',
-          'bucket',
-          'create',
-          bucketName,
-          '--binding',
-          binding,
-          '--update-config',
-          ...wranglerConfigArgs(configPath),
-        ]);
-        if (!isCleanSuccess(created)) {
-          throw new Error(
-            `provision: "wrangler r2 bucket create ${bucketName}" failed: ${created.stderr || created.stdout}`,
-          );
-        }
-        // Postcondition: confirm --update-config wrote the requested bucket_name
-        // (grammar-valid + EXACT name equality — the name IS the R2 identity).
-        // No placeholder heuristic here — a desired bucket genuinely
-        // named `default` must not fail a create that succeeded.
-        assertCreateWroteRealId(
-          configPath,
-          {
-            field: 'r2_buckets',
-            idField: 'bucket_name',
-            idValidator: isValidR2BucketNameFormat,
-            nameField: 'bucket_name',
-            resource: 'R2 bucket',
-            command: 'wrangler r2 bucket create',
-          },
-          binding,
-          bucketName,
-        );
-        // When the DESIRED name IS R2's placeholder string, the config
-        // postcondition is vacuous: a pre-existing placeholder entry is byte-identical
-        // to a real create result, so a masked signal-killed create (wrangler's
-        // launcher can report exit 0) would pass it. Verify via the EXACT remote probe
-        // instead — the same positive identification the adopt path uses.
-        if (bucketName === R2_BUCKET_NAME_PLACEHOLDER) {
-          const verify = await runWrangler(
-            ['r2', 'bucket', 'info', bucketName, '--json', ...wranglerConfigArgs(configPath)],
-            { captureJson: true },
-          );
-          const payload = isCleanSuccess(verify) ? parseJsonObject(verify.stdout) : undefined;
-          if (!payload || payload.name !== bucketName) {
-            throw new Error(
-              `provision: "wrangler r2 bucket create ${bucketName}" reported success but a ` +
-                `follow-up "wrangler r2 bucket info ${bucketName}" did not confirm the bucket ` +
-                `exists. The create may have been interrupted — wrangler's launcher can mask a ` +
-                `signal-killed child as exit 0, and the config entry is indistinguishable from ` +
-                `the local-dev placeholder for this name. Refusing to record an unprovisioned ` +
-                `bucket; inspect the account and retry.`,
-            );
-          }
-        }
-        persistCreatedConfig();
-        resources.push({ kind: 'r2', binding, name: bucketName, action: 'created' });
-      } else {
-        // A non-zero that is NOT the confirmed not-found signal (auth/metrics/
-        // network) — the bucket may well EXIST. Surface the real error instead of
-        // attempting a create that would spuriously fail or risk a duplicate.
-        throw new Error(
-          `provision: "wrangler r2 bucket info ${bucketName}" failed: ${info.stderr || info.stdout}. ` +
-            `Cannot determine whether the bucket exists; refusing to create a possible duplicate.`,
-        );
-      }
-    }
-  }
+  await reconcileR2(desired, configPath, runWrangler, write, persistCreatedConfig, resources, log);
 
   // --- Hyperdrive ----------------------------------------------------------
   // wrangler 4.131 has NO machine-readable Hyperdrive list (`hyperdrive list`
