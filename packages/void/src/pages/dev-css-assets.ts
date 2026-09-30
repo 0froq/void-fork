@@ -1,5 +1,11 @@
 import { init, parse } from 'es-module-lexer';
-import { normalizePath, type EnvironmentModuleNode, type Plugin, type ViteDevServer } from 'vite';
+import {
+  normalizePath,
+  parseSync,
+  type EnvironmentModuleNode,
+  type Plugin,
+  type ViteDevServer,
+} from 'vite';
 import type { DevCssAsset } from './types.ts';
 
 export const DEV_CSS_ASSET_MODULE_ID = 'virtual:void-pages-dev-assets';
@@ -25,9 +31,6 @@ type OrderedEdgeStore = {
 const CSS_REQUEST_RE = /\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)(?:$|[?#])/;
 const STYLE_QUERY_RE = /[?&](?:vue|svelte|island-style)\b.*[?&]type=style\b|[?&]type=style\b/;
 const CSS_BYPASS_RE = /[?&](?:raw|url|worker|sharedworker)\b/;
-const INLINE_CSS_EXPORT_RE =
-  /(?:export\s+default|__vite__css\s*=)\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/;
-const VITE_DEV_ID_RE = /const\s+__vite__id\s*=\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/;
 const SKIPPABLE_VIRTUAL_URL_RE =
   /^(?:\/@id\/__x00__)?virtual:void-client-(?:browser|worker)(?:$|[?#])/;
 
@@ -107,24 +110,75 @@ export function appendInlineQuery(url: string): string {
   return parsed.pathname + parsed.search + parsed.hash;
 }
 
-export function extractInlineCss(code: string): string {
-  const match = code.match(INLINE_CSS_EXPORT_RE);
-  if (!match) {
-    throw new Error('Unable to extract inline CSS from Vite transform output.');
+type CssOutputNode = {
+  type: string;
+  name?: string;
+  value?: unknown;
+  body?: Array<CssOutputNode>;
+  declaration?: CssOutputNode;
+  declarations?: Array<CssOutputNode>;
+  id?: CssOutputNode;
+  init?: CssOutputNode;
+  expression?: CssOutputNode;
+  left?: CssOutputNode;
+  right?: CssOutputNode;
+  kind?: string;
+};
+
+function parseCssOutput(code: string): { css?: string; id?: string; templateCss?: boolean } {
+  const program = parseSync('void-dev-css.js', code).program as unknown as CssOutputNode;
+  const result: { css?: string; id?: string; templateCss?: boolean } = {};
+  const readCss = (node: CssOutputNode | undefined): void => {
+    if (node?.type === 'Literal' && typeof node.value === 'string') {
+      result.css = node.value;
+    } else if (node?.type === 'TemplateLiteral') {
+      result.templateCss = true;
+    }
+  };
+  for (const statement of program.body ?? []) {
+    if (statement.type === 'ExportDefaultDeclaration') {
+      readCss(statement.declaration);
+    } else if (statement.type === 'VariableDeclaration') {
+      for (const declaration of statement.declarations ?? []) {
+        if (declaration.id?.name === '__vite__css') {
+          readCss(declaration.init);
+        } else if (
+          statement.kind === 'const' &&
+          declaration.id?.name === '__vite__id' &&
+          declaration.init?.type === 'Literal' &&
+          typeof declaration.init.value === 'string'
+        ) {
+          result.id = declaration.init.value;
+        }
+      }
+    } else if (
+      statement.type === 'ExpressionStatement' &&
+      statement.expression?.type === 'AssignmentExpression' &&
+      statement.expression.left?.name === '__vite__css'
+    ) {
+      readCss(statement.expression.right);
+    }
   }
-  const raw = match[1];
-  if (raw.startsWith('`')) {
+  return result;
+}
+
+export function extractInlineCss(code: string): string {
+  const result = parseCssOutput(code);
+  if (result.templateCss) {
     throw new Error('Unexpected template literal inline CSS output.');
   }
-  return JSON.parse(raw);
+  if (result.css === undefined) {
+    throw new Error('Unable to extract inline CSS from Vite transform output.');
+  }
+  return result.css;
 }
 
 export function extractViteDevId(code: string): string | undefined {
-  const match = code.match(VITE_DEV_ID_RE);
-  if (!match) {
-    return;
+  try {
+    return parseCssOutput(code).id;
+  } catch {
+    return undefined;
   }
-  return JSON.parse(match[1]);
 }
 
 function createOrderedEdgeStore(root: string): OrderedEdgeStore {
@@ -256,12 +310,15 @@ class DevCssProvider {
           cssUrls.push(node.url);
         }
         if (transformedCode) {
-          const viteDevId = extractViteDevId(transformedCode);
-          cssViteDevIds.set(node.url, viteDevId ?? node.id ?? node.url);
+          let output: ReturnType<typeof parseCssOutput> | undefined;
           try {
-            transformedCss.set(node.url, extractInlineCss(transformedCode));
+            output = parseCssOutput(transformedCode);
           } catch {
             // Some CSS-like modules only become extractable with ?inline.
+          }
+          cssViteDevIds.set(node.url, output?.id ?? node.id ?? node.url);
+          if (output?.css !== undefined && !output.templateCss) {
+            transformedCss.set(node.url, output.css);
           }
         } else {
           cssViteDevIds.set(node.url, node.id ?? node.url);

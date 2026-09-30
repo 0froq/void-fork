@@ -161,6 +161,22 @@ describe('pages dev CSS assets', () => {
     ).toBe('body{margin:0}');
   });
 
+  it('ignores CSS and style IDs mentioned only in comments or other strings', () => {
+    const code = `// export default "wrong"
+const note = "__vite__css = 'wrong'";
+const __vite__id = "/root/real.css";
+const __vite__css = ".real{}";
+export default __vite__css;`;
+    expect(extractInlineCss(code)).toBe('.real{}');
+    expect(extractViteDevId(code)).toBe('/root/real.css');
+  });
+
+  it('reads escaped CSS from JavaScript string literals', () => {
+    expect(extractInlineCss(`export default '.quote{content:"it\\'s"}'`)).toBe(
+      '.quote{content:"it\'s"}',
+    );
+  });
+
   it('rejects arbitrary inline CSS JavaScript', () => {
     expect(() => extractInlineCss('export default getCss()')).toThrow(/Unable to extract/);
   });
