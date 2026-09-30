@@ -85,23 +85,21 @@ it('reads OAuth credentials through cf instead of using the whoami source as a f
     writeFileSync(
       preload,
       `import child from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
-import { dirname, join } from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
 os.homedir = () => process.env.VOID_TEST_HOME;
 syncBuiltinESMExports();
+process.env.CLOUDFLARE_AUTH_USE_KEYRING = 'false';
 const cf = await import(${JSON.stringify(pathToFileURL(join(cfDist, cfModule)).href)});
-const credentialPath = join(cf.i(), 'config', 'default.json');
-mkdirSync(dirname(credentialPath), { recursive: true });
-writeFileSync(credentialPath, JSON.stringify({ oauth_token: 'synthetic-oauth-token' }));
+const noop = () => {};
+cf.t({ logger: { debug: noop, info: noop, log: noop, warn: noop, error: noop } })
+  .writeAuthCredentials({ oauth_token: 'synthetic-oauth-token' });
 child.spawnSync = (_binary, args, options) => {
   if (args[1] !== 'auth' || args[2] !== 'whoami' || options.env.CLOUDFLARE_AUTH_USE_KEYRING !== 'true') {
     return { status: 1, stdout: '', stderr: 'Wrong authentication source.' };
   }
   // Keep this synthetic test independent of the host OS keyring. The cf
   // subprocess still has to receive the keyring pin.
-  process.env.CLOUDFLARE_AUTH_USE_KEYRING = 'false';
   return { status: 0, stdout: JSON.stringify({ authenticated: true, tokenValid: true, authSource: 'OAuth token from encrypted store' }), stderr: '' };
 };
 syncBuiltinESMExports();
