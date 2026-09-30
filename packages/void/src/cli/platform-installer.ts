@@ -1,5 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
+  copyFileSync,
+  cpSync,
   existsSync,
   lstatSync,
   mkdtempSync,
@@ -4277,6 +4279,30 @@ export function platformWorkerUploadFingerprint(
   }
 }
 
+function snapshotPlatformWorkerUploadInputs(
+  config: Record<string, unknown>,
+  directory: string,
+): Record<string, unknown> {
+  const main = config.main;
+  if (typeof main !== 'string') {
+    throw new Error('platform: Worker upload has no script artifact.');
+  }
+  const snapshotMain = join(directory, 'worker-upload.js');
+  copyFileSync(main, snapshotMain);
+  const snapshot: Record<string, unknown> = { ...config, main: snapshotMain };
+  if (config.assets !== undefined) {
+    const assets = config.assets as Record<string, unknown>;
+    const sourceDirectory = assets.directory;
+    if (typeof sourceDirectory !== 'string') {
+      throw new Error('platform: Worker upload has no assets directory.');
+    }
+    const snapshotDirectory = join(directory, 'worker-assets');
+    cpSync(sourceDirectory, snapshotDirectory, { recursive: true });
+    snapshot.assets = { ...assets, directory: snapshotDirectory };
+  }
+  return snapshot;
+}
+
 function platformWorkerApiReadRunner(
   accountId: string,
   workerName: string,
@@ -4467,7 +4493,10 @@ export async function deployPlatformWorker(
           `platform: Worker ${workerName} changed concurrently while its deployment lineage was inspected.`,
         );
       }
-      if (candidate) {
+      if (
+        candidate &&
+        platformWorkerUploadFingerprint(config, options.managedRoutes) === contentHash
+      ) {
         return await reconcileExistingVersion(
           candidate.snapshot.versionId,
           candidate.snapshot.triggerConfig,
@@ -4498,7 +4527,11 @@ export async function deployPlatformWorker(
       }
       previousDeployment = deployments[0]!;
       previousDeploymentId = previousDeployment.id;
-      if (contentHash && previous.contentHash === contentHash) {
+      if (
+        contentHash &&
+        previous.contentHash === contentHash &&
+        platformWorkerUploadFingerprint(config, options.managedRoutes) === contentHash
+      ) {
         return await reconcileExistingVersion(
           previousVersionId,
           previous.triggerConfig,
@@ -4518,6 +4551,20 @@ export async function deployPlatformWorker(
         mergePreservedTriggerRoutes(previousTriggers, options.preservedRoutes),
       );
     }
+    const immutableConfig = contentHash
+      ? snapshotPlatformWorkerUploadInputs(config, directory)
+      : null;
+    const uploadedContentHash = immutableConfig
+      ? platformWorkerUploadFingerprint(immutableConfig, options.managedRoutes)
+      : null;
+    if (immutableConfig) {
+      uploadConfig = {
+        ...uploadConfig,
+        main: immutableConfig.main,
+        ...(immutableConfig.assets === undefined ? {} : { assets: immutableConfig.assets }),
+      };
+      writeFileSync(configPath, `${JSON.stringify(uploadConfig, null, 2)}\n`, { mode: 0o600 });
+    }
     const argv = [
       ...(options.workerExisted ? ['versions', 'upload'] : ['deploy']),
       '--config',
@@ -4527,7 +4574,7 @@ export async function deployPlatformWorker(
       '--experimental-auto-create=false',
       ...(!options.workerExisted ? ['--autoconfig=false'] : []),
       '--message',
-      encodeCloudflareVersionMessage([], nextTriggers, contentHash ?? undefined),
+      encodeCloudflareVersionMessage([], nextTriggers, uploadedContentHash ?? undefined),
     ];
     if (secrets) {
       const secretsPath = join(directory, 'secrets.json');

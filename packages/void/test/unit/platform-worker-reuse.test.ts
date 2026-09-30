@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   encodeCloudflareVersionMessage,
+  parseCloudflareVersionMessage,
   readCloudflareTriggerConfig,
 } from '@void/deploy-cloudflare';
 import { expect, it, vi } from 'vite-plus/test';
@@ -16,6 +17,7 @@ const VERSION = '11111111-1111-4111-8111-111111111111';
 async function attemptReuse(input: {
   annotationHash?: string;
   missingAnnotationHash?: boolean;
+  mutateScriptAtUpload?: boolean;
   changeConfig?: boolean;
   changeScript?: boolean;
   directApi?: boolean;
@@ -31,6 +33,9 @@ async function attemptReuse(input: {
   const onTrafficPublished = vi.fn(async () => {});
   const onUnsafeTraffic = vi.fn(async () => {});
   const retainNewWorker = vi.fn(async () => {});
+  let uploadedScript: string | null = null;
+  let uploadedHash: string | null = null;
+  let expectedHash: string | null = null;
   try {
     const main = join(directory, 'worker.js');
     const configPath = join(directory, 'wrangler.json');
@@ -48,6 +53,7 @@ async function attemptReuse(input: {
     writeFileSync(configPath, JSON.stringify(config));
     const originalHash = platformWorkerUploadFingerprint(config);
     expect(originalHash).toMatch(/^[a-f0-9]{64}$/);
+    expectedHash = originalHash;
     const triggers = readCloudflareTriggerConfig(configPath);
     if (input.changeScript) {
       writeFileSync(main, 'export default { fetch() { return new Response("two"); } };');
@@ -130,6 +136,15 @@ async function attemptReuse(input: {
         return { status: input.triggerFailure ? 1 : 0, stderr: '', stdout: '' };
       }
       if (args[0] === 'versions' && args[1] === 'upload') {
+        if (input.mutateScriptAtUpload) {
+          writeFileSync(main, 'export default { fetch() { return new Response("changed"); } };');
+          const uploadConfig = JSON.parse(
+            readFileSync(args[args.indexOf('--config') + 1]!, 'utf8'),
+          ) as { main: string };
+          uploadedScript = readFileSync(uploadConfig.main, 'utf8');
+          const metadata = parseCloudflareVersionMessage(args[args.indexOf('--message') + 1]);
+          uploadedHash = metadata?.schema === 2 ? (metadata.contentHash ?? null) : null;
+        }
         return { status: 1, stderr: 'upload reached', stdout: '' };
       }
       throw new Error(`Unexpected command: ${args.join(' ')}`);
@@ -162,6 +177,9 @@ async function attemptReuse(input: {
       onUnsafeTraffic,
       readCloudflare,
       retainNewWorker,
+      uploadedScript,
+      uploadedHash,
+      expectedHash,
       ...outcome,
     };
   } finally {
@@ -216,6 +234,13 @@ it.each([
   const run = await attemptReuse(input);
   expect(String(run.error)).toContain('upload reached');
   expect(run.calls).toContain('versions upload');
+});
+
+it('uploads copied artifact bytes matching the version annotation when source files change', async () => {
+  const run = await attemptReuse({ annotationHash: 'f'.repeat(64), mutateScriptAtUpload: true });
+  expect(String(run.error)).toContain('upload reached');
+  expect(run.uploadedScript).toContain('Response("one")');
+  expect(run.uploadedHash).toBe(run.expectedHash);
 });
 
 it('fails closed when the active version changes during inspection', async () => {
