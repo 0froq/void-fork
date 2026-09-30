@@ -34,7 +34,7 @@ function cfEnvironment(): NodeJS.ProcessEnv {
     CF_DELEGATION: '1',
     CF_SEND_TELEMETRY: 'false',
     CF_NO_OSC_PROGRESS: '1',
-    CLOUDFLARE_AUTH_USE_KEYRING: 'true',
+    CLOUDFLARE_AUTH_USE_KEYRING: process.env.CLOUDFLARE_AUTH_USE_KEYRING ?? 'true',
   };
   // cf uses Node's built-in fetch for API operations. Node does not consult
   // HTTP(S)_PROXY for fetch unless its environment proxy support is enabled.
@@ -430,18 +430,31 @@ async function sessionCredential(): Promise<{ type: 'oauth' | 'api_token'; token
   if (!entry) {
     throw new Error('The bundled Cloudflare credential reader is unavailable.');
   }
-  const module = (await import(pathToFileURL(join(dist, entry)).href)) as {
-    t?: (options: { logger: Record<string, (...args: Array<unknown>) => void> }) => {
-      readAuthCredentials: () => unknown;
+  // Match the storage setting used by the cf subprocess above. Without it,
+  // whoami can verify an OAuth session while this reader sees no bearer.
+  const previousKeyringSetting = process.env.CLOUDFLARE_AUTH_USE_KEYRING;
+  process.env.CLOUDFLARE_AUTH_USE_KEYRING = previousKeyringSetting ?? 'true';
+  let stored: unknown;
+  try {
+    const module = (await import(pathToFileURL(join(dist, entry)).href)) as {
+      t?: (options: { logger: Record<string, (...args: Array<unknown>) => void> }) => {
+        readAuthCredentials: () => unknown;
+      };
     };
-  };
-  if (typeof module.t !== 'function') {
-    throw new Error('The bundled Cloudflare credential reader is unavailable.');
+    if (typeof module.t !== 'function') {
+      throw new Error('The bundled Cloudflare credential reader is unavailable.');
+    }
+    const noop = () => {};
+    stored = module
+      .t({ logger: { debug: noop, info: noop, log: noop, warn: noop, error: noop } })
+      .readAuthCredentials();
+  } finally {
+    if (previousKeyringSetting === undefined) {
+      delete process.env.CLOUDFLARE_AUTH_USE_KEYRING;
+    } else {
+      process.env.CLOUDFLARE_AUTH_USE_KEYRING = previousKeyringSetting;
+    }
   }
-  const noop = () => {};
-  const stored = module
-    .t({ logger: { debug: noop, info: noop, log: noop, warn: noop, error: noop } })
-    .readAuthCredentials();
   const credential = stored && typeof stored === 'object' ? (stored as Json) : null;
   return credential && typeof credential.oauth_token === 'string' && credential.oauth_token
     ? { type: 'oauth', token: credential.oauth_token }

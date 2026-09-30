@@ -95,11 +95,11 @@ const noop = () => {};
 cf.t({ logger: { debug: noop, info: noop, log: noop, warn: noop, error: noop } })
   .writeAuthCredentials({ oauth_token: 'synthetic-oauth-token' });
 child.spawnSync = (_binary, args, options) => {
-  if (args[1] !== 'auth' || args[2] !== 'whoami' || options.env.CLOUDFLARE_AUTH_USE_KEYRING !== 'true') {
+  if (args[1] !== 'auth' || args[2] !== 'whoami' || options.env.CLOUDFLARE_AUTH_USE_KEYRING !== 'false') {
     return { status: 1, stdout: '', stderr: 'Wrong authentication source.' };
   }
   // Keep this synthetic test independent of the host OS keyring. The cf
-  // subprocess still has to receive the keyring pin.
+  // subprocess still has to use the same storage setting as the bearer reader.
   return { status: 0, stdout: JSON.stringify({ authenticated: true, tokenValid: true, authSource: 'OAuth token from encrypted store' }), stderr: '' };
 };
 syncBuiltinESMExports();
@@ -134,7 +134,7 @@ syncBuiltinESMExports();
             XDG_CONFIG_HOME: join(directory, '.config'),
             APPDATA: join(directory, 'AppData', 'Roaming'),
             LOCALAPPDATA: join(directory, 'AppData', 'Local'),
-            CLOUDFLARE_AUTH_USE_KEYRING: 'true',
+            CLOUDFLARE_AUTH_USE_KEYRING: 'false',
             CLOUDFLARE_ACCOUNT_ID: 'test-account',
             CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`,
             VOID_TEST_HOME: directory,
