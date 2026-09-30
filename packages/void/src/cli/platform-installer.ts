@@ -1995,6 +1995,15 @@ export async function installPlatform(
     }
     for (const key of workerKeys) {
       dependencies.onProgress?.(`Deploying the ${key} service`);
+      let workerStepStarted = performance.now();
+      const markWorkerStep = (step: string) => {
+        if (process.env.VOID_PLATFORM_TIMINGS === '1') {
+          process.stderr.write(
+            `[platform timing] worker ${key} ${step} ${(performance.now() - workerStepStarted).toFixed(0)} ms\n`,
+          );
+        }
+        workerStepStarted = performance.now();
+      };
       const action = workerActions.find(
         (entry) =>
           entry.key === (key === 'emailGateway' ? 'email-gateway-worker' : `${key}-worker`),
@@ -2013,11 +2022,13 @@ export async function installPlatform(
         await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
       }
       await dependencies.revalidateBeforeWorkerDeploy(manifest, action);
+      markWorkerStep('revalidate');
       const preservedRoutes = dependencies.deployWorker
         ? []
         : action.action === 'create'
           ? []
           : await inventoryUnmanagedPlatformWorkerTraffic(dependencies.client, plan, action.name);
+      markWorkerStep('traffic inventory');
       const workerConfig = mergePlatformWorkerTrafficConfig(configs[key], preservedRoutes);
       const previousWorkerConfig = mergePlatformWorkerTrafficConfig(
         previousConfigs[key],
@@ -2131,6 +2142,7 @@ export async function installPlatform(
             runner: runPinnedPlatformWrangler,
             workerExisted: action.action !== 'create',
           });
+      markWorkerStep('deploy');
       if (rollback) {
         workerRollbacks.push(rollback);
       }
@@ -2144,6 +2156,7 @@ export async function installPlatform(
         writeInstallationManifest(manifest);
         await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
       }
+      markWorkerStep('record');
     }
 
     manifest = setInstallationEndpoints(
