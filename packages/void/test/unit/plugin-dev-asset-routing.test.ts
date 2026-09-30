@@ -496,6 +496,57 @@ describe('voidPlugin dev asset routing', () => {
     expect(process.env.CLOUDFLARE_AUTH_USE_KEYRING).toBe('true');
   });
 
+  it('passes schema-declared shell values to the dev Worker without copying unrelated shell values', async () => {
+    const root = createProjectRoot();
+    writeFileSync(join(root, 'env.ts'), 'export default {};\n');
+    writeFileSync(
+      join(root, '.env'),
+      'VOID_TEST_TOKEN=from-file\nVOID_TEST_FILE_ONLY=local\nVOID_TEST_UNDECLARED=from-file\n',
+    );
+    vi.stubEnv('VOID_TEST_TOKEN', 'from-shell');
+    vi.stubEnv('VOID_TEST_SHELL_ONLY', 'shell-only');
+    vi.stubEnv('VOID_TEST_UNDECLARED', 'from-shell');
+    vi.stubEnv('VOID_TEST_UNRELATED', 'must-stay-out');
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+
+    const { defineEnv } = await import('../../src/runtime/env-public.ts');
+    const { string } = await import('../../src/runtime/env-helpers.ts');
+    defineEnv({
+      VOID_TEST_TOKEN: string(),
+      VOID_TEST_FILE_ONLY: string(),
+      VOID_TEST_SHELL_ONLY: string(),
+    });
+
+    const { voidPlugin } = await import('../../src/index.ts');
+    const plugins = voidPlugin();
+    const schemaPlugin = plugins.find((plugin) => plugin.name === 'void:env-schema');
+    const schemaConfig = getHookHandler(schemaPlugin?.config) as (
+      config: import('vite').UserConfig,
+      env: import('vite').ConfigEnv,
+    ) => Promise<void>;
+    await schemaConfig({}, { command: 'serve', mode: 'development' });
+
+    const envPlugin = plugins.find((plugin) => plugin.name === 'void:env');
+    const envConfig = getHookHandler(envPlugin?.config) as (
+      config: import('vite').UserConfig,
+      env: import('vite').ConfigEnv,
+    ) => void;
+    envConfig({}, { command: 'serve', mode: 'development' });
+
+    const cloudflarePlugin = plugins.find(
+      (plugin): plugin is MockCloudflarePlugin => plugin.name === 'mock:cloudflare',
+    );
+    expect(cloudflarePlugin).toBeDefined();
+    const config = cloudflarePlugin!.api.pluginConfig.config({});
+    expect(config.vars).toMatchObject({
+      VOID_TEST_TOKEN: 'from-shell',
+      VOID_TEST_FILE_ONLY: 'local',
+      VOID_TEST_SHELL_ONLY: 'shell-only',
+      VOID_TEST_UNDECLARED: 'from-shell',
+    });
+    expect(config.vars).not.toHaveProperty('VOID_TEST_UNRELATED');
+  });
+
   it('enables remote mode on an explicit Workers AI binding during direct development', async () => {
     vi.stubEnv('CLOUDFLARE_AUTH_USE_KEYRING', 'false');
     const config = await resolveCloudflareConfig(createAiProjectRoot('cloudflare'), {

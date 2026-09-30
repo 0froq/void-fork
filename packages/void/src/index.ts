@@ -1894,7 +1894,16 @@ export function voidPlugin(options?: {
       const ignored = ['**/.void/**'];
       if (command === 'serve') {
         const local = loadLocalEnv(root, { onWarn: (message) => voidWarn(message) });
-        const { sanitized: env, stripped } = stripInternalEnvKeys(local);
+        // Keep the dev Worker on the same values that env-schema validation
+        // sees. Shell values override .env, and shell-only values are included
+        // only when declared by the schema. Never copy unrelated host secrets.
+        const devEnv = { ...local };
+        for (const key of new Set([...Object.keys(local), ...(envSchemaFacts?.keys ?? [])])) {
+          if (process.env[key] !== undefined) {
+            devEnv[key] = process.env[key];
+          }
+        }
+        const { sanitized: env, stripped } = stripInternalEnvKeys(devEnv);
         if (stripped.length > 0) {
           voidWarn(
             `Ignoring internal env keys from .env: ${stripped.join(', ')}. These are reserved for Void runtime use.`,
