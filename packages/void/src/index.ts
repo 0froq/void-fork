@@ -106,6 +106,7 @@ import {
   stripInternalEnvKeys,
 } from './shared/env.ts';
 import { validateSsrEntry } from './ssr/entry.ts';
+import { injectSvelteKitHooks } from './sveltekit-hooks-transform.ts';
 
 /**
  * Persist the dev-trigger token at `<root>/.void/dev-trigger-token` so
@@ -1203,28 +1204,7 @@ export function voidPlugin(options?: {
         if (!id.includes('.svelte-kit/generated/server/internal')) {
           return;
         }
-        if (!code.includes('export async function get_hooks')) {
-          return;
-        }
-
-        const dispatchPath = JSON.stringify(frameworkTriggersDispatchPath(root));
-        return code
-          .replace(
-            'export async function get_hooks() {',
-            `export async function get_hooks() {\n` +
-              `  const { withRuntimeEnv } = await import("void/_env");\n` +
-              `  const { handleDevTrigger } = await import(${dispatchPath});`,
-          )
-          .replace(
-            /return\s*\{/,
-            `const __origHandle = handle ?? (({ event, resolve }) => resolve(event));\n` +
-              `  handle = ({ event, resolve }) => withRuntimeEnv(event.platform?.env, async () => {\n` +
-              `    const __triggerResp = await handleDevTrigger(event.request, event.platform?.env, undefined);\n` +
-              `    if (__triggerResp) return __triggerResp;\n` +
-              `    return __origHandle({ event, resolve });\n` +
-              `  });\n` +
-              `  return {`,
-          );
+        return injectSvelteKitHooks(code, id, frameworkTriggersDispatchPath(root));
       },
     };
 
