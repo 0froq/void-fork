@@ -807,6 +807,197 @@ function sanitizeWorkerSecretUpdates(
   );
 }
 
+type InstallationCheckpointWriter = (
+  client: InstallerClient,
+  plan: PlatformInstallPlan,
+  manifest: PlatformInstallationManifest,
+) => Promise<void>;
+
+// Keep the outer installer's failure handler on the latest manifest even when a
+// remote create or checkpoint throws partway through this phase.
+async function reconcilePlatformInstallationResources(
+  manifest: PlatformInstallationManifest,
+  plan: PlatformInstallPlan,
+  secrets: PlatformInstallationSecrets,
+  zoneId: string,
+  externalHyperdriveOriginHash: string | undefined,
+  dependencies: PlatformInstallerDependencies,
+  now: () => string,
+  writeRemoteInstallationCheckpoint: InstallationCheckpointWriter,
+  onManifestChange: (manifest: PlatformInstallationManifest) => void,
+): Promise<PlatformInstallationManifest> {
+  for (const action of plan.actions.filter(
+    (entry) => entry.key !== 'routing-kv' && entry.kind !== 'zone' && entry.kind !== 'worker',
+  )) {
+    const retainedManifest = retainReplacedInstallationResource(manifest, action, now());
+    if (retainedManifest !== manifest) {
+      manifest = retainedManifest;
+      onManifestChange(manifest);
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+    }
+    if (action.action === 'adopt') {
+      if (!action.id) {
+        throw new Error(`platform: Adopted ${action.kind} ${action.name} has no id.`);
+      }
+      manifest = recordAdoptionIntent(manifest, action, action.id, now());
+      onManifestChange(manifest);
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      manifest = recordResource(
+        manifest,
+        action,
+        action.id,
+        'adopted',
+        now(),
+        secrets.databaseUrl,
+        action.kind === 'hyperdrive' ? externalHyperdriveOriginHash : undefined,
+      );
+      onManifestChange(manifest);
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      continue;
+    }
+    if (action.action === 'reuse') {
+      if (
+        action.id &&
+        (action.kind === 'hyperdrive' ||
+          !manifest.resources.some((resource) => resource.key === action.key))
+      ) {
+        manifest = recordResource(
+          manifest,
+          action,
+          action.id,
+          undefined,
+          now(),
+          secrets.databaseUrl,
+          action.kind === 'hyperdrive' ? externalHyperdriveOriginHash : undefined,
+        );
+        onManifestChange(manifest);
+        writeInstallationManifest(manifest);
+        await writeR2OwnershipMarkerIfNeeded(dependencies.client, plan, manifest, action);
+        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      }
+      continue;
+    }
+    manifest = recordProvisionIntent(manifest, action, now());
+    onManifestChange(manifest);
+    writeInstallationManifest(manifest);
+    await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+    const resource = await createResource(
+      dependencies.client,
+      plan,
+      action,
+      secrets.databaseUrl,
+      zoneId,
+    );
+    manifest = recordResource(
+      manifest,
+      action,
+      resource.id,
+      'created',
+      now(),
+      secrets.databaseUrl,
+      action.kind === 'hyperdrive' ? externalHyperdriveOriginHash : resource.fingerprint,
+    );
+    onManifestChange(manifest);
+    writeInstallationManifest(manifest);
+    await writeR2OwnershipMarkerIfNeeded(dependencies.client, plan, manifest, action);
+    await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+  }
+
+  return manifest;
+}
+
+// Migration checkpoints must likewise be visible to the outer failure handler.
+async function preparePlatformDatabaseSchema(
+  manifest: PlatformInstallationManifest,
+  runtime: PlatformRuntimeManifest,
+  runtimeDirectory: string,
+  sourcePlatformVersion: string | null,
+  hadPriorWorkers: boolean,
+  plan: PlatformInstallPlan,
+  secrets: PlatformInstallationSecrets,
+  dependencies: PlatformInstallerDependencies,
+  releaseDatabaseLock: PlatformDatabaseLifecycleLock,
+  now: () => string,
+  writeRemoteInstallationCheckpoint: InstallationCheckpointWriter,
+  onManifestChange: (manifest: PlatformInstallationManifest) => void,
+): Promise<PlatformInstallationManifest> {
+  dependencies.onProgress?.('Checking the platform database schema');
+  const rollbackDatabase = dependencies.databaseRollbackSource;
+  const migrationStep = `database-schema:${runtime.database.schemaDigest}`;
+  if (rollbackDatabase) {
+    const verifyDatabase = releaseDatabaseLock.verifyDatabase;
+    if (!verifyDatabase) {
+      throw new Error(
+        'platform: The PostgreSQL lifecycle lock cannot verify the forward-only rollback schema.',
+      );
+    }
+    await verifyDatabase(rollbackDatabase.directory, rollbackDatabase.manifest.database);
+    manifest = {
+      ...manifest,
+      databaseSchemaDigest: rollbackDatabase.manifest.database.schemaDigest,
+      updatedAt: now(),
+    };
+    onManifestChange(manifest);
+    writeInstallationManifest(manifest);
+    await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+  } else if (!manifest.steps.some((step) => step.key === migrationStep)) {
+    dependencies.onProgress?.('Applying platform database migrations');
+    const legacyMigrationStep = `database-migrations:${runtime.database.journalSha256}`;
+    if (dependencies.migrateDatabase) {
+      if (!manifest.steps.some((step) => step.key === legacyMigrationStep)) {
+        await dependencies.migrateDatabase(secrets.databaseUrl, join(runtimeDirectory, 'drizzle'));
+      }
+    } else {
+      const prepareDatabase = dependencies.prepareDatabase ?? releaseDatabaseLock.prepareDatabase;
+      if (!prepareDatabase) {
+        throw new Error(
+          'platform: The PostgreSQL lifecycle lock cannot verify or migrate this database.',
+        );
+      }
+      await prepareDatabase(
+        runtimeDirectory,
+        runtime.database,
+        sourcePlatformVersion,
+        hadPriorWorkers,
+      );
+    }
+    manifest = recordInstallationStep(
+      manifest,
+      {
+        completedAt: now(),
+        key: migrationStep,
+        resultHash: runtime.database.schemaDigest,
+      },
+      now(),
+    );
+    manifest = {
+      ...manifest,
+      databaseSchemaDigest: runtime.database.schemaDigest,
+      updatedAt: now(),
+    };
+    onManifestChange(manifest);
+    writeInstallationManifest(manifest);
+    await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+  } else if (releaseDatabaseLock.verifyDatabase) {
+    await releaseDatabaseLock.verifyDatabase(runtimeDirectory, runtime.database);
+    if (manifest.databaseSchemaDigest !== runtime.database.schemaDigest) {
+      manifest = {
+        ...manifest,
+        databaseSchemaDigest: runtime.database.schemaDigest,
+        updatedAt: now(),
+      };
+      onManifestChange(manifest);
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+    }
+  }
+
+  return manifest;
+}
+
 export async function installPlatform(
   plan: PlatformInstallPlan,
   secrets: PlatformInstallationSecrets,
@@ -1284,79 +1475,19 @@ export async function installPlatform(
       }
     }
     const zoneId = zone?.id ?? '';
-    for (const action of plan.actions.filter(
-      (entry) => entry.key !== 'routing-kv' && entry.kind !== 'zone' && entry.kind !== 'worker',
-    )) {
-      const retainedManifest = retainReplacedInstallationResource(manifest, action, now());
-      if (retainedManifest !== manifest) {
-        manifest = retainedManifest;
-        writeInstallationManifest(manifest);
-        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-      }
-      if (action.action === 'adopt') {
-        if (!action.id) {
-          throw new Error(`platform: Adopted ${action.kind} ${action.name} has no id.`);
-        }
-        manifest = recordAdoptionIntent(manifest, action, action.id, now());
-        writeInstallationManifest(manifest);
-        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-        manifest = recordResource(
-          manifest,
-          action,
-          action.id,
-          'adopted',
-          now(),
-          secrets.databaseUrl,
-          action.kind === 'hyperdrive' ? externalHyperdriveOriginHash : undefined,
-        );
-        writeInstallationManifest(manifest);
-        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-        continue;
-      }
-      if (action.action === 'reuse') {
-        if (
-          action.id &&
-          (action.kind === 'hyperdrive' ||
-            !manifest.resources.some((resource) => resource.key === action.key))
-        ) {
-          manifest = recordResource(
-            manifest,
-            action,
-            action.id,
-            undefined,
-            now(),
-            secrets.databaseUrl,
-            action.kind === 'hyperdrive' ? externalHyperdriveOriginHash : undefined,
-          );
-          writeInstallationManifest(manifest);
-          await writeR2OwnershipMarkerIfNeeded(dependencies.client, plan, manifest, action);
-          await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-        }
-        continue;
-      }
-      manifest = recordProvisionIntent(manifest, action, now());
-      writeInstallationManifest(manifest);
-      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-      const resource = await createResource(
-        dependencies.client,
-        plan,
-        action,
-        secrets.databaseUrl,
-        zoneId,
-      );
-      manifest = recordResource(
-        manifest,
-        action,
-        resource.id,
-        'created',
-        now(),
-        secrets.databaseUrl,
-        action.kind === 'hyperdrive' ? externalHyperdriveOriginHash : resource.fingerprint,
-      );
-      writeInstallationManifest(manifest);
-      await writeR2OwnershipMarkerIfNeeded(dependencies.client, plan, manifest, action);
-      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-    }
+    manifest = await reconcilePlatformInstallationResources(
+      manifest,
+      plan,
+      secrets,
+      zoneId,
+      externalHyperdriveOriginHash,
+      dependencies,
+      now,
+      writeRemoteInstallationCheckpoint,
+      (next) => {
+        manifest = next;
+      },
+    );
 
     dependencies.onProgress?.('Verifying uncached authentication database reads');
     const authenticationDatabase = manifest.resources.find(
@@ -1372,76 +1503,22 @@ export async function installPlatform(
       secrets.databaseUrl,
     );
 
-    dependencies.onProgress?.('Checking the platform database schema');
-    const rollbackDatabase = dependencies.databaseRollbackSource;
-    const migrationStep = `database-schema:${runtime.database.schemaDigest}`;
-    if (rollbackDatabase) {
-      const verifyDatabase = releaseDatabaseLock.verifyDatabase;
-      if (!verifyDatabase) {
-        throw new Error(
-          'platform: The PostgreSQL lifecycle lock cannot verify the forward-only rollback schema.',
-        );
-      }
-      await verifyDatabase(rollbackDatabase.directory, rollbackDatabase.manifest.database);
-      manifest = {
-        ...manifest,
-        databaseSchemaDigest: rollbackDatabase.manifest.database.schemaDigest,
-        updatedAt: now(),
-      };
-      writeInstallationManifest(manifest);
-      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-    } else if (!manifest.steps.some((step) => step.key === migrationStep)) {
-      dependencies.onProgress?.('Applying platform database migrations');
-      const legacyMigrationStep = `database-migrations:${runtime.database.journalSha256}`;
-      if (dependencies.migrateDatabase) {
-        if (!manifest.steps.some((step) => step.key === legacyMigrationStep)) {
-          await dependencies.migrateDatabase(
-            secrets.databaseUrl,
-            join(runtimeDirectory, 'drizzle'),
-          );
-        }
-      } else {
-        const prepareDatabase = dependencies.prepareDatabase ?? releaseDatabaseLock.prepareDatabase;
-        if (!prepareDatabase) {
-          throw new Error(
-            'platform: The PostgreSQL lifecycle lock cannot verify or migrate this database.',
-          );
-        }
-        await prepareDatabase(
-          runtimeDirectory,
-          runtime.database,
-          sourcePlatformVersion,
-          hadPriorWorkers,
-        );
-      }
-      manifest = recordInstallationStep(
-        manifest,
-        {
-          completedAt: now(),
-          key: migrationStep,
-          resultHash: runtime.database.schemaDigest,
-        },
-        now(),
-      );
-      manifest = {
-        ...manifest,
-        databaseSchemaDigest: runtime.database.schemaDigest,
-        updatedAt: now(),
-      };
-      writeInstallationManifest(manifest);
-      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-    } else if (releaseDatabaseLock.verifyDatabase) {
-      await releaseDatabaseLock.verifyDatabase(runtimeDirectory, runtime.database);
-      if (manifest.databaseSchemaDigest !== runtime.database.schemaDigest) {
-        manifest = {
-          ...manifest,
-          databaseSchemaDigest: runtime.database.schemaDigest,
-          updatedAt: now(),
-        };
-        writeInstallationManifest(manifest);
-        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-      }
-    }
+    manifest = await preparePlatformDatabaseSchema(
+      manifest,
+      runtime,
+      runtimeDirectory,
+      sourcePlatformVersion,
+      hadPriorWorkers,
+      plan,
+      secrets,
+      dependencies,
+      releaseDatabaseLock,
+      now,
+      writeRemoteInstallationCheckpoint,
+      (next) => {
+        manifest = next;
+      },
+    );
 
     dependencies.onProgress?.('Checking platform safety');
     const targetSandboxDrainProtocol = runtime.safetyProtocols?.sandboxDrain ?? 0;
