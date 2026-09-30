@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vite-plus/test';
 import {
+  CloudflareWorkerInspectionError,
   assertCloudflareDurableObjectLifecycleSupported,
   readCloudflareWorkerMigrationTag,
   readExistingCloudflareWorker,
@@ -364,13 +365,12 @@ describe('existing Worker preservation', () => {
     expect(runWrangler.mock.calls[0]![0].slice(0, 3)).toEqual(['versions', 'view', 'candidate']);
   });
   it.each([403, 404, 1])('never turns a failed read (%s) into Worker creation', async (status) => {
-    await expect(
-      readExistingCloudflareWorker({
-        runWrangler: () => ({ status, stdout: '', stderr: 'private data' }),
-        workerName: 'site',
-        configPath: '/app/wrangler.jsonc',
-      }),
-    ).rejects.toThrow('Could not verify existing');
+    const inspect = readExistingCloudflareWorker({
+      runWrangler: () => ({ status, stdout: '', stderr: 'private data' }),
+      workerName: 'site',
+      configPath: '/app/wrangler.jsonc',
+    });
+    await expect(inspect).rejects.toBeInstanceOf(CloudflareWorkerInspectionError);
   });
 
   it('rejects a pending class migration on an existing Worker', async () => {

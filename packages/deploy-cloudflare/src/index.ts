@@ -1,4 +1,5 @@
 export {
+  CloudflareWorkerInspectionError,
   readExistingCloudflareWorker,
   readCloudflareWorkerMigrationTag,
   readCloudflareVersionMigrationTag,

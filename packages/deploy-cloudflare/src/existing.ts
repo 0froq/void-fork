@@ -25,6 +25,11 @@ type CloudflareWorkerInspection = {
   isSecretOnlyDraft: boolean;
 };
 
+/** A failed remote read, distinct from an invalid or changing Worker configuration. */
+export class CloudflareWorkerInspectionError extends Error {
+  override name = 'CloudflareWorkerInspectionError';
+}
+
 export type CloudflareWorkerMigrationTagOptions = {
   runWrangler: CloudflareCommandRunner;
   accountId: string;
@@ -60,7 +65,7 @@ async function readCloudflareWorker(
       if (missingIsNull && isMissingWorkerOutput(`${result.stdout}\n${result.stderr}`)) {
         return null;
       }
-      throw new Error(
+      throw new CloudflareWorkerInspectionError(
         `Could not verify existing Cloudflare Worker "${options.workerName}". Check the account, Worker name, and Cloudflare permissions before retrying.`,
       );
     }

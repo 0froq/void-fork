@@ -31,6 +31,7 @@ import {
   type SpinnerResult,
 } from '@clack/prompts';
 import {
+  CloudflareWorkerInspectionError,
   activateCloudflareVersion,
   encodeCloudflareVersionMessage,
   parseRootWranglerConfig,
@@ -144,8 +145,10 @@ import {
 } from './client.ts';
 import {
   CloudflareAuthenticationError,
+  cloudflareCredentialOverrides,
   cloudflareAuthNeedsTerminal,
   ensureCloudflareAuthentication,
+  parseCloudflareAuthSession,
 } from './cloudflare-auth.ts';
 import {
   assertCloudflareCandidateUnchanged,
@@ -3803,6 +3806,95 @@ export function createDeployWranglerRunner(
   };
 }
 
+/** Retry an existing-Worker read only when a fresh identity check proves the session is gone. */
+async function prepareExistingCloudflareDeployWithAuth(
+  options: Parameters<typeof prepareExistingCloudflareDeploy>[0],
+  beforeRun: () => boolean,
+): Promise<ExistingCloudflareWorker | null> {
+  try {
+    return await prepareExistingCloudflareDeploy(options);
+  } catch (error) {
+    if (!(error instanceof CloudflareWorkerInspectionError)) {
+      throw error;
+    }
+    if (!beforeRun()) {
+      throw new CloudflareAuthenticationError(
+        'The Cloudflare uploader changed during Worker verification.',
+        'uploader-changed',
+      );
+    }
+    const whoamiArgs = [...existingWranglerConfigArgs(options.configPath), '--env='];
+    const identity = await options.runWrangler(['whoami', '--json', ...whoamiArgs], {
+      capture: true,
+    });
+    const session = isCleanWranglerExit(identity)
+      ? parseCloudflareAuthSession(identity.stdout)
+      : null;
+    const wrongAccount =
+      session !== null &&
+      session.accounts.length > 0 &&
+      !session.accounts.some((account) => account.id === options.accountId);
+    if (session && !wrongAccount) {
+      // Authentication works. Preserve the original Worker/permission error.
+      throw error;
+    }
+    let loggedOut = false;
+    try {
+      loggedOut = (JSON.parse(identity.stdout) as { loggedIn?: unknown }).loggedIn === false;
+    } catch {
+      /* The auth command may have failed before producing JSON. */
+    }
+    const authenticationError =
+      loggedOut ||
+      wrongAccount ||
+      /authentication is required|not authenticated|no api token|invalid.*token|expired.*token|unauthorized/i.test(
+        identity.stderr,
+      );
+    if (!authenticationError || identity.signal || identity.error) {
+      throw new Error(
+        'Could not verify the Cloudflare session after the Worker check failed. Run `void cloudflare status` and retry.',
+      );
+    }
+    const overrides = cloudflareCredentialOverrides();
+    if (overrides.length > 0) {
+      throw new Error(
+        `Cloudflare credentials from ${overrides.join(', ')} were rejected or cannot access account ${options.accountId}. Correct or unset them, then retry the deploy.`,
+      );
+    }
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      throw new Error(
+        wrongAccount
+          ? `The Cloudflare session cannot access account ${options.accountId}. Run \`void cloudflare login\` with the correct user, or set a token for that account in CI, then retry.`
+          : 'Cloudflare authentication expired or is unavailable. Run `void cloudflare login` in a terminal, or set CLOUDFLARE_API_TOKEN in CI, then retry.',
+      );
+    }
+    log.warn(
+      wrongAccount
+        ? 'The current Cloudflare session cannot access the deployment account. Signing in before retrying the Worker check.'
+        : 'Cloudflare session is unavailable. Signing in before retrying the Worker check.',
+    );
+    const authenticated = await ensureCloudflareAuthentication({
+      forceLogin: true,
+      requireAccounts: true,
+      beforeRun,
+      runWrangler: (args, capture) => options.runWrangler([...args], { capture }),
+      whoamiArgs,
+    });
+    if (!authenticated.accounts.some((account) => account.id === options.accountId)) {
+      throw new Error(
+        `The signed-in Cloudflare user cannot access account ${options.accountId}. Sign in with a user who can access it, then retry.`,
+      );
+    }
+    if (!beforeRun()) {
+      throw new CloudflareAuthenticationError(
+        'The Cloudflare uploader changed during sign-in.',
+        'uploader-changed',
+      );
+    }
+    return await prepareExistingCloudflareDeploy(options);
+  }
+}
+
 async function chooseCloudflareDeployAccount(options: {
   persist?: boolean;
   beforeWranglerRun: () => boolean;
@@ -5054,16 +5146,19 @@ export async function runCloudflareDeploy(
       );
     }
     approvedHandoffKv = approvedCloudflareIsrBinding(voidConfig, rootConfig);
-    existingWorker = await prepareExistingCloudflareDeploy({
-      root,
-      configPath,
-      accountId,
-      reuse: options.reuseExistingWorker,
-      pinnedLink: initialCloudflareLink,
-      runWrangler,
-      readExistingWorker: deps.readExistingWorker,
-      approvedKv: approvedHandoffKv,
-    });
+    existingWorker = await prepareExistingCloudflareDeployWithAuth(
+      {
+        root,
+        configPath,
+        accountId,
+        reuse: options.reuseExistingWorker,
+        pinnedLink: initialCloudflareLink,
+        runWrangler,
+        readExistingWorker: deps.readExistingWorker,
+        approvedKv: approvedHandoffKv,
+      },
+      assertUploaderStillPinned,
+    );
     pinnedHandoffLink = readCloudflareLink(root);
     if (!pinnedHandoffLink) {
       throw new Error('The pending Cloudflare handoff was not saved before deployment.');
@@ -6589,15 +6684,18 @@ async function runCloudflareStaticDeploy(
     return exit(1);
   }
 
-  const existingWorker = await prepareExistingCloudflareDeploy({
-    root,
-    configPath,
-    accountId,
-    reuse: options.reuseExistingWorker,
-    pinnedLink: initialCloudflareLink,
-    runWrangler,
-    readExistingWorker: deps.readExistingWorker,
-  });
+  const existingWorker = await prepareExistingCloudflareDeployWithAuth(
+    {
+      root,
+      configPath,
+      accountId,
+      reuse: options.reuseExistingWorker,
+      pinnedLink: initialCloudflareLink,
+      runWrangler,
+      readExistingWorker: deps.readExistingWorker,
+    },
+    uploaderIsPinned,
+  );
   const pinnedHandoffLink = existingWorker ? readCloudflareLink(root) : null;
   if (existingWorker && !pinnedHandoffLink) {
     throw new Error('The pending Cloudflare handoff was not saved before deployment.');

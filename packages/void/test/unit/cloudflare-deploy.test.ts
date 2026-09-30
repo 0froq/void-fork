@@ -2,7 +2,10 @@ import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { log } from '@clack/prompts';
-import { parseCloudflareVersionMessage } from '@void/deploy-cloudflare';
+import {
+  CloudflareWorkerInspectionError,
+  parseCloudflareVersionMessage,
+} from '@void/deploy-cloudflare';
 import { toSlash } from 'pathslash';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { activateCloudflareVersion as activateCloudflareVersionPrimitive } from '../../../deploy-cloudflare/src/index.ts';
@@ -569,6 +572,151 @@ describe('existing Cloudflare site handoff', () => {
       JSON.stringify({ configPath: '../../dist/ssr/wrangler.json' }),
     );
   }
+  async function withTerminal<T>(interactive: boolean, action: () => Promise<T>): Promise<T> {
+    const stdin = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+    const stdout = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: interactive });
+    Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: interactive });
+    try {
+      return await action();
+    } finally {
+      for (const [stream, descriptor] of [
+        [process.stdin, stdin],
+        [process.stdout, stdout],
+      ] as const) {
+        if (descriptor) {
+          Object.defineProperty(stream, 'isTTY', descriptor);
+        } else {
+          Reflect.deleteProperty(stream, 'isTTY');
+        }
+      }
+    }
+  }
+  function workerReadFailureHarness(
+    recheck: DeployWranglerRunResult = {
+      ...cleanExit,
+      status: 1,
+      stdout: '{"loggedIn":false}',
+      stderr: 'Cloudflare authentication is required.',
+    },
+  ) {
+    const readExistingWorker = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new CloudflareWorkerInspectionError('Could not verify existing Worker'),
+      )
+      .mockResolvedValue(existing);
+    const { deps, wranglerArgs } = harness({ readExistingWorker });
+    const originalRunner = deps.runWrangler!;
+    let whoamiCalls = 0;
+    deps.runWrangler = (args, options) => {
+      if (args[0] === 'whoami') {
+        whoamiCalls++;
+        return whoamiCalls === 1
+          ? { ...cleanExit, stdout: '{"loggedIn":true,"accounts":[{"id":"personal"}]}' }
+          : whoamiCalls === 2
+            ? recheck
+            : { ...cleanExit, stdout: '{"loggedIn":true,"accounts":[{"id":"personal"}]}' };
+      }
+      if (args[0] === 'login') {
+        wranglerArgs.push(args);
+        return cleanExit;
+      }
+      return originalRunner(args, options);
+    };
+    return { deps, readExistingWorker, wranglerArgs, getWhoamiCalls: () => whoamiCalls };
+  }
+  it('signs in inside a TTY deploy and retries the existing Worker read once', async () => {
+    const root = site();
+    const { deps, readExistingWorker, wranglerArgs, getWhoamiCalls } = workerReadFailureHarness();
+    deps.runBuild = () => build(root);
+    await withTerminal(true, () =>
+      runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+    );
+    expect(readExistingWorker).toHaveBeenCalledTimes(2);
+    expect(wranglerArgs.filter((args) => args[0] === 'login')).toHaveLength(1);
+    expect(getWhoamiCalls()).toBe(3);
+  });
+  it('gives a login instruction without retrying in a non-TTY deploy', async () => {
+    const root = site();
+    const { deps, readExistingWorker, wranglerArgs } = workerReadFailureHarness();
+    await expect(
+      withTerminal(false, () =>
+        runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+      ),
+    ).rejects.toThrow('Run `void cloudflare login`');
+    expect(readExistingWorker).toHaveBeenCalledTimes(1);
+    expect(wranglerArgs.some((args) => args[0] === 'login')).toBe(false);
+  });
+  it('signs in once when the current OAuth user cannot access the pinned account', async () => {
+    const root = site();
+    const { deps, readExistingWorker, wranglerArgs } = workerReadFailureHarness({
+      ...cleanExit,
+      stdout: '{"loggedIn":true,"accounts":[{"id":"other"}]}',
+    });
+    deps.runBuild = () => build(root);
+    await withTerminal(true, () =>
+      runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+    );
+    expect(readExistingWorker).toHaveBeenCalledTimes(2);
+    expect(wranglerArgs.filter((args) => args[0] === 'login')).toHaveLength(1);
+  });
+  it('does not open browser login for an invalid environment token', async () => {
+    const root = site();
+    const { deps, readExistingWorker, wranglerArgs } = workerReadFailureHarness();
+    const originalRunner = deps.runWrangler!;
+    deps.runWrangler = (args, options) =>
+      args[0] === 'whoami'
+        ? {
+            ...cleanExit,
+            status: 1,
+            stdout: '{"loggedIn":false}',
+            stderr: 'Cloudflare authentication is required.',
+          }
+        : originalRunner(args, options);
+    vi.stubEnv('CLOUDFLARE_API_TOKEN', 'synthetic-invalid-token');
+    try {
+      await expect(
+        withTerminal(true, () =>
+          runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+        ),
+      ).rejects.toThrow('Cloudflare credentials from CLOUDFLARE_API_TOKEN were rejected');
+      expect(readExistingWorker).toHaveBeenCalledTimes(1);
+      expect(wranglerArgs.some((args) => args[0] === 'login')).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+  it('does not repeat login when the Worker read still fails after sign-in', async () => {
+    const root = site();
+    const { deps, readExistingWorker, wranglerArgs } = workerReadFailureHarness();
+    readExistingWorker.mockRejectedValueOnce(
+      new CloudflareWorkerInspectionError('Could not verify existing Worker'),
+    );
+    await expect(
+      withTerminal(true, () =>
+        runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+      ),
+    ).rejects.toThrow('Could not verify existing Worker');
+    expect(readExistingWorker).toHaveBeenCalledTimes(2);
+    expect(wranglerArgs.filter((args) => args[0] === 'login')).toHaveLength(1);
+  });
+  it('preserves the Worker error when the fresh identity check is valid', async () => {
+    const root = site();
+    const { deps, readExistingWorker, wranglerArgs } = workerReadFailureHarness();
+    const originalRunner = deps.runWrangler!;
+    deps.runWrangler = (args, options) =>
+      args[0] === 'whoami'
+        ? { ...cleanExit, stdout: '{"loggedIn":true,"accounts":[{"id":"personal"}]}' }
+        : originalRunner(args, options);
+    await expect(
+      withTerminal(true, () =>
+        runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+      ),
+    ).rejects.toThrow('Could not verify existing Worker');
+    expect(readExistingWorker).toHaveBeenCalledTimes(1);
+    expect(wranglerArgs.some((args) => args[0] === 'login')).toBe(false);
+  });
   it('reuses the target and completes the same invocation without provisioning or secret writes', async () => {
     const root = site();
     const activateVersion = vi
