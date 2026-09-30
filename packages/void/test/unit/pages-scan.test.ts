@@ -125,6 +125,57 @@ const example = 'export const actions = {}';`,
     ).not.toThrow();
   });
 
+  it('ignores commented and stringified page server metadata', async () => {
+    writeFile('comments/[slug].vue', '<template><div>Comment</div></template>');
+    writeFile(
+      'comments/[slug].server.ts',
+      `export const action = () => ({});
+const example = 'export const prerender = true; export const ssr = false;';
+// export const revalidate = 60;
+/* export const prerender = true;
+   export const ssr = false;
+   export function getPrerenderPaths() {} */`,
+    );
+
+    const result = await scanPages(TMP, { output: 'static' });
+    const page = result.pages[0];
+    expect(page.methods).toEqual(['action']);
+    expect(page.revalidate).toBeUndefined();
+    expect(page.prerender).toBeUndefined();
+    expect(page.ssr).toBeUndefined();
+    expect(page.hasGetPrerenderPaths).toBeUndefined();
+    expect(page.shouldPrerender).toBe(false);
+  });
+
+  it('reads page settings through TypeScript expression wrappers', async () => {
+    writeFile('typed.vue', '<template><div>Typed</div></template>');
+    writeFile(
+      'typed.server.ts',
+      `export const revalidate = (60 as number)!;
+export const prerender = false satisfies boolean;
+export const ssr = true as const;`,
+    );
+
+    const page = (await scanPages(TMP)).pages[0];
+    expect(page.revalidate).toBe(60);
+    expect(page.prerenderMode).toBe('disabled');
+    expect(page.ssrMode).toBe('server');
+  });
+
+  it('does not treat a computed revalidate expression as its leading literal', async () => {
+    writeFile('computed.vue', '<template><div>Computed</div></template>');
+    writeFile('computed.server.ts', 'export const revalidate = 60 + 1;');
+
+    expect((await scanPages(TMP)).pages[0].revalidate).toBeUndefined();
+  });
+
+  it('keeps detecting page methods declared with let or var', async () => {
+    writeFile('methods.vue', '<template><div>Methods</div></template>');
+    writeFile('methods.server.ts', 'export let loader = () => []; export var action = () => ({});');
+
+    expect((await scanPages(TMP)).pages[0].methods).toEqual(['loader', 'action']);
+  });
+
   it('detects page methods from named value re-exports without counting type exports', async () => {
     writeFile('settings.vue', '<template><div>Settings</div></template>');
     writeFile(

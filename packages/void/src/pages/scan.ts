@@ -6,8 +6,10 @@ import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
 import { parseRouteFilename } from '../router/parse-filename.ts';
 import {
   isIdentifier,
+  isLiteral,
   type AstExportNamedDeclaration,
   type AstFunctionDeclaration,
+  type AstNode,
   type AstProgram,
   type AstVariableDeclaration,
 } from '../shared/ast.ts';
@@ -26,12 +28,6 @@ import type {
 const COMPONENT_EXTENSIONS = ['vue', 'tsx', 'jsx', 'svelte', 'md'];
 const SERVER_EXTENSIONS = ['ts', 'tsx', 'js', 'mjs', 'mts'];
 const PAGE_METHODS = new Set(['loader', 'action', 'actions']);
-const REVALIDATE_RE = /export\s+const\s+revalidate\s*=\s*(\d+)\s*;?/;
-const PRERENDER_RE = /export\s+const\s+prerender\s*=\s*true\s*;?/;
-const PRERENDER_FALSE_RE = /export\s+const\s+prerender\s*=\s*false\s*;?/;
-const SSR_TRUE_RE = /export\s+const\s+ssr\s*=\s*true\s*;?/;
-const SSR_FALSE_RE = /export\s+const\s+ssr\s*=\s*false\s*;?/;
-const GET_PRERENDER_PATHS_RE = /export\s+(?:async\s+)?function\s+getPrerenderPaths\b/;
 const LAYOUT_STRING_RE = /export\s+const\s+layout\s*=\s*["']([^"']+)["']\s*;?/;
 const LAYOUT_FALSE_RE = /export\s+const\s+layout\s*=\s*false\s*;?/;
 export const MAX_REVALIDATE = 31536000; // 1 year in seconds
@@ -56,15 +52,38 @@ type ResolvedPageRendering = {
   shouldPrerender: boolean;
 };
 
-function detectPageMethods(source: string, filename: string): Array<string> {
+type PageServerMetadata = {
+  methods: Array<string>;
+  revalidate?: number;
+  prerender?: ExplicitBoolean;
+  ssr?: ExplicitBoolean;
+  hasGetPrerenderPaths?: boolean;
+};
+
+const TRANSPARENT_EXPRESSION_TYPES = new Set([
+  'ParenthesizedExpression',
+  'TSAsExpression',
+  'TSNonNullExpression',
+  'TSSatisfiesExpression',
+  'TSTypeAssertion',
+]);
+
+function readLiteral(node: AstNode | null | undefined): unknown {
+  while (node && TRANSPARENT_EXPRESSION_TYPES.has(node.type)) {
+    node = node.expression as AstNode | undefined;
+  }
+  return isLiteral(node) ? node.value : undefined;
+}
+
+function detectPageServerMetadata(source: string, filename: string): PageServerMetadata {
+  const metadata: PageServerMetadata = { methods: [] };
   let parsed: ReturnType<typeof parseSync>;
   try {
     parsed = parseSync(filename, source);
   } catch {
-    return [];
+    return metadata;
   }
 
-  const methods: Array<string> = [];
   const program = parsed.program as unknown as AstProgram;
   for (const node of program.body ?? []) {
     if (node.type !== 'ExportNamedDeclaration') {
@@ -76,28 +95,52 @@ function detectPageMethods(source: string, filename: string): Array<string> {
     }
     const declaration = exported.declaration;
     if (declaration?.type === 'VariableDeclaration') {
-      for (const variable of (declaration as AstVariableDeclaration).declarations ?? []) {
-        if (isIdentifier(variable.id) && PAGE_METHODS.has(variable.id.name)) {
-          methods.push(variable.id.name);
+      const variables = declaration as AstVariableDeclaration;
+      for (const variable of variables.declarations ?? []) {
+        if (!isIdentifier(variable.id)) {
+          continue;
+        }
+        const name = variable.id.name;
+        if (PAGE_METHODS.has(name)) {
+          metadata.methods.push(name);
+        } else if (name === 'getPrerenderPaths') {
+          metadata.hasGetPrerenderPaths = true;
+        } else if (variables.kind === 'const') {
+          if (name === 'revalidate') {
+            const value = readLiteral(variable.init);
+            if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
+              metadata.revalidate = value;
+            }
+          } else if (name === 'prerender' || name === 'ssr') {
+            const value = readLiteral(variable.init);
+            if (typeof value === 'boolean') {
+              metadata[name] = value;
+            }
+          }
         }
       }
     } else if (declaration?.type === 'FunctionDeclaration') {
       const functionName = (declaration as AstFunctionDeclaration).id;
-      if (isIdentifier(functionName) && PAGE_METHODS.has(functionName.name)) {
-        methods.push(functionName.name);
+      if (isIdentifier(functionName)) {
+        if (PAGE_METHODS.has(functionName.name)) {
+          metadata.methods.push(functionName.name);
+        } else if (functionName.name === 'getPrerenderPaths') {
+          metadata.hasGetPrerenderPaths = true;
+        }
       }
     }
     for (const specifier of exported.specifiers ?? []) {
-      if (
-        specifier.exportKind !== 'type' &&
-        isIdentifier(specifier.exported) &&
-        PAGE_METHODS.has(specifier.exported.name)
-      ) {
-        methods.push(specifier.exported.name);
+      if (specifier.exportKind === 'type' || !isIdentifier(specifier.exported)) {
+        continue;
+      }
+      if (PAGE_METHODS.has(specifier.exported.name)) {
+        metadata.methods.push(specifier.exported.name);
+      } else if (specifier.exported.name === 'getPrerenderPaths') {
+        metadata.hasGetPrerenderPaths = true;
       }
     }
   }
-  return methods;
+  return metadata;
 }
 
 function inferAutoPrerender(page: PageRenderingSource, options?: PageScanOptions): boolean {
@@ -219,24 +262,12 @@ export async function scanPages(root: string, options?: PageScanOptions): Promis
       if (existsSync(join(pagesDir, candidate))) {
         serverPath = candidate;
         const content = readFileSync(join(pagesDir, candidate), 'utf-8');
-        methods.push(...detectPageMethods(content, candidate));
-        const revalidateMatch = content.match(REVALIDATE_RE);
-        if (revalidateMatch) {
-          revalidate = Number(revalidateMatch[1]);
-        }
-        if (PRERENDER_RE.test(content)) {
-          prerender = true;
-        } else if (PRERENDER_FALSE_RE.test(content)) {
-          prerender = false;
-        }
-        if (SSR_TRUE_RE.test(content)) {
-          ssr = true;
-        } else if (SSR_FALSE_RE.test(content)) {
-          ssr = false;
-        }
-        if (GET_PRERENDER_PATHS_RE.test(content)) {
-          hasGetPrerenderPaths = true;
-        }
+        const metadata = detectPageServerMetadata(content, candidate);
+        methods.push(...metadata.methods);
+        revalidate = metadata.revalidate;
+        prerender = metadata.prerender;
+        ssr = metadata.ssr;
+        hasGetPrerenderPaths = metadata.hasGetPrerenderPaths;
         break;
       }
     }
