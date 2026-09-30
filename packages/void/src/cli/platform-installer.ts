@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import {
   createServer,
   request as httpRequest,
@@ -4096,11 +4096,72 @@ type PlatformWorkerDeploymentOptions = Readonly<{
   workerExisted: boolean;
 }>;
 
+/** Hash every input that can change a version upload; missing or unusual files disable reuse. */
+export function platformWorkerUploadFingerprint(
+  config: Record<string, unknown>,
+  managedRoutes: ReadonlyArray<string> = [],
+): string | null {
+  if (typeof config.main !== 'string') {
+    return null;
+  }
+  try {
+    const main = lstatSync(config.main);
+    if (!main.isFile()) {
+      return null;
+    }
+    const mainSha256 = createHash('sha256').update(readFileSync(config.main)).digest('hex');
+    const normalized: Record<string, unknown> = { ...config, main: { sha256: mainSha256 } };
+    if (config.assets !== undefined) {
+      const assets = config.assets;
+      if (!assets || typeof assets !== 'object' || Array.isArray(assets)) {
+        return null;
+      }
+      const directory = (assets as Record<string, unknown>).directory;
+      if (typeof directory !== 'string' || !lstatSync(directory).isDirectory()) {
+        return null;
+      }
+      const files = createHash('sha256');
+      const visit = (path: string, prefix: string): boolean => {
+        for (const entry of readdirSync(path, { withFileTypes: true }).sort((a, b) =>
+          a.name.localeCompare(b.name),
+        )) {
+          const relativePath = `${prefix}${entry.name}`;
+          const absolutePath = join(path, entry.name);
+          if (entry.isDirectory()) {
+            files.update(`directory:${relativePath}\0`);
+            if (!visit(absolutePath, `${relativePath}/`)) {
+              return false;
+            }
+          } else if (entry.isFile()) {
+            files.update(`file:${relativePath}\0`);
+            files.update(createHash('sha256').update(readFileSync(absolutePath)).digest('hex'));
+          } else {
+            return false;
+          }
+        }
+        return true;
+      };
+      if (!visit(directory, '')) {
+        return null;
+      }
+      normalized.assets = {
+        ...(assets as Record<string, unknown>),
+        directory: files.digest('hex'),
+      };
+    }
+    return createHash('sha256')
+      .update(JSON.stringify({ schema: 1, config: normalized, managedRoutes }))
+      .digest('hex');
+  } catch {
+    return null;
+  }
+}
+
 async function deployPlatformWorker(
   config: Record<string, unknown>,
   secrets: Record<string, string> | null,
   options: PlatformWorkerDeploymentOptions,
-): Promise<PlatformWorkerRollback> {
+): Promise<PlatformWorkerRollback | null> {
   const directory = mkdtempSync(join(tmpdir(), 'void-platform-deploy-'));
   const workerName = String(config.name);
   const accountId = String(config.account_id);
@@ -4114,6 +4175,8 @@ async function deployPlatformWorker(
   const previousTraffic = isolatePlatformWorkerCustomDomains(options.previousConfig);
   let uploadConfig = withoutPlatformWorkerTrafficAttachments(nextTraffic.wranglerConfig);
   const nextTriggers = readTriggerConfigFromObject(nextTraffic.wranglerConfig);
+  const contentHash =
+    secrets === null ? platformWorkerUploadFingerprint(config, options.managedRoutes) : null;
   let previousTriggers = readTriggerConfigFromObject(previousTraffic.wranglerConfig);
   try {
     const configPath = join(directory, 'wrangler.json');
@@ -4142,6 +4205,60 @@ async function deployPlatformWorker(
       }
       previousDeployment = deployments[0]!;
       previousDeploymentId = previousDeployment.id;
+      if (contentHash && previous.contentHash === contentHash) {
+        // The active immutable version contains the exact upload input. Reconcile
+        // mutable triggers and traffic even when no new version is necessary.
+        try {
+          const triggers = await stabilizeCloudflareVersionTriggers({
+            configPath,
+            knownTriggerConfigs: { [previousVersionId]: nextTriggers },
+            manageRoutes: false,
+            previousTriggerConfig: previous.triggerConfig,
+            publishEmptyCustomDomains: async () => {
+              await options.removeCustomDomains();
+              return cleanPlatformCommandResult();
+            },
+            runWrangler: platformWorkerCommandRunner(accountId, directory, options.runner),
+            targetTriggerConfig: nextTriggers,
+            targetVersionId: previousVersionId,
+            workerName,
+          });
+          assertPlatformTriggerStabilization(triggers, workerName, previousVersionId, 'publish');
+          if (nextTraffic.customDomains.length > 0) {
+            await options.publishCustomDomains(workerName, nextTraffic.customDomains);
+          }
+          if (options.managedRoutes.length > 0) {
+            await options.publishRoutes(workerName, options.managedRoutes);
+          }
+          await options.onTrafficPublished();
+          if (
+            (await readActivePlatformWorkerVersion(
+              configPath,
+              accountId,
+              workerName,
+              options.runner,
+            )) !== previousVersionId
+          ) {
+            throw new Error(
+              `platform: Worker ${workerName} changed during traffic reconciliation.`,
+            );
+          }
+          return null;
+        } catch (error) {
+          const failures = await recoverFailedPlatformWorkerDeployment({
+            checkpointUnsafeTraffic: options.onUnsafeTraffic,
+            closeRoutingGate: options.retainNewWorker,
+            rollback: null,
+            unsafeTraffic: true,
+          });
+          throw new PlatformWorkerRecoveryIncompleteError(
+            `platform: Worker ${workerName} traffic reconciliation failed: ${errorMessage(error)}${
+              failures.length > 0 ? ` Safety recovery also failed: ${failures.join('; ')}` : ''
+            }`,
+            { cause: error },
+          );
+        }
+      }
       uploadConfig = withoutCompletedPlatformWorkerMigrations(uploadConfig, previous.migrationTag);
       writeFileSync(configPath, `${JSON.stringify(uploadConfig, null, 2)}\n`, {
         mode: 0o600,
@@ -4164,7 +4281,7 @@ async function deployPlatformWorker(
       '--experimental-auto-create=false',
       ...(!options.workerExisted ? ['--autoconfig=false'] : []),
       '--message',
-      encodeCloudflareVersionMessage([], nextTriggers),
+      encodeCloudflareVersionMessage([], nextTriggers, contentHash ?? undefined),
     ];
     if (secrets) {
       const secretsPath = join(directory, 'secrets.json');
@@ -5144,6 +5261,7 @@ export async function readActivePlatformWorkerSnapshot(
   expectedOwnershipMarker: string,
   runner: typeof runPlatformWrangler = runPlatformWrangler,
 ): Promise<{
+  contentHash?: string;
   migrationTag: string | null;
   triggerConfig: CloudflareTriggerConfig;
   versionId: string;
@@ -5214,7 +5332,12 @@ export async function readActivePlatformWorkerSnapshot(
     );
   }
   const migrationTag = readCloudflareVersionMigrationTag(value);
-  return { migrationTag, triggerConfig: metadata.triggerConfig, versionId };
+  return {
+    ...(metadata.contentHash ? { contentHash: metadata.contentHash } : {}),
+    migrationTag,
+    triggerConfig: metadata.triggerConfig,
+    versionId,
+  };
 }
 
 export function withoutCompletedPlatformWorkerMigrations(

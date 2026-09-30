@@ -1212,6 +1212,26 @@ describe('Cloudflare version activation', () => {
     expect(parseCloudflareVersionMessage('void:{bad')).toBeNull();
   });
 
+  it('round-trips an upload digest only when it is a valid SHA-256 value', () => {
+    const triggers = {
+      workers_dev: true,
+      preview_urls: false,
+      routes: [],
+      crons: [],
+      queueConsumers: [],
+      workflows: [],
+    };
+    const digest = 'a'.repeat(64);
+    expect(
+      parseCloudflareVersionMessage(encodeCloudflareVersionMessage([], triggers, digest)),
+    ).toMatchObject({ contentHash: digest });
+    expect(
+      parseCloudflareVersionMessage(
+        `void:${JSON.stringify({ schema: 2, migrations: [], triggerConfig: triggers, contentHash: 'bad' })}`,
+      ),
+    ).not.toHaveProperty('contentHash');
+  });
+
   // Wrangler 4.131 applies its Email Routing plan inside `triggers deploy`, reading the
   // config's `addresses`. The trigger-only config Void hands it must therefore carry the
   // snapshot's addresses verbatim — and carry NOTHING when the snapshot has none, because an

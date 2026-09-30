@@ -23,6 +23,8 @@ export type CloudflareVersionMetadata =
       schema: 2;
       migrations: ReadonlyArray<string>;
       triggerConfig: CloudflareTriggerConfig;
+      /** Digest of the complete Worker upload input, when supplied by the caller. */
+      contentHash?: string;
     }>;
 
 export type CloudflareTriggerConfig = Readonly<{
@@ -129,9 +131,10 @@ type RecentCloudflareVersion = Readonly<{
 export function encodeCloudflareVersionMessage(
   migrations: ReadonlyArray<string>,
   triggerConfig?: CloudflareTriggerConfig,
+  contentHash?: string,
 ): string {
   const metadata: CloudflareVersionMetadata = triggerConfig
-    ? { schema: 2, migrations, triggerConfig }
+    ? { schema: 2, migrations, triggerConfig, ...(contentHash ? { contentHash } : {}) }
     : { schema: 1, migrations };
   return `void:${JSON.stringify(metadata)}`;
 }
@@ -148,6 +151,7 @@ export function parseCloudflareVersionMessage(
       schema?: unknown;
       migrations?: unknown;
       triggerConfig?: unknown;
+      contentHash?: unknown;
     };
     if (
       (value.schema !== 1 && value.schema !== 2) ||
@@ -163,7 +167,17 @@ export function parseCloudflareVersionMessage(
       return { schema: 1, migrations: value.migrations };
     }
     const triggerConfig = parseTriggerConfig(value.triggerConfig);
-    return triggerConfig ? { schema: 2, migrations: value.migrations, triggerConfig } : null;
+    if (!triggerConfig) {
+      return null;
+    }
+    return {
+      schema: 2,
+      migrations: value.migrations,
+      triggerConfig,
+      ...(typeof value.contentHash === 'string' && /^[a-f0-9]{64}$/.test(value.contentHash)
+        ? { contentHash: value.contentHash }
+        : {}),
+    };
   } catch {
     return null;
   }

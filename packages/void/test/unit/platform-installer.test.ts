@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -37,6 +37,7 @@ import {
   apiWorkerSecrets,
   bootstrapPlatformSharedEmail,
   platformWorkerSecretPayload,
+  platformWorkerUploadFingerprint,
   assertRequiredPlatformSecrets,
   classifyPlatformWorkerDeploymentLineage,
   installPlatform as installPlatformImplementation,
@@ -1549,6 +1550,39 @@ describe('platform installer', () => {
     expect(withoutCompletedPlatformWorkerMigrations(config, 'v3')).toBe(config);
     expect(withoutCompletedPlatformWorkerMigrations(config, null)).toBe(config);
     expect(config.migrations).toBe(migrations);
+  });
+
+  it('reuses a Worker upload digest only for identical code, assets, and bindings', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-worker-fingerprint-'));
+    try {
+      const main = join(directory, 'worker.js');
+      const assets = join(directory, 'assets');
+      mkdirSync(assets);
+      writeFileSync(main, 'export default { fetch() { return new Response("one"); } };');
+      writeFileSync(join(assets, 'index.html'), '<h1>one</h1>');
+      const config = {
+        main,
+        name: 'void-test-api',
+        assets: { directory: assets },
+        vars: { PLATFORM_VERSION: 'one' },
+      };
+      const original = platformWorkerUploadFingerprint(config);
+      expect(original).toMatch(/^[a-f0-9]{64}$/);
+      expect(platformWorkerUploadFingerprint(config)).toBe(original);
+      expect(
+        platformWorkerUploadFingerprint({ ...config, vars: { PLATFORM_VERSION: 'two' } }),
+      ).not.toBe(original);
+      writeFileSync(main, 'export default { fetch() { return new Response("two"); } };');
+      expect(platformWorkerUploadFingerprint(config)).not.toBe(original);
+      writeFileSync(main, 'export default { fetch() { return new Response("one"); } };');
+      writeFileSync(join(assets, 'index.html'), '<h1>two</h1>');
+      expect(platformWorkerUploadFingerprint(config)).not.toBe(original);
+      expect(
+        platformWorkerUploadFingerprint({ ...config, main: join(directory, 'missing.js') }),
+      ).toBeNull();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('rejects a Worker replacement during immutable version inspection', async () => {
