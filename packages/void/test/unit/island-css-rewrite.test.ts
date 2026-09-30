@@ -1,12 +1,30 @@
-import { resolve } from 'node:path';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { normalizePath } from 'vite';
 import { describe, it, expect } from 'vite-plus/test';
-import { rewriteCssImportForVirtualModule } from '../../src/pages/islands-plugin.ts';
+import {
+  extractCssImports,
+  rewriteCssImportForVirtualModule,
+} from '../../src/pages/islands-plugin.ts';
 
 /** Resolve a POSIX-style absolute path to a platform-correct path with forward slashes. */
 const p = (posix: string) => normalizePath(resolve(posix));
 
 describe('rewriteCssImportForVirtualModule', () => {
+  it('extracts only authored static CSS imports', () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-island-css-'));
+    try {
+      const path = join(root, 'page.tsx');
+      writeFileSync(
+        path,
+        `import './real.css';\nconst sample = \`example\nimport './fake.css'\`;\nawait import('./later.css');`,
+      );
+      expect(extractCssImports(path)).toBe('@import "./real.css";');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
   it('rewrites relative CSS import to absolute path', () => {
     const result = rewriteCssImportForVirtualModule(
       'import "./global.css"',

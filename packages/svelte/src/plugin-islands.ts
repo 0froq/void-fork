@@ -13,6 +13,7 @@ import {
   ISLANDS_RENDERER_ID,
   ISLANDS_CLIENT_ENTRY_ID,
   findIslandImports,
+  findStaticCssImports,
   editIslandSource,
   type IslandSourceEdit,
 } from 'void/pages-islands-plugin';
@@ -433,17 +434,8 @@ function generateIslandClientEntry(
       }
 
       // Extract CSS imports from <script> blocks
-      const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/g;
-      const cssImportRe =
-        /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
-      let scriptMatch;
-      while ((scriptMatch = scriptRe.exec(content)) !== null) {
-        const scriptContent = scriptMatch[1];
-        let cssMatch;
-        cssImportRe.lastIndex = 0;
-        while ((cssMatch = cssImportRe.exec(scriptContent)) !== null) {
-          lines.push(rewriteCssImportForVirtualModule(cssMatch[0], cssMatch[1], file));
-        }
+      for (const item of findStaticCssImports(content, file)) {
+        lines.push(rewriteCssImportForVirtualModule(item.statement, item.specifier, file));
       }
     }
   }

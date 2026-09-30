@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'pathslash';
 import { normalizePath, type ResolvedConfig, type ViteDevServer } from 'vite';
-import { findIslandImports } from './island-imports.ts';
+import { findIslandImports, findStaticCssImports } from './island-imports.ts';
 import { resolveEffectiveLayoutChain, scanPages } from './scan.ts';
 import type { PageScanResult } from './types.ts';
 
@@ -14,7 +14,12 @@ export type IslandEntry = {
   hydrate: string;
 };
 
-export { findIslandImports, editIslandSource, type IslandSourceEdit } from './island-imports.ts';
+export {
+  findIslandImports,
+  findStaticCssImports,
+  editIslandSource,
+  type IslandSourceEdit,
+} from './island-imports.ts';
 
 type VoidMdPluginApi = {
   getClientScripts?(): Map<string, unknown>;
@@ -105,20 +110,16 @@ export function rewriteCssImportForVirtualModule(
     const absPath = normalizePath(resolve(dirname(sourceFilePath), specifier));
     return `import ${JSON.stringify(absPath)};`;
   }
-  return matchedLine.trim() + ';';
+  const statement = matchedLine.trim();
+  return statement.endsWith(';') ? statement : statement + ';';
 }
 
 /** Extract CSS import statements from a file and return them as @import rules. */
 export function extractCssImports(filePath: string): string {
   const code = readFileSync(filePath, 'utf-8');
-  const re =
-    /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
-  const imports: Array<string> = [];
-  let match;
-  while ((match = re.exec(code)) !== null) {
-    imports.push(`@import ${JSON.stringify(match[1])};`);
-  }
-  return imports.join('\n');
+  return findStaticCssImports(code, filePath)
+    .map(({ specifier }) => `@import ${JSON.stringify(specifier)};`)
+    .join('\n');
 }
 
 /** Compute which island pages need client-side JavaScript. */

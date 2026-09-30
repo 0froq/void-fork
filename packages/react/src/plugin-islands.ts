@@ -13,6 +13,7 @@ import {
   ISLANDS_RENDERER_ID,
   ISLANDS_CLIENT_ENTRY_ID,
   findIslandImports,
+  findStaticCssImports,
   editIslandSource,
   type IslandSourceEdit,
 } from 'void/pages-islands-plugin';
@@ -375,14 +376,10 @@ function generateIslandClientEntry(
   // In production, the <link> tags aren't used — the imports below ensure
   // the CSS is included in the bundled output.
   if (!isDev) {
-    const cssImportRe =
-      /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
     for (const file of cssFiles) {
       const content = readFileSync(file, 'utf-8');
-      cssImportRe.lastIndex = 0;
-      let match;
-      while ((match = cssImportRe.exec(content)) !== null) {
-        lines.push(rewriteCssImportForVirtualModule(match[0], match[1], file));
+      for (const item of findStaticCssImports(content, file)) {
+        lines.push(rewriteCssImportForVirtualModule(item.statement, item.specifier, file));
       }
     }
   }

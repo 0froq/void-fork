@@ -12,6 +12,7 @@ import {
   ISLANDS_RENDERER_ID,
   ISLANDS_CLIENT_ENTRY_ID,
   findIslandImports,
+  findStaticCssImports,
   editIslandSource,
   type IslandSourceEdit,
 } from 'void/pages-islands-plugin';
@@ -411,8 +412,6 @@ function generateIslandClientEntry(
   // ensure the CSS is included in the bundled output.
   if (!isDev) {
     const styleRe = /<style\b([^>]*)>/g;
-    const cssImportRe =
-      /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
     for (const file of cssFiles) {
       const content = readFileSync(file, 'utf-8');
       // Extract <style> blocks via Vue SFC query params
@@ -432,9 +431,8 @@ function generateIslandClientEntry(
         index++;
       }
       // Extract JS-style CSS imports (e.g. import "@void/md/theme.css")
-      cssImportRe.lastIndex = 0;
-      while ((match = cssImportRe.exec(content)) !== null) {
-        lines.push(rewriteCssImportForVirtualModule(match[0], match[1], file));
+      for (const item of findStaticCssImports(content, file)) {
+        lines.push(rewriteCssImportForVirtualModule(item.statement, item.specifier, file));
       }
     }
   }

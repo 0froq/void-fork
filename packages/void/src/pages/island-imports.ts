@@ -13,6 +13,46 @@ export type IslandImportSource = {
 
 export type IslandSourceEdit = { start: number; end: number; text: string };
 
+export type StaticCssImport = { statement: string; specifier: string };
+
+/** Collect stylesheet imports from authored modules without treating dynamic imports or text as dependencies. */
+export function findStaticCssImports(code: string, filename: string): Array<StaticCssImport> {
+  if (!code.includes('import')) {
+    return [];
+  }
+  const scripts = /\.(?:vue|svelte)$/.test(filename)
+    ? [...code.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)].map((match) => ({
+        source: match[1]!,
+        filename: filename.replace(/\.(?:vue|svelte)$/, '.ts'),
+      }))
+    : [{ source: code, filename }];
+  const imports: Array<StaticCssImport> = [];
+  for (const script of scripts) {
+    if (!script.source.includes('import')) {
+      continue;
+    }
+    const program = parseSync(script.filename, script.source).program as unknown as AstProgram;
+    for (const node of program.body ?? []) {
+      const source = node.source as AstNode | undefined;
+      if (
+        node.type !== 'ImportDeclaration' ||
+        !isLiteral(source) ||
+        typeof source.value !== 'string' ||
+        !/\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)$/.test(source.value) ||
+        node.start === undefined ||
+        node.end === undefined
+      ) {
+        continue;
+      }
+      imports.push({
+        statement: script.source.slice(node.start, node.end),
+        specifier: source.value,
+      });
+    }
+  }
+  return imports;
+}
+
 export function editIslandSource(
   code: string,
   edits: ReadonlyArray<IslandSourceEdit>,
