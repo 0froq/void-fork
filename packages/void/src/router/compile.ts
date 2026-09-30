@@ -963,7 +963,7 @@ export function compileRouteTable(
   lines.push('');
 
   // `__mergeQueryIntoLocation` is used by both the routing-rules middleware
-  // (static redirects) and the `c.redirect` wrapper below — emit it up-front
+  // (static redirects) and the `c.redirect` wrapper below — import it up-front
   // so it's available regardless of whether routing rules are compiled in.
   ensureMergeQueryHelperEmitted(lines);
 
@@ -3192,62 +3192,14 @@ export async function fetch(path, options) {
 }`;
 }
 
-/**
- * Emit inline `__compilePattern()` and `__matchPattern()` — pattern compilation
- * with named captures, matching the dispatch worker's behavior in
- * `packages/dispatch/src/pattern.ts`.
- *
- * Syntax:
- *   :name    — single path segment (captured as `name`)
- *   :name*   — zero or more segments (captured as `name`)
- *   *        — zero or more segments (captured as `splat`, legacy)
- *
- * When a pattern contains multiple bare `*`, only the first captures as
- * `splat`; later occurrences emit a non-capturing `.*` so the constructed
- * `RegExp` doesn't reject "duplicate group name" at request time. `:name*`
- * uses a distinct group name and never clashes with `*`. `__matchPattern`
- * additionally swallows any compile-time `RegExp` error and returns `false`
- * so a single malformed rule cannot 500 unrelated requests on CF dev.
- */
-function emitCompilePattern(lines: Array<string>): void {
-  lines.push('function __compilePattern(source) {');
-  lines.push('  const names = [];');
-  lines.push('  let legacySplatCaptured = false;');
-  lines.push('  let pattern = "";');
-  lines.push('  let i = 0;');
-  lines.push('  while (i < source.length) {');
-  lines.push('    const ch = source[i];');
-  lines.push('    if (ch === ":") {');
-  lines.push('      let j = i + 1;');
-  lines.push('      while (j < source.length && /[A-Za-z0-9_]/.test(source[j])) j++;');
-  lines.push('      const name = source.slice(i + 1, j);');
-  lines.push('      if (!name) { pattern += "\\\\:"; i++; continue; }');
-  lines.push('      if (source[j] === "*") {');
-  lines.push('        names.push(name);');
-  lines.push('        pattern += `(?<${name}>.*)`;');
-  lines.push('        i = j + 1;');
-  lines.push('      } else {');
-  lines.push('        names.push(name);');
-  lines.push('        pattern += `(?<${name}>[^/]+)`;');
-  lines.push('        i = j;');
-  lines.push('      }');
-  lines.push('    } else if (ch === "*") {');
-  lines.push('      if (legacySplatCaptured) {');
-  lines.push('        pattern += ".*";');
-  lines.push('      } else {');
-  lines.push('        names.push("splat");');
-  lines.push('        pattern += "(?<splat>.*)";');
-  lines.push('        legacySplatCaptured = true;');
-  lines.push('      }');
-  lines.push('      i++;');
-  lines.push('    } else {');
-  lines.push('      if (/[.+?^${}()|[\\]\\\\]/.test(ch)) pattern += "\\\\";');
-  lines.push('      pattern += ch;');
-  lines.push('      i++;');
-  lines.push('    }');
-  lines.push('  }');
-  lines.push('  return { regex: new RegExp(`^${pattern}$`), names };');
-  lines.push('}');
+/** Import the shared cached routing helpers only for modules that use rules. */
+function ensureCompilePatternEmitted(lines: Array<string>): void {
+  if (lines.some((line) => line.includes('compilePattern as __compilePattern'))) {
+    return;
+  }
+  lines.push(
+    'import { compilePattern as __compilePattern, substituteParams as __substituteParams } from "@void/edge";',
+  );
   lines.push('const __matchPatternWarned = new Set();');
   lines.push('function __matchPattern(pattern, pathname) {');
   lines.push('  try {');
@@ -3262,46 +3214,14 @@ function emitCompilePattern(lines: Array<string>): void {
   lines.push('    return false;');
   lines.push('  }');
   lines.push('}');
-  lines.push('function __substituteParams(destination, params) {');
-  lines.push('  return destination.replace(/:([A-Za-z0-9_]+)\\*?/g, (whole, name) => {');
-  lines.push('    return params[name] != null ? params[name] : whole;');
-  lines.push('  });');
-  lines.push('}');
   lines.push('');
 }
 
-function ensureCompilePatternEmitted(lines: Array<string>): void {
-  if (!lines.some((l) => l.includes('function __compilePattern'))) {
-    emitCompilePattern(lines);
-  }
-}
-
-/**
- * Emit the `__mergeQueryIntoLocation` helper. Shared between the static
- * routing-rules middleware (for `_redirects` entries) and the dynamic
- * `c.redirect` wrapper, so it's emitted unconditionally above the rewrite
- * middleware. If the destination already carries a param, the destination
- * wins — matching the static-redirect semantics.
- */
 function ensureMergeQueryHelperEmitted(lines: Array<string>): void {
-  if (lines.some((l) => l.includes('function __mergeQueryIntoLocation'))) {
+  if (lines.some((line) => line.includes('mergeQueryIntoLocation as __mergeQueryIntoLocation'))) {
     return;
   }
-  lines.push('function __mergeQueryIntoLocation(destination, search) {');
-  lines.push('  if (!search || search === "?") return destination;');
-  lines.push('  const fragIdx = destination.indexOf("#");');
-  lines.push('  const base = fragIdx === -1 ? destination : destination.slice(0, fragIdx);');
-  lines.push('  const fragment = fragIdx === -1 ? "" : destination.slice(fragIdx);');
-  lines.push('  const q = base.indexOf("?");');
-  lines.push('  if (q === -1) return base + search + fragment;');
-  lines.push('  if (q === base.length - 1) return base.slice(0, q) + fragment;');
-  lines.push('  const dp = new URLSearchParams(base.slice(q + 1));');
-  lines.push('  for (const [k, v] of new URLSearchParams(search)) {');
-  lines.push('    if (!dp.has(k)) dp.append(k, v);');
-  lines.push('  }');
-  lines.push('  return base.slice(0, q) + "?" + dp.toString() + fragment;');
-  lines.push('}');
-  lines.push('');
+  lines.push('import { mergeQueryIntoLocation as __mergeQueryIntoLocation } from "@void/edge";');
 }
 
 /**

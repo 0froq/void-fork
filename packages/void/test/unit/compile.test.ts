@@ -1,3 +1,8 @@
+import {
+  compilePattern as sharedCompilePattern,
+  mergeQueryIntoLocation as sharedMergeQueryIntoLocation,
+  substituteParams as sharedSubstituteParams,
+} from '@void/edge';
 /* oxlint-disable typescript-eslint/no-explicit-any -- these tests wire the void context augmentations by hand (`c.rewrite`, `c.originalUrl`, `c.isRewritten`) to exercise generated code paths directly; `as any` is the least noisy way to assign/read those members without re-declaring the full Hono context shape per test. */
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vite-plus/test';
@@ -636,9 +641,8 @@ describe('compileRouteTable', () => {
       testOptions,
     );
 
-    // The __mergeQueryIntoLocation helper must be emitted even without
-    // static routing rules, since the c.redirect wrapper now depends on it.
-    expect(code).toContain('function __mergeQueryIntoLocation(destination, search)');
+    // The c.redirect wrapper also uses this helper when no static rules exist.
+    expect(code).toContain('mergeQueryIntoLocation as __mergeQueryIntoLocation');
     // And the c.redirect wrapper must reference it for string paths that
     // start with "/" (internal), passing through absolute URLs untouched.
     expect(code).toContain('const __origRedirect = c.redirect.bind(c);');
@@ -720,6 +724,9 @@ function evalCompiledApp(code: string): Hono {
     'convertReturnValue',
     '__VoidAssetRewriteError',
     'AsyncLocalStorage',
+    '__compilePattern',
+    '__substituteParams',
+    '__mergeQueryIntoLocation',
     [
       // Inject the noop binding for both nodeTarget (was a `const` we stripped)
       // and the cf branch (was an import we stripped). Anything beyond the
@@ -737,6 +744,9 @@ function evalCompiledApp(code: string): Hono {
     (v: unknown) => (v instanceof Response ? v : new Response(String(v ?? ''))),
     class VoidAssetRewriteErrorStub extends Error {},
     AsyncLocalStorage,
+    sharedCompilePattern,
+    sharedSubstituteParams,
+    sharedMergeQueryIntoLocation,
   ) as Hono;
 }
 
@@ -2847,46 +2857,35 @@ describe('compileNodeServer', () => {
   });
 });
 
-/**
- * Extract the emitted `__compilePattern` and `__matchPattern` runtime helpers
- * from a generated route-table source string and rebuild them as live JS
- * functions so we can exercise the actual emitter output (not a hand-written
- * mirror). This guards against drift between the dispatch worker's compiler
- * (`packages/dispatch/src/pattern.ts`) and the framework's inlined emitter.
- */
+/** Exercise the generated warning wrapper against the shared cached compiler. */
 function extractEmittedPatternRuntime(code: string): {
   matchPattern: (pattern: string, pathname: string) => boolean;
   compilePattern: (source: string) => { regex: RegExp; names: Array<string> };
 } {
-  const compileFnStart = code.indexOf('function __compilePattern(source) {');
-  if (compileFnStart === -1) {
-    throw new Error('emitted source missing __compilePattern');
+  const matchFnStart = code.indexOf('const __matchPatternWarned = new Set();');
+  const matchFnEnd = code.indexOf('\n// Header rules', matchFnStart);
+  if (matchFnStart === -1 || matchFnEnd === -1) {
+    throw new Error('emitted source missing __matchPattern wrapper');
   }
-  // The emitter's own helper bodies are flat (no nested closing braces beyond
-  // the regex character classes); a brace-aware scan would be overkill.
-  const matchFnStart = code.indexOf('function __matchPattern(pattern, pathname) {', compileFnStart);
-  if (matchFnStart === -1) {
-    throw new Error('emitted source missing __matchPattern');
-  }
-  const matchFnEnd = code.indexOf('\nfunction __substituteParams', matchFnStart);
-  if (matchFnEnd === -1) {
-    throw new Error('emitted source missing __substituteParams sentinel');
-  }
-  const helpersSrc = code.slice(compileFnStart, matchFnEnd);
-  // `new Function` evaluates the helpers in a fresh scope, then returns the
-  // two we care about. The Set-warned dedupe map is private to that scope.
+  const helpersSrc = code.slice(matchFnStart, matchFnEnd);
   // oxlint-disable-next-line no-new-func
-  const factory = new Function(`${helpersSrc}\nreturn { __compilePattern, __matchPattern };`);
-  const { __compilePattern, __matchPattern } = factory() as {
-    __compilePattern: (source: string) => { regex: RegExp; names: Array<string> };
-    __matchPattern: (pattern: string, pathname: string) => boolean;
+  const factory = new Function('__compilePattern', `${helpersSrc}\nreturn __matchPattern;`);
+  const matchPattern = factory(sharedCompilePattern) as (
+    pattern: string,
+    pathname: string,
+  ) => boolean;
+  return {
+    compilePattern: (source) => {
+      const { regex, paramNames } = sharedCompilePattern(source);
+      return { regex, names: [...paramNames] };
+    },
+    matchPattern,
   };
-  return { compilePattern: __compilePattern, matchPattern: __matchPattern };
 }
 
-describe('emitted __compilePattern / __matchPattern runtime', () => {
-  // Build a minimal route table with a header rule so the emitter inlines the
-  // pattern helpers (header middleware is what triggers `ensureCompilePatternEmitted`).
+describe('shared pattern compiler in generated routes', () => {
+  // Build a minimal route table with a header rule so the generated module
+  // imports the cached compiler and emits its warning wrapper.
   const emptyScan: ScanResult = {
     routes: [],
     middleware: [],
@@ -2899,11 +2898,18 @@ describe('emitted __compilePattern / __matchPattern runtime', () => {
     dev: true,
     headerRules: [{ pattern: '/*', headers: [['x-test', '1']] as Array<[string, string]> }],
   });
+  it('uses the shared cached pattern and redirect helpers', () => {
+    expect(code).toContain('compilePattern as __compilePattern');
+    expect(code).toContain('mergeQueryIntoLocation as __mergeQueryIntoLocation');
+    expect(code).not.toContain('function __compilePattern(source)');
+    expect(code).not.toContain('function __mergeQueryIntoLocation(destination, search)');
+  });
   const { compilePattern, matchPattern } = extractEmittedPatternRuntime(code);
 
   it('compiles a single bare "*" with the legacy "splat" capture', () => {
     const { regex, names } = compilePattern('/docs/*');
     expect(names).toEqual(['splat']);
+    expect(sharedCompilePattern('/docs/*').regex).toBe(regex);
     const m = regex.exec('/docs/intro/getting-started');
     expect(m?.groups?.splat).toBe('intro/getting-started');
   });
@@ -3007,7 +3013,7 @@ describe('emitted __compilePattern / __matchPattern runtime', () => {
 
   it('__matchPattern swallows construction errors and returns false', () => {
     // Directly stress-test the try/catch by monkey-patching the global
-    // RegExp once: the emitted body calls `new RegExp(...)` — if it throws,
+    // RegExp once: the shared compiler calls `new RegExp(...)` — if it throws,
     // the catch returns false and warns at most once.
     const originalRegExp = globalThis.RegExp;
     let callCount = 0;
@@ -3022,12 +3028,12 @@ describe('emitted __compilePattern / __matchPattern runtime', () => {
         callCount++;
         throw new SyntaxError('Invalid regular expression: Duplicate capture group name');
       } as unknown as typeof RegExp;
-      expect(matchPattern('/a/*/b/*', '/a/x/b/y')).toBe(false);
+      expect(matchPattern('/a/*/b/*/__forced_error', '/a/x/b/y')).toBe(false);
       expect(callCount).toBeGreaterThan(0);
       expect(consoleWarnings.some((w) => w.includes('failed to compile route pattern'))).toBe(true);
       // Second call with the same pattern must not double-warn.
       const warnedCount = consoleWarnings.length;
-      expect(matchPattern('/a/*/b/*', '/foo')).toBe(false);
+      expect(matchPattern('/a/*/b/*/__forced_error', '/foo')).toBe(false);
       expect(consoleWarnings.length).toBe(warnedCount);
     } finally {
       // oxlint-disable-next-line no-global-assign
