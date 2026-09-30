@@ -23,6 +23,7 @@ async function attemptReuse(input: {
   directApi?: boolean;
   directDeploymentDrift?: boolean;
   directLateDeploymentDrift?: boolean;
+  directProofDeploymentDrift?: boolean;
   liveTriggers?: boolean;
   secrets?: Record<string, string> | null;
   triggerFailure?: boolean;
@@ -86,6 +87,7 @@ async function attemptReuse(input: {
         return {
           deployments: [
             (input.directDeploymentDrift && directDeploymentReads > 1) ||
+            (input.directProofDeploymentDrift && directDeploymentReads > 2) ||
             (input.directLateDeploymentDrift && directDeploymentReads > 4)
               ? { ...deployment, id: 'deployment-two' }
               : deployment,
@@ -235,6 +237,18 @@ it('skips trigger publication only after live traffic matches the reused version
   expect(run.error).toBeNull();
   expect(run.calls).not.toContain('triggers deploy');
   expect(run.onTrafficPublished).toHaveBeenCalledOnce();
+});
+
+it('closes the routing gate if deployment lineage changes after live trigger proof', async () => {
+  const run = await attemptReuse({
+    directApi: true,
+    liveTriggers: true,
+    directProofDeploymentDrift: true,
+  });
+  expect(String(run.error)).toContain('changed deployment lineage during trigger verification');
+  expect(run.calls).not.toContain('triggers deploy');
+  expect(run.onUnsafeTraffic).toHaveBeenCalledOnce();
+  expect(run.retainNewWorker).toHaveBeenCalledOnce();
 });
 
 it('refuses reuse when direct Cloudflare reads observe a deployment change', async () => {
