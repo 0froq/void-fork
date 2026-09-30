@@ -351,6 +351,7 @@
     "ignore": "^7.0.9",
     "jiti": "^2.7.0",
     "jsonc-parser": "3.3.1",
+    "mime": "4.1.0",
     "miniflare": "5.20260926.0-alpha",
     "minimatch": "^10.2.6",
     "mysql2": "3.24.4",

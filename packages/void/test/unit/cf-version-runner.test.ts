@@ -212,7 +212,10 @@ async function output(config: Record<string, unknown> = {}, additionalAsset = fa
     mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, 'index.html'), '<h1>Public</h1>');
     if (additionalAsset) {
-      writeFileSync(join(directory, 'second.html'), '<h1>Second</h1>');
+      writeFileSync(join(directory, 'module.js'), 'export const ready = true;');
+      writeFileSync(join(directory, 'style.css'), 'body { color: red; }');
+      writeFileSync(join(directory, 'image.png'), Buffer.from([137, 80, 78, 71]));
+      writeFileSync(join(directory, 'opaque.unknown'), 'opaque');
     }
     writeFileSync(join(directory, 'private.txt'), 'Never upload this');
     writeFileSync(join(directory, '.assetsignore'), 'private.txt\n');
@@ -287,7 +290,7 @@ async function verifyPinnedUpload(atomic: boolean): Promise<void> {
             ]),
           }
         : path.includes('/assets/upload')
-          ? ++uploadedBatches === 2
+          ? ++uploadedBatches === 5
             ? { jwt: 'completion-token' }
             : {}
           : request.method === 'GET'
@@ -339,15 +342,34 @@ async function verifyPinnedUpload(atomic: boolean): Promise<void> {
       });
       expect(body.bindings).toContainEqual({ name: 'ASSETS', type: 'assets' });
       const session = requests.find(({ url }) => url.endsWith('/assets-upload-session'));
-      expect(Object.keys(JSON.parse(session!.body).manifest)).toEqual([
-        '/index.html',
-        '/second.html',
-      ]);
-      expect(
-        requests
-          .filter(({ url }) => url.includes('/assets/upload'))
-          .map(({ authorization }) => authorization),
-      ).toEqual(['Bearer asset-token', 'Bearer asset-token']);
+      const manifest = JSON.parse(session!.body).manifest as Record<string, { hash: string }>;
+      expect(Object.keys(manifest)).toEqual(
+        expect.arrayContaining([
+          '/index.html',
+          '/module.js',
+          '/style.css',
+          '/image.png',
+          '/opaque.unknown',
+        ]),
+      );
+      expect(Object.keys(manifest)).toHaveLength(5);
+      const assetUploads = requests.filter(({ url }) => url.includes('/assets/upload'));
+      for (const [name, contentType, contents] of [
+        ['index.html', 'text/html', Buffer.from('<h1>Public</h1>')],
+        ['module.js', 'text/javascript', Buffer.from('export const ready = true;')],
+        ['style.css', 'text/css', Buffer.from('body { color: red; }')],
+        ['image.png', 'image/png', Buffer.from([137, 80, 78, 71])],
+        ['opaque.unknown', 'application/null', Buffer.from('opaque')],
+      ] as const) {
+        const hash = manifest[`/${name}`].hash;
+        const upload = assetUploads.find(({ body }) => body.includes(`name="${hash}"`));
+        expect(upload?.body).toContain(`filename="${hash}"`);
+        expect(upload?.body).toContain(`Content-Type: ${contentType}`);
+        expect(upload?.body).toContain(contents.toString('base64'));
+      }
+      expect(assetUploads.map(({ authorization }) => authorization)).toEqual(
+        Array(5).fill('Bearer asset-token'),
+      );
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),

@@ -6,6 +6,7 @@ import {
   readBuildOutput,
 } from '@cloudflare/build-output-utils';
 import ignore from 'ignore';
+import mime from 'mime';
 import { extname, join, relative } from 'pathslash';
 import type { CfBuildOutput } from './cf-build-output.ts';
 
@@ -275,7 +276,14 @@ async function uploadAssets(options: {
       if (!path) {
         throw new Error('Cloudflare requested an asset outside the verified Worker output.');
       }
-      form.append(hash, readFileSync(path).toString('base64'));
+      // Cloudflare stores each multipart part's MIME type on the asset. A string
+      // field has no Content-Type and makes browser modules unloadable.
+      form.append(
+        hash,
+        new File([readFileSync(path).toString('base64')], hash, {
+          type: mime.getType(path) ?? 'application/null',
+        }),
+      );
     }
     const uploaded = await apiResult(
       `${options.accountUrl}/workers/assets/upload?base64=true`,
