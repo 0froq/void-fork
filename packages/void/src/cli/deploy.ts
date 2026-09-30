@@ -6060,6 +6060,14 @@ export async function runCloudflareDeploy(
     },
   ).finally(() => cfOutput?.dispose());
   if (!execution.ok) {
+    if (
+      execution.reason === 'atomic-readiness-failed' ||
+      execution.reason === 'atomic-readiness-access-denied'
+    ) {
+      // The atomic command published successfully; the old inactive-candidate chain
+      // no longer describes the live parent for the next deploy.
+      clearCloudflareCandidate(root);
+    }
     await reportCloudflareActivationFailure(
       cliLog,
       needsSandbox && execution.containersUnavailable

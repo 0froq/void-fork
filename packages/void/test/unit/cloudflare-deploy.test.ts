@@ -795,6 +795,41 @@ describe('existing Cloudflare site handoff', () => {
     );
     expect(activateVersion).toHaveBeenCalledWith(expect.objectContaining({ atomic: true }));
   });
+
+  it('clears the old upload receipt when atomic publication succeeds but readiness fails', async () => {
+    const root = site();
+    const configPath = join(root, 'wrangler.jsonc');
+    const config = parseRootWranglerConfig(configPath);
+    config.migrations = [{ tag: 'v1', new_sqlite_classes: ['Room'] }];
+    writeFileSync(configPath, JSON.stringify(config));
+    mkdirSync(join(root, '.void'), { recursive: true });
+    writeFileSync(
+      join(root, '.void/cloudflare-candidate.json'),
+      JSON.stringify({
+        accountId: 'personal',
+        workerName: 'site',
+        parentVersionId: 'original',
+        versionIds: ['candidate'],
+      }),
+    );
+    const { deps } = harness({
+      runBuild: () => build(root),
+      activateVersion: async (options) => {
+        expect(options.trustedInheritanceVersionIds).toEqual(['candidate']);
+        return {
+          ok: false,
+          reason: 'atomic-readiness-failed',
+          versionId: 'published',
+          previousVersionId: 'original',
+          rollback: 'unavailable',
+        };
+      },
+    });
+    await expect(
+      runCloudflareDeploy(root, { platform: 'cloudflare', atomic: true }, silentCliLog, deps),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(existsSync(join(root, '.void/cloudflare-candidate.json'))).toBe(false);
+  });
   it('rejects a forged candidate receipt written by the Worker schema probe', async () => {
     const root = site();
     const { deps, trace } = harness({
