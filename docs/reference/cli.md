@@ -995,6 +995,7 @@ Void records provisioned resource IDs in `void.lock.json`. Commit it for other m
 `.env` stays local. Store server keys declared in `env.ts` with `void secret put <NAME>`; Void rejects them as plaintext Worker vars. If the first deploy reports missing remote secrets, set them and retry. Custom D1 migration layouts must match the exact files, contents, and order Void validated. Direct deploy and Cloudflare commands use the top-level settings, not named environments or alternate config paths.
 
 Existing remote secrets are preserved. Void also preserves or creates `BETTER_AUTH_SECRET` for auth apps.
+If a failed upload leaves a newer inactive version, later deployments inherit secret bindings from the live version without requiring their plaintext values.
 
 **Email.** If the app uses `sendEmail()` or `email/` handlers, set `email.from` in `void.config.ts`. Void shows the Cloudflare account changes and asks before applying them. Later deploys skip the prompt once setup is ready. Without `email.from`, deploy continues without email. For CI, run `void email setup --platform cloudflare` locally and commit `void.lock.json`; pass `--require-email` to fail when email is unavailable. DNS propagation may delay a deploy after setup. See [Email on your own Cloudflare account](../guide/email.md#your-own-cloudflare-account) for setup and recovery.
 

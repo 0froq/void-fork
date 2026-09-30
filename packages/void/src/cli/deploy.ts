@@ -133,6 +133,7 @@ import {
   createCfCommand,
   createCfResourceVerifier,
   createCfVersionRunner,
+  pinActiveWorkerSecrets,
 } from './cf-version-runner.ts';
 import {
   isExpiredTokenError,
@@ -6056,6 +6057,21 @@ export async function runCloudflareDeploy(
       previousTrafficConfig: readWranglerPublishedTrafficSnapshot(configPath),
       queueConsumerCleanup,
       verifyInheritedSecrets: true,
+      ...(cfOutput && existingWorker && !pinnedHandoffLink
+        ? {
+            pinActiveSecrets: (
+              activeVersionId: string,
+              bindings: ReadonlyArray<{ name: string; type: 'secret_text' | 'secret_key' }>,
+            ) =>
+              pinActiveWorkerSecrets({
+                output: cfOutput,
+                activeVersionId,
+                bindings,
+                requiredNames: schemaFacts.requiredKeys,
+                ...(initialAuthSecret ? { explicitNames: [BETTER_AUTH_SECRET_NAME] } : {}),
+              }),
+          }
+        : {}),
       atomic,
       ...(initialAuthSecret
         ? { candidateSecrets: { [BETTER_AUTH_SECRET_NAME]: initialAuthSecret } }
@@ -6195,9 +6211,8 @@ export function formatCloudflareActivationError(
       return 'deploy: could not verify which Worker Version would supply inherited secrets; production traffic is unchanged.';
     case 'inheritance-source-changed':
       return [
-        'deploy: the active Worker Version is not the latest upload, so inherited secrets cannot be pinned safely.',
-        'Supply explicit local values for every schema-marked text secret and retry. If the Worker has',
-        'non-text secret bindings, inspect its active and latest versions in Cloudflare before proceeding.',
+        'deploy: the active Worker Version is not the latest upload, and its secrets could not be pinned safely.',
+        'Inspect the active and latest Worker versions in Cloudflare before retrying.',
         'No version was uploaded; production traffic is unchanged.',
       ].join('\n');
     case 'traffic-preservation-unavailable':

@@ -46,6 +46,92 @@ function safePositional(value: unknown): value is string {
   );
 }
 
+/** Pin opaque secrets to the live version in the private, disposable Build Output. */
+export async function pinActiveWorkerSecrets(options: {
+  output: CfBuildOutput;
+  activeVersionId: string;
+  bindings: ReadonlyArray<{ name: string; type: 'secret_text' | 'secret_key' }>;
+  requiredNames: ReadonlyArray<string>;
+  explicitNames?: ReadonlyArray<string>;
+}): Promise<boolean> {
+  const { activeVersionId, bindings, requiredNames, explicitNames = [] } = options;
+  if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(activeVersionId)) {
+    return false;
+  }
+  const secretNames = new Set(bindings.map((binding) => binding.name));
+  const explicit = new Set(explicitNames);
+  if (
+    bindings.some((binding) => !safePositional(binding.name)) ||
+    secretNames.size !== bindings.length
+  ) {
+    return false;
+  }
+  if (requiredNames.some((name) => !secretNames.has(name) && !explicit.has(name))) {
+    return false;
+  }
+  const path = getWorkerConfigPath(options.output.directory);
+  const worker = parseJson(readFileSync(path, 'utf8'));
+  if (!record(worker) || (worker.env !== undefined && !record(worker.env))) {
+    return false;
+  }
+  const env = { ...(worker.env ?? {}) } as Record<string, unknown>;
+  // Candidate plaintext secrets are supplied by the one-off secrets file.
+  // Remove placeholders so they cannot also inherit from the latest upload.
+  for (const name of explicit) {
+    delete env[name];
+  }
+  for (const [name, value] of Object.entries(env)) {
+    if (
+      record(value) &&
+      (value.type === 'secret' || value.type === 'inherit' || value.type === 'unsafe:inherit') &&
+      !secretNames.has(name) &&
+      !explicit.has(name)
+    ) {
+      return false;
+    }
+  }
+  for (const { name } of bindings) {
+    if (explicit.has(name)) {
+      continue;
+    }
+    const current = env[name];
+    if (
+      current !== undefined &&
+      (!record(current) ||
+        (current.type !== 'secret' &&
+          current.type !== 'inherit' &&
+          current.type !== 'unsafe:inherit'))
+    ) {
+      return false;
+    }
+    env[name] = { type: 'unsafe:inherit', version_id: activeVersionId };
+  }
+  // `keep_bindings` would add secrets from the newer inactive upload. Explicit
+  // inherited bindings above are the complete live secret set for this upload.
+  const unsafe = record(worker.unsafe) ? { ...worker.unsafe } : {};
+  const metadata = record(unsafe.metadata) ? { ...unsafe.metadata } : {};
+  if (metadata.bindings !== undefined) {
+    return false;
+  }
+  if (
+    metadata.keep_bindings !== undefined &&
+    (!Array.isArray(metadata.keep_bindings) ||
+      !metadata.keep_bindings.every((type) => typeof type === 'string'))
+  ) {
+    return false;
+  }
+  // cf defaults to preserving secrets even without a keep_bindings field. An
+  // explicit array overrides that default in the multipart upload metadata.
+  metadata.keep_bindings = (metadata.keep_bindings ?? []).filter(
+    (type) => type !== 'secret_text' && type !== 'secret_key',
+  );
+  unsafe.metadata = metadata;
+  const next = { ...worker, env, unsafe };
+  writeFileSync(path, JSON.stringify(next), { mode: 0o600 });
+  await readBuildOutput(options.output.directory);
+  return true;
+}
+
 /** Prevent cf's prebuilt uploader from creating a resource as a side effect. */
 export function createCfResourceVerifier(options: {
   configPath: string;

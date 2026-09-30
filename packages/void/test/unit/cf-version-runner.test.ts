@@ -16,6 +16,7 @@ import {
   createCfCommand,
   createCfResourceVerifier,
   createCfVersionRunner,
+  pinActiveWorkerSecrets,
 } from '../../src/cli/cf-version-runner.ts';
 
 const roots: Array<string> = [];
@@ -217,6 +218,107 @@ async function output(config: Record<string, unknown> = {}) {
   expect(prepared).not.toBeNull();
   return prepared!;
 }
+
+it('pins live secrets in private Build Output and drops latest-version secret preservation', async () => {
+  const prepared = await output({
+    secrets: { required: ['AUTH_SECRET'] },
+    keep_secrets: true,
+  });
+  try {
+    const activeVersionId = '11111111-1111-4111-8111-111111111111';
+    expect(
+      await pinActiveWorkerSecrets({
+        output: prepared,
+        activeVersionId,
+        bindings: [
+          { name: 'AUTH_SECRET', type: 'secret_text' },
+          { name: 'KEY', type: 'secret_key' },
+        ],
+        requiredNames: ['AUTH_SECRET'],
+      }),
+    ).toBe(true);
+    const worker = JSON.parse(readFileSync(getWorkerConfigPath(prepared.directory), 'utf8'));
+    expect(worker.env.AUTH_SECRET).toEqual({ type: 'unsafe:inherit', version_id: activeVersionId });
+    expect(worker.env.KEY).toEqual({ type: 'unsafe:inherit', version_id: activeVersionId });
+    expect(worker.unsafe.metadata.keep_bindings).toEqual([]);
+    const requests: Array<{ url: string; body: string }> = [];
+    const server = createServer(async (request, response) => {
+      const chunks: Array<Buffer> = [];
+      for await (const chunk of request) {
+        chunks.push(Buffer.from(chunk));
+      }
+      requests.push({ url: request.url ?? '', body: Buffer.concat(chunks).toString('utf8') });
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(
+        JSON.stringify({
+          success: true,
+          errors: [],
+          result: {
+            id: '22222222-2222-4222-8222-222222222222',
+            number: 3,
+            metadata: { has_preview: false },
+            default_environment: { environment: 'production', script: { tag: 'test-tag' } },
+          },
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const cf = join(new URL('.', import.meta.resolve('cf/package.json')).pathname, 'bin', 'cf');
+      const dryRun = await new Promise<{ status: number | null; stderr: string }>((resolve) => {
+        execFile(
+          process.execPath,
+          [cf, 'workers', 'versions', 'create', '--prebuilt'],
+          {
+            cwd: prepared.directory,
+            encoding: 'utf8',
+            env: {
+              PATH: process.env.PATH,
+              CLOUDFLARE_API_TOKEN: 'synthetic-token',
+              CLOUDFLARE_ACCOUNT_ID: 'account-id',
+              CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`,
+            },
+          },
+          (error, _stdout, stderr) => resolve({ status: error ? 1 : 0, stderr }),
+        );
+      });
+      expect(dryRun.status, `${dryRun.stderr}\n${requests.map(({ url }) => url).join('\n')}`).toBe(
+        0,
+      );
+      const upload = requests.find(({ url }) => url.includes('/versions'));
+      expect(upload).toBeDefined();
+      expect(upload!.body).toContain(
+        '"name":"AUTH_SECRET","type":"inherit","version_id":"11111111-1111-4111-8111-111111111111"',
+      );
+      expect(upload!.body).toContain(
+        '"name":"KEY","type":"inherit","version_id":"11111111-1111-4111-8111-111111111111"',
+      );
+      expect(upload!.body).toContain('"keep_bindings":[]');
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  } finally {
+    prepared.dispose();
+  }
+});
+
+it('refuses to pin when a required secret is absent from the live version', async () => {
+  const prepared = await output({ secrets: { required: ['AUTH_SECRET'] } });
+  try {
+    expect(
+      await pinActiveWorkerSecrets({
+        output: prepared,
+        activeVersionId: '11111111-1111-4111-8111-111111111111',
+        bindings: [],
+        requiredNames: ['AUTH_SECRET'],
+      }),
+    ).toBe(false);
+  } finally {
+    prepared.dispose();
+  }
+});
 
 it('does not delegate credentialed commands to a project-local cf', async () => {
   const root = mkdtempSync(join(tmpdir(), 'void-cf-pinned-command-'));

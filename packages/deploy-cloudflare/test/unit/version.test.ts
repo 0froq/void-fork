@@ -500,6 +500,93 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls.some(([args]) => args[1] === 'upload')).toBe(true);
   });
 
+  it('pins opaque secrets to the active version when an abandoned upload is latest', async () => {
+    const abandoned = '44444444-4444-4444-8444-444444444444';
+    const base = runner();
+    let uploaded = false;
+    const runWrangler = vi.fn((args: Array<string>) => {
+      if (args[0] === 'versions' && args[1] === 'list') {
+        return ok(
+          JSON.stringify([
+            { id: CURRENT, number: 1 },
+            { id: abandoned, number: 2 },
+            ...(uploaded ? [{ id: NEXT, number: 3 }] : []),
+          ]),
+        );
+      }
+      if (args[0] === 'versions' && args[1] === 'view') {
+        return ok(
+          JSON.stringify({
+            id: args[2],
+            resources: { bindings: [{ name: 'AUTH_SECRET', type: 'secret_text' }] },
+          }),
+        );
+      }
+      if (args[0] === 'versions' && args[1] === 'upload') {
+        uploaded = true;
+      }
+      return base(args);
+    });
+    const pinActiveSecrets = vi.fn().mockResolvedValue(true);
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        workerName: 'my-worker',
+        verifyUploader: () => true,
+        verifyInheritedSecrets: true,
+        expectedPreviousVersionId: CURRENT,
+        pinActiveSecrets,
+        message: encodeCloudflareVersionMessage([]),
+        fetch: async () => Response.json({ ready: true }),
+      }),
+    ).resolves.toMatchObject({ ok: true, versionId: NEXT });
+    expect(pinActiveSecrets).toHaveBeenCalledWith(CURRENT, [
+      { name: 'AUTH_SECRET', type: 'secret_text' },
+    ]);
+    expect(uploaded).toBe(true);
+  });
+
+  it('pins the active secrets when a saved receipt no longer covers the latest upload', async () => {
+    const abandoned = '44444444-4444-4444-8444-444444444444';
+    const base = runner({
+      versions: ok(
+        JSON.stringify([
+          { id: CURRENT, number: 1 },
+          { id: CONCURRENT, number: 2 },
+          { id: abandoned, number: 3 },
+        ]),
+      ),
+    });
+    const runWrangler = vi.fn((args: Array<string>) => {
+      if (args[0] === 'versions' && args[1] === 'view') {
+        return ok(
+          JSON.stringify({
+            id: args[2],
+            resources: { bindings: [{ name: 'AUTH_SECRET', type: 'secret_text' }] },
+          }),
+        );
+      }
+      return base(args);
+    });
+    const pinActiveSecrets = vi.fn().mockResolvedValue(false);
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        workerName: 'my-worker',
+        verifyUploader: () => true,
+        verifyInheritedSecrets: true,
+        expectedPreviousVersionId: CURRENT,
+        trustedInheritanceVersionIds: [CONCURRENT],
+        pinActiveSecrets,
+        message: encodeCloudflareVersionMessage([]),
+      }),
+    ).resolves.toMatchObject({ ok: false, reason: 'inheritance-source-changed' });
+    expect(pinActiveSecrets).toHaveBeenCalledWith(CURRENT, [
+      { name: 'AUTH_SECRET', type: 'secret_text' },
+    ]);
+    expect(runWrangler.mock.calls.some(([args]) => args[1] === 'upload')).toBe(false);
+  });
+
   it('does not trust an unpublished version with a copied Void annotation', async () => {
     const unpublished = '44444444-4444-4444-8444-444444444444';
     const runWrangler = runner({

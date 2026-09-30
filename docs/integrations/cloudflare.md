@@ -308,6 +308,7 @@ Custom D1 layouts are supported through `migrations_dir`, `migrations_table`, an
 Root `.env` is local-only and is never emitted into Worker vars. Every non-client key declared in `env.ts` is a server value: store it with `void secret put <NAME>`. Void emits required server names through `secrets.required`, rejects plaintext Worker vars with those names, and preserves existing remote secrets.
 
 For apps using auth, Void creates a random 32-byte `BETTER_AUTH_SECRET` only when the remote secret is missing. It reuses that value on later deploys. Both auth secrets and schema-marked secrets can be set up on a new Worker's draft before its first upload.
+If an earlier deployment leaves a newer inactive upload, Void pins later uploads to the active version's secret bindings. You do not need to recover the plaintext values from Cloudflare.
 
 ### Readiness and rollback
 

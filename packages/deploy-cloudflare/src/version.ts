@@ -764,6 +764,11 @@ export type CloudflareVersionActivationOptions = {
   readinessAttempts?: number;
   /** Verify that omitted remote secrets come from the active Worker Version before uploading. */
   verifyInheritedSecrets?: boolean;
+  /** Pin opaque secret bindings to the live version when an unpublished upload is newer. */
+  pinActiveSecrets?: (
+    activeVersionId: string,
+    bindings: ReadonlyArray<{ name: string; type: 'secret_text' | 'secret_key' }>,
+  ) => Promise<boolean> | boolean;
   /** Explicitly publish an existing Durable Object Worker in one atomic operation. */
   atomic?: boolean;
   /**
@@ -834,6 +839,7 @@ async function activateCloudflareVersionWithSecretsFile(
   }
   const previousVersionId = previous.versionId;
   let inheritanceBaseline: Array<RecentCloudflareVersion> | undefined;
+  let trustedCandidateChain = false;
   if (options.expectedPreviousVersionId !== undefined || options.verifyInheritedSecrets === true) {
     const recent = await readRecentCloudflareVersionIds(options, commonArgs);
     if (recent === null) {
@@ -847,13 +853,18 @@ async function activateCloudflareVersionWithSecretsFile(
       const activeIndex = recent.findIndex((version) => version.id === previous.versionId);
       const inheritedChain = activeIndex < 0 ? [] : recent.slice(activeIndex);
       const inheritedCandidates = inheritedChain.slice(1).map((version) => version.id);
+      trustedCandidateChain =
+        options.trustedInheritanceVersionIds !== undefined &&
+        options.trustedInheritanceVersionIds.length > 0 &&
+        arraysEqual(inheritedCandidates, options.trustedInheritanceVersionIds);
       const safeInheritanceChain =
         inheritedChain.length > 0 &&
         inheritedChain.every(
           (version, index) =>
             index === 0 || version.number === inheritedChain[index - 1]!.number + 1,
         ) &&
-        arraysEqual(inheritedCandidates, options.trustedInheritanceVersionIds ?? []);
+        (arraysEqual(inheritedCandidates, options.trustedInheritanceVersionIds ?? []) ||
+          options.pinActiveSecrets !== undefined);
       if (!safeInheritanceChain) {
         return {
           ok: false,
@@ -863,10 +874,6 @@ async function activateCloudflareVersionWithSecretsFile(
         };
       }
     }
-    const trustedCandidateChain =
-      options.trustedInheritanceVersionIds !== undefined &&
-      options.trustedInheritanceVersionIds.length > 0 &&
-      previous.versionId !== latestVersionId;
     if (
       options.verifyInheritedSecrets === true &&
       previous.versionId !== latestVersionId &&
@@ -882,12 +889,21 @@ async function activateCloudflareVersionWithSecretsFile(
         return { ok: false, reason: 'inheritance-source-unavailable' };
       }
       if (!replacesAllRemoteSecrets) {
-        return {
-          ok: false,
-          reason: 'inheritance-source-changed',
-          activeVersionId: latestVersionId,
-          rollback: 'not-needed',
-        };
+        const activeSecrets = previous.versionId
+          ? await readCloudflareVersionSecretBindings(options, commonArgs, previous.versionId)
+          : null;
+        if (
+          !activeSecrets ||
+          !options.pinActiveSecrets ||
+          !(await options.pinActiveSecrets(previous.versionId!, activeSecrets))
+        ) {
+          return {
+            ok: false,
+            reason: 'inheritance-source-changed',
+            activeVersionId: latestVersionId,
+            rollback: 'not-needed',
+          };
+        }
       }
     }
     inheritanceBaseline = recent;
