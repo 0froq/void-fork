@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { log } from '@clack/prompts';
@@ -9492,6 +9492,23 @@ describe('hashWranglerUploader — content hash of the wrangler uploader bundle 
     // cli.js is untouched; only the sibling changes — still caught.
     writeFileSync(join(distDir, 'ProxyWorker.js'), 'tampered-sibling');
     expect(hashWranglerUploader(tmpDir, resolveArgv)).not.toBe(before);
+  });
+
+  it('hashes linked files and tolerates a broken symlink without weakening pinning', () => {
+    const resolveArgv = makeFakeUploader({ 'cli.js': 'entry', 'chunk.js': 'original' });
+    symlinkSync('chunk.js', join(distDir, 'linked.js'));
+    symlinkSync('missing.js', join(distDir, 'optional.js'));
+    const before = hashWranglerUploader(tmpDir, resolveArgv);
+    expect(before).toBeDefined();
+    expect(hashWranglerUploader(tmpDir, resolveArgv)).toBe(before);
+    writeFileSync(join(distDir, 'chunk.js'), 'changed');
+    expect(hashWranglerUploader(tmpDir, resolveArgv)).not.toBe(before);
+  });
+
+  it('fails closed for a linked directory cycle', () => {
+    const resolveArgv = makeFakeUploader({ 'cli.js': 'entry' });
+    symlinkSync('.', join(distDir, 'loop'));
+    expect(hashWranglerUploader(tmpDir, resolveArgv)).toBeUndefined();
   });
 
   it('returns undefined when the resolver throws (wrangler unresolvable → fail closed)', () => {

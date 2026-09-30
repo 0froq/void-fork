@@ -7,7 +7,10 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
+  realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -1283,20 +1286,51 @@ function hashCfUploader(): string | undefined {
 function hashDirectoryContents(dir: string): string | undefined {
   try {
     const hash = createHash('sha256');
+    const visiting = new Set<string>();
     const walk = (rel: string): void => {
-      const entries = readdirSync(join(dir, rel), { withFileTypes: true }).sort((a, b) =>
-        a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
-      );
-      for (const entry of entries) {
-        const childRel = rel ? `${rel}/${entry.name}` : entry.name;
-        if (entry.isDirectory()) {
-          walk(childRel);
-        } else {
+      const real = realpathSync(join(dir, rel));
+      if (visiting.has(real)) {
+        throw new Error(`Cyclic symlink in uploader: ${rel}`);
+      }
+      visiting.add(real);
+      try {
+        const entries = readdirSync(join(dir, rel), { withFileTypes: true }).sort((a, b) =>
+          a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+        );
+        for (const entry of entries) {
+          const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+          const childPath = join(dir, childRel);
+          if (entry.isDirectory()) {
+            walk(childRel);
+            continue;
+          }
           hash.update(childRel);
           hash.update('\0');
-          hash.update(readFileSync(join(dir, childRel)));
+          if (entry.isSymbolicLink()) {
+            hash.update(readlinkSync(childPath));
+            hash.update('\0');
+            try {
+              const target = statSync(childPath);
+              if (target.isDirectory()) {
+                walk(childRel);
+              } else if (target.isFile()) {
+                hash.update(readFileSync(childPath));
+              } else {
+                throw new Error(`Unsupported uploader symlink target: ${childRel}`);
+              }
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+                throw error;
+              }
+              hash.update('missing');
+            }
+          } else {
+            hash.update(readFileSync(childPath));
+          }
           hash.update('\0');
         }
+      } finally {
+        visiting.delete(real);
       }
     };
     walk('');
