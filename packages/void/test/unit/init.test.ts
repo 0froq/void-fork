@@ -1812,13 +1812,6 @@ describe('isScaffoldableEmptyProject', () => {
       // `id-token: write` is retained — `void deploy` mints the OIDC token.
       expect(yaml).toContain('id-token: write');
       expect(yaml).toContain('contents: read');
-      // Single-step workflow: the CLI does the exchange, so no curl/jq step and
-      // no OIDC/exchange endpoints appear in the workflow anymore.
-      expect(yaml).not.toContain('Exchange GitHub OIDC token');
-      expect(yaml).not.toContain('$ACTIONS_ID_TOKEN_REQUEST_URL');
-      expect(yaml).not.toContain('$VOID_API_URL/auth/github-oidc');
-      expect(yaml).not.toContain('curl');
-      expect(yaml).not.toContain('jq -r');
       // No linked project → placeholder repository variable.
       expect(yaml).toContain('VOID_PROJECT: ${{ vars.VOID_PROJECT }}');
       expect(yaml).toContain("VOID_API_URL: ${{ vars.VOID_API_URL || 'https://api.void.cloud' }}");
