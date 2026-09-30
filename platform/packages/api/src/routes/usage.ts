@@ -1,5 +1,6 @@
 import { and, eq, gt, isNull, lt, or } from 'drizzle-orm';
 import { Hono } from 'hono';
+import { uploadPool } from '../concurrency.ts';
 import type { Db } from '../db.ts';
 import { type ApiEnv, isDevBypass } from '../env.ts';
 import { projectOwnershipPeriods, projects as projectsTable } from '../schema.ts';
@@ -30,22 +31,30 @@ const projectUsage = new Hono<ApiEnv>()
 
     const since = getCurrentBillingPeriodStart(access.owner.billing_cycle_start);
     const requestsDataset = getRequestsDataset(context.env);
-    const [usage, aiUsage] = await Promise.all([
-      queryProjectUsage(
-        context.env.CF_ACCOUNT_ID,
-        context.env.CF_API_TOKEN,
-        requestsDataset,
-        projectId,
-        since,
-      ),
-      queryProjectAiUsage(
-        context.env.CF_ACCOUNT_ID,
-        context.env.CF_API_TOKEN,
-        context.env.AI_GATEWAY_ID ?? 'void',
-        projectId,
-        since,
-      ),
-    ]);
+    let usage: { requests: number; bandwidthBytes: number };
+    let aiUsage: { neurons: number };
+    try {
+      [usage, aiUsage] = await Promise.all([
+        queryProjectUsage(
+          context.env.CF_ACCOUNT_ID,
+          context.env.CF_API_TOKEN,
+          requestsDataset,
+          projectId,
+          since,
+        ),
+        queryProjectAiUsage(
+          context.env.CF_ACCOUNT_ID,
+          context.env.CF_API_TOKEN,
+          context.env.AI_GATEWAY_ID ?? 'void',
+          projectId,
+          since,
+          undefined,
+          true,
+        ),
+      ]);
+    } catch {
+      return context.json({ error: 'usage unavailable' }, 503);
+    }
 
     return context.json({
       projectId,
@@ -90,38 +99,32 @@ const accountUsage = new Hono<ApiEnv>()
 
     const requestsDataset = getRequestsDataset(context.env);
 
-    const [usageMap, ...aiUsages] = await Promise.all([
-      queryBatchProjectUsageWindows(
-        context.env.CF_ACCOUNT_ID,
-        context.env.CF_API_TOKEN,
-        requestsDataset,
-        projectWindows,
-      ),
-      ...projectWindows.map(async ({ project, intervals }) =>
-        intervals.reduce(
-          async (totalPromise, interval) => {
-            const [total, usage] = await Promise.all([
-              totalPromise,
-              queryProjectAiUsage(
-                context.env.CF_ACCOUNT_ID,
-                context.env.CF_API_TOKEN,
-                context.env.AI_GATEWAY_ID ?? 'void',
-                project.id,
-                interval.start,
-                interval.end,
-              ),
-            ]);
-            return { neurons: total.neurons + usage.neurons };
-          },
-          Promise.resolve({ neurons: 0 }),
+    let usageMap: Map<string, UsageEntry>;
+    let aiUsages: Array<number>;
+    try {
+      [usageMap, aiUsages] = await Promise.all([
+        queryBatchProjectUsageWindows(
+          context.env.CF_ACCOUNT_ID,
+          context.env.CF_API_TOKEN,
+          requestsDataset,
+          projectWindows,
+          true,
         ),
-      ),
-    ]);
+        sumAiUsageForWindows(
+          context.env.CF_ACCOUNT_ID,
+          context.env.CF_API_TOKEN,
+          context.env.AI_GATEWAY_ID ?? 'void',
+          projectWindows.map(({ project, intervals }) => ({ projectId: project.id, intervals })),
+        ),
+      ]);
+    } catch {
+      return context.json({ error: 'usage unavailable' }, 503);
+    }
     const projectUsages = projectWindows.map(({ project }, i) => ({
       projectId: project.id,
       slug: project.slug,
       ...(usageMap.get(project.id) ?? ZERO_USAGE),
-      aiNeurons: aiUsages[i].neurons,
+      aiNeurons: aiUsages[i],
     }));
 
     const totals = projectUsages.reduce(
@@ -216,7 +219,7 @@ async function queryProjectUsage(
   );
 
   if (!response.ok) {
-    return { requests: 0, bandwidthBytes: 0 };
+    throw new Error(`Usage query failed with HTTP ${response.status}`);
   }
 
   const result = (await response.json()) as { data: ReadonlyArray<AnalyticsRow> };
@@ -298,6 +301,7 @@ async function queryBatchProjectUsageWindows(
   apiToken: string,
   requestsDataset: string,
   windows: ReadonlyArray<AccountUsageProjectWindow>,
+  failOnError = false,
 ): Promise<Map<string, UsageEntry>> {
   if (windows.length === 0) {
     return new Map();
@@ -308,40 +312,70 @@ async function queryBatchProjectUsageWindows(
         `(blob1 = ${analyticsStringLiteral(project.id)} AND timestamp >= toDateTime64(${analyticsStringLiteral(formatAnalyticsDateMilliseconds(start))}, 3) AND timestamp < toDateTime64(${analyticsStringLiteral(formatAnalyticsDateMilliseconds(end))}, 3))`,
     ),
   );
-  const query = `
+  const usage = new Map<string, UsageEntry>();
+  for (let offset = 0; offset < predicates.length; offset += 50) {
+    const query = `
     SELECT
       blob1,
       SUM(_sample_interval * double1) as requests,
       SUM(_sample_interval * double2) as bandwidth_bytes
     FROM ${requestsDataset}
-    WHERE ${predicates.join('\n      OR ')}
+    WHERE ${predicates.slice(offset, offset + 50).join('\n      OR ')}
     GROUP BY blob1
   `;
 
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        'Content-Type': 'text/plain',
-      },
-      body: query,
-    },
-  );
-  if (!response.ok) {
-    return new Map();
-  }
-  const json = (await response.json()) as { data: ReadonlyArray<BatchAnalyticsRow> };
-  return new Map(
-    (json.data ?? []).map((row) => [
-      row.blob1,
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
       {
-        requests: Math.round(row.requests ?? 0),
-        bandwidthBytes: Math.round(row.bandwidth_bytes ?? 0),
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          'Content-Type': 'text/plain',
+        },
+        body: query,
       },
-    ]),
+    );
+    if (!response.ok) {
+      if (failOnError) {
+        throw new Error(`Usage query failed with HTTP ${response.status}`);
+      }
+      return new Map();
+    }
+    const json = (await response.json()) as { data: ReadonlyArray<BatchAnalyticsRow> };
+    for (const row of json.data ?? []) {
+      const previous = usage.get(row.blob1) ?? ZERO_USAGE;
+      usage.set(row.blob1, {
+        requests: previous.requests + Math.round(row.requests ?? 0),
+        bandwidthBytes: previous.bandwidthBytes + Math.round(row.bandwidth_bytes ?? 0),
+      });
+    }
+  }
+  return usage;
+}
+
+export async function sumAiUsageForWindows(
+  accountId: string,
+  apiToken: string,
+  gatewayId: string,
+  windows: ReadonlyArray<{ projectId: string; intervals: ReadonlyArray<AccountUsageInterval> }>,
+): Promise<Array<number>> {
+  const totals = windows.map(() => 0);
+  const tasks = windows.flatMap(({ projectId, intervals }, index) =>
+    intervals.map((interval) => ({ projectId, interval, index })),
   );
+  await uploadPool(tasks, 4, async ({ projectId, interval, index }) => {
+    const usage = await queryProjectAiUsage(
+      accountId,
+      apiToken,
+      gatewayId,
+      projectId,
+      interval.start,
+      interval.end,
+      true,
+    );
+    totals[index]! += usage.neurons;
+  });
+  return totals;
 }
 
 async function queryTopProjectTraffic(

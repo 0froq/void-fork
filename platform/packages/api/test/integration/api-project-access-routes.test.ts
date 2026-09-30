@@ -325,6 +325,32 @@ describe('project route membership capabilities', () => {
 });
 
 describe('ownership-period account usage', () => {
+  it('reports unavailable usage rather than zero when analytics fails', async () => {
+    const owner = await createTestUser(env.db, 'usage-owner');
+    const project = await createTestProject(env.db, owner.id, 'usage-app');
+    await env.db
+      .update(users)
+      .set({ billing_cycle_start: new Date(Date.now() - 86_400_000).toISOString() })
+      .where(eq(users.id, owner.id));
+    await env.db
+      .delete(projectOwnershipPeriods)
+      .where(eq(projectOwnershipPeriods.project_id, project.id));
+    await env.db.insert(projectOwnershipPeriods).values({
+      id: 'pown_usage',
+      project_id: project.id,
+      owner_user_id: owner.id,
+      starts_at: new Date(Date.now() - 60_000).toISOString(),
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ error: 'unavailable' }, { status: 503 })),
+    );
+
+    const response = await app.fetch(authed('/usage', owner.jwt), env);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: 'usage unavailable' });
+  });
+
   it('queries only the former owner interval that overlaps the billing window', async () => {
     const formerOwner = await createTestUser(env.db, 'former-owner');
     const currentOwner = await createTestUser(env.db, 'current-owner');

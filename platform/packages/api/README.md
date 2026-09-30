@@ -105,6 +105,8 @@ drizzle/
   - `/projects/:id/email/*` — monthly usage, and the verified-recipient list the project may send to (`GET|POST|DELETE`). Adding a recipient triggers a verification email; the address only becomes sendable once the recipient consents. See [Email](#email).
 - `GET /usage`
 
+Project and account usage endpoints return HTTP 503 when upstream analytics are unavailable, so clients can distinguish missing data from zero usage.
+
 Project authorization resolves the implicit owner from `projects.user_id` and
 shared access from `project_members`. Readers can inspect, collaborators can
 deploy and manage deploy prerequisites, project administrators additionally

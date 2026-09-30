@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
-import { queryProjectAiUsage } from '../../src/routes/usage.ts';
+import {
+  queryBatchProjectUsageWindows,
+  queryProjectAiUsage,
+  sumAiUsageForWindows,
+} from '../../src/routes/usage.ts';
 
 const apiToken = 'private-cloudflare-token';
 const since = new Date('2026-09-01T00:00:00.000Z');
@@ -156,5 +160,48 @@ describe('queryProjectAiUsage best-effort compatibility', () => {
   it('preserves the default zero fallback for HTTP failures', async () => {
     respond({}, 503);
     await expect(query(false)).resolves.toEqual({ neurons: 0 });
+  });
+});
+
+describe('account usage query bounds', () => {
+  it('limits concurrent AI queries while preserving each project total', async () => {
+    let active = 0;
+    let peak = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active--;
+      return Response.json(payload([{ sum: { cost: 0.000011 } }]));
+    });
+    const intervals = Array.from({ length: 12 }, () => ({ start: since, end: until }));
+    await expect(
+      sumAiUsageForWindows('account-1', apiToken, 'void', [
+        { projectId: 'one', intervals },
+        { projectId: 'two', intervals: [intervals[0]!] },
+      ]),
+    ).resolves.toEqual([12, 1]);
+    expect(peak).toBeLessThanOrEqual(4);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(13);
+  });
+
+  it('chunks ownership predicates and adds usage across chunks', async () => {
+    const queries: Array<string> = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      queries.push(String(init?.body));
+      return Response.json({ data: [{ blob1: 'one', requests: 3, bandwidth_bytes: 7 }] });
+    });
+    const windows = [
+      {
+        project: { id: 'one' },
+        intervals: Array.from({ length: 51 }, () => ({ start: since, end: until })),
+      },
+    ] as never;
+    await expect(
+      queryBatchProjectUsageWindows('account-1', apiToken, 'void_requests', windows, true),
+    ).resolves.toEqual(new Map([['one', { requests: 6, bandwidthBytes: 14 }]]));
+    expect(queries).toHaveLength(2);
+    expect(queries[0]!.match(/blob1 =/g)).toHaveLength(50);
+    expect(queries[1]!.match(/blob1 =/g)).toHaveLength(1);
   });
 });
