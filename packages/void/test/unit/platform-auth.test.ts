@@ -1,4 +1,3 @@
-import { log } from '@clack/prompts';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { cloudflareAuthEnvironment } from '../../src/cli/cloudflare-auth.ts';
 import {
@@ -74,7 +73,6 @@ describe('platform Cloudflare authentication', () => {
   });
 
   it('uses cf browser login when no session exists', async () => {
-    const loginNotice = vi.spyOn(log, 'info').mockImplementation(() => {});
     const calls: Array<string> = [];
     let tokenAttempts = 0;
     const credential = await resolvePlatformCloudflareCredential({
@@ -97,9 +95,6 @@ describe('platform Cloudflare authentication', () => {
 
     expect(credential).toEqual({ source: 'oauth', token: 'browser-token' });
     expect(calls).toEqual(['auth token --json', 'login', 'auth token --json']);
-    expect(loginNotice).toHaveBeenCalledWith(
-      'Opening Cloudflare login in your browser. Compare the code below with the browser prompt. Press Ctrl+C to cancel.',
-    );
   });
 
   it('requires an explicit environment token in non-interactive environments', async () => {
@@ -163,7 +158,6 @@ describe('platform authentication during input', () => {
 
   it('waits for the name before opening browser login', async () => {
     const input = deferred<string>();
-    const loginNotice = vi.spyOn(log, 'info').mockImplementation(() => {});
     const runWrangler = vi
       .fn()
       .mockResolvedValueOnce({ ...success, status: 1 })
@@ -174,7 +168,6 @@ describe('platform authentication during input', () => {
       runWrangler,
     });
     await vi.waitFor(() => expect(runWrangler).toHaveBeenCalledTimes(1));
-    expect(loginNotice).not.toHaveBeenCalled();
     input.resolve('team');
     await expect(result).resolves.toEqual({
       input: 'team',
@@ -185,7 +178,6 @@ describe('platform authentication during input', () => {
       'login',
       'auth token --json',
     ]);
-    expect(loginNotice).toHaveBeenCalledOnce();
   });
 
   it('does not start another auth command after input is cancelled', async () => {

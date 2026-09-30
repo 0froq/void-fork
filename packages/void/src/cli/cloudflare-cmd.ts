@@ -14,8 +14,8 @@ export async function runCloudflareCommand(root: string, args: CloudflareArgs): 
   const runWrangler = createBundledCloudflareAuthRunner(root);
   switch (args.subcommand) {
     case 'login': {
-      const session = await ensureCloudflareAuthentication({ runWrangler, forceLogin: true });
-      log.success(formatSession(root, session));
+      await ensureCloudflareAuthentication({ runWrangler, forceLogin: true });
+      console.log('Successfully logged in.');
       return;
     }
     case 'status': {

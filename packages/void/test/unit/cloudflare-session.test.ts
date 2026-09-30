@@ -65,6 +65,9 @@ beforeEach(() => {
   Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
   Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: true });
   output = [];
+  vi.spyOn(console, 'log').mockImplementation((message) => {
+    output.push(String(message));
+  });
   for (const level of ['info', 'success', 'warn'] as const) {
     vi.spyOn(log, level).mockImplementation((message) => {
       output.push(String(message));
@@ -121,12 +124,13 @@ describe('Cloudflare session switching through the bundled CLI runner', () => {
   it('explicit login replaces the old session without retargeting the project', async () => {
     await runCloudflareCommand(root, { subcommand: 'login' });
     expect(read().session?.email).toBe(newSession.email);
+    expect(output).toEqual(['Successfully logged in.']);
+    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')).toBe(pin);
+    await runCloudflareCommand(root, { subcommand: 'status' });
     expect(output.join('\n')).toContain(newSession.email);
     expect(output.join('\n')).toContain('OAuth Token');
     expect(output.join('\n')).toContain('work-id');
     expect(output.join('\n')).toContain('individual-id');
-    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')).toBe(pin);
-    await runCloudflareCommand(root, { subcommand: 'status' });
     expect(read().credentialStores).toEqual(['true', 'true', 'true']);
   });
 

@@ -4,7 +4,7 @@
  * orchestrators still use their established argument/result contracts; this
  * process translates them to the pinned cf CLI. It never invokes Wrangler.
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   copyFileSync,
   mkdtempSync,
@@ -20,6 +20,7 @@ import { parse } from 'jsonc-parser';
 import { dirname, join, resolve } from 'pathslash';
 import { EnvHttpProxyAgent, fetch as httpFetch } from 'undici';
 import { prepareCfBuildOutput } from './cf-build-output.ts';
+import { cloudflareDeviceCode, printCloudflareLoginPrompt } from './cloudflare-login-output.ts';
 
 type Result = { status: number; stdout: string; stderr: string };
 type Json = Record<string, unknown>;
@@ -82,17 +83,54 @@ function runCf(command: Array<string>, cwd = process.cwd()): Result {
   return result(child.status ?? 1, child.stdout ?? '', stderr);
 }
 
-function runInteractiveCf(command: Array<string>): Result {
-  const child = spawnSync(process.execPath, [cf, ...command, '--quiet'], {
-    cwd: process.cwd(),
-    // cf's global quiet flag hides its banner; OAuth's browser URL and device
-    // code are still printed by the login handler for the user to verify.
-    env: { ...cfEnvironment(), CF_QUIET: '1' },
-    shell: false,
-    stdio: 'inherit',
-    windowsHide: true,
+function runInteractiveCf(command: Array<string>): Promise<Result> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [cf, ...command, '--quiet'], {
+      cwd: process.cwd(),
+      env: { ...cfEnvironment(), CF_QUIET: '1' },
+      shell: false,
+      stdio: ['inherit', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let output = '';
+    let announced = false;
+    let settled = false;
+    const finish = (value: Result) => {
+      if (!settled) {
+        settled = true;
+        resolve(value);
+      }
+    };
+    const collect = (chunk: Buffer) => {
+      output = (output + chunk.toString()).slice(-32_768);
+      if (!announced) {
+        const code = cloudflareDeviceCode(output);
+        if (code) {
+          announced = true;
+          printCloudflareLoginPrompt(code);
+        }
+      }
+    };
+    child.stdout.on('data', collect);
+    child.stderr.on('data', collect);
+    child.once('error', (error) => finish(result(1, '', error.message)));
+    child.once('close', (status, signal) => {
+      if (status === 0) {
+        if (!announced) {
+          printCloudflareLoginPrompt(null);
+        }
+        finish(result(0));
+      } else {
+        finish(
+          result(
+            status ?? 1,
+            '',
+            output.trim() || `Cloudflare login ended${signal ? ` (${signal})` : ''}.`,
+          ),
+        );
+      }
+    });
   });
-  return result(child.status ?? 1, '', child.error?.message ?? '');
 }
 
 async function withBuildOutput(
@@ -463,7 +501,7 @@ async function sessionCredential(): Promise<{ type: 'oauth' | 'api_token'; token
 
 async function auth(): Promise<Result> {
   if (args[0] === 'login') {
-    return runInteractiveCf(['auth', 'login', '--force']);
+    return await runInteractiveCf(['auth', 'login', '--force']);
   }
   if (args[0] === 'logout') {
     return runCf(['auth', 'logout']);

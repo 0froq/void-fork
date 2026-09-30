@@ -1,8 +1,4 @@
-import {
-  announceCloudflareLogin,
-  runCloudflareAuthCommand,
-  type CloudflareAuthRunner,
-} from './cloudflare-auth.ts';
+import { runCloudflareAuthCommand, type CloudflareAuthRunner } from './cloudflare-auth.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
 
 export type PlatformCloudflareCredential = Readonly<{
@@ -89,7 +85,6 @@ export async function resolvePlatformCloudflareCredentialWithInput<T>(
       return { input, credential: result.credential };
     }
 
-    announceCloudflareLogin();
     const login = await runWrangler(['login'], false);
     assertNotCancelled();
     if (login.status !== 0) {

@@ -1,4 +1,3 @@
-import { log } from '@clack/prompts';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   cloudflareAuthCommandEnvironment,
@@ -27,7 +26,6 @@ describe('Cloudflare authentication', () => {
   });
 
   it('signs in with cf and resumes', async () => {
-    const loginNotice = vi.spyOn(log, 'info').mockImplementation(() => {});
     const calls: Array<string> = [];
     let whoamiCalls = 0;
     const session = await ensureCloudflareAuthentication({
@@ -47,9 +45,6 @@ describe('Cloudflare authentication', () => {
 
     expect(session.accounts).toEqual([{ id: 'account-1', name: 'Example' }]);
     expect(calls).toEqual(['whoami --json', 'login', 'whoami --json']);
-    expect(loginNotice).toHaveBeenCalledWith(
-      'Opening Cloudflare login in your browser. Compare the code below with the browser prompt. Press Ctrl+C to cancel.',
-    );
   });
 
   it('requires a token or a prior browser session outside a terminal', async () => {

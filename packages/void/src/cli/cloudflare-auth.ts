@@ -1,5 +1,4 @@
 import { execFile, spawn, spawnSync } from 'node:child_process';
-import { log } from '@clack/prompts';
 import { resolveWranglerArgv } from './preset.ts';
 
 export type CloudflareAccount = Readonly<{
@@ -115,7 +114,6 @@ export async function ensureCloudflareAuthentication(
     );
   }
 
-  announceCloudflareLogin();
   const login = await run(['login'], false);
   if (!isCleanExit(login)) {
     throw new CloudflareAuthenticationError(
@@ -311,11 +309,5 @@ export function cloudflareAuthEnvironment(
 function isCleanExit(result: CloudflareAuthRunResult): boolean {
   return (
     result.status === 0 && result.signal == null && (result.error == null || result.error === '')
-  );
-}
-
-export function announceCloudflareLogin(): void {
-  log.info(
-    'Opening Cloudflare login in your browser. Compare the code below with the browser prompt. Press Ctrl+C to cancel.',
   );
 }
