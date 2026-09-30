@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { findVoidAuthConfig } from '../../src/auth/config.ts';
 
@@ -23,7 +24,7 @@ describe('auth config discovery', () => {
     const root = rootWithAuth(
       "import { betterAuth } from 'void/auth';\nexport default betterAuth;",
     );
-    expect(findVoidAuthConfig(root)).toBe(join(root, 'auth.ts'));
+    expect(findVoidAuthConfig(root)).toBe(toSlash(join(root, 'auth.ts')));
   });
 
   it('ignores void/auth text in comments and strings', () => {
