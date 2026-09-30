@@ -3,8 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createServer } from 'node:http';
 import { connect, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Duplex } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import { getWorkerConfigPath } from '@cloudflare/build-output-utils';
 import { afterEach, expect, it } from 'vite-plus/test';
 import {
@@ -264,7 +265,7 @@ it('pins live secrets in private Build Output and drops latest-version secret pr
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     try {
-      const cf = join(new URL('.', import.meta.resolve('cf/package.json')).pathname, 'bin', 'cf');
+      const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
       const dryRun = await new Promise<{ status: number | null; stderr: string }>((resolve) => {
         execFile(
           process.execPath,
