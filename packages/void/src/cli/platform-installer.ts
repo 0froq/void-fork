@@ -4156,7 +4156,14 @@ function platformWorkerUploaderHash(): string | null {
     digest.update('platform-uploader:v1\0');
     digest.update(process.version);
     digest.update(readFileSync(resolve(dirname(launcher), '..', '..', 'package.json')));
-    digest.update(readFileSync(fileURLToPath(import.meta.resolve('cf/package.json'))));
+    const cfDirectory = dirname(fileURLToPath(import.meta.resolve('cf/package.json')));
+    digest.update(readFileSync(join(cfDirectory, 'package.json')));
+    digest.update(readFileSync(join(cfDirectory, 'bin', 'cf')));
+    const cfCodeHash = platformWorkerDirectoryHash(join(cfDirectory, 'dist'));
+    if (!cfCodeHash) {
+      throw new Error('Cloudflare CLI code is unavailable.');
+    }
+    digest.update(cfCodeHash);
     let dependencyDirectory = dirname(
       fileURLToPath(import.meta.resolve('@cloudflare/build-output-utils')),
     );
@@ -4168,6 +4175,11 @@ function platformWorkerUploaderHash(): string | null {
       dependencyDirectory = parent;
     }
     digest.update(readFileSync(join(dependencyDirectory, 'package.json')));
+    const buildOutputCodeHash = platformWorkerDirectoryHash(join(dependencyDirectory, 'dist'));
+    if (!buildOutputCodeHash) {
+      throw new Error('Cloudflare build output code is unavailable.');
+    }
+    digest.update(buildOutputCodeHash);
     const visited = new Set<string>();
     const visit = (path: string, name: string) => {
       if (visited.has(path)) {
