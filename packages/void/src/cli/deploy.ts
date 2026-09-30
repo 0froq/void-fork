@@ -5989,10 +5989,11 @@ export async function runCloudflareDeploy(
       configPath: generatedConfigPath,
       preserveTriggers: existingWorker !== null,
       expectedPreviousVersionId: existingWorker?.versionId,
-      trustedInheritanceVersionIds:
-        existingWorker && candidateReceipt?.parentVersionId === existingWorker.versionId
+      trustedInheritanceVersionIds: existingWorker
+        ? candidateReceipt?.parentVersionId === existingWorker.versionId
           ? candidateReceipt.versionIds
-          : initialCloudflareCandidate?.versionIds,
+          : undefined
+        : initialCloudflareCandidate?.versionIds,
       validateUploadedVersion: existingWorker
         ? async (versionId) => {
             if (!assertUploaderStillPinned()) {
@@ -6736,10 +6737,11 @@ async function runCloudflareStaticDeploy(
       configPath: staticConfigPath,
       preserveTriggers: existingWorker !== null,
       expectedPreviousVersionId: existingWorker?.versionId,
-      trustedInheritanceVersionIds:
-        existingWorker && candidateReceipt?.parentVersionId === existingWorker.versionId
+      trustedInheritanceVersionIds: existingWorker
+        ? candidateReceipt?.parentVersionId === existingWorker.versionId
           ? candidateReceipt.versionIds
-          : initialCloudflareCandidate?.versionIds,
+          : undefined
+        : initialCloudflareCandidate?.versionIds,
       validateUploadedVersion: existingWorker
         ? async (versionId) => {
             if (!uploaderIsPinned()) {
