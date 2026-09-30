@@ -175,6 +175,18 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     throw new Error(`platform: Unsupported lifecycle command ${args.subcommand}.`);
   }
   assertNoninteractivePlatformMutationAcknowledged(args, process.stdin.isTTY === true);
+  const timingStart = performance.now();
+  let timingPrevious = timingStart;
+  const markPhase = (phase: string) => {
+    if (process.env.VOID_PLATFORM_TIMINGS !== '1') {
+      return;
+    }
+    const current = performance.now();
+    process.stderr.write(
+      `[platform timing] phase ${phase} ${(current - timingPrevious).toFixed(0)} ms, total ${(current - timingStart).toFixed(0)} ms\n`,
+    );
+    timingPrevious = current;
+  };
   const manifest = await resolveInstalledPlatformManifest(args.selector);
   const operatorCredential = await resolvePlatformCloudflareCredential();
   const operatorClient = new PlatformCloudflareClient(operatorCredential.token);
@@ -251,6 +263,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       includeEmailGateway: runtime!.manifest.artifacts.emailGateway !== undefined,
       enableSandbox: runtime!.manifest.safetyProtocols.sandboxDrain >= 3,
     });
+    markPhase('plan');
     note(
       formatPlatformInstallPlan(plan),
       args.subcommand === 'upgrade'
@@ -321,6 +334,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
         databaseUrl,
       },
     );
+    markPhase('ownership');
     const installation =
       args.subcommand === 'enable'
         ? setInstallationDesiredState(manifest, 'enabled', new Date().toISOString())
@@ -367,6 +381,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
         },
       );
     }
+    markPhase('runtime token');
     if (!databaseLock?.readAuthenticationState) {
       throw new Error(
         'platform: The database lifecycle lock cannot read authoritative authentication settings.',
@@ -386,7 +401,10 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
         }),
       client,
       databaseRollbackSource: rollbackSourceRuntime ?? undefined,
-      onProgress: (message) => progress?.message(message),
+      onProgress: (message) => {
+        markPhase(message);
+        progress?.message(message);
+      },
       runtime: runtime!,
       replanWorkers: async (recoveryManifest) =>
         (
@@ -404,6 +422,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     });
     // Keep progress visible while the outer database session releases its lock.
     progress.message('Finalizing platform changes');
+    markPhase('installer complete');
     reportResult = () => {
       progress?.stop(
         result.waitingForDns || result.waitingForSandboxDrain
@@ -465,6 +484,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       current.id,
       current.ownershipNonce,
     );
+    markPhase('database lock');
     try {
       const authoritative = releaseDatabase.authoritativeManifest;
       const databaseCheckpointExists = authoritative !== null && authoritative !== undefined;
@@ -480,6 +500,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       await releaseDatabase();
     }
     reportResult?.();
+    markPhase('complete');
   } catch (error) {
     progress?.error(`Platform ${args.subcommand} failed.`);
     progress = undefined;
