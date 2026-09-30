@@ -4355,8 +4355,9 @@ export async function deployPlatformWorker(
         }
         await options.onTrafficPublished();
         if (
+          !deploymentId &&
           (await readActivePlatformWorkerVersion(configPath, accountId, workerName, runner)) !==
-          versionId
+            versionId
         ) {
           throw new Error(`platform: Worker ${workerName} changed during traffic reconciliation.`);
         }
@@ -4410,11 +4411,21 @@ export async function deployPlatformWorker(
           workerName,
           directRunner,
         );
-        const snapshot = await readActivePlatformWorkerSnapshot(
+        const activeVersion =
+          before[0]?.versions.length === 1 && before[0].versions[0]?.percentage === 100
+            ? before[0].versions[0].versionId
+            : null;
+        if (!activeVersion) {
+          throw new Error(
+            `platform: Existing Worker ${workerName} has no single active production version.`,
+          );
+        }
+        const snapshot = await readPlatformWorkerVersionSnapshot(
           configPath,
           accountId,
           workerName,
           readPlatformWorkerOwnershipMarker(config),
+          activeVersion,
           directRunner,
         );
         const after = await readPlatformWorkerDeployments(
@@ -5497,6 +5508,33 @@ export async function readActivePlatformWorkerSnapshot(
       `platform: Existing Worker ${workerName} has no single active production version.`,
     );
   }
+  const snapshot = await readPlatformWorkerVersionSnapshot(
+    configPath,
+    accountId,
+    workerName,
+    expectedOwnershipMarker,
+    versionId,
+    runner,
+    async () => {
+      if ((await readActiveVersion()) !== versionId) {
+        throw new Error(
+          `platform: Worker ${workerName} changed concurrently while its active version was inspected.`,
+        );
+      }
+    },
+  );
+  return snapshot;
+}
+
+async function readPlatformWorkerVersionSnapshot(
+  configPath: string,
+  accountId: string,
+  workerName: string,
+  expectedOwnershipMarker: string,
+  versionId: string,
+  runner: typeof runPlatformWrangler,
+  validateCurrentVersion?: () => Promise<void>,
+): Promise<Awaited<ReturnType<typeof readActivePlatformWorkerSnapshot>>> {
   const result = await runner(
     ['versions', 'view', versionId, '--config', configPath, '--name', workerName, '--json'],
     accountId,
@@ -5536,11 +5574,7 @@ export async function readActivePlatformWorkerSnapshot(
       `platform: Active Worker version ${versionId} for ${workerName} does not belong to this installation.`,
     );
   }
-  if ((await readActiveVersion()) !== versionId) {
-    throw new Error(
-      `platform: Worker ${workerName} changed concurrently while its active version was inspected.`,
-    );
-  }
+  await validateCurrentVersion?.();
   const annotations = (value as { annotations?: unknown }).annotations;
   const message =
     annotations &&

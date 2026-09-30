@@ -20,6 +20,7 @@ async function attemptReuse(input: {
   changeScript?: boolean;
   directApi?: boolean;
   directDeploymentDrift?: boolean;
+  directLateDeploymentDrift?: boolean;
   secrets?: Record<string, string> | null;
   triggerFailure?: boolean;
   lateVersionDrift?: boolean;
@@ -77,7 +78,8 @@ async function attemptReuse(input: {
         directDeploymentReads++;
         return {
           deployments: [
-            input.directDeploymentDrift && directDeploymentReads > 1
+            (input.directDeploymentDrift && directDeploymentReads > 1) ||
+            (input.directLateDeploymentDrift && directDeploymentReads > 4)
               ? { ...deployment, id: 'deployment-two' }
               : deployment,
           ],
@@ -180,13 +182,28 @@ it('uses direct Cloudflare reads for a verified matching version', async () => {
   const run = await attemptReuse({ directApi: true });
   expect(run.error).toBeNull();
   expect(run.calls).toEqual(['triggers deploy']);
-  expect(run.readCloudflare).toHaveBeenCalled();
+  expect(run.readCloudflare.mock.calls.map(([path]) => String(path).split('/').at(-1))).toEqual([
+    'deployments',
+    VERSION,
+    'deployments',
+    'deployments',
+    'deployments',
+    'deployments',
+  ]);
 });
 
 it('refuses reuse when direct Cloudflare reads observe a deployment change', async () => {
   const run = await attemptReuse({ directApi: true, directDeploymentDrift: true });
   expect(String(run.error)).toContain('changed concurrently');
   expect(run.calls).not.toContain('versions upload');
+});
+
+it('closes the routing gate when a direct read detects a deployment change after triggers', async () => {
+  const run = await attemptReuse({ directApi: true, directLateDeploymentDrift: true });
+  expect(String(run.error)).toContain('traffic reconciliation failed');
+  expect(run.calls).not.toContain('versions upload');
+  expect(run.onUnsafeTraffic).toHaveBeenCalledOnce();
+  expect(run.retainNewWorker).toHaveBeenCalledOnce();
 });
 
 it.each([
