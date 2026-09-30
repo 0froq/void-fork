@@ -15,6 +15,7 @@ import { build } from 'vite';
 import type { MigrationPlanBundle } from '../migrations/plan.ts';
 import { readProjectPaths } from '../project-paths.ts';
 import { generateQueueResolverSource } from '../queues/dispatch.ts';
+import { transformPgWorkerBundle } from './pg-bundle-transform.ts';
 
 export type WrapperFeatures = {
   /** Auth providers (kept for type compatibility, no longer used by wrapper). */
@@ -315,25 +316,11 @@ function patchPgWorkerBundle(outDir: string): void {
       continue;
     }
     const path = join(outDir, file);
-    let code = readFileSync(path, 'utf-8');
-    if (!code.includes('__require("pgpass")') && !code.includes('createRequire(import.meta.url)')) {
-      continue;
+    const code = readFileSync(path, 'utf-8');
+    const transformed = transformPgWorkerBundle(code, file, pgWorkerRequireShim());
+    if (transformed !== code) {
+      writeFileSync(path, transformed);
     }
-    code = code
-      .replaceAll('__require("pgpass")', '__voidPgpassNoop')
-      .replace('import { createRequire } from "node:module";', '')
-      .replace(
-        'var __require = /* @__PURE__ */ createRequire(import.meta.url);',
-        pgWorkerRequireShim(),
-      )
-      .replace(
-        'var __require = /* #__PURE__ */ (() => createRequire(import.meta.url))();',
-        pgWorkerRequireShim(),
-      );
-    code =
-      `const __voidPgpassNoop = Object.assign(function pgpass(_connectionInfo, callback) { callback(undefined); }, { warnTo() {} });\n` +
-      code;
-    writeFileSync(path, code);
   }
 }
 
