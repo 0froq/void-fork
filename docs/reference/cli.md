@@ -986,7 +986,7 @@ If Cloudflare Access protects readiness URLs, supply an allowed `CF_ACCESS_CLIEN
 
 Secrets and migrations are validated after the build, so a failed check may leave provisioned resources. It doesn't apply remote D1 migrations or upload the application Worker. PostgreSQL migrations are transactional; MySQL schema changes may partially apply on error.
 
-Void records provisioned resource IDs in `void.lock.json`. Commit it for other machines and CI. Run the first deploy from one machine at a time; provisioning locks are local. The `--provision` flag is accepted but no longer needed.
+Void records provisioned resource IDs in `void.lock.json`. Commit it for other machines and CI. Run the first deploy from one machine at a time; provisioning locks are local.
 
 `.env` stays local. Store server keys declared in `env.ts` with `void secret put <NAME>`; Void rejects them as plaintext Worker vars. If the first deploy reports missing remote secrets, set them and retry. Custom D1 migration layouts must match the exact files, contents, and order Void validated. Direct deploy and Cloudflare commands use the top-level settings, not named environments or alternate config paths.
 
