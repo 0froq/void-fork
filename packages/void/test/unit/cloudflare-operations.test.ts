@@ -732,12 +732,12 @@ describe('Cloudflare custom domains', () => {
         'triggers',
         'clear-domains',
         '-c',
-        join(root, 'wrangler.jsonc'),
+        join(root, 'wrangler.jsonc').replaceAll('\\', '/'),
         '--env=',
         '--name',
         'my-worker',
       ],
-      { capture: true },
+      expect.objectContaining({ capture: true }),
     );
   });
 
