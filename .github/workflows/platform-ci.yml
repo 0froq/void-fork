@@ -172,13 +172,6 @@ jobs:
         run: |
           vp run build
           vp run --filter './platform/packages/**' build
-          if [ "$BASELINE_SHA" = '8174326b692ef9bc120525adb766cec7cd386016' ]; then
-            # This deployed revision has an audit test that assumes unordered database rows arrive in insertion order.
-            # The candidate runtime runs the corrected assertion in the regular Platform CI test job.
-            vp test run --project platform-api-integration --testNamePattern '^(?!.*records sanitized action targets and change arguments)'
-          else
-            vp test run --project platform-api-integration
-          fi
+          vp test run --project platform-api-integration
         env:
-          BASELINE_SHA: ${{ steps.baseline.outputs.sha }}
           VOID_TEST_DATABASE_URL: ${{ env.COMPAT_DATABASE_URL }}
