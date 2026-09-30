@@ -2661,7 +2661,13 @@ async function writeRemoteInstallationCheckpointWithoutDatabase(
   manifest: PlatformInstallationManifest,
   databaseLock?: PlatformDatabaseLifecycleLock,
 ): Promise<void> {
+  const startedAt = performance.now();
   await databaseLock?.checkpoint?.(manifest);
+  if (process.env.VOID_PLATFORM_TIMINGS === '1') {
+    process.stderr.write(
+      `[platform timing] database checkpoint ${(performance.now() - startedAt).toFixed(0)} ms\n`,
+    );
+  }
   const routing = manifest.resources.find(
     (resource) =>
       resource.key === 'routing-kv' &&
@@ -2672,12 +2678,18 @@ async function writeRemoteInstallationCheckpointWithoutDatabase(
   if (!routing) {
     return;
   }
+  const kvStartedAt = performance.now();
   await client.putKvValue(
     plan.account.id,
     routing.id,
     REMOTE_INSTALLATION_MANIFEST_KEY,
     JSON.stringify(manifest),
   );
+  if (process.env.VOID_PLATFORM_TIMINGS === '1') {
+    process.stderr.write(
+      `[platform timing] remote checkpoint ${(performance.now() - kvStartedAt).toFixed(0)} ms\n`,
+    );
+  }
 }
 
 function recordProvisionIntent(
@@ -4573,6 +4585,7 @@ async function runPlatformWranglerAtApiBase(
   capture: boolean,
   apiBaseUrl = resolvePinnedApiBaseUrl(),
 ): Promise<CloudflareCommandResult> {
+  const startedAt = performance.now();
   const runner = createDefaultRunWrangler(process.cwd(), {
     launcher: resolveWranglerArgv(process.cwd()),
     timeoutMs: PLATFORM_WRANGLER_TIMEOUT_MS,
@@ -4583,6 +4596,15 @@ async function runPlatformWranglerAtApiBase(
     captureJson: capture,
     cwd,
   });
+  if (process.env.VOID_PLATFORM_TIMINGS === '1') {
+    const operation =
+      args[0] === 'versions' || args[0] === 'deployments'
+        ? `${args[0]} ${args[1] ?? ''}`
+        : (args[0] ?? 'unknown');
+    process.stderr.write(
+      `[platform timing] wrangler ${operation} ${(performance.now() - startedAt).toFixed(0)} ms\n`,
+    );
+  }
   const stdout = result.stdout || '';
   const stderr = result.stderr || '';
   // Void owns progress output. Successful commands may still emit banners and
