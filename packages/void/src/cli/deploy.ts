@@ -130,10 +130,10 @@ import {
   prepareCfStaticBuildOutput,
 } from './cf-build-output.ts';
 import {
+  createActiveSecretPinner,
   createCfCommand,
   createCfResourceVerifier,
   createCfVersionRunner,
-  pinActiveWorkerSecrets,
 } from './cf-version-runner.ts';
 import {
   isExpiredTokenError,
@@ -5984,6 +5984,12 @@ export async function runCloudflareDeploy(
           }),
         })
       : runWrangler;
+  const pinActiveSecrets = createActiveSecretPinner({
+    output: cfOutput,
+    handoffPending: pinnedHandoffLink !== null,
+    requiredNames: schemaFacts.requiredKeys,
+    ...(initialAuthSecret ? { explicitNames: [BETTER_AUTH_SECRET_NAME] } : {}),
+  });
   const execution = await activateCloudflareVersionWithProgress(
     deps.activateVersion ?? activateCloudflareVersion,
     {
@@ -6057,21 +6063,7 @@ export async function runCloudflareDeploy(
       previousTrafficConfig: readWranglerPublishedTrafficSnapshot(configPath),
       queueConsumerCleanup,
       verifyInheritedSecrets: true,
-      ...(cfOutput && existingWorker && !pinnedHandoffLink
-        ? {
-            pinActiveSecrets: (
-              activeVersionId: string,
-              bindings: ReadonlyArray<{ name: string; type: 'secret_text' | 'secret_key' }>,
-            ) =>
-              pinActiveWorkerSecrets({
-                output: cfOutput,
-                activeVersionId,
-                bindings,
-                requiredNames: schemaFacts.requiredKeys,
-                ...(initialAuthSecret ? { explicitNames: [BETTER_AUTH_SECRET_NAME] } : {}),
-              }),
-          }
-        : {}),
+      ...(pinActiveSecrets ? { pinActiveSecrets } : {}),
       atomic,
       ...(initialAuthSecret
         ? { candidateSecrets: { [BETTER_AUTH_SECRET_NAME]: initialAuthSecret } }

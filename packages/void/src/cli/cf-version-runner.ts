@@ -3,7 +3,11 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { getWorkerConfigPath, readBuildOutput } from '@cloudflare/build-output-utils';
-import type { CloudflareCommandResult, CloudflareCommandRunner } from '@void/deploy-cloudflare';
+import type {
+  CloudflareCommandResult,
+  CloudflareCommandRunner,
+  CloudflareVersionActivationOptions,
+} from '@void/deploy-cloudflare';
 import { dirname, join } from 'pathslash';
 import type { CfBuildOutput } from './cf-build-output.ts';
 import { migrateBuiltWranglerConfig } from './cf-config-migrate.ts';
@@ -44,6 +48,27 @@ function safePositional(value: unknown): value is string {
       return code < 32 || code === 127;
     })
   );
+}
+
+/** Existing-Worker handoffs retain their separate link and binding checks. */
+export function createActiveSecretPinner(options: {
+  output: CfBuildOutput | null;
+  handoffPending: boolean;
+  requiredNames: ReadonlyArray<string>;
+  explicitNames?: ReadonlyArray<string>;
+}): CloudflareVersionActivationOptions['pinActiveSecrets'] {
+  const { output } = options;
+  if (!output || options.handoffPending) {
+    return undefined;
+  }
+  return (activeVersionId, bindings) =>
+    pinActiveWorkerSecrets({
+      output,
+      activeVersionId,
+      bindings,
+      requiredNames: options.requiredNames,
+      explicitNames: options.explicitNames,
+    });
 }
 
 /** Pin opaque secrets to the live version in the private, disposable Build Output. */

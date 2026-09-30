@@ -14,6 +14,7 @@ import {
 } from '../../../deploy-cloudflare/src/version.ts';
 import { prepareCfBuildOutput } from '../../src/cli/cf-build-output.ts';
 import {
+  createActiveSecretPinner,
   createCfCommand,
   createCfResourceVerifier,
   createCfVersionRunner,
@@ -227,16 +228,17 @@ it('pins live secrets in private Build Output and drops latest-version secret pr
   });
   try {
     const activeVersionId = '11111111-1111-4111-8111-111111111111';
+    const pinActiveSecrets = createActiveSecretPinner({
+      output: prepared,
+      handoffPending: false,
+      requiredNames: ['AUTH_SECRET'],
+    });
+    expect(pinActiveSecrets).toBeDefined();
     expect(
-      await pinActiveWorkerSecrets({
-        output: prepared,
-        activeVersionId,
-        bindings: [
-          { name: 'AUTH_SECRET', type: 'secret_text' },
-          { name: 'KEY', type: 'secret_key' },
-        ],
-        requiredNames: ['AUTH_SECRET'],
-      }),
+      await pinActiveSecrets!(activeVersionId, [
+        { name: 'AUTH_SECRET', type: 'secret_text' },
+        { name: 'KEY', type: 'secret_key' },
+      ]),
     ).toBe(true);
     const worker = JSON.parse(readFileSync(getWorkerConfigPath(prepared.directory), 'utf8'));
     expect(worker.env.AUTH_SECRET).toEqual({ type: 'unsafe:inherit', version_id: activeVersionId });
@@ -300,6 +302,17 @@ it('pins live secrets in private Build Output and drops latest-version secret pr
         server.close((error) => (error ? reject(error) : resolve())),
       );
     }
+  } finally {
+    prepared.dispose();
+  }
+});
+
+it('does not pin active secrets during an existing-Worker handoff', async () => {
+  const prepared = await output();
+  try {
+    expect(
+      createActiveSecretPinner({ output: prepared, handoffPending: true, requiredNames: [] }),
+    ).toBeUndefined();
   } finally {
     prepared.dispose();
   }
