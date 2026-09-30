@@ -2578,12 +2578,39 @@ export function compileAssetFallbackHelper(
       : `  return response;`;
 
   return `
+const __voidAssetContentTypes = {
+  ".avif": "image/avif",
+  ".css": "text/css; charset=utf-8",
+  ".gif": "image/gif",
+  ".html": "text/html; charset=utf-8",
+  ".ico": "image/x-icon",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".txt": "text/plain; charset=utf-8",
+  ".wasm": "application/wasm",
+  ".webp": "image/webp",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+};
+
 async function serveWithAssets(request, env, response) {
   if (response.status !== 404 || !env.ASSETS || (request.method !== "GET" && request.method !== "HEAD")) return response;
   const asset = await env.ASSETS.fetch(new Request(request.url, { method: request.method, headers: request.headers }));
   if (asset.status !== 404) {
     const res = new Response(asset.body, asset);
-    if (new URL(request.url).pathname.startsWith(${JSON.stringify('/' + assetsDir + '/')})) {
+    const pathname = new URL(request.url).pathname;
+    // Directly uploaded assets can reach the binding without a MIME type.
+    if (!res.headers.get("Content-Type")) {
+      const filename = pathname.slice(pathname.lastIndexOf("/") + 1);
+      const contentType = __voidAssetContentTypes[filename.slice(filename.lastIndexOf(".")).toLowerCase()];
+      if (contentType) res.headers.set("Content-Type", contentType);
+    }
+    if (pathname.startsWith(${JSON.stringify('/' + assetsDir + '/')})) {
       res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
     } else {
       res.headers.set("Cache-Control", "no-store");
