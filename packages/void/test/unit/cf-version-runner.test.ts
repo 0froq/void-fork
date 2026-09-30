@@ -200,7 +200,7 @@ it('treats a verified empty deployment list as missing but rejects malformed sta
   }
 });
 
-async function output(config: Record<string, unknown> = {}) {
+async function output(config: Record<string, unknown> = {}, additionalAsset = false) {
   const root = mkdtempSync(join(tmpdir(), 'void-cf-runner-test-'));
   roots.push(root);
   const worker = join(root, 'dist', 'ssr');
@@ -211,6 +211,9 @@ async function output(config: Record<string, unknown> = {}) {
     const directory = join(worker, assets.directory);
     mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, 'index.html'), '<h1>Public</h1>');
+    if (additionalAsset) {
+      writeFileSync(join(directory, 'second.html'), '<h1>Second</h1>');
+    }
     writeFileSync(join(directory, 'private.txt'), 'Never upload this');
     writeFileSync(join(directory, '.assetsignore'), 'private.txt\n');
   }
@@ -229,13 +232,16 @@ async function output(config: Record<string, unknown> = {}) {
   return prepared!;
 }
 
-it('uploads live secrets through the version-aware API when the latest upload is inactive', async () => {
-  const prepared = await output({
-    secrets: { required: ['AUTH_SECRET'] },
-    keep_secrets: true,
-    keep_vars: true,
-    assets: { directory: '../client', binding: 'ASSETS', not_found_handling: 'none' },
-  });
+it('uploads live secrets and multiple asset batches when the latest upload is inactive', async () => {
+  const prepared = await output(
+    {
+      secrets: { required: ['AUTH_SECRET'] },
+      keep_secrets: true,
+      keep_vars: true,
+      assets: { directory: '../client', binding: 'ASSETS', not_found_handling: 'none' },
+    },
+    true,
+  );
   try {
     const activeVersionId = '11111111-1111-4111-8111-111111111111';
     const pinActiveSecrets = createActiveSecretPinner({
@@ -259,27 +265,31 @@ it('uploads live secrets through the version-aware API when the latest upload is
         { name: 'KEY', type: 'secret_key' },
       ],
     });
-    const requests: Array<{ url: string; body: string }> = [];
+    const requests: Array<{ url: string; body: string; authorization: string | undefined }> = [];
+    let uploadedBatches = 0;
     const server = createServer(async (request, response) => {
       const chunks: Array<Buffer> = [];
       for await (const chunk of request) {
         chunks.push(Buffer.from(chunk));
       }
-      requests.push({ url: request.url ?? '', body: Buffer.concat(chunks).toString('utf8') });
+      requests.push({
+        url: request.url ?? '',
+        body: Buffer.concat(chunks).toString('utf8'),
+        authorization: request.headers.authorization,
+      });
       response.writeHead(200, { 'Content-Type': 'application/json' });
       const path = request.url ?? '';
       const result = path.endsWith('/assets-upload-session')
         ? {
             jwt: 'asset-token',
-            buckets: [
-              [
-                (Object.values(JSON.parse(requests.at(-1)!.body).manifest)[0] as { hash: string })
-                  .hash,
-              ],
-            ],
+            buckets: Object.values(JSON.parse(requests.at(-1)!.body).manifest).map((entry) => [
+              (entry as { hash: string }).hash,
+            ]),
           }
         : path.includes('/assets/upload')
-          ? { jwt: 'completion-token' }
+          ? ++uploadedBatches === 2
+            ? { jwt: 'completion-token' }
+            : {}
           : request.method === 'GET'
             ? {
                 id: activeVersionId,
@@ -327,7 +337,15 @@ it('uploads live secrets through the version-aware API when the latest upload is
       });
       expect(body.bindings).toContainEqual({ name: 'ASSETS', type: 'assets' });
       const session = requests.find(({ url }) => url.endsWith('/assets-upload-session'));
-      expect(Object.keys(JSON.parse(session!.body).manifest)).toEqual(['/index.html']);
+      expect(Object.keys(JSON.parse(session!.body).manifest)).toEqual([
+        '/index.html',
+        '/second.html',
+      ]);
+      expect(
+        requests
+          .filter(({ url }) => url.includes('/assets/upload'))
+          .map(({ authorization }) => authorization),
+      ).toEqual(['Bearer asset-token', 'Bearer asset-token']);
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),

@@ -257,10 +257,14 @@ async function uploadAssets(options: {
     { manifest },
     options.verifyUploader,
   );
-  let jwt = requiredString(session.jwt, 'asset upload token');
+  const uploadJwt = requiredString(session.jwt, 'asset upload token');
   if (!Array.isArray(session.buckets)) {
     throw new Error('Cloudflare did not provide asset upload batches.');
   }
+  if (session.buckets.length === 0) {
+    return uploadJwt;
+  }
+  let completionJwt: string | undefined;
   for (const bucket of session.buckets) {
     if (!Array.isArray(bucket) || !bucket.every((hash) => typeof hash === 'string')) {
       throw new Error('Cloudflare returned an invalid asset upload batch.');
@@ -275,14 +279,16 @@ async function uploadAssets(options: {
     }
     const uploaded = await apiResult(
       `${options.accountUrl}/workers/assets/upload?base64=true`,
-      jwt,
+      uploadJwt,
       'POST',
       form,
       options.verifyUploader,
     );
-    jwt = requiredString(uploaded.jwt, 'asset completion token');
+    if (uploaded.jwt !== undefined) {
+      completionJwt = requiredString(uploaded.jwt, 'asset completion token');
+    }
   }
-  return jwt;
+  return requiredString(completionJwt, 'asset completion token');
 }
 
 /** The Workers beta API is the only upload endpoint that accepts a version UUID as an inheritance source. */
