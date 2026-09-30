@@ -4400,6 +4400,270 @@ async function prepareCloudflareDeploySource(
   return { configPath, ...facts };
 }
 
+/** Apply remote D1 changes and prove no migrations remain pending. */
+async function applyAndVerifyRemoteD1Migrations(
+  d1MigrateToken: string | undefined,
+  configPath: string,
+  runWrangler: DeployWranglerRun,
+  assertUploaderStillPinned: () => boolean,
+): Promise<boolean> {
+  // 10. Apply pending migrations to remote D1 — AFTER all local + ground-truth gates pass, so a
+  // failed gate never mutates remote D1. Uses the token resolved + validated at step 8d, and the
+  // pinned root config (`-c`), which targets the account already verified by provision/drift.
+  if (d1MigrateToken) {
+    log.step('Applying D1 migrations...');
+    // The local migration gates above ran project code (drizzle-kit loaded db/schema.ts), which
+    // could have overwritten the hashed uploader bundle after the last check. Re-verify against the
+    // pre-build baseline immediately before this credentialed, remote-mutating apply.
+    if (!assertUploaderStillPinned()) {
+      return false;
+    }
+    // 9a. Apply.
+    const migrate = await Promise.resolve(
+      runWrangler(
+        ['d1', 'migrations', 'apply', d1MigrateToken, '--remote', '-c', configPath, '--env='],
+        { capture: false },
+      ),
+    );
+    if (!isCleanWranglerExit(migrate)) {
+      log.error(
+        `deploy: remote D1 migrations failed for "${d1MigrateToken}" (exit ${String(migrate.status)}). ` +
+          'Fix the migration and rerun. Note: D1 always enforces foreign_keys=ON — a Drizzle ' +
+          'table-rebuild using PRAGMA foreign_keys=OFF must use PRAGMA defer_foreign_keys instead.',
+      );
+      return false;
+    }
+
+    // 9b. Verify NO migrations remain pending on remote. `d1 migrations apply` EXITS 0 when
+    // its confirmation is DECLINED (interactive) — a no-op that reads as success — and prints
+    // no machine-readable applied set. `d1 migrations list --remote` queries the remote
+    // `d1_migrations` table and prints "Migrations to be applied:" when any remain, else the
+    // affirmative "No migrations to apply!". Both emit at wrangler's `log` level, which the
+    // child env PINS (`WRANGLER_LOG=log`), so an ambient reduced level can never suppress
+    // them. Reject on the pending marker, REQUIRE the affirmative sentinel, and reject any
+    // empty/unrecognized output rather than trust an absent marker.
+    // Re-verify the uploader before this distinct credentialed run too (defense in depth — the
+    // pre-build baseline is the constant reference for every spawn).
+    if (!assertUploaderStillPinned()) {
+      return false;
+    }
+    const migrateList = await Promise.resolve(
+      runWrangler(
+        ['d1', 'migrations', 'list', d1MigrateToken, '--remote', '-c', configPath, '--env='],
+        { capture: true },
+      ),
+    );
+    if (!isCleanWranglerExit(migrateList)) {
+      log.error(
+        `deploy: could not verify the remote migration state for "${d1MigrateToken}" ` +
+          `(\`d1 migrations list\` exit ${String(migrateList.status)}). Refusing to deploy against ` +
+          'an unverified schema — rerun once wrangler can reach your account.',
+      );
+      return false;
+    }
+    if (migrateList.stdout.includes('Migrations to be applied:')) {
+      log.error(
+        [
+          `deploy: remote D1 still has UNAPPLIED migrations for "${d1MigrateToken}" after apply.`,
+          '`wrangler d1 migrations apply` exits 0 even when its confirmation is declined, so',
+          'the schema may be un-migrated while the code that needs it is about to deploy.',
+          'Re-run and confirm the migration (or apply it non-interactively), then rerun.',
+        ].join('\n'),
+      );
+      return false;
+    }
+    if (!migrateList.stdout.includes('No migrations to apply!')) {
+      log.error(
+        [
+          `deploy: could not confirm the remote migration state for "${d1MigrateToken}".`,
+          '`wrangler d1 migrations list` printed neither the "no migrations to apply" nor the',
+          '"migrations to be applied" marker (WRANGLER_LOG is pinned so they are never',
+          'suppressed) — refusing to deploy against an unverified schema. Rerun once wrangler',
+          'can reach your account.',
+        ].join('\n'),
+      );
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/** Check the built Worker against the pinned deployment target before upload. */
+function verifyCloudflareDeployArtifact(
+  root: string,
+  deps: CloudflareDeployDeps,
+  options: Parameters<typeof verifyGeneratedDeployConfig>[1],
+): boolean {
+  // 10. Verify the generated deploy config targets the pinned account + expected worker
+  // AND the exact provisioned binding IDENTITIES BEFORE uploading. A `CLOUDFLARE_ENV` /
+  // `CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH` the CF plugin loaded could have baked a
+  // different account/name — or the SAME account/name with a flattened, DIFFERENT binding
+  // set — into dist/ssr/wrangler.json; passing `desired` + the step-6 snapshots lets the check
+  // reject a divergent binding set, not only an account/name mismatch. The comparison is against
+  // the in-memory `bindingIdentitySnapshot` (NOT a post-build root re-read), so a build that
+  // consistently rewrote both the root config and this artifact is still caught. The
+  // `passthroughIdentitySnapshot` extends the same defense to the resource fields Void never emits
+  // (`services` / `secrets_store_secrets` / …): an entry the build injected into one of them — or a
+  // queue not in `desired.queues` — fails closed here too, before the credentialed upload binds it.
+  const verification = (deps.verifyDeployConfig ?? verifyGeneratedDeployConfig)(root, options);
+  if (!verification.ok) {
+    log.error(
+      [
+        'deploy: the generated deploy config does not match the pinned target — refusing to deploy.',
+        verification.reason,
+        'This typically means CLOUDFLARE_ENV / CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH (in the',
+        'environment or a production `.env`) selected a different named environment or config',
+        'at build time. This backend always deploys the canonical top-level config — remove',
+        'them and rebuild.',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
+    return false;
+  }
+
+  return true;
+}
+
+/** Validate emitted Worker vars and required secrets against post-build ground truth. */
+async function validateCloudflarePostBuildEnv(
+  root: string,
+  configPath: string,
+  accountId: string,
+  apiBaseUrl: string,
+  workerName: string,
+  schemaFacts: SelfHostSchemaFacts,
+  authEnabled: boolean,
+  existingWorker: ExistingCloudflareWorker | null,
+  approvedHandoffKv: Array<ApprovedCloudflareKvBinding>,
+  deps: CloudflareDeployDeps,
+  assertUploaderStillPinned: () => boolean,
+): Promise<boolean> {
+  // 8. Post-build GROUND-TRUTH gates — validate the REAL artifact the build emitted, not a
+  // facsimile. Read the actual `vars` the build baked into `dist/ssr/wrangler.json`, then
+  // WARN (plaintext secret-looking vars) + GATE (required secrets, incl. INVALID values) +
+  // auth-schema check + local migration gates, all against that ground truth. The only
+  // project code that runs does so in the isolated `validate-emitted` probe (8b).
+  const emitted = (deps.readEmittedWorkerVars ?? readEmittedWorkerVarsDefault)(root);
+  if (existingWorker) {
+    const generated = readGeneratedDeployConfig(root);
+    assertExistingCloudflareConfig(existingWorker, generated.config, true, approvedHandoffKv);
+  }
+  if (!emitted.ok) {
+    log.error(
+      [
+        'deploy: could not read the worker vars the build emitted — refusing to validate secrets.',
+        `  ${emitted.reason}`,
+        'The build must emit dist/ssr/wrangler.json for this backend. Rerun the build, or deploy',
+        'this app with `void deploy` (the managed platform).',
+      ].join('\n'),
+    );
+    return false;
+  }
+  const emittedVars = emitted.vars;
+  // Better Auth's signing secret must never be baked into the generated config.
+  // Match the managed Void deploy contract: the deploy target owns this secret
+  // and stores it through its encrypted secret API, not through plaintext vars.
+  if (authEnabled && Object.prototype.hasOwnProperty.call(emittedVars, BETTER_AUTH_SECRET_NAME)) {
+    log.error(
+      [
+        `deploy: ${BETTER_AUTH_SECRET_NAME} must be stored as a Cloudflare Worker secret, not a plaintext worker var.`,
+        'Remove it from Worker vars and rerun. This deploy command preserves an',
+        'existing remote value or creates a persistent one automatically when it is missing.',
+      ].join('\n'),
+    );
+    return false;
+  }
+
+  const plaintextServerKeys = schemaFacts.serverKeys.filter((key) => key in emittedVars);
+  if (plaintextServerKeys.length > 0) {
+    log.error(
+      [
+        'deploy: server env keys cannot ship as plaintext Worker vars:',
+        ...plaintextServerKeys.map((key) => `  • ${key}`),
+        'Remove them from Worker vars and set them with `void secret put <NAME>`.',
+      ].join('\n'),
+    );
+    return false;
+  }
+
+  // 8b. Required-secret gate — build the values-free context from the REAL emitted vars + the
+  // env-insensitive required-key names (pure parent work, no project code): a required key
+  // shipped EMPTY (`K=""`) SHADOWS a same-named remote secret → fail closed always; a required
+  // key ABSENT from the emitted vars is discharged only by `wrangler secret list`.
+  const envContext = deriveSelfHostEnvContextFromVars(emittedVars, schemaFacts);
+  // Then VALUE-validate the REAL emitted vars against the schema's validators in the isolated
+  // `validate-emitted` probe (project code, off this credentialed parent) and fold the FAILING
+  // key NAMES into the context, so a required var shipped with a MALFORMED value (e.g. a
+  // non-number `PORT`, a bad JSON object) fails closed HERE — before any remote mutation —
+  // rather than only at worker boot. Values-free: only key names cross the process boundary.
+  if (schemaFacts.hasSchema) {
+    let validateResult: EnvSchemaValidateResult;
+    try {
+      validateResult = await (deps.validateEmittedVars ?? validateEmittedVarsDefault)(
+        { root },
+        buildSchemaProbeEnv(accountId, apiBaseUrl),
+      );
+    } catch (err) {
+      log.error(
+        `deploy: could not validate the emitted worker vars against the env schema — ${getErrorMessage(err)}`,
+      );
+      return false;
+    }
+    if (validateResult.kind === 'schema-error') {
+      log.error(`deploy: ${selfHostSchemaFailureMessage(validateResult.reason)}`);
+      return false;
+    }
+    envContext.invalidKeys = validateResult.invalidKeys;
+  }
+  // The auth secret has its own deploy-owned lifecycle below. If an env schema
+  // also declares it required, do not make the generic secret gate reject it
+  // before the deploy has a chance to provision and verify it.
+  if (authEnabled) {
+    envContext.absentRequired = envContext.absentRequired.filter(
+      (key) => key !== BETTER_AUTH_SECRET_NAME,
+    );
+    envContext.invalidKeys = envContext.invalidKeys.filter(
+      (key) => key !== BETTER_AUTH_SECRET_NAME,
+    );
+  }
+  // DISCHARGE the context. Reuses the same `dischargeSelfHostEnvContext` the unit tests
+  // exercise — now fed the ground-truth vars + the real invalid-value set. It may spawn a
+  // credentialed `wrangler secret list` (its own runner, via `createDefaultSecretListRunner`),
+  // which runs the hashed uploader bundle — and the emitted-var validation above just ran project
+  // code (env.ts) that could have overwritten it. Re-verify the uploader against the pre-build
+  // baseline immediately before the spawn.
+  if (!assertUploaderStillPinned()) {
+    return false;
+  }
+  try {
+    await (deps.dischargeSelfHostEnv ?? dischargeSelfHostEnvContext)(envContext, {
+      root,
+      configPath,
+      accountId,
+      // Pin the worker NAME too: the secret list resolves the worker from the config's
+      // `name`, which the emitted-var probe above (project code) could have rewritten
+      // since step 5 pinned it. The gate reconciles the config against this and fails
+      // closed on a mismatch, mirroring the account pin.
+      workerName,
+    });
+  } catch (err) {
+    if (
+      err instanceof SelfHostFirstDeployError ||
+      err instanceof SelfHostSecretListError ||
+      err instanceof SelfHostEnvValidationError ||
+      err instanceof SelfHostSchemaError
+    ) {
+      log.error(err.message);
+      return false;
+    }
+    throw err;
+  }
+
+  return true;
+}
+
 /** Deploy to the user's own Cloudflare account through the guarded native Worker flow. */
 export async function runCloudflareDeploy(
   root: string,
@@ -5244,125 +5508,22 @@ export async function runCloudflareDeploy(
     return exit(1);
   }
 
-  // 8. Post-build GROUND-TRUTH gates — validate the REAL artifact the build emitted, not a
-  // facsimile. Read the actual `vars` the build baked into `dist/ssr/wrangler.json`, then
-  // WARN (plaintext secret-looking vars) + GATE (required secrets, incl. INVALID values) +
-  // auth-schema check + local migration gates, all against that ground truth. The only
-  // project code that runs does so in the isolated `validate-emitted` probe (8b).
-  const emitted = (deps.readEmittedWorkerVars ?? readEmittedWorkerVarsDefault)(root);
-  if (existingWorker) {
-    const generated = readGeneratedDeployConfig(root);
-    assertExistingCloudflareConfig(existingWorker, generated.config, true, approvedHandoffKv);
-  }
-  if (!emitted.ok) {
-    log.error(
-      [
-        'deploy: could not read the worker vars the build emitted — refusing to validate secrets.',
-        `  ${emitted.reason}`,
-        'The build must emit dist/ssr/wrangler.json for this backend. Rerun the build, or deploy',
-        'this app with `void deploy` (the managed platform).',
-      ].join('\n'),
-    );
-    return exit(1);
-  }
-  const emittedVars = emitted.vars;
-  // Better Auth's signing secret must never be baked into the generated config.
-  // Match the managed Void deploy contract: the deploy target owns this secret
-  // and stores it through its encrypted secret API, not through plaintext vars.
-  if (authEnabled && Object.prototype.hasOwnProperty.call(emittedVars, BETTER_AUTH_SECRET_NAME)) {
-    log.error(
-      [
-        `deploy: ${BETTER_AUTH_SECRET_NAME} must be stored as a Cloudflare Worker secret, not a plaintext worker var.`,
-        'Remove it from Worker vars and rerun. This deploy command preserves an',
-        'existing remote value or creates a persistent one automatically when it is missing.',
-      ].join('\n'),
-    );
-    return exit(1);
-  }
-
-  const plaintextServerKeys = schemaFacts.serverKeys.filter((key) => key in emittedVars);
-  if (plaintextServerKeys.length > 0) {
-    log.error(
-      [
-        'deploy: server env keys cannot ship as plaintext Worker vars:',
-        ...plaintextServerKeys.map((key) => `  • ${key}`),
-        'Remove them from Worker vars and set them with `void secret put <NAME>`.',
-      ].join('\n'),
-    );
-    return exit(1);
-  }
-
-  // 8b. Required-secret gate — build the values-free context from the REAL emitted vars + the
-  // env-insensitive required-key names (pure parent work, no project code): a required key
-  // shipped EMPTY (`K=""`) SHADOWS a same-named remote secret → fail closed always; a required
-  // key ABSENT from the emitted vars is discharged only by `wrangler secret list`.
-  const envContext = deriveSelfHostEnvContextFromVars(emittedVars, schemaFacts);
-  // Then VALUE-validate the REAL emitted vars against the schema's validators in the isolated
-  // `validate-emitted` probe (project code, off this credentialed parent) and fold the FAILING
-  // key NAMES into the context, so a required var shipped with a MALFORMED value (e.g. a
-  // non-number `PORT`, a bad JSON object) fails closed HERE — before any remote mutation —
-  // rather than only at worker boot. Values-free: only key names cross the process boundary.
-  if (schemaFacts.hasSchema) {
-    let validateResult: EnvSchemaValidateResult;
-    try {
-      validateResult = await (deps.validateEmittedVars ?? validateEmittedVarsDefault)(
-        { root },
-        buildSchemaProbeEnv(accountId, apiBaseUrl),
-      );
-    } catch (err) {
-      log.error(
-        `deploy: could not validate the emitted worker vars against the env schema — ${getErrorMessage(err)}`,
-      );
-      return exit(1);
-    }
-    if (validateResult.kind === 'schema-error') {
-      log.error(`deploy: ${selfHostSchemaFailureMessage(validateResult.reason)}`);
-      return exit(1);
-    }
-    envContext.invalidKeys = validateResult.invalidKeys;
-  }
-  // The auth secret has its own deploy-owned lifecycle below. If an env schema
-  // also declares it required, do not make the generic secret gate reject it
-  // before the deploy has a chance to provision and verify it.
-  if (authEnabled) {
-    envContext.absentRequired = envContext.absentRequired.filter(
-      (key) => key !== BETTER_AUTH_SECRET_NAME,
-    );
-    envContext.invalidKeys = envContext.invalidKeys.filter(
-      (key) => key !== BETTER_AUTH_SECRET_NAME,
-    );
-  }
-  // DISCHARGE the context. Reuses the same `dischargeSelfHostEnvContext` the unit tests
-  // exercise — now fed the ground-truth vars + the real invalid-value set. It may spawn a
-  // credentialed `wrangler secret list` (its own runner, via `createDefaultSecretListRunner`),
-  // which runs the hashed uploader bundle — and the emitted-var validation above just ran project
-  // code (env.ts) that could have overwritten it. Re-verify the uploader against the pre-build
-  // baseline immediately before the spawn.
-  if (!assertUploaderStillPinned()) {
-    return exit(1);
-  }
-  try {
-    await (deps.dischargeSelfHostEnv ?? dischargeSelfHostEnvContext)(envContext, {
+  if (
+    !(await validateCloudflarePostBuildEnv(
       root,
       configPath,
       accountId,
-      // Pin the worker NAME too: the secret list resolves the worker from the config's
-      // `name`, which the emitted-var probe above (project code) could have rewritten
-      // since step 5 pinned it. The gate reconciles the config against this and fails
-      // closed on a mismatch, mirroring the account pin.
+      apiBaseUrl,
       workerName,
-    });
-  } catch (err) {
-    if (
-      err instanceof SelfHostFirstDeployError ||
-      err instanceof SelfHostSecretListError ||
-      err instanceof SelfHostEnvValidationError ||
-      err instanceof SelfHostSchemaError
-    ) {
-      log.error(err.message);
-      return exit(1);
-    }
-    throw err;
+      schemaFacts,
+      authEnabled,
+      existingWorker,
+      approvedHandoffKv,
+      deps,
+      assertUploaderStillPinned,
+    ))
+  ) {
+    return exit(1);
   }
 
   // 8c. Auth-schema check — the managed platform creates Void-managed Better Auth tables at
@@ -5657,125 +5818,35 @@ export async function runCloudflareDeploy(
     }
   }
 
-  // 10. Apply pending migrations to remote D1 — AFTER all local + ground-truth gates pass, so a
-  // failed gate never mutates remote D1. Uses the token resolved + validated at step 8d, and the
-  // pinned root config (`-c`), which targets the account already verified by provision/drift.
-  if (d1MigrateToken) {
-    log.step('Applying D1 migrations...');
-    // The local migration gates above ran project code (drizzle-kit loaded db/schema.ts), which
-    // could have overwritten the hashed uploader bundle after the last check. Re-verify against the
-    // pre-build baseline immediately before this credentialed, remote-mutating apply.
-    if (!assertUploaderStillPinned()) {
-      return exit(1);
-    }
-    // 9a. Apply.
-    const migrate = await Promise.resolve(
-      runWrangler(
-        ['d1', 'migrations', 'apply', d1MigrateToken, '--remote', '-c', configPath, '--env='],
-        { capture: false },
-      ),
-    );
-    if (!isCleanWranglerExit(migrate)) {
-      log.error(
-        `deploy: remote D1 migrations failed for "${d1MigrateToken}" (exit ${String(migrate.status)}). ` +
-          'Fix the migration and rerun. Note: D1 always enforces foreign_keys=ON — a Drizzle ' +
-          'table-rebuild using PRAGMA foreign_keys=OFF must use PRAGMA defer_foreign_keys instead.',
-      );
-      return exit(1);
-    }
-
-    // 9b. Verify NO migrations remain pending on remote. `d1 migrations apply` EXITS 0 when
-    // its confirmation is DECLINED (interactive) — a no-op that reads as success — and prints
-    // no machine-readable applied set. `d1 migrations list --remote` queries the remote
-    // `d1_migrations` table and prints "Migrations to be applied:" when any remain, else the
-    // affirmative "No migrations to apply!". Both emit at wrangler's `log` level, which the
-    // child env PINS (`WRANGLER_LOG=log`), so an ambient reduced level can never suppress
-    // them. Reject on the pending marker, REQUIRE the affirmative sentinel, and reject any
-    // empty/unrecognized output rather than trust an absent marker.
-    // Re-verify the uploader before this distinct credentialed run too (defense in depth — the
-    // pre-build baseline is the constant reference for every spawn).
-    if (!assertUploaderStillPinned()) {
-      return exit(1);
-    }
-    const migrateList = await Promise.resolve(
-      runWrangler(
-        ['d1', 'migrations', 'list', d1MigrateToken, '--remote', '-c', configPath, '--env='],
-        { capture: true },
-      ),
-    );
-    if (!isCleanWranglerExit(migrateList)) {
-      log.error(
-        `deploy: could not verify the remote migration state for "${d1MigrateToken}" ` +
-          `(\`d1 migrations list\` exit ${String(migrateList.status)}). Refusing to deploy against ` +
-          'an unverified schema — rerun once wrangler can reach your account.',
-      );
-      return exit(1);
-    }
-    if (migrateList.stdout.includes('Migrations to be applied:')) {
-      log.error(
-        [
-          `deploy: remote D1 still has UNAPPLIED migrations for "${d1MigrateToken}" after apply.`,
-          '`wrangler d1 migrations apply` exits 0 even when its confirmation is declined, so',
-          'the schema may be un-migrated while the code that needs it is about to deploy.',
-          'Re-run and confirm the migration (or apply it non-interactively), then rerun.',
-        ].join('\n'),
-      );
-      return exit(1);
-    }
-    if (!migrateList.stdout.includes('No migrations to apply!')) {
-      log.error(
-        [
-          `deploy: could not confirm the remote migration state for "${d1MigrateToken}".`,
-          '`wrangler d1 migrations list` printed neither the "no migrations to apply" nor the',
-          '"migrations to be applied" marker (WRANGLER_LOG is pinned so they are never',
-          'suppressed) — refusing to deploy against an unverified schema. Rerun once wrangler',
-          'can reach your account.',
-        ].join('\n'),
-      );
-      return exit(1);
-    }
+  if (
+    !(await applyAndVerifyRemoteD1Migrations(
+      d1MigrateToken,
+      configPath,
+      runWrangler,
+      assertUploaderStillPinned,
+    ))
+  ) {
+    return exit(1);
   }
 
-  // 10. Verify the generated deploy config targets the pinned account + expected worker
-  // AND the exact provisioned binding IDENTITIES BEFORE uploading. A `CLOUDFLARE_ENV` /
-  // `CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH` the CF plugin loaded could have baked a
-  // different account/name — or the SAME account/name with a flattened, DIFFERENT binding
-  // set — into dist/ssr/wrangler.json; passing `desired` + the step-6 snapshots lets the check
-  // reject a divergent binding set, not only an account/name mismatch. The comparison is against
-  // the in-memory `bindingIdentitySnapshot` (NOT a post-build root re-read), so a build that
-  // consistently rewrote both the root config and this artifact is still caught. The
-  // `passthroughIdentitySnapshot` extends the same defense to the resource fields Void never emits
-  // (`services` / `secrets_store_secrets` / …): an entry the build injected into one of them — or a
-  // queue not in `desired.queues` — fails closed here too, before the credentialed upload binds it.
-  const verification = (deps.verifyDeployConfig ?? verifyGeneratedDeployConfig)(root, {
-    accountId,
-    workerName,
-    desired,
-    bindingIdentitySnapshot,
-    passthroughIdentitySnapshot,
-    passthroughRawFields,
-    needsAI,
-    aiBindingName,
-    authEnabled,
-    requiredSecretNames: schemaFacts.requiredKeys,
-    expectedContainers,
-    expectedDurableObjectBindings: expectedDurableObjectState.bindings,
-    expectedMigrations: expectedDurableObjectState.migrations,
-    expectedCrons,
-  });
-  if (!verification.ok) {
-    log.error(
-      [
-        'deploy: the generated deploy config does not match the pinned target — refusing to deploy.',
-        verification.reason,
-        'This typically means CLOUDFLARE_ENV / CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH (in the',
-        'environment or a production `.env`) selected a different named environment or config',
-        'at build time. This backend always deploys the canonical top-level config — remove',
-        'them and rebuild.',
-      ]
-        .filter(Boolean)
-        .join('\n'),
-    );
+  if (
+    !verifyCloudflareDeployArtifact(root, deps, {
+      accountId,
+      workerName,
+      desired,
+      bindingIdentitySnapshot,
+      passthroughIdentitySnapshot,
+      passthroughRawFields,
+      needsAI,
+      aiBindingName,
+      authEnabled,
+      requiredSecretNames: schemaFacts.requiredKeys,
+      expectedContainers,
+      expectedDurableObjectBindings: expectedDurableObjectState.bindings,
+      expectedMigrations: expectedDurableObjectState.migrations,
+      expectedCrons,
+    })
+  ) {
     return exit(1);
   }
 
