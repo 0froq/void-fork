@@ -6045,12 +6045,19 @@ async function activateCloudflareVersionWithProgress(
   const progress = createSpinner();
   progress.start('Checking the current Worker deployment...');
   try {
-    return await activate({
+    const result = await activate({
       ...options,
       onProgress: (message) => progress.message(message),
     });
-  } finally {
-    progress.stop();
+    if (result.ok) {
+      progress.stop('Worker version is ready.');
+    } else {
+      progress.error('Worker deployment stopped.');
+    }
+    return result;
+  } catch (error) {
+    progress.error('Worker deployment stopped.');
+    throw error;
   }
 }
 
@@ -6115,7 +6122,7 @@ export function formatCloudflareActivationError(
         'and retry. Void caches it after a successful workers.dev deployment; production traffic is unchanged.',
       ].join('\n');
     case 'readiness-staging-failed':
-      return `deploy: Cloudflare could not stage the uploaded Worker Version at zero-percent traffic${status}; production traffic is unchanged.`;
+      return `deploy: Cloudflare could not stage the uploaded Worker Version at zero-percent traffic${status}; production traffic is unchanged.${cloudflareCode}${diagnostic}`;
     case 'readiness-failed':
       return [
         'deploy: the uploaded Worker Version did not pass /__void/ready.',

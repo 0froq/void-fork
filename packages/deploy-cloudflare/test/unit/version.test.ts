@@ -158,6 +158,29 @@ function runner(overrides?: {
 }
 
 describe('Cloudflare version activation', () => {
+  it('returns the Cloudflare error when zero-percent staging fails', async () => {
+    const runWrangler = runner({
+      upload: ok(`Worker Version ID: ${NEXT}`),
+      activate: {
+        status: 1,
+        stdout: '',
+        stderr: `[ERROR] Invalid deployment: migration live-v1 conflicts with an older version. [code: 10210]`,
+      },
+    });
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        workersDevSubdomain: 'example',
+        message: encodeCloudflareVersionMessage([]),
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: 'readiness-staging-failed',
+      diagnostic: expect.stringContaining('migration live-v1'),
+    });
+  });
   it('shares the initial version snapshot while rechecking inheritance after upload', async () => {
     const runWrangler = runner();
     const result = await activateCloudflareVersion({

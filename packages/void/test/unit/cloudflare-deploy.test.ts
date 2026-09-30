@@ -192,7 +192,7 @@ describe('Cloudflare activation diagnostics', () => {
     },
   );
 
-  it.each(['upload-failed', 'bootstrap-failed'] as const)(
+  it.each(['upload-failed', 'bootstrap-failed', 'readiness-staging-failed'] as const)(
     'prints the underlying diagnostic for %s',
     (reason) => {
       const message = formatCloudflareActivationError({
