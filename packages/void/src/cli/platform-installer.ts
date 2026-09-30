@@ -4312,26 +4312,31 @@ function platformWorkerApiReadRunner(
 ): typeof runPlatformWrangler {
   const base = `/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(workerName)}`;
   return async (args, account, cwd, capture) => {
-    if (args[0] === 'deployments' && (args[1] === 'status' || args[1] === 'list')) {
-      const response = await readCloudflare(`${base}/deployments`);
-      const deployments =
-        response && typeof response === 'object' && !Array.isArray(response)
-          ? (response as { deployments?: unknown }).deployments
-          : null;
-      if (!Array.isArray(deployments)) {
-        throw new Error(
-          `platform: Cloudflare returned malformed deployment history for ${workerName}.`,
-        );
+    try {
+      if (args[0] === 'deployments' && (args[1] === 'status' || args[1] === 'list')) {
+        const response = await readCloudflare(`${base}/deployments`);
+        const deployments =
+          response && typeof response === 'object' && !Array.isArray(response)
+            ? (response as { deployments?: unknown }).deployments
+            : null;
+        if (!Array.isArray(deployments)) {
+          throw new Error(
+            `platform: Cloudflare returned malformed deployment history for ${workerName}.`,
+          );
+        }
+        return {
+          status: args[1] === 'status' && deployments.length === 0 ? 1 : 0,
+          stderr: '',
+          stdout: JSON.stringify(args[1] === 'status' ? deployments[0] : deployments),
+        };
       }
-      return {
-        status: args[1] === 'status' && deployments.length === 0 ? 1 : 0,
-        stderr: '',
-        stdout: JSON.stringify(args[1] === 'status' ? deployments[0] : deployments),
-      };
-    }
-    if (args[0] === 'versions' && args[1] === 'view' && args[2]) {
-      const version = await readCloudflare(`${base}/versions/${encodeURIComponent(args[2])}`);
-      return { status: 0, stderr: '', stdout: JSON.stringify(version) };
+      if (args[0] === 'versions' && args[1] === 'view' && args[2]) {
+        const version = await readCloudflare(`${base}/versions/${encodeURIComponent(args[2])}`);
+        return { status: 0, stderr: '', stdout: JSON.stringify(version) };
+      }
+    } catch {
+      // An API read error is not evidence of ownership or deployment lineage.
+      // Run the established cf command for the same check.
     }
     return fallback(args, account, cwd, capture);
   };
@@ -4345,6 +4350,9 @@ export async function deployPlatformWorker(
   const directory = mkdtempSync(join(tmpdir(), 'void-platform-deploy-'));
   const workerName = String(config.name);
   const accountId = String(config.account_id);
+  const readRunner = options.readCloudflare
+    ? platformWorkerApiReadRunner(accountId, workerName, options.readCloudflare, options.runner)
+    : options.runner;
   let activatedVersionId: string | null = null;
   let activatedDeploymentId: string | null = null;
   let uploadedVersionId: string | null = null;
@@ -4456,12 +4464,6 @@ export async function deployPlatformWorker(
       }
     };
     if (options.workerExisted && contentHash && options.readCloudflare) {
-      const directRunner = platformWorkerApiReadRunner(
-        accountId,
-        workerName,
-        options.readCloudflare,
-        options.runner,
-      );
       let candidate:
         | {
             deploymentId: string;
@@ -4474,7 +4476,7 @@ export async function deployPlatformWorker(
           configPath,
           accountId,
           workerName,
-          directRunner,
+          readRunner,
         );
         const activeVersion =
           before[0]?.versions.length === 1 && before[0].versions[0]?.percentage === 100
@@ -4491,13 +4493,13 @@ export async function deployPlatformWorker(
           workerName,
           readPlatformWorkerOwnershipMarker(config),
           activeVersion,
-          directRunner,
+          readRunner,
         );
         const after = await readPlatformWorkerDeployments(
           configPath,
           accountId,
           workerName,
-          directRunner,
+          readRunner,
         );
         changedDuringRead =
           before[0]?.id !== after[0]?.id ||
@@ -4527,7 +4529,7 @@ export async function deployPlatformWorker(
         return await reconcileExistingVersion(
           candidate.snapshot.versionId,
           candidate.snapshot.triggerConfig,
-          directRunner,
+          readRunner,
           candidate.deploymentId,
         );
       }
@@ -4538,14 +4540,14 @@ export async function deployPlatformWorker(
         accountId,
         workerName,
         readPlatformWorkerOwnershipMarker(config),
-        options.runner,
+        readRunner,
       );
       previousVersionId = previous.versionId;
       const deployments = await readPlatformWorkerDeployments(
         configPath,
         accountId,
         workerName,
-        options.runner,
+        readRunner,
       );
       if (!deploymentRunsOnlyVersion(deployments[0], previousVersionId)) {
         throw new Error(
@@ -4562,7 +4564,7 @@ export async function deployPlatformWorker(
         return await reconcileExistingVersion(
           previousVersionId,
           previous.triggerConfig,
-          options.runner,
+          readRunner,
         );
       }
       uploadConfig = withoutCompletedPlatformWorkerMigrations(uploadConfig, previous.migrationTag);
@@ -4639,7 +4641,7 @@ export async function deployPlatformWorker(
         configPath,
         accountId,
         workerName,
-        options.runner,
+        readRunner,
       );
       if (
         deploymentsBeforeActivation[0]?.id !== previousDeploymentId ||
@@ -4671,7 +4673,7 @@ export async function deployPlatformWorker(
       configPath,
       accountId,
       workerName,
-      options.runner,
+      readRunner,
     );
     const lineage = classifyPlatformWorkerDeploymentLineage(
       deploymentsAfterActivation,
@@ -4702,7 +4704,7 @@ export async function deployPlatformWorker(
           expectedActiveDeploymentId: lineage.deploymentId,
           expectedActiveVersionId: uploadedVersionId,
           restoration: interveningDeployment,
-          runner: options.runner,
+          runner: readRunner,
           workerName,
         });
       } catch (recoveryError) {
@@ -4737,7 +4739,7 @@ export async function deployPlatformWorker(
         await options.removeCustomDomains();
         return cleanPlatformCommandResult();
       },
-      runWrangler: platformWorkerCommandRunner(accountId, directory, options.runner),
+      runWrangler: platformWorkerCommandRunner(accountId, directory, readRunner),
       targetTriggerConfig: nextTriggers,
       targetVersionId: uploadedVersionId,
       workerName,
@@ -4767,7 +4769,7 @@ export async function deployPlatformWorker(
         removeCustomDomains: options.removeCustomDomains,
         publishCustomDomains: options.publishCustomDomains,
         retainNewWorker: options.retainNewWorker,
-        runner: options.runner,
+        runner: readRunner,
         workerExisted: options.workerExisted,
         workerName,
       });
@@ -4798,7 +4800,7 @@ export async function deployPlatformWorker(
               removeCustomDomains: options.removeCustomDomains,
               publishCustomDomains: options.publishCustomDomains,
               retainNewWorker: options.retainNewWorker,
-              runner: options.runner,
+              runner: readRunner,
               workerExisted: options.workerExisted,
               workerName,
             })

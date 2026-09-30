@@ -24,6 +24,7 @@ async function attemptReuse(input: {
   directDeploymentDrift?: boolean;
   directLateDeploymentDrift?: boolean;
   directProofDeploymentDrift?: boolean;
+  directReadFailure?: boolean;
   liveTriggers?: boolean;
   secrets?: Record<string, string> | null;
   triggerFailure?: boolean;
@@ -82,6 +83,9 @@ async function attemptReuse(input: {
     };
     let directDeploymentReads = 0;
     const readCloudflare = vi.fn(async (path: string): Promise<unknown> => {
+      if (input.directReadFailure) {
+        throw new Error('Cloudflare API read unavailable');
+      }
       if (path.endsWith('/deployments')) {
         directDeploymentReads++;
         return {
@@ -230,6 +234,25 @@ it('uses direct Cloudflare reads for a verified matching version', async () => {
     'deployments',
     'deployments',
   ]);
+});
+
+it('uses direct reads while preparing a changed Worker upload', async () => {
+  const run = await attemptReuse({ changeConfig: true, directApi: true });
+  expect(String(run.error)).toContain('upload reached');
+  expect(run.calls).toEqual(['versions upload']);
+  expect(run.readCloudflare).toHaveBeenCalled();
+});
+
+it('falls back to cf reads when the direct API is unavailable', async () => {
+  const run = await attemptReuse({
+    changeConfig: true,
+    directApi: true,
+    directReadFailure: true,
+  });
+  expect(String(run.error)).toContain('upload reached');
+  expect(run.calls).toContain('deployments status');
+  expect(run.calls).toContain('versions view');
+  expect(run.calls).toContain('versions upload');
 });
 
 it('skips trigger publication only after live traffic matches the reused version', async () => {
