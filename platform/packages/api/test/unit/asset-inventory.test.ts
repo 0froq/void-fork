@@ -1,7 +1,25 @@
 import { describe, expect, it, vi } from 'vite-plus/test';
-import { findR2Assets } from '../../src/asset-inventory.ts';
+import { findR2Assets, persistedR2AssetSizes } from '../../src/asset-inventory.ts';
 
 describe('asset inventory', () => {
+  it('trusts only unambiguous R2 placement recorded in an active manifest', () => {
+    const hash = 'a'.repeat(32);
+    const conflicting = 'b'.repeat(32);
+    expect(
+      persistedR2AssetSizes(
+        JSON.stringify({
+          '/app.js': { hash, size: 12, store: 'r2' },
+          '/copy.js': { hash, size: 12, store: 'r2' },
+          '/legacy.js': { hash: 'c'.repeat(32), size: 10 },
+          '/kv.js': { hash: 'd'.repeat(32), size: 10, store: 'kv' },
+          '/first.js': { hash: conflicting, size: 8, store: 'r2' },
+          '/second.js': { hash: conflicting, size: 9, store: 'r2' },
+        }),
+      ),
+    ).toEqual(new Map([[hash, 12]]));
+    expect(persistedR2AssetSizes('{')).toEqual(new Map());
+  });
+
   it('does no I/O for an empty manifest', async () => {
     const head = vi.fn();
     const list = vi.fn();

@@ -1,3 +1,5 @@
+import { R2_CONCURRENCY, uploadPool } from './concurrency.ts';
+
 /** Find only project-scoped objects; legacy stores have separate placement rules. */
 export async function findR2Assets(
   r2: R2Bucket,
@@ -37,7 +39,46 @@ export async function findR2Assets(
   } while (cursor !== undefined);
   return found;
 }
-import { R2_CONCURRENCY, uploadPool } from './concurrency.ts';
+
+/** Active deployment metadata is protected from platform GC until cutover. */
+export function persistedR2AssetSizes(raw: string | null): Map<string, number> {
+  const sizes = new Map<string, number>();
+  const conflicting = new Set<string>();
+  if (!raw) {
+    return sizes;
+  }
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(raw);
+  } catch {
+    return sizes;
+  }
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    return sizes;
+  }
+  for (const value of Object.values(manifest)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      continue;
+    }
+    const entry = value as { hash?: unknown; size?: unknown; store?: unknown };
+    if (
+      entry.store === 'r2' &&
+      typeof entry.hash === 'string' &&
+      /^[0-9a-f]{32}$/.test(entry.hash) &&
+      typeof entry.size === 'number' &&
+      Number.isSafeInteger(entry.size) &&
+      entry.size >= 0
+    ) {
+      if (sizes.has(entry.hash) && sizes.get(entry.hash) !== entry.size) {
+        conflicting.add(entry.hash);
+        sizes.delete(entry.hash);
+      } else if (!conflicting.has(entry.hash)) {
+        sizes.set(entry.hash, entry.size);
+      }
+    }
+  }
+  return sizes;
+}
 
 /** Preflight is advisory: finalization protects its hashes from GC, then verifies presence. */
 export async function findMissingR2Assets(

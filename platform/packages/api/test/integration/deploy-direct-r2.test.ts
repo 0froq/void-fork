@@ -349,6 +349,126 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     });
   });
 
+  it('skips R2 inventory for unchanged hashes protected by the active deployment', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'worker-active-reuse');
+    const reusedHash = HASH(0x41);
+    const missingHash = HASH(0x42);
+    await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, reusedHash, new Uint8Array(12));
+    const liveId = 'dpl_worker_active_reuse';
+    await env.db.insert(deployments).values({
+      id: liveId,
+      project_id: project.id,
+      status: 'live',
+      manifest: JSON.stringify(v2Manifest({ type: 'void' })),
+      asset_hashes: JSON.stringify({ '/app.js': { hash: reusedHash, size: 12, store: 'r2' } }),
+      created_at: sql`now()`,
+      deployed_at: sql`now()`,
+    });
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: liveId })
+      .where(eq(projects.id, project.id));
+    const head = vi.spyOn(env.STATIC_ASSETS_R2, 'head');
+    const list = vi.spyOn(env.STATIC_ASSETS_R2, 'list');
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          hasWorker: true,
+          assetManifest: {
+            '/app.js': { hash: reusedHash, size: 12 },
+            '/renamed.js': { hash: reusedHash, size: 12 },
+            '/wrong-size.js': { hash: reusedHash, size: 13 },
+            '/missing.js': { hash: missingHash, size: 5 },
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      needed: ['/wrong-size.js', '/missing.js'],
+      total: 4,
+      skipped: 2,
+    });
+    expect(head.mock.calls).toEqual([
+      [`assets/${project.id}/${reusedHash}`],
+      [`assets/${project.id}/${missingHash}`],
+    ]);
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it('finalizes an unchanged Worker asset without scanning the R2 prefix', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'worker-finalize-reuse');
+    const hash = HASH(0x43);
+    await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, hash, new Uint8Array(12));
+    const liveId = 'dpl_worker_finalize_reuse';
+    await env.db.insert(deployments).values({
+      id: liveId,
+      project_id: project.id,
+      status: 'live',
+      manifest: JSON.stringify(v2Manifest({ type: 'void' })),
+      asset_hashes: JSON.stringify({ '/app.js': { hash, size: 12, store: 'r2' } }),
+      created_at: sql`now()`,
+      deployed_at: sql`now()`,
+    });
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: liveId })
+      .where(eq(projects.id, project.id));
+    mockCfApi();
+    const head = vi.spyOn(env.STATIC_ASSETS_R2, 'head');
+    const originalList = env.STATIC_ASSETS_R2.list.bind(env.STATIC_ASSETS_R2);
+    let releaseList: (() => void) | undefined;
+    const list = vi.spyOn(env.STATIC_ASSETS_R2, 'list').mockImplementation(async (options) => {
+      await new Promise<void>((resolve) => {
+        releaseList = resolve;
+      });
+      return originalList(options);
+    });
+    const pending: Array<Promise<unknown>> = [];
+    const executionCtx = {
+      waitUntil: (work: Promise<unknown>) => pending.push(work),
+      passThroughOnException: () => {},
+    } as unknown as ExecutionContext;
+    const originalDispatch = env.DISPATCH;
+    env.DISPATCH = {
+      get: () => ({ fetch: async () => Response.json({ ready: true }) }),
+    } as unknown as DispatchNamespace;
+    try {
+      const res = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            manifest: v2Manifest({ type: 'void' }),
+            assetManifest: { '/app.js': { blake3: hash, md5: MD5(0x43), size: 12 } },
+            workerFiles: {
+              'index.js': btoa('export default { fetch() { return new Response("ok"); } };'),
+            },
+            preflight: 'true',
+          }),
+        }),
+        env,
+        executionCtx,
+      );
+      const events = await readAllEvents(res);
+      expect(events.find((event) => isEvent(event, 'error'))).toBeUndefined();
+      expect(events.find((event) => isEvent(event, 'done'))).toBeDefined();
+      expect(head).not.toHaveBeenCalled();
+      expect(pending).toHaveLength(1);
+      await vi.waitFor(() => expect(list).toHaveBeenCalledOnce());
+    } finally {
+      releaseList?.();
+      await Promise.allSettled(pending);
+      env.DISPATCH = originalDispatch;
+    }
+  });
+
   it('protects reused Worker assets from GC before verifying their presence', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'worker-reuse-protected');

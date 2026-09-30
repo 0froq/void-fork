@@ -19,7 +19,7 @@ import {
 } from '@void/platform';
 import { eq, sql as drizzleSql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
-import { findMissingR2Assets, findR2Assets } from '../asset-inventory.ts';
+import { findMissingR2Assets, findR2Assets, persistedR2AssetSizes } from '../asset-inventory.ts';
 import {
   computeAssetHash,
   createAssetUploadSession,
@@ -3029,6 +3029,21 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
       });
     };
     let remainingAssetGcHashBudget = ASSET_GC_MAX_HASHES_PER_DEPLOY;
+    let orphanSweepAfterResponse: (() => Promise<void>) | null = null;
+    const finishOrphanSweep = async (): Promise<void> => {
+      const sweep = orphanSweepAfterResponse;
+      if (!sweep) {
+        return;
+      }
+      const work = Promise.resolve().then(sweep);
+      try {
+        context.executionCtx.waitUntil(work);
+      } catch {
+        // app.fetch() has no ExecutionContext in integration tests. Await the
+        // same work there so cleanup remains observable and deterministic.
+        await work;
+      }
+    };
     const deleteAssetHashesWithProjectFence = async (
       knownRetainedHashes: ReadonlySet<string>,
       hashes: ReadonlyArray<string>,
@@ -3209,6 +3224,22 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
       const declaredHashes = Array.from(
         new Set(Object.values(incomingAssetManifest).map((e) => e.hash)),
       );
+      // The active deployment's placement-bearing manifest is protected from
+      // platform GC. Reusing those exact R2 hashes avoids inventorying the
+      // whole project prefix again on an unchanged Worker redeploy. New or
+      // legacy entries still require the existing object-store verification.
+      const activeR2Sizes =
+        currentLiveDeployment?.status === 'live' && currentLiveDeployment.project_id === projectId
+          ? persistedR2AssetSizes(currentLiveDeployment.asset_hashes)
+          : new Map<string, number>();
+      const declaredSizeByHash = new Map<string, number | null>();
+      for (const entry of Object.values(incomingAssetManifest)) {
+        if (!declaredSizeByHash.has(entry.hash)) {
+          declaredSizeByHash.set(entry.hash, entry.size);
+        } else if (declaredSizeByHash.get(entry.hash) !== entry.size) {
+          declaredSizeByHash.set(entry.hash, null);
+        }
+      }
       let previousBackendIsStatic = false;
       if (currentLiveDeployment) {
         const routingRaw = await context.env.ROUTING.get(project.slug);
@@ -3222,11 +3253,13 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           }
         }
       }
-      // Worker preflight reuses only verified scoped R2 objects. Require every
-      // hash here again: a stale preflight cannot publish a missing object. The
-      // admission row already protects these hashes from platform GC.
-      const newHashes =
-        hasWorkerFiles || !previousBackendIsStatic
+      // Worker preflight reuses verified scoped R2 objects. Verify new and
+      // uncertain hashes again: a stale preflight cannot publish a missing
+      // upload. The admission row protects them from platform GC while the
+      // active deployment protects hashes with persisted R2 placement.
+      const newHashes = hasWorkerFiles
+        ? declaredHashes.filter((hash) => activeR2Sizes.get(hash) !== declaredSizeByHash.get(hash))
+        : !previousBackendIsStatic
           ? declaredHashes
           : declaredHashes.filter((hash) => !carryForwardHashes.has(hash));
       const missingHashes: Array<string> = [];
@@ -3849,21 +3882,22 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               await context.env.ROUTING.delete(`manifest:${old.id}`);
             }
 
-            // Direct-to-R2 orphan sweep. See WfP branch for rationale —
-            // orphans uploaded via presigned PUTs that never finalized are
-            // not named in any manifest, so the eviction loop misses them.
-            // Best-effort: a failed sweep should not fail the deploy.
+            // Presigned uploads without a finalized manifest become orphans.
+            // Sweep after the terminal event so R2 history does not delay a
+            // successful deploy. The project fence still protects live hashes.
             if (assetCleanupSafe) {
-              try {
-                const orphans = await sweepAssetOrphansWithProjectFence(retainedHashes);
-                if (orphans > 0) {
-                  logger.info('retention_cleanup', 'r2_orphans_swept', { count: orphans });
+              orphanSweepAfterResponse = async () => {
+                try {
+                  const orphans = await sweepAssetOrphansWithProjectFence(retainedHashes);
+                  if (orphans > 0) {
+                    logger.info('retention_cleanup', 'r2_orphans_swept', { count: orphans });
+                  }
+                } catch (e) {
+                  logger.warn('retention_cleanup', 'r2_orphan_sweep_failed', {
+                    err: e instanceof Error ? e.message : String(e),
+                  });
                 }
-              } catch (e) {
-                logger.warn('retention_cleanup', 'r2_orphan_sweep_failed', {
-                  err: e instanceof Error ? e.message : String(e),
-                });
-              }
+              };
             }
           }
 
@@ -3885,6 +3919,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             assets: assetCount,
             workers: 0,
           });
+          await finishOrphanSweep();
           return;
         }
 
@@ -5130,24 +5165,22 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             }
           }
 
-          // Direct-to-R2 orphan sweep. The eviction loop above only deletes
-          // hashes named in the EVICTED deployments' `asset_hashes` — bytes
-          // uploaded via direct-to-R2 presigned PUTs that never finalized
-          // into a live deploy were never named in any manifest, so they
-          // outlive the eviction loop. Walk the project's R2 keyspace and
-          // drop anything not in `retainedHashes`. Best-effort: a failed
-          // sweep should not fail the deploy.
+          // Presigned uploads without a finalized manifest become orphans.
+          // Sweep after the terminal event so R2 history does not delay a
+          // successful deploy. The project fence still protects live hashes.
           if (assetCleanupSafe) {
-            try {
-              const orphans = await sweepAssetOrphansWithProjectFence(retainedHashes);
-              if (orphans > 0) {
-                logger.info('retention_cleanup', 'r2_orphans_swept', { count: orphans });
+            orphanSweepAfterResponse = async () => {
+              try {
+                const orphans = await sweepAssetOrphansWithProjectFence(retainedHashes);
+                if (orphans > 0) {
+                  logger.info('retention_cleanup', 'r2_orphans_swept', { count: orphans });
+                }
+              } catch (e) {
+                logger.warn('retention_cleanup', 'r2_orphan_sweep_failed', {
+                  err: e instanceof Error ? e.message : String(e),
+                });
               }
-            } catch (e) {
-              logger.warn('retention_cleanup', 'r2_orphan_sweep_failed', {
-                err: e instanceof Error ? e.message : String(e),
-              });
-            }
+            };
           }
         }
 
@@ -5170,6 +5203,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           workers: workerFiles.length,
           ...(migrationsApplied > 0 && { migrations: migrationsApplied }),
         });
+        await finishOrphanSweep();
       } catch (err) {
         const raw =
           err instanceof ProjectAccessDeniedError
@@ -5749,11 +5783,19 @@ app.post('/:id/deploy/preflight', async (context) => {
     if (!valid) {
       return context.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
     }
-    const needed = await findMissingR2Assets(
-      context.env.STATIC_ASSETS_R2,
-      projectId,
-      assetManifest,
+    const active = project.active_deployment_id
+      ? await getDeployment(context.get('db'), project.active_deployment_id)
+      : null;
+    const activeR2Sizes =
+      active?.status === 'live' && active.project_id === projectId
+        ? persistedR2AssetSizes(active.asset_hashes)
+        : new Map<string, number>();
+    const unverified = Object.fromEntries(
+      Object.entries(assetManifest).filter(
+        ([, entry]) => activeR2Sizes.get(entry.hash) !== entry.size,
+      ),
     );
+    const needed = await findMissingR2Assets(context.env.STATIC_ASSETS_R2, projectId, unverified);
     return context.json({ needed, total, skipped: total - needed.length });
   }
 
