@@ -11,37 +11,14 @@ import {
   watchPagesForRescan,
   ISLANDS_RENDERER_ID,
   ISLANDS_CLIENT_ENTRY_ID,
+  findIslandImports,
+  editIslandSource,
+  type IslandSourceEdit,
 } from 'void/pages-islands-plugin';
 import type { IslandEntry } from 'void/pages-islands-plugin';
 import { generateComponentManifest } from './pages-manifest.ts';
 
 const COMPONENT_EXTENSIONS = ['.vue', '.tsx', '.jsx', '.ts', '.js'];
-const ISLAND_IMPORT_RE =
-  /import\s+([$_A-Za-z][$_\w]*)\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*,?\s*\}/g;
-
-function findIslandImports(code: string) {
-  const imports: Array<{
-    statement: string;
-    importName: string;
-    specifierRaw: string;
-    specifier: string;
-    hydrate: string;
-  }> = [];
-  let match: RegExpExecArray | null;
-  ISLAND_IMPORT_RE.lastIndex = 0;
-  while ((match = ISLAND_IMPORT_RE.exec(code)) !== null) {
-    const specifierRaw = match[2];
-    imports.push({
-      statement: match[0],
-      importName: match[1],
-      specifierRaw,
-      specifier: specifierRaw.slice(1, -1),
-      hydrate: match[3].slice(1, -1),
-    });
-  }
-  return imports;
-}
-
 type MdPluginWithApi = Plugin & {
   api?: {
     getClientScripts?: () => Map<string, unknown>;
@@ -141,7 +118,7 @@ export function islandsPlugin(
             const filePath = resolve(pagesDir, entry.filePath);
             const code = readFileSync(filePath, 'utf-8');
             const importerDir = dirname(filePath);
-            for (const islandImport of findIslandImports(code)) {
+            for (const islandImport of findIslandImports(code, filePath)) {
               const spec = islandImport.specifier;
               const strategy = islandImport.hydrate;
               const absPath = resolveSpecifier(spec, importerDir, COMPONENT_EXTENSIONS);
@@ -248,11 +225,11 @@ export function islandsPlugin(
           }
 
           const importerDir = dirname(id);
-          let transformed = code;
+          const edits: Array<IslandSourceEdit> = [];
           const wrappers: Array<string> = [];
           let idx = 0;
 
-          for (const islandImport of findIslandImports(code)) {
+          for (const islandImport of findIslandImports(code, id)) {
             const name = islandImport.importName;
             const specRaw = islandImport.specifierRaw;
             const strategy = islandImport.hydrate;
@@ -276,7 +253,7 @@ export function islandsPlugin(
 
             // Replace the import with a renamed import
             const replacement = `import ${rawName} from ${specRaw}`;
-            transformed = transformed.replace(islandImport.statement, replacement);
+            edits.push({ start: islandImport.start, end: islandImport.end, text: replacement });
 
             // Generate wrapper that adds data-island attributes during SSR.
             // Uses Vue's h() function for createElement.
@@ -300,22 +277,21 @@ export function islandsPlugin(
             // so the Vue SFC compiler hasn't processed the file yet. We must place
             // the h() import and wrapper consts inside the script block.
             const scriptSetupRe = /<script\b[^>]*\bsetup\b[^>]*>/;
-            const setupMatch = transformed.match(scriptSetupRe);
-            if (setupMatch) {
-              const openEnd = setupMatch.index! + setupMatch[0].length;
-              const closeIdx = transformed.indexOf('</script>', openEnd);
-              if (closeIdx !== -1) {
-                transformed =
-                  transformed.slice(0, openEnd) +
-                  '\nimport { h as _h_island } from "vue";' +
-                  transformed.slice(openEnd, closeIdx) +
-                  '\n' +
-                  wrappers.join('\n') +
-                  '\n' +
-                  transformed.slice(closeIdx);
-              }
+            const setupMatch = code.match(scriptSetupRe);
+            if (!setupMatch) {
+              throw new Error(`islands: Expected a <script setup> block in '${id}'.`);
             }
-            return { code: transformed, map: null };
+            const openEnd = setupMatch.index! + setupMatch[0].length;
+            const closeIdx = code.indexOf('</script>', openEnd);
+            if (closeIdx === -1) {
+              throw new Error(`islands: Expected a closing </script> tag in '${id}'.`);
+            }
+            return editIslandSource(code, edits, {
+              insert: [
+                { offset: openEnd, text: '\nimport { h as _h_island } from "vue";' },
+                { offset: closeIdx, text: '\n' + wrappers.join('\n') + '\n' },
+              ],
+            });
           }
         },
       },

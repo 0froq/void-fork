@@ -1,8 +1,6 @@
+import { editIslandSource, findIslandImports } from 'void/pages-islands-plugin';
+
 const SCRIPT_RE = /^<script\b[^>]*>([\s\S]*?)<\/script>\s*\n?/;
-const ISLAND_IMPORT_RE =
-  /import\s+([$_A-Za-z][$_\w]*)\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*,?\s*\}/g;
-const ISLAND_IMPORT_LINE_RE =
-  /^[ \t]*import\s+[$_A-Za-z][$_\w]*\s+from\s+(?:"[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*(?:"[^"]+"|'[^']+')\s*,?\s*\}\s*;?\s*$/gm;
 
 export type IslandImport = {
   name: string;
@@ -28,17 +26,19 @@ export function extractScript(source: string): ScriptExtraction {
   const script = match[1].trim();
   const body = source.slice(match[0].length);
 
-  const islandImports: Array<IslandImport> = [];
-  let importMatch: RegExpExecArray | null;
-  while ((importMatch = ISLAND_IMPORT_RE.exec(script)) !== null) {
-    islandImports.push({
-      name: importMatch[1],
-      specifier: importMatch[2].slice(1, -1),
-      strategy: importMatch[3].slice(1, -1),
-    });
-  }
-
-  const stripped = script.replace(ISLAND_IMPORT_LINE_RE, '').trim();
+  const imports = findIslandImports(script, 'page.md-script.ts');
+  const islandImports: Array<IslandImport> = imports.map((entry) => ({
+    name: entry.importName,
+    specifier: entry.specifier,
+    strategy: entry.hydrate,
+  }));
+  const stripped =
+    imports.length > 0
+      ? editIslandSource(
+          script,
+          imports.map((entry) => ({ start: entry.start, end: entry.end, text: '' })),
+        ).code.trim()
+      : script;
   const clientCode = stripped || null;
 
   return { script, body, islandImports, clientCode };

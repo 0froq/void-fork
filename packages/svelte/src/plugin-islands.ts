@@ -12,35 +12,14 @@ import {
   watchPagesForRescan,
   ISLANDS_RENDERER_ID,
   ISLANDS_CLIENT_ENTRY_ID,
+  findIslandImports,
+  editIslandSource,
+  type IslandSourceEdit,
 } from 'void/pages-islands-plugin';
 import type { IslandEntry } from 'void/pages-islands-plugin';
 import { generateComponentManifest } from './pages-manifest.ts';
 
 const COMPONENT_EXTENSIONS = ['.svelte', '.ts', '.js'];
-const ISLAND_IMPORT_RE =
-  /import\s+([$_A-Za-z][$_\w]*)\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*,?\s*\}/g;
-
-function findIslandImports(code: string) {
-  const imports: Array<{
-    statement: string;
-    importName: string;
-    specifier: string;
-    hydrate: string;
-  }> = [];
-  let match: RegExpExecArray | null;
-  ISLAND_IMPORT_RE.lastIndex = 0;
-  while ((match = ISLAND_IMPORT_RE.exec(code)) !== null) {
-    const specifierRaw = match[2];
-    imports.push({
-      statement: match[0],
-      importName: match[1],
-      specifier: specifierRaw.slice(1, -1),
-      hydrate: match[3].slice(1, -1),
-    });
-  }
-  return imports;
-}
-
 /**
  * Prefix for virtual island wrapper modules. Must NOT use the `\0` prefix
  * because `@sveltejs/vite-plugin-svelte` skips `\0`-prefixed modules in
@@ -118,7 +97,7 @@ export function islandsPlugin(
             const filePath = resolve(pagesDir, entry.filePath);
             const code = readFileSync(filePath, 'utf-8');
             const importerDir = dirname(filePath);
-            for (const islandImport of findIslandImports(code)) {
+            for (const islandImport of findIslandImports(code, filePath)) {
               const spec = islandImport.specifier;
               const strategy = islandImport.hydrate;
               const absPath = resolveSpecifier(spec, importerDir, COMPONENT_EXTENSIONS);
@@ -236,9 +215,9 @@ export function islandsPlugin(
           }
 
           const importerDir = dirname(id);
-          let transformed = code;
+          const edits: Array<IslandSourceEdit> = [];
 
-          for (const islandImport of findIslandImports(code)) {
+          for (const islandImport of findIslandImports(code, id)) {
             const name = islandImport.importName;
             const spec = islandImport.specifier;
             const strategy = islandImport.hydrate;
@@ -269,11 +248,11 @@ export function islandsPlugin(
               '&hydrate=' +
               encodeURIComponent(strategy);
             const replacement = `import ${name} from ${JSON.stringify(wrapperUrl)}`;
-            transformed = transformed.replace(islandImport.statement, replacement);
+            edits.push({ start: islandImport.start, end: islandImport.end, text: replacement });
           }
 
-          if (transformed !== code) {
-            return { code: transformed, map: null };
+          if (edits.length > 0) {
+            return editIslandSource(code, edits);
           }
         },
       },

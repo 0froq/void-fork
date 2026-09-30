@@ -12,37 +12,14 @@ import {
   rewriteCssImportForVirtualModule,
   ISLANDS_RENDERER_ID,
   ISLANDS_CLIENT_ENTRY_ID,
+  findIslandImports,
+  editIslandSource,
+  type IslandSourceEdit,
 } from 'void/pages-islands-plugin';
 import type { IslandEntry } from 'void/pages-islands-plugin';
 import { generateComponentManifest } from './pages-manifest.ts';
 
 const COMPONENT_EXTENSIONS = ['.tsx', '.jsx', '.ts', '.js'];
-const ISLAND_IMPORT_RE =
-  /import\s+([$_A-Za-z][$_\w]*)\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*,?\s*\}/g;
-
-function findIslandImports(code: string) {
-  const imports: Array<{
-    statement: string;
-    importName: string;
-    specifierRaw: string;
-    specifier: string;
-    hydrate: string;
-  }> = [];
-  let match: RegExpExecArray | null;
-  ISLAND_IMPORT_RE.lastIndex = 0;
-  while ((match = ISLAND_IMPORT_RE.exec(code)) !== null) {
-    const specifierRaw = match[2];
-    imports.push({
-      statement: match[0],
-      importName: match[1],
-      specifierRaw,
-      specifier: specifierRaw.slice(1, -1),
-      hydrate: match[3].slice(1, -1),
-    });
-  }
-  return imports;
-}
-
 type MdPluginWithApi = Plugin & {
   api?: {
     getClientScripts?: () => Map<string, unknown>;
@@ -113,7 +90,7 @@ export function islandsPlugin(
             const filePath = resolve(pagesDir, entry.filePath);
             const code = readFileSync(filePath, 'utf-8');
             const importerDir = dirname(filePath);
-            for (const islandImport of findIslandImports(code)) {
+            for (const islandImport of findIslandImports(code, filePath)) {
               const spec = islandImport.specifier;
               const strategy = islandImport.hydrate;
               const absPath = resolveSpecifier(spec, importerDir, COMPONENT_EXTENSIONS);
@@ -220,11 +197,11 @@ export function islandsPlugin(
           }
 
           const importerDir = dirname(id);
-          let transformed = code;
+          const edits: Array<IslandSourceEdit> = [];
           const wrappers: Array<string> = [];
           let idx = 0;
 
-          for (const islandImport of findIslandImports(code)) {
+          for (const islandImport of findIslandImports(code, id)) {
             const name = islandImport.importName;
             const specRaw = islandImport.specifierRaw;
             const strategy = islandImport.hydrate;
@@ -248,7 +225,7 @@ export function islandsPlugin(
 
             // Replace the import with a renamed import
             const replacement = `import ${rawName} from ${specRaw}`;
-            transformed = transformed.replace(islandImport.statement, replacement);
+            edits.push({ start: islandImport.start, end: islandImport.end, text: replacement });
 
             // Generate wrapper that adds data-island attributes during SSR.
             // Uses _React_island (imported below) for createElement.
@@ -265,9 +242,10 @@ export function islandsPlugin(
 
           if (wrappers.length > 0) {
             // Prepend a React import for the wrapper functions
-            transformed =
-              `import _React_island from "react";\n` + transformed + '\n' + wrappers.join('\n');
-            return { code: transformed, map: null };
+            return editIslandSource(code, edits, {
+              prepend: 'import _React_island from "react";\n',
+              append: '\n' + wrappers.join('\n'),
+            });
           }
         },
       },

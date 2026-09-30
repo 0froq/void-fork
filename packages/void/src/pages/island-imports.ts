@@ -1,0 +1,105 @@
+import MagicString from 'magic-string';
+import { parseSync } from 'vite';
+import { isIdentifier, isLiteral, type AstNode, type AstProgram } from '../shared/ast.ts';
+
+export type IslandImportSource = {
+  start: number;
+  end: number;
+  importName: string;
+  specifierRaw: string;
+  specifier: string;
+  hydrate: string;
+};
+
+export type IslandSourceEdit = { start: number; end: number; text: string };
+
+export function editIslandSource(
+  code: string,
+  edits: ReadonlyArray<IslandSourceEdit>,
+  options?: {
+    prepend?: string;
+    append?: string;
+    insert?: ReadonlyArray<{ offset: number; text: string }>;
+  },
+): { code: string; map: ReturnType<MagicString['generateMap']> } {
+  const ms = new MagicString(code);
+  for (const edit of edits) {
+    ms.overwrite(edit.start, edit.end, edit.text);
+  }
+  for (const insertion of options?.insert ?? []) {
+    ms.appendLeft(insertion.offset, insertion.text);
+  }
+  if (options?.prepend) {
+    ms.prepend(options.prepend);
+  }
+  if (options?.append) {
+    ms.append(options.append);
+  }
+  return { code: ms.toString(), map: ms.generateMap({ hires: true }) };
+}
+
+/** Read island import attributes from JS/TS, or script blocks inside an SFC. */
+export function findIslandImports(code: string, filename: string): Array<IslandImportSource> {
+  if (!code.includes('import') || !code.includes('island')) {
+    return [];
+  }
+  const scripts: Array<{ source: string; offset: number; filename: string }> = [];
+  if (/\.(?:vue|svelte)$/.test(filename)) {
+    for (const match of code.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
+      const source = match[1]!;
+      scripts.push({
+        source,
+        offset: match.index! + match[0].indexOf(source),
+        filename: filename.replace(/\.(?:vue|svelte)$/, '.ts'),
+      });
+    }
+  } else {
+    scripts.push({ source: code, offset: 0, filename });
+  }
+  const imports: Array<IslandImportSource> = [];
+  for (const script of scripts) {
+    if (!script.source.includes('island')) {
+      continue;
+    }
+    const program = parseSync(script.filename, script.source).program as unknown as AstProgram;
+    for (const node of program.body ?? []) {
+      if (node.type !== 'ImportDeclaration') {
+        continue;
+      }
+      const specifiers = node.specifiers as Array<AstNode> | undefined;
+      const attributes = node.attributes as Array<AstNode> | undefined;
+      const first = specifiers?.[0];
+      const attribute = attributes?.[0];
+      const key = attribute?.key as AstNode | undefined;
+      const value = attribute?.value as AstNode | undefined;
+      const source = node.source as AstNode | undefined;
+      if (
+        specifiers?.length !== 1 ||
+        first?.type !== 'ImportDefaultSpecifier' ||
+        !isIdentifier(first.local as AstNode | undefined) ||
+        attributes?.length !== 1 ||
+        !isIdentifier(key) ||
+        key.name !== 'island' ||
+        !isLiteral(value) ||
+        typeof value.value !== 'string' ||
+        !isLiteral(source) ||
+        typeof source.value !== 'string' ||
+        source.start === undefined ||
+        source.end === undefined ||
+        node.start === undefined ||
+        node.end === undefined
+      ) {
+        continue;
+      }
+      imports.push({
+        start: script.offset + node.start,
+        end: script.offset + node.end,
+        importName: (first.local as { name: string }).name,
+        specifierRaw: script.source.slice(source.start, source.end),
+        specifier: source.value,
+        hydrate: value.value,
+      });
+    }
+  }
+  return imports;
+}

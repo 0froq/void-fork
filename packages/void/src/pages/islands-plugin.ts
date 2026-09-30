@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'pathslash';
 import { normalizePath, type ResolvedConfig, type ViteDevServer } from 'vite';
+import { findIslandImports } from './island-imports.ts';
 import { resolveEffectiveLayoutChain, scanPages } from './scan.ts';
 import type { PageScanResult } from './types.ts';
 
@@ -13,8 +14,7 @@ export type IslandEntry = {
   hydrate: string;
 };
 
-const ISLAND_IMPORT_RE =
-  /import\s+([$_A-Za-z][$_\w]*)\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*,?\s*\}/g;
+export { findIslandImports, editIslandSource, type IslandSourceEdit } from './island-imports.ts';
 
 type VoidMdPluginApi = {
   getClientScripts?(): Map<string, unknown>;
@@ -25,9 +25,8 @@ type VoidMdPlugin = {
   api?: VoidMdPluginApi;
 };
 
-function hasIslandImports(code: string): boolean {
-  ISLAND_IMPORT_RE.lastIndex = 0;
-  return ISLAND_IMPORT_RE.test(code);
+function hasIslandImports(code: string, filename: string): boolean {
+  return findIslandImports(code, filename).length > 0;
 }
 
 /** Resolve a relative import specifier to an absolute path by checking extensions. */
@@ -70,7 +69,7 @@ export function needsIslandClientBundle(
       const name = entry.name;
       if (islandFilePattern.test(name) || name.startsWith('layout.') || name.startsWith('_')) {
         const content = readFileSync(resolve(entry.parentPath!, name), 'utf-8');
-        if (hasIslandImports(content)) {
+        if (hasIslandImports(content, name)) {
           return true;
         }
         if (styleRe && styleRe.test(content)) {
@@ -140,7 +139,7 @@ export function computePagesNeedingClientJS(
     }
     const filePath = resolve(pagesDir, layout.filePath);
     const code = readFileSync(filePath, 'utf-8');
-    if (hasIslandImports(code)) {
+    if (hasIslandImports(code, filePath)) {
       layoutDirsWithIslands.add(layout.directory);
     }
   }
@@ -158,7 +157,7 @@ export function computePagesNeedingClientJS(
 
     const filePath = resolve(pagesDir, page.componentPath);
     const code = readFileSync(filePath, 'utf-8');
-    if (hasIslandImports(code)) {
+    if (hasIslandImports(code, filePath)) {
       result.add(page.componentId);
       continue;
     }

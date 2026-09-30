@@ -162,4 +162,17 @@ import $Counter from "./Counter.vue" with { island: "load" }
     expect(result.islandImports[0].name).toBe('$Counter');
     expect(result.clientCode).toBeNull();
   });
+
+  it('keeps commented island imports in client code', () => {
+    const result = extractScript(`<script>
+// import Fake from "./Fake.vue" with { island: "load" };
+import Counter from "./Counter.vue" with { island: "load" };
+const ready = true;
+</script>`);
+    expect(result.islandImports).toEqual([
+      { name: 'Counter', specifier: './Counter.vue', strategy: 'load' },
+    ]);
+    expect(result.clientCode).toContain('// import Fake');
+    expect(result.clientCode).toContain('const ready = true;');
+  });
 });
