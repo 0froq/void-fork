@@ -60,7 +60,20 @@ syncBuiltinESMExports();
         execFile(
           process.execPath,
           ['--import', pathToFileURL(preload).href, entry, 'login'],
-          { cwd: directory, encoding: 'utf8', timeout: 10_000 },
+          {
+            cwd: directory,
+            encoding: 'utf8',
+            timeout: 10_000,
+            env: {
+              ...process.env,
+              CLOUDFLARE_AUTH_USE_KEYRING: 'false',
+              HOME: directory,
+              USERPROFILE: directory,
+              XDG_CONFIG_HOME: join(directory, '.config'),
+              APPDATA: join(directory, 'AppData', 'Roaming'),
+              LOCALAPPDATA: join(directory, 'AppData', 'Local'),
+            },
+          },
           (error, stdout, stderr) => resolve({ status: error ? 1 : 0, stdout, stderr }),
         );
       },
