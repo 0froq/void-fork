@@ -53,7 +53,7 @@ function matchesQueueConsumer(
   if (
     !live ||
     live.type !== 'worker' ||
-    live.script_name !== workerName ||
+    (live.script_name !== undefined && live.script_name !== workerName) ||
     live.queue_name !== desired.queue ||
     !settings
   ) {
@@ -67,8 +67,9 @@ function matchesQueueConsumer(
     retry_delay: desired.retry_delay ?? 0,
   };
   return (
-    Object.entries(expected).every(([key, value]) => settings[key] === value) &&
-    (live.dead_letter_queue ?? '') === (desired.dead_letter_queue ?? '')
+    Object.entries(expected).every(([key, value]) =>
+      key === 'max_concurrency' ? (settings[key] ?? null) === value : settings[key] === value,
+    ) && (live.dead_letter_queue ?? '') === (desired.dead_letter_queue ?? '')
   );
 }
 

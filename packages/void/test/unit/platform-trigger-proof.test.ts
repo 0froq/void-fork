@@ -19,6 +19,9 @@ function liveProof(
     cron?: string;
     queues?: Array<unknown>;
     consumerBatchSize?: number;
+    consumerConcurrency?: number;
+    consumerWorker?: string;
+    deadLetterQueue?: string;
     preview?: boolean;
     workflow?: Array<unknown>;
     failRead?: string;
@@ -52,14 +55,16 @@ function liveProof(
       const usage = path.includes('/usage-id/');
       return {
         type: 'worker',
-        script_name: 'test-worker',
+        ...(overrides.consumerWorker ? { script_name: overrides.consumerWorker } : {}),
         queue_name: usage ? 'usage' : 'cron',
-        dead_letter_queue: '',
+        ...(overrides.deadLetterQueue ? { dead_letter_queue: overrides.deadLetterQueue } : {}),
         settings: {
           batch_size: usage ? (overrides.consumerBatchSize ?? 100) : 50,
           max_wait_time_ms: usage ? 5000 : 1000,
           max_retries: 3,
-          max_concurrency: null,
+          ...(overrides.consumerConcurrency
+            ? { max_concurrency: overrides.consumerConcurrency }
+            : {}),
           retry_delay: 0,
         },
       };
@@ -85,6 +90,9 @@ it('proves matching live subdomain, cron, queue consumer, and workflow state', a
 it.each([
   { cron: '1 * * * *' },
   { consumerBatchSize: 99 },
+  { consumerConcurrency: 2 },
+  { consumerWorker: 'different-worker' },
+  { deadLetterQueue: 'other-queue' },
   { preview: true },
   { workflow: [{ name: 'unexpected', script_name: 'test-worker' }] },
   { queues: [] },
