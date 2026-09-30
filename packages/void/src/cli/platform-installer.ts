@@ -4175,6 +4175,34 @@ function platformWorkerUploaderHash(): string | null {
   }
 }
 
+function platformWorkerDirectoryHash(directory: string): string | null {
+  if (!lstatSync(directory).isDirectory()) {
+    return null;
+  }
+  const digest = createHash('sha256');
+  const visit = (path: string, prefix: string): boolean => {
+    for (const entry of readdirSync(path, { withFileTypes: true }).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    )) {
+      const relativePath = `${prefix}${entry.name}`;
+      const absolutePath = join(path, entry.name);
+      if (entry.isDirectory()) {
+        digest.update(`directory:${relativePath}\0`);
+        if (!visit(absolutePath, `${relativePath}/`)) {
+          return false;
+        }
+      } else if (entry.isFile()) {
+        digest.update(`file:${relativePath}\0`);
+        digest.update(createHash('sha256').update(readFileSync(absolutePath)).digest('hex'));
+      } else {
+        return false;
+      }
+    }
+    return true;
+  };
+  return visit(directory, '') ? digest.digest('hex') : null;
+}
+
 /** Hash every input that can change a version upload; missing or unusual files disable reuse. */
 export function platformWorkerUploadFingerprint(
   config: Record<string, unknown>,
@@ -4190,43 +4218,30 @@ export function platformWorkerUploadFingerprint(
       return null;
     }
     const mainSha256 = createHash('sha256').update(readFileSync(config.main)).digest('hex');
-    const normalized: Record<string, unknown> = { ...config, main: { sha256: mainSha256 } };
+    const mainDirectoryHash = platformWorkerDirectoryHash(dirname(config.main));
+    if (!mainDirectoryHash) {
+      return null;
+    }
+    const normalized: Record<string, unknown> = {
+      ...config,
+      main: { sha256: mainSha256, directorySha256: mainDirectoryHash },
+    };
     if (config.assets !== undefined) {
       const assets = config.assets;
       if (!assets || typeof assets !== 'object' || Array.isArray(assets)) {
         return null;
       }
       const directory = (assets as Record<string, unknown>).directory;
-      if (typeof directory !== 'string' || !lstatSync(directory).isDirectory()) {
+      if (typeof directory !== 'string') {
         return null;
       }
-      const files = createHash('sha256');
-      const visit = (path: string, prefix: string): boolean => {
-        for (const entry of readdirSync(path, { withFileTypes: true }).sort((a, b) =>
-          a.name.localeCompare(b.name),
-        )) {
-          const relativePath = `${prefix}${entry.name}`;
-          const absolutePath = join(path, entry.name);
-          if (entry.isDirectory()) {
-            files.update(`directory:${relativePath}\0`);
-            if (!visit(absolutePath, `${relativePath}/`)) {
-              return false;
-            }
-          } else if (entry.isFile()) {
-            files.update(`file:${relativePath}\0`);
-            files.update(createHash('sha256').update(readFileSync(absolutePath)).digest('hex'));
-          } else {
-            return false;
-          }
-        }
-        return true;
-      };
-      if (!visit(directory, '')) {
+      const assetsHash = platformWorkerDirectoryHash(directory);
+      if (!assetsHash) {
         return null;
       }
       normalized.assets = {
         ...(assets as Record<string, unknown>),
-        directory: files.digest('hex'),
+        directory: assetsHash,
       };
     }
     return createHash('sha256')

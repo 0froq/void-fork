@@ -1570,6 +1570,10 @@ describe('platform installer', () => {
       expect(original).toMatch(/^[a-f0-9]{64}$/);
       expect(platformWorkerUploadFingerprint(config)).toBe(original);
       expect(platformWorkerUploadFingerprint(config, ['example.com/*'])).not.toBe(original);
+      const sourceMap = join(directory, 'worker.js.map');
+      writeFileSync(sourceMap, '{"sources":["worker.ts"]}');
+      expect(platformWorkerUploadFingerprint(config)).not.toBe(original);
+      rmSync(sourceMap);
       expect(
         platformWorkerUploadFingerprint({ ...config, vars: { PLATFORM_VERSION: 'two' } }),
       ).not.toBe(original);
