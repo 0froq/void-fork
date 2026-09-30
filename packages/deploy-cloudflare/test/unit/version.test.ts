@@ -158,6 +158,29 @@ function runner(overrides?: {
 }
 
 describe('Cloudflare version activation', () => {
+  it('publishes explicitly atomic Durable Object deployments without a candidate stage', async () => {
+    const runWrangler = runner({
+      bootstrap: ok(`Worker Version ID: ${NEXT}\nhttps://my-worker.example.workers.dev`),
+    });
+    const result = await activateCloudflareVersion({
+      runWrangler,
+      workerName: 'my-worker',
+      verifyUploader: () => true,
+      verifyInheritedSecrets: true,
+      atomic: true,
+      workersDevSubdomain: 'example',
+      message: encodeCloudflareVersionMessage([]),
+      fetch: async () => Response.json({ ready: true }),
+    });
+    expect(result).toMatchObject({ ok: true, versionId: NEXT, previousVersionId: CURRENT });
+    expect(runWrangler.mock.calls.filter(([args]) => args[0] === 'deploy')).toHaveLength(1);
+    expect(
+      runWrangler.mock.calls.some(([args]) => args[0] === 'versions' && args[1] === 'upload'),
+    ).toBe(false);
+    expect(
+      runWrangler.mock.calls.some(([args]) => args[0] === 'versions' && args[1] === 'deploy'),
+    ).toBe(false);
+  });
   it('returns the Cloudflare error when zero-percent staging fails', async () => {
     const runWrangler = runner({
       upload: ok(`Worker Version ID: ${NEXT}`),

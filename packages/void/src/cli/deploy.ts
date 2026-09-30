@@ -360,6 +360,8 @@ export type RunDeployOptions = {
    * (CI / non-TTY, a blocker, a declined prompt). `--platform cloudflare` only.
    */
   requireEmail?: boolean;
+  /** Publish an existing Durable Object Worker atomically after explicit operator choice. */
+  atomic?: boolean;
 };
 
 export function resolveDeploymentPlatform(
@@ -2860,16 +2862,21 @@ export async function computeDesiredCloudflareResources(
       : 'checked-in migrations need a D1 database';
   if (needsDatabase && dialect === 'sqlite') {
     const binding = bindingNames?.d1 ?? 'DB';
-    // Trust a stored `database_name` ONLY when the paired `database_id` is a REAL
-    // (non-placeholder) id. A synced-but-unprovisioned entry carries the local
-    // placeholder id `"local"` (often alongside `database_name: "default"`); trusting
-    // that name would provision/adopt an account-wide DB literally named `default`.
+    // An explicitly authored name is the intended remote identity even before Void
+    // has pinned its ID. Only inferred local placeholders need a generated name.
     const storedName = readStoredResourceName(config, 'd1_databases', binding, 'database_name');
     const storedId = readStoredResourceName(config, 'd1_databases', binding, 'database_id');
+    const authoredName = voidConfig.cloudflare?.d1_databases?.find(
+      (entry) => entry.binding === binding,
+    )?.database_name;
     const name =
       storedName != null && isRealD1Id(storedId)
         ? storedName
-        : suffixedResourceName(workerName, 'db');
+        : authoredName?.trim() ||
+          (basename(configPath) !== MATERIALIZED_CLOUDFLARE_FILE && storedName !== 'default'
+            ? storedName
+            : undefined) ||
+          suffixedResourceName(workerName, 'db');
     // Carry the sourceDir-aware config-relative migrations dir so the provisioner
     // writes the correct `migrations_dir` (it otherwise hardcodes `./db/migrations`).
     desired.d1 = { binding, name, migrationsDir: migrationsDirRelative };
@@ -4715,6 +4722,12 @@ export async function runCloudflareDeploy(
   const initialCloudflareLink = readCloudflareLink(root);
   const initialCloudflareCandidate = readCloudflareCandidate(root);
   const exit = deps.exit ?? ((code: number): never => process.exit(code));
+  if (options.atomic && (options.reuseExistingWorker || initialCloudflareLink)) {
+    log.error(
+      'deploy: --atomic is unavailable during the existing Worker handoff. Complete the handoff first.',
+    );
+    return exit(1);
+  }
   const voidConfig = readConfig(root);
   const detectedFramework = detectFramework(root);
   const frameworkPreset = detectedFramework ? FRAMEWORK_PRESETS[detectedFramework.name] : undefined;
@@ -4752,6 +4765,10 @@ export async function runCloudflareDeploy(
     resolveCloudflareStaticPreset(root, voidConfig, options) ??
     (await resolveCloudflareVoidStaticPreset(root, voidConfig));
   if (staticPreset) {
+    if (options.atomic) {
+      log.error('deploy: --atomic is only for Workers with Durable Objects.');
+      return exit(1);
+    }
     return runCloudflareStaticDeploy(
       root,
       options,
@@ -5534,6 +5551,10 @@ export async function runCloudflareDeploy(
     deps.resolveGeneratedConfigPath ??
     ((projectRoot) => readGeneratedDeployConfig(projectRoot).path)
   )(root);
+  if (options.atomic && !Array.isArray(parseRootWranglerConfig(lifecycleConfigPath).migrations)) {
+    log.error('deploy: --atomic is only for Workers with Durable Object migration history.');
+    return exit(1);
+  }
   try {
     deduplicateGeneratedCompatibilityFlags(lifecycleConfigPath, configPath);
     const lifecycleOptions = {
@@ -5543,9 +5564,10 @@ export async function runCloudflareDeploy(
       accountId,
       apiBaseUrl,
     };
-    await (deps.assertDurableObjectLifecycle ?? assertCloudflareDurableObjectLifecycleSupported)(
-      lifecycleOptions,
-    );
+    await (deps.assertDurableObjectLifecycle ?? assertCloudflareDurableObjectLifecycleSupported)({
+      ...lifecycleOptions,
+      allowPendingAtomicMigration: options.atomic === true,
+    });
   } catch (error) {
     log.error(getErrorMessage(error));
     return exit(1);
@@ -6030,6 +6052,7 @@ export async function runCloudflareDeploy(
       previousTrafficConfig: readWranglerPublishedTrafficSnapshot(configPath),
       queueConsumerCleanup,
       verifyInheritedSecrets: true,
+      atomic: options.atomic,
       ...(initialAuthSecret
         ? { candidateSecrets: { [BETTER_AUTH_SECRET_NAME]: initialAuthSecret } }
         : {}),
@@ -6188,6 +6211,13 @@ export function formatCloudflareActivationError(
       ].join('\n');
     case 'readiness-staging-failed':
       return `deploy: Cloudflare could not stage the uploaded Worker Version at zero-percent traffic${status}; production traffic is unchanged.${cloudflareCode}${diagnostic}`;
+    case 'atomic-failed':
+      return `deploy: Cloudflare could not publish the Worker atomically${status}; inspect production status before retrying.${cloudflareCode}${diagnostic}`;
+    case 'atomic-output-invalid':
+      return 'deploy: Cloudflare published atomically but did not report a version id or URL. Inspect `void project status` immediately.';
+    case 'atomic-readiness-failed':
+    case 'atomic-readiness-access-denied':
+      return 'deploy: the atomic Worker deployment is live, but /__void/ready could not be verified. Inspect `void project status` and Worker logs immediately.';
     case 'readiness-failed':
       return [
         'deploy: the uploaded Worker Version did not pass /__void/ready.',
@@ -6897,6 +6927,9 @@ async function runDeployInner(
     options = { ...options, platform: 'cloudflare', reuseExistingWorker: true };
   }
   const platform = resolveDeploymentPlatform(root, options);
+  if (options?.atomic && platform !== 'cloudflare') {
+    throw new Error('deploy: --atomic is available only for Cloudflare Workers.');
+  }
 
   if (platform === 'none') {
     throw new Error(

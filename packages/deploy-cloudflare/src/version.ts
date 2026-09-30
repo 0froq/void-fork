@@ -83,6 +83,10 @@ export type CloudflareVersionActivation =
         | 'bootstrap-output-invalid'
         | 'bootstrap-readiness-failed'
         | 'bootstrap-readiness-access-denied'
+        | 'atomic-failed'
+        | 'atomic-output-invalid'
+        | 'atomic-readiness-failed'
+        | 'atomic-readiness-access-denied'
         | 'activation-failed'
         | 'triggers-failed';
       status?: number;
@@ -760,6 +764,8 @@ export type CloudflareVersionActivationOptions = {
   readinessAttempts?: number;
   /** Verify that omitted remote secrets come from the active Worker Version before uploading. */
   verifyInheritedSecrets?: boolean;
+  /** Explicitly publish an existing Durable Object Worker in one atomic operation. */
+  atomic?: boolean;
   /**
    * Plaintext secrets to attach only to the uploaded candidate version. Supplying every remote
    * `secret_text` binding lets a deployment recover safely when an inactive upload is newer than
@@ -976,6 +982,9 @@ async function activateCloudflareVersionWithSecretsFile(
   );
 
   const alias = `void-ready-${Date.now().toString(36)}`;
+  if (options.atomic && previous.versionId !== null) {
+    return bootstrapFirstDeployment({ ...options, message }, commonArgs, previous.versionId, true);
+  }
   options.onProgress?.('Uploading the Worker and assets...');
   const upload = await Promise.resolve(
     options.runWrangler(
@@ -1756,11 +1765,28 @@ async function bootstrapFirstDeployment(
   options: InternalCloudflareVersionActivationOptions,
   commonArgs: Array<string>,
   previousVersionId: string | null,
+  atomic = false,
 ): Promise<CloudflareVersionActivation> {
   if (!options.verifyUploader()) {
     return { ok: false, reason: 'uploader-changed' };
   }
-  options.onProgress?.('Publishing the first Worker deployment...');
+  if (atomic) {
+    const current = await readCurrentProductionVersion(options, commonArgs);
+    if (current.kind === 'failed') {
+      return { ok: false, reason: 'status-failed', status: current.status };
+    }
+    if (current.kind !== 'ok' || current.versionId !== previousVersionId) {
+      return {
+        ok: false,
+        reason: 'deployment-changed',
+        activeVersionId: current.kind === 'ok' ? current.versionId : null,
+        rollback: 'not-needed',
+      };
+    }
+  }
+  options.onProgress?.(
+    atomic ? 'Publishing the Worker atomically...' : 'Publishing the first Worker deployment...',
+  );
   const bootstrap = await Promise.resolve(
     options.runWrangler(
       [
@@ -1787,7 +1813,7 @@ async function bootstrapFirstDeployment(
     const cloudflareErrorCode = parseCloudflareErrorCode(output);
     return {
       ok: false,
-      reason: 'bootstrap-failed',
+      reason: atomic ? 'atomic-failed' : 'bootstrap-failed',
       status: bootstrap.status,
       ...commandDiagnosticFields(bootstrap),
       ...(cloudflareErrorCode === undefined ? {} : { cloudflareErrorCode }),
@@ -1811,7 +1837,7 @@ async function bootstrapFirstDeployment(
   if (!versionId || !reportedOrConfiguredUrl) {
     return {
       ok: false,
-      reason: 'bootstrap-output-invalid',
+      reason: atomic ? 'atomic-output-invalid' : 'bootstrap-output-invalid',
       previousVersionId,
       ...(versionId ? { versionId } : {}),
     };
@@ -1841,8 +1867,12 @@ async function bootstrapFirstDeployment(
       ok: false,
       reason:
         ready === 'access-denied'
-          ? 'bootstrap-readiness-access-denied'
-          : 'bootstrap-readiness-failed',
+          ? atomic
+            ? 'atomic-readiness-access-denied'
+            : 'bootstrap-readiness-access-denied'
+          : atomic
+            ? 'atomic-readiness-failed'
+            : 'bootstrap-readiness-failed',
       versionId,
       previousVersionId,
       rollback: 'unavailable',

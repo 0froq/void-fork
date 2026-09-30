@@ -768,6 +768,33 @@ describe('existing Cloudflare site handoff', () => {
     await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(existsSync(join(root, '.void/cloudflare-candidate.json'))).toBe(false);
   });
+
+  it('allows an explicit atomic deploy after the Durable Object migration preflight', async () => {
+    const root = site();
+    const configPath = join(root, 'wrangler.jsonc');
+    const config = parseRootWranglerConfig(configPath);
+    config.migrations = [{ tag: 'v1', new_sqlite_classes: ['Room'] }];
+    writeFileSync(configPath, JSON.stringify(config));
+    const assertDurableObjectLifecycle = vi.fn().mockResolvedValue(undefined);
+    const activateVersion = vi
+      .fn<NonNullable<CloudflareDeployDeps['activateVersion']>>()
+      .mockResolvedValue({
+        ok: true,
+        versionId: 'new',
+        previousVersionId: 'original',
+        previewUrl: 'https://site.example.com',
+      });
+    const { deps } = harness({
+      runBuild: () => build(root),
+      assertDurableObjectLifecycle,
+      activateVersion,
+    });
+    await runCloudflareDeploy(root, { platform: 'cloudflare', atomic: true }, silentCliLog, deps);
+    expect(assertDurableObjectLifecycle).toHaveBeenCalledWith(
+      expect.objectContaining({ allowPendingAtomicMigration: true }),
+    );
+    expect(activateVersion).toHaveBeenCalledWith(expect.objectContaining({ atomic: true }));
+  });
   it('rejects a forged candidate receipt written by the Worker schema probe', async () => {
     const root = site();
     const { deps, trace } = harness({
@@ -1499,6 +1526,20 @@ describe('computeDesiredCloudflareResources — desired set from source', () => 
       join(root, 'wrangler.jsonc'),
     );
     expect(desired.d1?.name).toBe('myapp-db');
+  });
+
+  it('uses an explicitly configured D1 name before its remote ID is pinned', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'myapp' }),
+      'void.config.ts': `export default { cloudflare: { name: 'myapp', d1_databases: [{ binding: 'DB', database_name: 'codiff-public' }] } };`,
+      'routes/index.ts': `export const GET = ({ env }: { env: { DB: unknown } }) => env.DB;`,
+    });
+    const { desired } = await computeDesiredCloudflareResources(
+      root,
+      readConfig(root),
+      join(root, '.void-wrangler.jsonc'),
+    );
+    expect(desired.d1?.name).toBe('codiff-public');
   });
 
   it('honors inference.bindings overrides (disabled D1, custom KV, forced R2)', async () => {

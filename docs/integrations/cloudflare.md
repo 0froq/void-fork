@@ -313,6 +313,8 @@ For apps using auth, Void creates a random 32-byte `BETTER_AUTH_SECRET` only whe
 
 Void usually checks an uploaded version before sending it traffic. When Cloudflare provides a version preview URL, Void probes that URL. Otherwise, it stages the version at 0% traffic and checks it through `workers.dev` using Cloudflare's version-override header.
 
+For an existing Durable Object Worker that Cloudflare cannot stage, run `void deploy --platform cloudflare --atomic` after reviewing the Worker and database changes. This explicitly publishes the built Worker at 100% in one operation and checks `/__void/ready` afterward. Production traffic can reach the new version before that check finishes, and a Durable Object class migration cannot be rolled back across its migration boundary. Ordinary deploys continue to use pre-traffic verification. A failed ordinary upload is recorded locally in `.void/cloudflare-candidate.json`; keep that file for a safe retry from the same checkout.
+
 If readiness or trigger synchronization fails, Void restores the previous deployment. If you already have a gradual rollout splitting traffic across versions, finish or cancel it in Cloudflare before deploying through Void.
 
 A new Worker may need one ordinary deployment before version uploads work. This can happen when creating the Worker, establishing its first Durable Object migration history, or enabling preview URLs. Void checks that the Worker did not exist before first-deploy secret setup, deploys it once, then checks the active Worker through `/__void/ready`. It keeps that earlier check even if attaching a secret creates a placeholder version. This bootstrap is never used for an existing application.

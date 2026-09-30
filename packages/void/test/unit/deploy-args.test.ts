@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vite-plus/test';
 import { parseDeployArgs } from '../../src/cli/args.ts';
 
 describe('parseDeployArgs', () => {
+  it('parses explicit atomic Cloudflare deployment', () => {
+    expect(parseDeployArgs(['--platform', 'cloudflare', '--atomic']).atomic).toBe(true);
+  });
   it('parses --project slug', () => {
     expect(parseDeployArgs(['--project', 'my-app'])).toEqual({
       projectSlug: 'my-app',

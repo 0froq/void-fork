@@ -879,6 +879,7 @@ See [Disable and Uninstall](../guide/platform/installation/uninstall.md) for the
 ```
 void deploy [--project <name>] [--dir <path>] [--spa] [--skip-build] [--debug]
 void deploy [--platform <cloudflare|void>] [--require-email]
+void deploy --platform cloudflare --atomic
 ```
 
 Auto-detects your project type and chooses the right pipeline. See [Supported App Types](../guide/app-types.md) and [Deployment](../guide/deployment.md) for details.
@@ -899,6 +900,7 @@ For Drizzle projects, deploy performs a read-only schema drift check. If a new m
 | `--spa`                         | Use SPA mode instead of SSG for static deploys                                                     |
 | `--skip-build`                  | Skip the build step; on Cloudflare this is supported for static/SPA/SSG deploys only               |
 | `--require-email`               | Fail when email cannot be set up instead of deploying without it; requires `--platform cloudflare` |
+| `--atomic`                      | Publish an existing Durable Object Worker directly; readiness is checked after traffic changes     |
 | `--debug`                       | Mirror the structured deploy log to stderr (also written to `~/.void/logs/`)                       |
 
 The older `--backend cloudflare` spelling remains available as a compatibility alias for `--platform cloudflare`.

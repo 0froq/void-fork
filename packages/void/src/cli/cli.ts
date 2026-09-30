@@ -144,6 +144,7 @@ if (helpPath) {
       backend: deployArgs.backend,
       provision: deployArgs.provision,
       requireEmail: deployArgs.requireEmail,
+      atomic: deployArgs.atomic,
     }).catch((err) => {
       log.error(formatCloudflareUserMessage(err.message ?? String(err)));
       process.exit(1);

@@ -242,6 +242,7 @@ export async function assertCloudflareDurableObjectLifecycleSupported(options: {
   accountId: string;
   apiBaseUrl: string;
   readMigrationTag?: (options: CloudflareWorkerMigrationTagOptions) => Promise<string | null>;
+  allowPendingAtomicMigration?: boolean;
 }): Promise<void> {
   const migrations = parseDurableObjectMigrations(
     parseRootWranglerConfig(options.configPath).migrations,
@@ -277,17 +278,26 @@ export async function assertCloudflareDurableObjectLifecycleSupported(options: {
   if (activeTag === null && existing.isSecretOnlyDraft && after.isSecretOnlyDraft) {
     return;
   }
+  if (
+    activeTag === null &&
+    declarativeClassesMatch(migrations, existing.snapshot.runtime.exports)
+  ) {
+    return;
+  }
   const activeIndex =
     activeTag === null ? -1 : migrations.findIndex((migration) => migration.tag === activeTag);
   const pending = migrations.slice(activeIndex + 1).filter((migration) => migration.changesClasses);
   if (pending.length === 0) {
     return;
   }
+  if (options.allowPendingAtomicMigration === true) {
+    return;
+  }
   throw new Error(
     [
-      'deploy: native Cloudflare beta cannot apply a Durable Object class migration to an existing Worker.',
+      'deploy: this Durable Object class migration needs an atomic Cloudflare deployment.',
       `Pending migration tag${pending.length === 1 ? '' : 's'}: ${pending.map((migration) => migration.tag).join(', ')}.`,
-      'Apply the class migration through a supported Cloudflare deployment workflow, then retry after that migration tag is active.',
+      'Review the migration, then run `void deploy --platform cloudflare --atomic`. The Worker will receive traffic before readiness is checked.',
       'No database migration or Worker secret was changed.',
     ].join('\n'),
   );
@@ -295,7 +305,7 @@ export async function assertCloudflareDurableObjectLifecycleSupported(options: {
 
 function parseDurableObjectMigrations(
   value: unknown,
-): Array<{ tag: string; changesClasses: boolean }> {
+): Array<{ tag: string; changesClasses: boolean; step: Record<string, unknown> }> {
   if (value === undefined) {
     return [];
   }
@@ -320,7 +330,59 @@ function parseDurableObjectMigrations(
     return {
       tag: migration.tag,
       changesClasses: fields.some((field) => Array.isArray(field) && field.length > 0),
+      step: migration,
     };
+  });
+}
+
+/** Cloudflare's declarative exports replace the legacy migration tag after an atomic publish. */
+function declarativeClassesMatch(
+  migrations: Array<{ step: Record<string, unknown> }>,
+  actualValue: unknown,
+): boolean {
+  if (!record(actualValue)) {
+    return false;
+  }
+  const desired = new Map<string, 'sqlite' | 'legacy-kv' | 'deleted'>();
+  for (const { step } of migrations) {
+    for (const [field, storage] of [
+      ['new_classes', 'legacy-kv'],
+      ['new_sqlite_classes', 'sqlite'],
+    ] as const) {
+      for (const name of (step[field] ?? []) as Array<string>) {
+        if (typeof name !== 'string') {
+          return false;
+        }
+        desired.set(name, storage);
+      }
+    }
+    for (const item of (step.renamed_classes ?? []) as Array<unknown>) {
+      if (!record(item) || typeof item.from !== 'string' || typeof item.to !== 'string') {
+        return false;
+      }
+      const storage = desired.get(item.from);
+      if (storage !== 'sqlite' && storage !== 'legacy-kv') {
+        return false;
+      }
+      desired.set(item.from, 'deleted');
+      desired.set(item.to, storage);
+    }
+    for (const name of (step.deleted_classes ?? []) as Array<string>) {
+      if (typeof name !== 'string') {
+        return false;
+      }
+      desired.set(name, 'deleted');
+    }
+  }
+  if (desired.size === 0) {
+    return false;
+  }
+  return [...desired].every(([name, storage]) => {
+    const current = actualValue[name];
+    if (storage === 'deleted') {
+      return current === undefined || (record(current) && current.state === 'deleted');
+    }
+    return record(current) && current.type === 'durable-object' && current.storage === storage;
   });
 }
 

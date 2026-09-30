@@ -176,6 +176,11 @@ const HELP_TREE: HelpTree = {
           'Fail instead of deploying without email when the mail domain is not set up (with --platform cloudflare)',
       },
       {
+        command: '--atomic',
+        description:
+          'Publish a Durable Object Worker without pre-traffic staging (Cloudflare only)',
+      },
+      {
         command: '--debug',
         description: 'Mirror the deploy log to stderr (always written to ~/.void/logs)',
       },

@@ -10,6 +10,7 @@ export type DeployArgs = {
   backend?: 'cloudflare';
   provision?: boolean;
   requireEmail?: boolean;
+  atomic?: boolean;
 };
 
 export function parseDeployArgs(args: Array<string>): DeployArgs {
@@ -27,6 +28,7 @@ export function parseDeployArgs(args: Array<string>): DeployArgs {
         backend: { type: 'string' },
         provision: { type: 'boolean' },
         'require-email': { type: 'boolean' },
+        atomic: { type: 'boolean' },
       },
       allowPositionals: true,
       strict: true,
@@ -117,6 +119,7 @@ export function parseDeployArgs(args: Array<string>): DeployArgs {
   // continuing without email when the domain is not set up and nobody can press Enter
   // (CI / non-TTY). Only the Cloudflare backend runs the email step.
   const requireEmail = parsed.values['require-email'] === true ? true : undefined;
+  const atomic = parsed.values.atomic === true ? true : undefined;
   if (requireEmail && backend !== 'cloudflare' && platform !== 'cloudflare') {
     throw new Error('deploy: --require-email requires --platform cloudflare.');
   }
@@ -133,5 +136,16 @@ export function parseDeployArgs(args: Array<string>): DeployArgs {
     }
   }
 
-  return { projectSlug, dir, spa, skipBuild, debug, platform, backend, provision, requireEmail };
+  return {
+    projectSlug,
+    dir,
+    spa,
+    skipBuild,
+    debug,
+    platform,
+    backend,
+    provision,
+    requireEmail,
+    atomic,
+  };
 }
