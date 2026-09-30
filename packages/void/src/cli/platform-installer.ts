@@ -1,5 +1,13 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import {
   createServer,
   request as httpRequest,
@@ -9,6 +17,7 @@ import {
 import { request as httpsRequest } from 'node:https';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import {
   encodeCloudflareVersionMessage,
   parseCloudflareVersionMessage,
@@ -54,7 +63,7 @@ import type {
   PlatformRuntimeManifest,
   PlatformRuntimeMigration,
 } from '@void/platform/installer';
-import { join } from 'pathslash';
+import { dirname, join, resolve } from 'pathslash';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { ensurePlatformAccessToken } from './cf-access.ts';
 import { verifyInstalledPlatformAccessProtection } from './platform-access-preflight.ts';
@@ -4112,12 +4121,67 @@ type PlatformWorkerDeploymentOptions = Readonly<{
   workerExisted: boolean;
 }>;
 
+let cachedPlatformUploaderHash: string | null | undefined;
+
+function platformWorkerUploaderHash(): string | null {
+  if (cachedPlatformUploaderHash !== undefined) {
+    return cachedPlatformUploaderHash;
+  }
+  try {
+    const launcher = resolveWranglerArgv(process.cwd())[1];
+    if (!launcher) {
+      return (cachedPlatformUploaderHash = null);
+    }
+    const digest = createHash('sha256');
+    digest.update('platform-uploader:v1\0');
+    digest.update(process.version);
+    digest.update(readFileSync(resolve(dirname(launcher), '..', '..', 'package.json')));
+    digest.update(readFileSync(fileURLToPath(import.meta.resolve('cf/package.json'))));
+    let dependencyDirectory = dirname(
+      fileURLToPath(import.meta.resolve('@cloudflare/build-output-utils')),
+    );
+    while (!existsSync(join(dependencyDirectory, 'package.json'))) {
+      const parent = dirname(dependencyDirectory);
+      if (parent === dependencyDirectory) {
+        throw new Error('Cloudflare build output package is unavailable.');
+      }
+      dependencyDirectory = parent;
+    }
+    digest.update(readFileSync(join(dependencyDirectory, 'package.json')));
+    const visited = new Set<string>();
+    const visit = (path: string, name: string) => {
+      if (visited.has(path)) {
+        return;
+      }
+      visited.add(path);
+      const source = readFileSync(path);
+      digest.update(`${name}\0`);
+      digest.update(source);
+      const imports = [
+        ...source
+          .toString('utf8')
+          .matchAll(/\b(?:from|import)\s*(?:\(\s*)?['"](\.{1,2}\/[^'"]+)['"]/g),
+      ]
+        .map((match) => match[1]!)
+        .sort();
+      for (const specifier of imports) {
+        visit(resolve(dirname(path), specifier), specifier);
+      }
+    };
+    visit(launcher, 'launcher');
+    return (cachedPlatformUploaderHash = digest.digest('hex'));
+  } catch {
+    return (cachedPlatformUploaderHash = null);
+  }
+}
+
 /** Hash every input that can change a version upload; missing or unusual files disable reuse. */
 export function platformWorkerUploadFingerprint(
   config: Record<string, unknown>,
   managedRoutes: ReadonlyArray<string> = [],
 ): string | null {
-  if (typeof config.main !== 'string') {
+  const uploaderHash = platformWorkerUploaderHash();
+  if (typeof config.main !== 'string' || !uploaderHash) {
     return null;
   }
   try {
@@ -4166,7 +4230,7 @@ export function platformWorkerUploadFingerprint(
       };
     }
     return createHash('sha256')
-      .update(JSON.stringify({ schema: 1, config: normalized, managedRoutes }))
+      .update(JSON.stringify({ schema: 2, config: normalized, managedRoutes, uploaderHash }))
       .digest('hex');
   } catch {
     return null;

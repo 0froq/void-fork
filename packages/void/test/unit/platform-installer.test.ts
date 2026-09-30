@@ -1569,6 +1569,7 @@ describe('platform installer', () => {
       const original = platformWorkerUploadFingerprint(config);
       expect(original).toMatch(/^[a-f0-9]{64}$/);
       expect(platformWorkerUploadFingerprint(config)).toBe(original);
+      expect(platformWorkerUploadFingerprint(config, ['example.com/*'])).not.toBe(original);
       expect(
         platformWorkerUploadFingerprint({ ...config, vars: { PLATFORM_VERSION: 'two' } }),
       ).not.toBe(original);
