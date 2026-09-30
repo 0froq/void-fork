@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { parseExpressionAt } from 'acorn';
 import { dirname, join } from 'pathslash';
+import { parseSync } from 'vite';
 
 const GENERATED_PATH = './.void-wrangler.jsonc';
 const CONFIG_FILES = [
@@ -28,8 +28,15 @@ type Expression = {
   type: string;
   start: number;
   end: number;
+  body?: Array<Expression>;
   name?: string;
+  key?: Expression;
   value?: unknown;
+  elements?: Array<Expression>;
+  source?: Expression;
+  specifiers?: Array<Expression>;
+  local?: Expression;
+  imported?: Expression;
   callee?: Expression;
   arguments?: Array<Expression>;
   expressions?: Array<Expression>;
@@ -38,6 +45,72 @@ type Expression = {
   >;
 };
 type Edit = { start: number; end: number; text: string };
+
+function parseSource(source: string, file: string): Expression {
+  return parseSync(file, source).program as unknown as Expression;
+}
+
+function asNode(value: unknown): Expression | undefined {
+  return value !== null &&
+    typeof value === 'object' &&
+    typeof (value as Expression).type === 'string'
+    ? (value as Expression)
+    : undefined;
+}
+
+function walk(root: Expression): Array<Expression> {
+  const result: Array<Expression> = [];
+  const pending = [root];
+  while (pending.length > 0) {
+    const node = pending.pop()!;
+    result.push(node);
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) {
+        for (const child of value) {
+          if (child && typeof child === 'object' && typeof child.type === 'string') {
+            pending.push(child as Expression);
+          }
+        }
+      } else if (
+        value &&
+        typeof value === 'object' &&
+        typeof (value as Expression).type === 'string'
+      ) {
+        pending.push(value as Expression);
+      }
+    }
+  }
+  return result;
+}
+
+function adapterImport(program: Expression, packageName: string, file: string): string | undefined {
+  const imports = (program.body ?? []).filter(
+    (node) => node.type === 'ImportDeclaration' && node.source?.value === packageName,
+  );
+  if (imports.length === 0) {
+    const loaded = walk(program).some(
+      (node) =>
+        node.type === 'CallExpression' &&
+        (node.callee?.name === 'require' || node.callee?.type === 'Import') &&
+        node.arguments?.[0]?.value === packageName,
+    );
+    if (loaded) {
+      throw new Error(
+        `migrate: Update ${file} to pass ${GENERATED_PATH} to its Cloudflare adapter before removing the root Wrangler config.`,
+      );
+    }
+    return undefined;
+  }
+  const defaultImport = imports[0]?.specifiers?.find(
+    (specifier) => specifier.type === 'ImportDefaultSpecifier',
+  );
+  if (imports.length !== 1 || imports[0]?.specifiers?.length !== 1 || !defaultImport?.local?.name) {
+    throw new Error(
+      `migrate: Update ${file} to pass ${GENERATED_PATH} to its Cloudflare adapter before removing the root Wrangler config.`,
+    );
+  }
+  return defaultImport.local.name;
+}
 
 /** Find an adapter's explicit root Wrangler JSON file, including custom build filenames. */
 export function discoverFrameworkWranglerFiles(root: string): Array<string> {
@@ -55,11 +128,30 @@ export function discoverFrameworkWranglerFiles(root: string): Array<string> {
     ) {
       continue;
     }
-    for (const match of source.matchAll(
-      /\b(?:configPath|config)\s*:\s*(['"])(?:\.\/)?(wrangler[A-Za-z0-9._-]*\.jsonc?)\1/g,
-    )) {
-      const name = match[2]!;
-      if (existsSync(join(root, name))) {
+    const program = parseSource(source, file);
+    const hasAdapter = walk(program).some(
+      (node) =>
+        node.type === 'ImportDeclaration' &&
+        (node.source?.value === '@sveltejs/adapter-cloudflare' ||
+          node.source?.value === '@astrojs/cloudflare'),
+    );
+    const hasNitro = walk(program).some(
+      (node) => node.type === 'Literal' && node.value === 'nitro-cloudflare-dev',
+    );
+    if (!hasAdapter && !hasNitro) {
+      continue;
+    }
+    for (const node of walk(program)) {
+      const value = asNode(node.value);
+      if (
+        node.type !== 'Property' ||
+        (node.key?.name !== 'configPath' && node.key?.name !== 'config') ||
+        typeof value?.value !== 'string'
+      ) {
+        continue;
+      }
+      const name = value.value.replace(/^\.\//, '');
+      if (/^wrangler[A-Za-z0-9._-]*\.jsonc?$/.test(name) && existsSync(join(root, name))) {
         names.add(name);
       }
     }
@@ -112,32 +204,9 @@ function patchAdapterCall(
   kind: 'svelte' | 'astro',
   legacyName?: string,
 ): string {
-  const candidates = [...source.matchAll(new RegExp(`\\b${identifier}\\s*\\(`, 'g'))];
-  const calls: Array<Expression> = [];
-  for (const candidate of candidates) {
-    try {
-      const parsed = parseExpressionAt(source, candidate.index!, {
-        ecmaVersion: 'latest',
-        sourceType: 'module',
-      }) as Expression;
-      // Acorn parses a property value followed by another property as a comma
-      // expression when started in the middle of an object. Accept only its
-      // first call when the source places it directly after a property colon.
-      const first = parsed.expressions?.[0];
-      const node =
-        parsed.type === 'SequenceExpression' &&
-        source.slice(0, candidate.index).trimEnd().endsWith(':') &&
-        first?.type === 'CallExpression' &&
-        /^\s*,/.test(source.slice(first.end))
-          ? first
-          : parsed;
-      if (node.type === 'CallExpression' && node.callee?.name === identifier) {
-        calls.push(node);
-      }
-    } catch {
-      // An authored TypeScript expression may need a manual adapter update.
-    }
-  }
+  const calls = walk(parseSource(source, file)).filter(
+    (node) => node.type === 'CallExpression' && node.callee?.name === identifier,
+  );
   if (calls.length !== 1) {
     throw new Error(
       `migrate: Update ${file} to pass ${GENERATED_PATH} to its Cloudflare adapter before removing the root Wrangler config.`,
@@ -200,65 +269,74 @@ export function planFrameworkConfigMigration(
     const original = readFileSync(path, 'utf8');
     let updated = original;
 
-    const svelteImport = /import\s+(\w+)\s+from\s+['"]@sveltejs\/adapter-cloudflare['"]/.exec(
-      original,
-    );
-    if (svelteImport) {
-      const identifier = svelteImport[1]!;
+    if (
+      !original.includes('@sveltejs/adapter-cloudflare') &&
+      !original.includes('@astrojs/cloudflare') &&
+      !original.includes('nitro-cloudflare-dev')
+    ) {
+      continue;
+    }
+    const program = parseSource(original, file);
+    const svelteIdentifier = adapterImport(program, '@sveltejs/adapter-cloudflare', file);
+    if (svelteIdentifier) {
+      const identifier = svelteIdentifier;
       updated = patchAdapterCall(updated, identifier, file, 'svelte', legacyName);
-    } else if (
-      /(?:from\s*['"]|require\(\s*['"]|import\(\s*['"])@sveltejs\/adapter-cloudflare['"]/.test(
-        original,
-      )
-    ) {
-      throw new Error(
-        `migrate: Update ${file} to pass ${GENERATED_PATH} to its Cloudflare adapter before removing the root Wrangler config.`,
-      );
     }
 
-    const astroImport = /import\s+(\w+)\s+from\s+['"]@astrojs\/cloudflare['"]/.exec(original);
-    if (astroImport) {
-      const identifier = astroImport[1]!;
+    const astroIdentifier = adapterImport(program, '@astrojs/cloudflare', file);
+    if (astroIdentifier) {
+      const identifier = astroIdentifier;
       updated = patchAdapterCall(updated, identifier, file, 'astro', legacyName);
-    } else if (
-      /(?:from\s*['"]|require\(\s*['"]|import\(\s*['"])@astrojs\/cloudflare['"]/.test(original)
-    ) {
-      throw new Error(
-        `migrate: Update ${file} to pass ${GENERATED_PATH} to its Cloudflare adapter before removing the root Wrangler config.`,
-      );
     }
 
-    if (original.includes('nitro-cloudflare-dev') && !original.includes('cloudflareDev:')) {
-      const preset = /preset:\s*['"]cloudflare-module['"]\s*,/g;
-      const matches = [...updated.matchAll(preset)];
-      if (matches.length !== 1) {
-        throw new Error(
-          `migrate: Set nitro.cloudflareDev.configPath to ${GENERATED_PATH} in ${file} before removing the root Wrangler config.`,
-        );
+    const nitroConfigurations = walk(parseSource(updated, file)).filter((node) => {
+      const nitro = asNode(node.value);
+      if (
+        node.type !== 'Property' ||
+        node.key?.name !== 'nitro' ||
+        nitro?.type !== 'ObjectExpression'
+      ) {
+        return false;
       }
-      updated = updated.replace(
-        preset,
-        (match) => `${match}\n        cloudflareDev: { configPath: '${GENERATED_PATH}' },`,
+      const modules = property(nitro, 'modules');
+      return (
+        modules?.type === 'ArrayExpression' &&
+        modules.elements?.some((entry) => entry?.value === 'nitro-cloudflare-dev')
       );
-    } else if (
-      original.includes('nitro-cloudflare-dev') &&
-      original.includes('cloudflareDev:') &&
-      !original.includes(`configPath: '${GENERATED_PATH}'`) &&
-      !original.includes(`configPath: "${GENERATED_PATH}"`)
-    ) {
-      const rootPath = /configPath:\s*(['"])(?:\.\/)?([^'"]+)\1/g;
-      const names = new Set(['wrangler.jsonc', 'wrangler.json', legacyName]);
-      const matches = [...updated.matchAll(rootPath)].filter((match) => names.has(match[2]));
-      if (matches.length !== 1) {
+    });
+    if (nitroConfigurations.length > 0) {
+      if (nitroConfigurations.length !== 1) {
         throw new Error(
           `migrate: Set nitro.cloudflareDev.configPath to ${GENERATED_PATH} in ${file} before removing the root Wrangler config.`,
         );
       }
-      const match = matches[0]!;
-      updated =
-        updated.slice(0, match.index) +
-        `configPath: '${GENERATED_PATH}'` +
-        updated.slice(match.index + match[0].length);
+      const nitro = asNode(nitroConfigurations[0]!.value)!;
+      if (property(nitro, 'preset')?.value !== 'cloudflare-module') {
+        throw new Error(
+          `migrate: Set nitro.cloudflareDev.configPath to ${GENERATED_PATH} in ${file} before removing the root Wrangler config.`,
+        );
+      }
+      const dev = property(nitro, 'cloudflareDev');
+      const edits: Array<Edit> = [];
+      if (!dev) {
+        edits.push({
+          start: nitro.start + 1,
+          end: nitro.start + 1,
+          text: `cloudflareDev: { configPath: '${GENERATED_PATH}' }, `,
+        });
+      } else if (dev.type === 'ObjectExpression') {
+        setPath(dev, 'configPath', file, edits, legacyName);
+      } else {
+        throw new Error(
+          `migrate: Set nitro.cloudflareDev.configPath to ${GENERATED_PATH} in ${file} before removing the root Wrangler config.`,
+        );
+      }
+      updated = edits
+        .sort((a, b) => b.start - a.start)
+        .reduce(
+          (result, edit) => result.slice(0, edit.start) + edit.text + result.slice(edit.end),
+          updated,
+        );
     }
 
     if (updated !== original) {

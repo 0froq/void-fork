@@ -138,4 +138,31 @@ describe('framework config migration', () => {
     expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(true);
     expect(existsSync(join(root, 'void.config.ts'))).toBe(false);
   });
+
+  it('ignores adapter and config paths mentioned only in comments', () => {
+    setup(
+      'vite.config.ts',
+      `// import adapter from '@astrojs/cloudflare';
+// configPath: './wrangler.example.jsonc'
+export default { plugins: [] };`,
+    );
+    writeFileSync(join(root, 'wrangler.example.jsonc'), '{"name":"example"}');
+    expect(migrateLegacyVoidConfig(root)).toBe(true);
+    expect(readFileSync(join(root, 'vite.config.ts'), 'utf8')).toContain(
+      'export default { plugins: [] };',
+    );
+    expect(existsSync(join(root, 'wrangler.example.jsonc'))).toBe(true);
+  });
+
+  it('updates only the Nitro Cloudflare config path', () => {
+    setup(
+      'vite.config.ts',
+      `const unrelated = { configPath: './wrangler.jsonc' };
+export default { nitro: { preset: 'cloudflare-module', modules: ['nitro-cloudflare-dev'], cloudflareDev: { configPath: './wrangler.jsonc' } } };`,
+    );
+    expect(migrateLegacyVoidConfig(root)).toBe(true);
+    const source = readFileSync(join(root, 'vite.config.ts'), 'utf8');
+    expect(source).toContain("const unrelated = { configPath: './wrangler.jsonc' }");
+    expect(source).toContain("cloudflareDev: { configPath: './.void-wrangler.jsonc' }");
+  });
 });
