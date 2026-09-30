@@ -672,8 +672,65 @@ export async function revalidatePlatformInstallAction(
   original: PlatformInstallPlan,
   manifest: PlatformInstallationManifest,
   action: PlatformInstallPlanAction,
-  options?: { authoritativeProvisionIntents?: boolean; repairMissing?: boolean },
+  options?: {
+    authoritativeProvisionIntents?: boolean;
+    repairMissing?: boolean;
+    stableWorkerUpdate?: boolean;
+  },
 ): Promise<void> {
+  // The installed-platform upgrade already planned and verified every shared
+  // resource under its lifecycle lock. Recheck the Worker immediately before
+  // deployment; deployPlatformWorker independently proves the active version
+  // and deployment lineage. Keep full replanning for recovery and provisioning.
+  if (
+    options?.stableWorkerUpdate &&
+    !options.repairMissing &&
+    action.kind === 'worker' &&
+    action.action === 'update' &&
+    original.actions.some(
+      (entry) =>
+        entry.key === action.key &&
+        entry.kind === action.kind &&
+        entry.action === action.action &&
+        entry.id === action.id &&
+        entry.name === action.name,
+    ) &&
+    original.actions.every((entry) => {
+      const resource = manifest.resources.find((candidate) => candidate.key === entry.key);
+      return (
+        (entry.kind === 'worker' ? entry.action === 'update' : entry.action === 'reuse') &&
+        resource?.kind === entry.kind &&
+        resource.state === 'ready' &&
+        resource.id === entry.id &&
+        resource.name === entry.name
+      );
+    })
+  ) {
+    const recorded = manifest.resources.find((resource) => resource.key === action.key);
+    if (
+      !recorded ||
+      recorded.kind !== 'worker' ||
+      recorded.state !== 'ready' ||
+      recorded.id !== action.name ||
+      recorded.name !== action.name
+    ) {
+      throw new Error(
+        `platform: Worker ${JSON.stringify(action.name)} no longer matches the approved installation plan. Review a new plan before retrying.`,
+      );
+    }
+    const bindings = await client.getWorkerPlainTextBindings(original.account.id, action.name);
+    if (
+      !matchesResourceMarker(bindings.PLATFORM_OWNERSHIP_MARKER, manifest, action.key, 'worker', {
+        id: action.name,
+        name: action.name,
+      })
+    ) {
+      throw new Error(
+        `platform: Cloudflare Worker ${JSON.stringify(action.name)} no longer has this installation's ownership marker. Review a new plan before retrying.`,
+      );
+    }
+    return;
+  }
   const deployment = original.deployment;
   const refreshed = await createPlatformInstallPlan(
     client,

@@ -418,6 +418,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       revalidateBeforeWorkerDeploy: (manifest, action) =>
         revalidatePlatformInstallAction(client, plan, manifest, action, {
           repairMissing: args.subcommand === 'repair',
+          stableWorkerUpdate: args.subcommand === 'upgrade',
         }),
     });
     // Keep progress visible while the outer database session releases its lock.

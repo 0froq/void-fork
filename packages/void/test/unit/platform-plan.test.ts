@@ -1254,6 +1254,80 @@ describe('platform installation planning', () => {
     );
   });
 
+  it('revalidates a stable upgrade Worker without rebuilding the platform plan', async () => {
+    const initial = await createPlatformInstallPlan(client(), input, null);
+    let manifest = createPlatformInstallationManifest({
+      account: initial.account,
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: initial.deployment,
+      id: initial.installationId,
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    const workerName = manifest.deployment.resources.apiWorker;
+    manifest = recordInstallationResource(
+      manifest,
+      {
+        configHash: 'hash',
+        id: workerName,
+        key: 'api-worker',
+        kind: 'worker',
+        name: workerName,
+        ownership: 'created',
+        state: 'ready',
+      },
+      '2026-09-14T00:00:01.000Z',
+    );
+    const action = {
+      action: 'update',
+      id: workerName,
+      key: 'api-worker',
+      kind: 'worker',
+      name: workerName,
+      reason: 'Update the owned Worker.',
+    } as const;
+    const stablePlan = { ...initial, actions: [action] };
+    let marker = JSON.stringify(
+      createPlatformResourceOwnershipMarker({
+        accountId: manifest.account.id,
+        installationId: manifest.id,
+        ownershipNonce: manifest.ownershipNonce,
+        resourceId: workerName,
+        resourceKey: action.key,
+        resourceKind: 'worker',
+        resourceName: workerName,
+      }),
+    );
+    const listAccounts = vi.fn(async () => {
+      throw new Error('full planning was called');
+    });
+    const fake = client({
+      getWorkerPlainTextBindings: async () => ({ PLATFORM_OWNERSHIP_MARKER: marker }),
+      listAccounts,
+    });
+
+    await expect(
+      revalidatePlatformInstallAction(fake, stablePlan, manifest, action, {
+        stableWorkerUpdate: true,
+      }),
+    ).resolves.toBeUndefined();
+    expect(listAccounts).not.toHaveBeenCalled();
+
+    marker = 'another installation';
+    await expect(
+      revalidatePlatformInstallAction(fake, stablePlan, manifest, action, {
+        stableWorkerUpdate: true,
+      }),
+    ).rejects.toThrow("no longer has this installation's ownership marker");
+    expect(listAccounts).not.toHaveBeenCalled();
+
+    await expect(
+      revalidatePlatformInstallAction(fake, initial, manifest, action, {
+        stableWorkerUpdate: true,
+      }),
+    ).rejects.toThrow('full planning was called');
+  });
+
   it('resumes resources proven by the remote ownership checkpoint', async () => {
     let manifest = createPlatformInstallationManifest({
       account: { id: 'account', name: 'Account' },
