@@ -99,6 +99,16 @@ describe('ssr entry helpers', () => {
     );
   });
 
+  it('does not accept a render export mentioned only in a comment', () => {
+    const root = createTempRoot();
+    writeFileSync(join(root, 'src', 'main.client.ts'), "console.log('client entry');");
+    writeFileSync(
+      join(root, 'src', 'main.ssr.ts'),
+      '// export const render = () => null;\nexport const other = 1;',
+    );
+    expect(() => validateSsrEntry(root)).toThrow('Export `render(c, assetTags)`');
+  });
+
   it('does not treat a type-only render export as a valid entry', () => {
     const root = createTempRoot();
     writeFileSync(join(root, 'src', 'main.client.ts'), "console.log('client entry');");

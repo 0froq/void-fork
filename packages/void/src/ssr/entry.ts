@@ -73,14 +73,6 @@ function validateServerRenderExport(entry: ResolvedEntry): void {
   const { absolutePath, relativePath } = entry;
 
   const source = readFileSync(absolutePath, 'utf-8');
-  if (
-    /\bexport\s+(?:async\s+)?function\s+render\b/.test(source) ||
-    /\bexport\s+const\s+render\b/.test(source) ||
-    /\bexport\s+default\s+(?:defineRender\b|(?:async\s+)?function\b)/.test(source)
-  ) {
-    return;
-  }
-
   let parsed: ReturnType<typeof parseSync>;
   try {
     parsed = parseSync(relativePath, source);
