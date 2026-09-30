@@ -4316,30 +4316,91 @@ export async function ensureCloudflareAuthSecret(options: {
   return { created: true, ...(workerWasMissing ? { workerWasMissing: true as const } : {}) };
 }
 
-/**
- * Deploy to the user's OWN Cloudflare account (no Void platform).
- *
- * Orchestrates the existing units — it does NOT re-implement provisioning
- * (`cli/provision.ts`), the config writer (`cli/wrangler.ts`), or the self-host
- * secret preflight (`cli/env-validation.ts`). Flow:
- *
- *   app-class guard → desired set (from source, pre-build) → preflight (auth +
- *   account pin) → automatically ensure resources → ensure worker name →
- *   remote D1 migrate → secrets (warn + gate) → clean-env build → wrangler deploy
- *
- * ORDERING DECISION (documented): the secrets GATE runs AFTER provision + remote
- * migrations resolve but BEFORE build + deploy — the brief's recommended default.
- * Provision and D1 migrations are idempotent (read-first / tracked in wrangler's
- * `d1_migrations` table), so re-running them after a gate failure is safe, while
- * build + `wrangler deploy` (the non-idempotent worker upload) is what the gate
- * protects. The warning is emitted first (non-fatal); a first-deploy secret-list
- * failure (worker not yet created) renders actionable `wrangler secret put`
- * bootstrap guidance rather than dead-ending.
- *
- * Every wrangler / provisioner / secret-unit call is an injected seam
- * ({@link CloudflareDeployDeps}) so the whole orchestration is unit-testable with
- * no real wrangler, network, or Cloudflare account.
- */
+/** Validate source-level native deploy inputs before account operations or project code. */
+async function prepareCloudflareDeploySource(
+  root: string,
+  options: RunDeployOptions,
+  voidConfig: VoidConfig,
+) {
+  // 0. Flag guard — `--skip-build` cannot be honored by this backend, so REJECT the
+  // combination rather than silently ignore it. Every gate on this path reads the artifact
+  // `vite build` emits as ground truth: the plaintext-var warnings, the required-secret gate
+  // and the invalid-value gate all read the REAL `dist/ssr/wrangler.json`, and the auth check
+  // reads the generated `.void/better-auth-schema.ts`. Skipping the build would leave them
+  // validating a stale or absent artifact — i.e. reporting a worker that is not the one being
+  // uploaded. Rejected here, before any account op, so the flag can never cost a build hook.
+  if (options.skipBuild) {
+    log.error(
+      [
+        'deploy: --skip-build is not supported with --platform cloudflare.',
+        'This backend validates the artifact the build emits — the worker vars in',
+        'dist/ssr/wrangler.json and the generated auth schema — so a skipped build would',
+        'leave every check reading a stale or missing artifact instead of the worker you',
+        'are about to upload. Drop --skip-build, or deploy with `void deploy` (the managed',
+        'platform), which supports it.',
+      ].join('\n'),
+    );
+    return null;
+  }
+
+  // Load the provision module ONCE, dynamically, so the sync deploy helpers can
+  // reach its transport/drift/scrub primitives without a static import that would
+  // make every managed `void deploy` eagerly load the provision lifecycle. Awaited
+  // here BEFORE any sync helper that calls `requireProvisionModule()`.
+  // 1. App-class narrowing — reject every artifact shape the current native
+  // verifier cannot prove safe before any account, provision, or build op.
+  const classification = classifyCloudflareDeployApp(root, voidConfig, options);
+  if (!classification.supported) {
+    log.error(classification.reason);
+    return null;
+  }
+
+  // 2. Desired resource set — computed ONCE from SOURCE, pre-build (fail-fast),
+  // shared by the provision and drift paths. `authEnabled` / `migrationsDir` /
+  // `dialect` drive the auth + migration gates below. The checked-in migrations are
+  // deliberately NOT read here: the auth + migration gates re-collect them AFTER the
+  // build (see step 8), because `vite build` runs arbitrary project plugins that could
+  // add/rewrite migration SQL, and the remote apply reads the live post-build files.
+  const configPath = discoverRootWranglerConfig(root);
+  const facts = await computeDesiredCloudflareResources(root, voidConfig, configPath);
+  const { desired, dialect, migrations: preBuildMigrations, migrationsDir } = facts;
+
+  // 2a. External-database migrations are applied directly after every local gate
+  // passes and immediately before the Worker upload. A checked-in migration therefore requires
+  // the production DATABASE_URL in the deploy environment; the URL is also the source used when
+  // provisioning a missing Hyperdrive config and is never serialized into the Worker artifact.
+  if (dialect !== 'sqlite' && preBuildMigrations.length > 0 && !process.env.DATABASE_URL) {
+    log.error(
+      [
+        `deploy: ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'} migrations require DATABASE_URL for --platform cloudflare.`,
+        'Set the production connection string in the deploy environment. Void uses it only to',
+        'provision Hyperdrive and apply checked-in migrations before uploading the Worker; it is',
+        'never written to wrangler.jsonc or the generated Worker config.',
+      ].join('\n'),
+    );
+    return null;
+  }
+
+  // 2b. Validate Wrangler's migration glob before any account operation. Custom patterns are
+  // supported, but they must follow Wrangler's migrations_dir prefix rule; the post-build gate
+  // later enumerates the exact Minimatch result and requires byte-for-byte set and order parity
+  // with Void's validated migrations before any remote D1 mutation.
+  if (desired.d1) {
+    const migrationsPattern = resolveWranglerMigrationPattern(
+      parseRootWranglerConfig(configPath),
+      desired.d1.binding,
+      desired.d1.migrationsDir ?? relative(dirname(configPath), migrationsDir),
+    );
+    if (!migrationsPattern.ok) {
+      log.error(migrationsPattern.reason);
+      return null;
+    }
+  }
+
+  return { configPath, ...facts };
+}
+
+/** Deploy to the user's own Cloudflare account through the guarded native Worker flow. */
 export async function runCloudflareDeploy(
   root: string,
   options: RunDeployOptions,
@@ -4396,47 +4457,12 @@ export async function runCloudflareDeploy(
     );
   }
 
-  // 0. Flag guard — `--skip-build` cannot be honored by this backend, so REJECT the
-  // combination rather than silently ignore it. Every gate on this path reads the artifact
-  // `vite build` emits as ground truth: the plaintext-var warnings, the required-secret gate
-  // and the invalid-value gate all read the REAL `dist/ssr/wrangler.json`, and the auth check
-  // reads the generated `.void/better-auth-schema.ts`. Skipping the build would leave them
-  // validating a stale or absent artifact — i.e. reporting a worker that is not the one being
-  // uploaded. Rejected here, before any account op, so the flag can never cost a build hook.
-  if (options.skipBuild) {
-    log.error(
-      [
-        'deploy: --skip-build is not supported with --platform cloudflare.',
-        'This backend validates the artifact the build emits — the worker vars in',
-        'dist/ssr/wrangler.json and the generated auth schema — so a skipped build would',
-        'leave every check reading a stale or missing artifact instead of the worker you',
-        'are about to upload. Drop --skip-build, or deploy with `void deploy` (the managed',
-        'platform), which supports it.',
-      ].join('\n'),
-    );
+  const source = await prepareCloudflareDeploySource(root, options, voidConfig);
+  if (!source) {
     return exit(1);
   }
-
-  // Load the provision module ONCE, dynamically, so the sync deploy helpers can
-  // reach its transport/drift/scrub primitives without a static import that would
-  // make every managed `void deploy` eagerly load the provision lifecycle. Awaited
-  // here BEFORE any sync helper that calls `requireProvisionModule()`.
-  // 1. App-class narrowing — reject every artifact shape the current native
-  // verifier cannot prove safe before any account, provision, or build op.
-  const classification = classifyCloudflareDeployApp(root, voidConfig, options);
-  if (!classification.supported) {
-    log.error(classification.reason);
-    return exit(1);
-  }
-
-  // 2. Desired resource set — computed ONCE from SOURCE, pre-build (fail-fast),
-  // shared by the provision and drift paths. `authEnabled` / `migrationsDir` /
-  // `dialect` drive the auth + migration gates below. The checked-in migrations are
-  // deliberately NOT read here: the auth + migration gates re-collect them AFTER the
-  // build (see step 8), because `vite build` runs arbitrary project plugins that could
-  // add/rewrite migration SQL, and the remote apply reads the live post-build files.
-  const configPath = discoverRootWranglerConfig(root);
   const {
+    configPath,
     desired,
     reasons,
     authEnabled,
@@ -4450,39 +4476,7 @@ export async function runCloudflareDeploy(
     expectedCrons,
     needsEmail,
     emailHandlers,
-  } = await computeDesiredCloudflareResources(root, voidConfig, configPath);
-
-  // 2a. External-database migrations are applied directly after every local gate
-  // passes and immediately before the Worker upload. A checked-in migration therefore requires
-  // the production DATABASE_URL in the deploy environment; the URL is also the source used when
-  // provisioning a missing Hyperdrive config and is never serialized into the Worker artifact.
-  if (dialect !== 'sqlite' && preBuildMigrations.length > 0 && !process.env.DATABASE_URL) {
-    log.error(
-      [
-        `deploy: ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'} migrations require DATABASE_URL for --platform cloudflare.`,
-        'Set the production connection string in the deploy environment. Void uses it only to',
-        'provision Hyperdrive and apply checked-in migrations before uploading the Worker; it is',
-        'never written to wrangler.jsonc or the generated Worker config.',
-      ].join('\n'),
-    );
-    return exit(1);
-  }
-
-  // 2b. Validate Wrangler's migration glob before any account operation. Custom patterns are
-  // supported, but they must follow Wrangler's migrations_dir prefix rule; the post-build gate
-  // later enumerates the exact Minimatch result and requires byte-for-byte set and order parity
-  // with Void's validated migrations before any remote D1 mutation.
-  if (desired.d1) {
-    const migrationsPattern = resolveWranglerMigrationPattern(
-      parseRootWranglerConfig(configPath),
-      desired.d1.binding,
-      desired.d1.migrationsDir ?? relative(dirname(configPath), migrationsDir),
-    );
-    if (!migrationsPattern.ok) {
-      log.error(migrationsPattern.reason);
-      return exit(1);
-    }
-  }
+  } = source;
 
   // (The auth-migration guard runs at 3d below, AFTER the transport + account pin, so it can
   // derive the Better Auth schema in an isolated subprocess under the build's EFFECTIVE mode +
