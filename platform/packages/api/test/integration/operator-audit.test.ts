@@ -314,10 +314,11 @@ test('records sanitized action targets and change arguments', async () => {
 
   const events = await env.db.select().from(operatorEvents);
   const targets = Object.fromEntries(
-    events.map((event) => [event.action, JSON.parse(event.target)]),
+    events
+      .filter((event) => event.action !== 'signup/remove')
+      .map((event) => [event.action, JSON.parse(event.target)]),
   );
   expect(targets).toMatchObject({
-    'signup/remove': { type: 'email', pattern: 'bob@example.com' },
     'invitations/send': {
       emails: ['invite-one@example.com', 'invite-two@example.com'],
     },
@@ -330,8 +331,12 @@ test('records sanitized action targets and change arguments', async () => {
   expect(
     events
       .filter((event) => event.action === 'signup/remove')
-      .map((event) => JSON.parse(event.target).pattern),
-  ).toEqual(['alice@example.com', 'bob@example.com']);
+      .map((event) => JSON.parse(event.target))
+      .sort((a, b) => a.pattern.localeCompare(b.pattern)),
+  ).toEqual([
+    { type: 'email', pattern: 'alice@example.com' },
+    { type: 'email', pattern: 'bob@example.com' },
+  ]);
 });
 
 test('records only the project and registered user IDs for ownership transfer', async () => {
