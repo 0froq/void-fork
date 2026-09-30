@@ -4722,13 +4722,14 @@ export async function runCloudflareDeploy(
   const initialCloudflareLink = readCloudflareLink(root);
   const initialCloudflareCandidate = readCloudflareCandidate(root);
   const exit = deps.exit ?? ((code: number): never => process.exit(code));
-  if (options.atomic && (options.reuseExistingWorker || initialCloudflareLink)) {
+  const voidConfig = readConfig(root);
+  const atomic = options.atomic === true || voidConfig.deploy?.cloudflare?.mode === 'atomic';
+  if (atomic && (options.reuseExistingWorker || initialCloudflareLink)) {
     log.error(
-      'deploy: --atomic is unavailable during the existing Worker handoff. Complete the handoff first.',
+      'deploy: atomic deployment is unavailable during the existing Worker handoff. Complete the handoff first.',
     );
     return exit(1);
   }
-  const voidConfig = readConfig(root);
   const detectedFramework = detectFramework(root);
   const frameworkPreset = detectedFramework ? FRAMEWORK_PRESETS[detectedFramework.name] : undefined;
   cliLog.info('cloudflare_deploy_start', {
@@ -4765,8 +4766,8 @@ export async function runCloudflareDeploy(
     resolveCloudflareStaticPreset(root, voidConfig, options) ??
     (await resolveCloudflareVoidStaticPreset(root, voidConfig));
   if (staticPreset) {
-    if (options.atomic) {
-      log.error('deploy: --atomic is only for Workers with Durable Objects.');
+    if (atomic) {
+      log.error('deploy: atomic deployment is only for Workers with Durable Objects.');
       return exit(1);
     }
     return runCloudflareStaticDeploy(
@@ -5551,8 +5552,10 @@ export async function runCloudflareDeploy(
     deps.resolveGeneratedConfigPath ??
     ((projectRoot) => readGeneratedDeployConfig(projectRoot).path)
   )(root);
-  if (options.atomic && !Array.isArray(parseRootWranglerConfig(lifecycleConfigPath).migrations)) {
-    log.error('deploy: --atomic is only for Workers with Durable Object migration history.');
+  if (atomic && !Array.isArray(parseRootWranglerConfig(lifecycleConfigPath).migrations)) {
+    log.error(
+      'deploy: atomic deployment is only for Workers with Durable Object migration history.',
+    );
     return exit(1);
   }
   try {
@@ -5566,7 +5569,7 @@ export async function runCloudflareDeploy(
     };
     await (deps.assertDurableObjectLifecycle ?? assertCloudflareDurableObjectLifecycleSupported)({
       ...lifecycleOptions,
-      allowPendingAtomicMigration: options.atomic === true,
+      allowPendingAtomicMigration: atomic,
     });
   } catch (error) {
     log.error(getErrorMessage(error));
@@ -6053,7 +6056,7 @@ export async function runCloudflareDeploy(
       previousTrafficConfig: readWranglerPublishedTrafficSnapshot(configPath),
       queueConsumerCleanup,
       verifyInheritedSecrets: true,
-      atomic: options.atomic,
+      atomic,
       ...(initialAuthSecret
         ? { candidateSecrets: { [BETTER_AUTH_SECRET_NAME]: initialAuthSecret } }
         : {}),
@@ -6219,7 +6222,7 @@ export function formatCloudflareActivationError(
         'and retry. Void caches it after a successful workers.dev deployment; production traffic is unchanged.',
       ].join('\n');
     case 'readiness-staging-failed':
-      return `deploy: Cloudflare could not stage the uploaded Worker Version at zero-percent traffic${status}; production traffic is unchanged.${cloudflareCode}${diagnostic}${result.cloudflareErrorCode === 10210 && /Durable Object migration/i.test(result.diagnostic ?? '') ? '\n\nReview the Durable Object migration, then run `void deploy --platform cloudflare --atomic` to publish without pre-traffic staging.' : ''}`;
+      return `deploy: Cloudflare could not stage the uploaded Worker Version at zero-percent traffic${status}; production traffic is unchanged.${cloudflareCode}${diagnostic}${result.cloudflareErrorCode === 10210 && /Durable Object migration/i.test(result.diagnostic ?? '') ? '\n\nReview the Durable Object migration, then run `void deploy --platform cloudflare --atomic`. For future deploys, set deploy.cloudflare.mode to "atomic" in void.config.ts.' : ''}`;
     case 'atomic-failed':
       return `deploy: Cloudflare could not publish the Worker atomically${status}; inspect production status before retrying.${cloudflareCode}${diagnostic}`;
     case 'atomic-output-invalid':

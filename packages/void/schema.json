@@ -385,6 +385,24 @@
       },
       "additionalProperties": false
     },
+    "deploy": {
+      "type": "object",
+      "description": "Void deployment choices. Cloudflare Worker settings belong in cloudflare instead.",
+      "properties": {
+        "cloudflare": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["staged", "atomic"],
+              "description": "Staged is the default and verifies readiness before traffic. Atomic publishes a Durable Object Worker directly and verifies readiness afterward."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "database": {
       "type": "string",
       "enum": ["pg", "mysql"],

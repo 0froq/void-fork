@@ -217,6 +217,7 @@ describe('Cloudflare activation diagnostics', () => {
       diagnostic: 'The version depends on Durable Object migration fate-live-v1.',
     });
     expect(message).toContain('void deploy --platform cloudflare --atomic');
+    expect(message).toContain('deploy.cloudflare.mode');
   });
 
   it('reports readiness restoration outcomes without claiming uncertain traffic is unchanged', () => {
@@ -801,6 +802,38 @@ describe('existing Cloudflare site handoff', () => {
       activateVersion,
     });
     await runCloudflareDeploy(root, { platform: 'cloudflare', atomic: true }, silentCliLog, deps);
+    expect(assertDurableObjectLifecycle).toHaveBeenCalledWith(
+      expect.objectContaining({ allowPendingAtomicMigration: true }),
+    );
+    expect(activateVersion).toHaveBeenCalledWith(expect.objectContaining({ atomic: true }));
+  });
+
+  it('uses the project Cloudflare deploy mode on subsequent plain deploys', async () => {
+    const root = site();
+    const configPath = join(root, 'wrangler.jsonc');
+    const config = parseRootWranglerConfig(configPath);
+    config.migrations = [{ tag: 'v1', new_sqlite_classes: ['Room'] }];
+    writeFileSync(configPath, JSON.stringify(config));
+    writeFileSync(
+      join(root, 'void.json'),
+      JSON.stringify({ deploy: { cloudflare: { mode: 'atomic' } } }),
+    );
+    const assertDurableObjectLifecycle = vi.fn().mockResolvedValue(undefined);
+    const activateVersion = vi
+      .fn<NonNullable<CloudflareDeployDeps['activateVersion']>>()
+      .mockResolvedValue({
+        ok: true,
+        versionId: 'new',
+        previousVersionId: 'original',
+        previewUrl: 'https://site.example.com',
+      });
+    const { deps } = harness({
+      runBuild: () => build(root),
+      assertDurableObjectLifecycle,
+      activateVersion,
+    });
+
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(assertDurableObjectLifecycle).toHaveBeenCalledWith(
       expect.objectContaining({ allowPendingAtomicMigration: true }),
     );

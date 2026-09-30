@@ -903,6 +903,8 @@ For Drizzle projects, deploy performs a read-only schema drift check. If a new m
 | `--atomic`                      | Publish an existing Durable Object Worker directly; readiness is checked after traffic changes     |
 | `--debug`                       | Mirror the structured deploy log to stderr (also written to `~/.void/logs/`)                       |
 
+`--atomic` applies to one deployment. For an existing Durable Object Worker that consistently cannot stage, set `deploy: { cloudflare: { mode: 'atomic' } }` in `void.config.ts` so plain `void deploy` uses atomic publication. The default is `staged`.
+
 The older `--backend cloudflare` spelling remains available as a compatibility alias for `--platform cloudflare`.
 
 Every deploy writes a structured JSONL trace to `~/.void/logs/deploy-<timestamp>.jsonl` regardless of `--debug`. On failure the path is printed at the end of the error message so you can attach it when reporting platform issues. `VOID_DEPLOY_DEBUG=1` is accepted as an alternate trigger for stderr mirroring.

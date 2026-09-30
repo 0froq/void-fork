@@ -67,6 +67,28 @@ describe('readConfig', () => {
     cleanup();
   });
 
+  it('accepts an explicit Cloudflare deploy mode', () => {
+    setup(JSON.stringify({ deploy: { cloudflare: { mode: 'atomic' } } }));
+    expect(readConfig(tmpDir).deploy?.cloudflare?.mode).toBe('atomic');
+    cleanup();
+  });
+
+  it('reads the deploy mode from void.config.ts', () => {
+    setup();
+    writeFileSync(
+      join(tmpDir, 'void.config.ts'),
+      "export default { deploy: { cloudflare: { mode: 'atomic' } } };\n",
+    );
+    expect(readConfig(tmpDir).deploy?.cloudflare?.mode).toBe('atomic');
+    cleanup();
+  });
+
+  it.each(['auto', true, null])('rejects invalid Cloudflare deploy mode: %j', (mode) => {
+    setup(JSON.stringify({ deploy: { cloudflare: { mode } } }));
+    expect(() => readConfig(tmpDir)).toThrow('"deploy.cloudflare.mode" in void.json');
+    cleanup();
+  });
+
   it.each([true, false])('accepts routing.isr: %s', (isr) => {
     setup(JSON.stringify({ routing: { isr } }));
     expect(readConfig(tmpDir).routing?.isr).toBe(isr);

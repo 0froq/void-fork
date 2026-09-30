@@ -94,6 +94,11 @@ export type EmailConfig = {
   from?: string;
 };
 
+/** Deployment choices owned by Void rather than passed to the Worker config. */
+export type DeployConfig = {
+  cloudflare?: { mode?: 'staged' | 'atomic' };
+};
+
 /** Cloudflare Worker configuration passed through to the native deploy artifact. */
 type CloudflareField<T> = T & Record<string, unknown>;
 
@@ -167,6 +172,7 @@ export type VoidConfig = {
   remote?: boolean;
   worker?: WranglerConfig;
   cloudflare?: CloudflareConfig;
+  deploy?: DeployConfig;
   database?: 'pg' | 'mysql';
   ai?: AiConfig;
   email?: EmailConfig;
@@ -1031,6 +1037,46 @@ function validateConfigObject(config: unknown): VoidConfig {
       Array.isArray(obj.cloudflare)
     ) {
       throw new Error(`config: "cloudflare" in ${CONFIG_FILE} must be an object.`);
+    }
+  }
+
+  if (obj.deploy !== undefined) {
+    if (typeof obj.deploy !== 'object' || obj.deploy === null || Array.isArray(obj.deploy)) {
+      throw new Error(`config: "deploy" in ${CONFIG_FILE} must be an object.`);
+    }
+    const deploy = obj.deploy as Record<string, unknown>;
+    for (const key of Object.keys(deploy)) {
+      if (key !== 'cloudflare') {
+        throw new Error(
+          `config: Unknown key 'deploy.${key}' in ${CONFIG_FILE}. Valid: cloudflare.`,
+        );
+      }
+    }
+    if (deploy.cloudflare !== undefined) {
+      if (
+        typeof deploy.cloudflare !== 'object' ||
+        deploy.cloudflare === null ||
+        Array.isArray(deploy.cloudflare)
+      ) {
+        throw new Error(`config: "deploy.cloudflare" in ${CONFIG_FILE} must be an object.`);
+      }
+      const cloudflareDeploy = deploy.cloudflare as Record<string, unknown>;
+      for (const key of Object.keys(cloudflareDeploy)) {
+        if (key !== 'mode') {
+          throw new Error(
+            `config: Unknown key 'deploy.cloudflare.${key}' in ${CONFIG_FILE}. Valid: mode.`,
+          );
+        }
+      }
+      if (
+        cloudflareDeploy.mode !== undefined &&
+        cloudflareDeploy.mode !== 'staged' &&
+        cloudflareDeploy.mode !== 'atomic'
+      ) {
+        throw new Error(
+          `config: "deploy.cloudflare.mode" in ${CONFIG_FILE} must be "staged" or "atomic".`,
+        );
+      }
     }
   }
 
