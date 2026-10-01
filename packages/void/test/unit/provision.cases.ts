@@ -7495,7 +7495,8 @@ describe('createDefaultRunWrangler — post-spawn child `error` events confirm/q
         `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\n` +
         `fs.writeSync(1, JSON.stringify({ operationResult: 1, data: { id: 'provider-id' } }));\n` +
         // Exit closes every inherited handle on Windows as well as POSIX. The
-        // oversized unread input is still pending, so the parent gets a real EPIPE.
+        // oversized unread input is still pending, so the parent gets a real
+        // closed-pipe error (write EOF on Windows, EPIPE on POSIX).
         `process.exit(0);\n`,
     );
     let observedOutput = '';
@@ -7536,7 +7537,9 @@ describe('createDefaultRunWrangler — post-spawn child `error` events confirm/q
       expect(result!.status).toBe(1);
       // The stdin error owns termination even if exit 0 is concurrently observed.
       expect(result!.signal).toBe('SIGKILL');
-      expect(result!.stderr).toMatch(/EPIPE|broken pipe/i);
+      expect(result!.stderr).toMatch(
+        process.platform === 'win32' ? /write EOF|EPIPE|broken pipe/i : /EPIPE|broken pipe/i,
+      );
       expect(result!.stdout).toContain('"operationResult":1');
       expect(result!.data).toBeUndefined();
     }
