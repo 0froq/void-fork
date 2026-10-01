@@ -2,6 +2,7 @@ import {
   MAX_REVALIDATE_QUERY_ALLOWLIST_ENTRIES,
   MAX_ROUTING_RULES,
   planWebSocketMigrations,
+  MIGRATION_CLASSIFIER_VERSION,
   validateManifestShape,
   isSandboxRegistryImage,
 } from '@void/deploy-core';
@@ -757,10 +758,6 @@ type UserWorkerMigrationResult = Readonly<{
   error?: string;
 }>;
 
-function asStringArray(value: unknown): ReadonlyArray<string> {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : [];
-}
-
 function normalizeUserWorkerMigrationResult(
   value: unknown,
   bodyPreview: string,
@@ -776,19 +773,6 @@ function normalizeUserWorkerMigrationResult(
   const data = value as Record<string, unknown>;
   if (Array.isArray(data.migrations)) {
     return data as UserWorkerMigrationResult;
-  }
-
-  const applied = [...asStringArray(data.applied), ...asStringArray(data.confirmedApplied)];
-  const skipped = [...asStringArray(data.skipped), ...asStringArray(data.confirmedSkipped)];
-  if (applied.length > 0 || skipped.length > 0) {
-    return {
-      ok: data.ok !== false,
-      migrations: [
-        ...applied.map((name) => ({ name, applied: true, durationMs: 0 })),
-        ...skipped.map((name) => ({ name, applied: false, durationMs: 0 })),
-      ],
-      ...(typeof data.error === 'string' ? { error: data.error } : {}),
-    };
   }
 
   return {
@@ -2039,7 +2023,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     }
     throw error;
   }
-  await ensureProjectIngress(context.env, project);
   const cliVersion = context.req.header('x-void-cli-version') ?? null;
 
   const actor = context.get('user');
@@ -2121,6 +2104,27 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     return context.json({ event: 'error', message: shapeError }, 400);
   }
   const incomingManifest = body.manifest as DeployManifest;
+  // Stored deployment manifests remain readable without this contract. Only
+  // new SQLite builds that run migrations must include their verified plan.
+  const migrations = incomingManifest.migrations;
+  if (
+    migrations &&
+    migrations.pending > 0 &&
+    (migrations.dialect === 'sqlite' || migrations.dialect === undefined) &&
+    (migrations.protocolVersion !== 2 ||
+      migrations.classifierVersion !== MIGRATION_CLASSIFIER_VERSION ||
+      !/^sha256:[a-f0-9]{64}$/.test(migrations.migrationListHash ?? '') ||
+      (migrations.stability !== 'stable' && migrations.stability !== 'legacy'))
+  ) {
+    return context.json(
+      {
+        event: 'error',
+        message:
+          'SQLite migrations require an updated Void runtime. Upgrade void, rebuild the app, and deploy again.',
+      },
+      400,
+    );
+  }
   if (incomingManifest.sandbox && incomingManifest.sandbox.controllerProtocol !== 2) {
     return context.json(
       {
@@ -2390,6 +2394,8 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
   // (env vars travel inside `manifest.vars`; the JSON-mode wire contract
   // never accepted a top-level `body.vars` — every CLI version that ever
   // hit this endpoint populated `manifest.vars` instead.)
+
+  await ensureProjectIngress(context.env, project);
 
   // Pre-validation done — now run the atomic precheck-and-claim
   // transaction. FOR UPDATE on the project row, 10-minute stale-deploy
@@ -4273,9 +4279,8 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           const readinessError =
             'worker readiness probe failed: new worker not reachable after retries';
           let readinessFailure = 'no readiness attempts completed';
-          let probeResult: 'ready' | 'compat';
           try {
-            probeResult = await retryWithBackoff<'ready' | 'compat'>(
+            await retryWithBackoff<true>(
               async (attempt) => {
                 const attemptStart = Date.now();
                 const maxAttempts = CF_READINESS_RETRY.maxRetries + 1;
@@ -4302,20 +4307,10 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                   try {
                     const data = JSON.parse(text);
                     if (data.ready === true) {
-                      return 'ready';
+                      return true;
                     }
                   } catch {
                     // fall through
-                  }
-                  if (readyResponse.status === 404) {
-                    return 'compat';
-                  }
-                  if (readyResponse.ok) {
-                    logger.info('migrate', 'readiness_probe_compat', {
-                      status: readyResponse.status,
-                      bodyPreview: text.slice(0, 200),
-                    });
-                    return 'compat';
                   }
                   readinessFailure = `last readiness response was HTTP ${readyResponse.status}: ${text.slice(0, 200)}`;
                   logger.warn('migrate', 'readiness_probe_attempt_failed', {
@@ -4460,19 +4455,16 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               );
             }
           } else {
-            const migrationRetry =
-              probeResult === 'ready' ? CF_MIGRATION_RETRY : CF_READINESS_RETRY;
-
             const result = await context.get('db').transaction(async (tx) => {
               await tx.execute(
                 drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
               );
               const txDb = tx as unknown as Db;
               await requireActiveDeployAccess(txDb, projectId, actor.id);
-              const legacyResult = await retryWithBackoff<UserWorkerMigrationResult>(
+              const externalResult = await retryWithBackoff<UserWorkerMigrationResult>(
                 async (attempt) => {
                   const attemptStart = Date.now();
-                  const maxAttempts = migrationRetry.maxRetries + 1;
+                  const maxAttempts = CF_MIGRATION_RETRY.maxRetries + 1;
                   const userWorker = context.env.DISPATCH.get(workerName);
                   const migrateResponse = await userWorker.fetch(
                     new Request('https://internal/__void/migrate', {
@@ -4514,18 +4506,18 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                   }
                 },
                 {
-                  ...migrationRetry,
+                  ...CF_MIGRATION_RETRY,
                   errorMessage: 'migration dispatch failed after retries',
                 },
               );
-              const allApplied = legacyResult.migrations
+              const allApplied = externalResult.migrations
                 .filter((migration) => !migration.error)
                 .map((migration) => migration.name);
               if (allApplied.length > 0) {
                 await appendProjectMigrations(txDb, projectId, allApplied, deployment.id);
                 await setAppliedMigrations(txDb, deployment.id, allApplied);
               }
-              return legacyResult;
+              return externalResult;
             });
 
             if (!result.ok) {
