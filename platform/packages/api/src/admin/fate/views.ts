@@ -57,7 +57,13 @@ export const HealthView = view<AdminHealth>()({
 });
 export const healthRequest = { health: { view: HealthView } } as const;
 
-export const BuildLogsView = view<AdminBuildLogs>()({ id: true, lines: true, lastSeq: true });
+export const BuildLogsView = view<AdminBuildLogs>()({
+  id: true,
+  lines: true,
+  lastSeq: true,
+  terminal: true,
+  logsComplete: true,
+});
 export const BuildStatusView = view<AdminBuildStatus>()({ id: true, status: true, terminal: true });
 export const DeploymentLogsView = view<AdminDeploymentLogs>()({ id: true, data: true });
 export const buildLogsRequest = (id: string, since: number) =>

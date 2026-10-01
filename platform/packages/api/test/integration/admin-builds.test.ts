@@ -79,6 +79,8 @@ describe('GET /admin/builds/:id/logs', () => {
     const base = spyNamespace({
       lines: [{ seq: 1, line: 'ready', stream: 'stdout', ts: 1 }],
       lastSeq: 1,
+      terminal: true,
+      logsComplete: false,
     });
     env.BUILD_MANAGER = base.ns;
     const response = await app.fetch(
@@ -97,7 +99,7 @@ describe('GET /admin/builds/:id/logs', () => {
               kind: 'query',
               name: 'buildLogs',
               args: { id: build.id, since: 0 },
-              select: ['id', 'lines', 'lastSeq'],
+              select: ['id', 'lines', 'lastSeq', 'terminal', 'logsComplete'],
             },
             {
               id: 'status',
@@ -115,12 +117,19 @@ describe('GET /admin/builds/:id/logs', () => {
     const result = (await response.json()) as {
       results: Array<{
         ok: boolean;
-        data?: { lines?: Array<{ line: string }>; lastSeq?: number; terminal?: boolean };
+        data?: {
+          lines?: Array<{ line: string }>;
+          lastSeq?: number;
+          terminal?: boolean;
+          logsComplete?: boolean | null;
+        };
       }>;
     };
     expect(result.results[0]?.ok).toBe(true);
     expect(result.results[0]?.data?.lines?.[0]?.line).toBe('ready');
     expect(result.results[0]?.data?.lastSeq).toBe(1);
+    expect(result.results[0]?.data?.terminal).toBe(true);
+    expect(result.results[0]?.data?.logsComplete).toBe(false);
     expect(result.results[1]?.data?.terminal).toBe(false);
     expect(base.calls).toHaveLength(1);
   });

@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vite-plus/test';
-import { followBuildLogs, isFatalFollowError } from '../../src/cli/build-cmd.ts';
-import { PlatformApiError, type BuildLogsResponse } from '../../src/cli/client.ts';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import { followBuildLogs, isFatalFollowError, runBuildCommand } from '../../src/cli/build-cmd.ts';
+import { PlatformApiError, PlatformClient, type BuildLogsResponse } from '../../src/cli/client.ts';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  vi.useRealTimers();
+});
 
 function page(partial: Partial<BuildLogsResponse>): BuildLogsResponse {
   return { lines: [], lastSeq: 0, status: 'building', terminal: false, external: null, ...partial };
@@ -45,6 +51,7 @@ describe('followBuildLogs', () => {
         lastSeq: 3,
         status: 'complete',
         terminal: true,
+        logsComplete: true,
       }),
     ];
     const sinceCalls: Array<number> = [];
@@ -88,6 +95,7 @@ describe('followBuildLogs', () => {
             lastSeq: 3,
             status: 'complete',
             terminal: true,
+            logsComplete: true,
           }),
         );
       },
@@ -149,7 +157,9 @@ describe('followBuildLogs', () => {
         if (call === 1) {
           return Promise.reject(apiError(429, '{"error":"rate_limited"}'));
         }
-        return Promise.resolve(page({ lastSeq: 5, status: 'complete', terminal: true }));
+        return Promise.resolve(
+          page({ lastSeq: 5, status: 'complete', terminal: true, logsComplete: true }),
+        );
       },
       write: () => {},
       sleep: () => Promise.resolve(),
@@ -162,5 +172,121 @@ describe('followBuildLogs', () => {
 
     expect(retries).toHaveLength(1); // the 429 was retried, not thrown
     expect(result).toEqual({ status: 'complete', terminal: true });
+  });
+
+  it('keeps reading terminal pages until delayed final logs are captured', async () => {
+    const pages = [
+      page({ status: 'complete', terminal: true, logsComplete: false, lastSeq: 2 }),
+      page({
+        status: 'complete',
+        terminal: true,
+        logsComplete: true,
+        lines: [{ seq: 3, line: 'final tail', stream: 'stdout', ts: 3 }],
+        lastSeq: 3,
+      }),
+    ];
+    const sinceCalls: Array<number> = [];
+    const written: Array<string> = [];
+
+    await followBuildLogs({
+      fetchPage: (since) => {
+        sinceCalls.push(since);
+        return Promise.resolve(pages.shift()!);
+      },
+      write: (line) => written.push(line),
+      sleep: () => Promise.resolve(),
+      since: 2,
+      status: 'complete',
+    });
+
+    expect(sinceCalls).toEqual([2, 2]);
+    expect(written).toEqual(['final tail']);
+  });
+
+  it.each([undefined, null])(
+    'prints retained logs before rejecting %s completion proof',
+    async (logsComplete) => {
+      const written: Array<string> = [];
+      await expect(
+        followBuildLogs({
+          fetchPage: () =>
+            Promise.resolve(
+              page({
+                status: 'complete',
+                terminal: true,
+                logsComplete,
+                lines: [{ seq: 3, line: 'retained tail', stream: 'stdout', ts: 3 }],
+                lastSeq: 3,
+              }),
+            ),
+          write: (line) => written.push(line),
+          sleep: () => Promise.resolve(),
+          since: 2,
+          status: 'complete',
+        }),
+      ).rejects.toThrow('upgrade the platform runtime');
+      expect(written).toEqual(['retained tail']);
+    },
+  );
+
+  it('bounds terminal drain waiting at two minutes', async () => {
+    let now = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    let fetches = 0;
+    await expect(
+      followBuildLogs({
+        fetchPage: () => {
+          fetches++;
+          return Promise.resolve(page({ status: 'complete', terminal: true, logsComplete: false }));
+        },
+        write: () => {},
+        sleep: () => {
+          now += 60_000;
+          return Promise.resolve();
+        },
+        since: 0,
+        status: 'complete',
+      }),
+    ).rejects.toThrow('did not confirm completion');
+    expect(fetches).toBe(3);
+  });
+
+  it('follows an initially terminal build whose producer has not drained', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('VOID_TOKEN', 'token');
+    vi.stubEnv('VOID_API_URL', '');
+    vi.stubEnv('VOID_PROJECT', '');
+    vi.spyOn(PlatformClient.prototype, 'listProjects').mockResolvedValue([
+      { id: 'project', slug: 'project' } as Awaited<
+        ReturnType<PlatformClient['listProjects']>
+      >[number],
+    ]);
+    const logs = vi
+      .spyOn(PlatformClient.prototype, 'getBuildLogs')
+      .mockResolvedValueOnce(
+        page({ terminal: true, status: 'complete', logsComplete: false, lastSeq: 2 }),
+      )
+      .mockResolvedValueOnce(
+        page({
+          terminal: true,
+          status: 'complete',
+          logsComplete: true,
+          lastSeq: 3,
+          lines: [{ seq: 3, line: 'delayed tail', stream: 'stdout', ts: 3 }],
+        }),
+      );
+    const write = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const run = runBuildCommand(process.cwd(), {
+      subcommand: 'logs',
+      buildId: 'build',
+      projectName: 'project',
+      follow: true,
+    });
+    await vi.runAllTimersAsync();
+    await run;
+
+    expect(logs.mock.calls.map(([, , since]) => since)).toEqual([0, 2]);
+    expect(write.mock.calls.flat()).toContain('delayed tail');
   });
 });

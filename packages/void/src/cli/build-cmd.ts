@@ -8,6 +8,19 @@ import { readProjectConfig } from './project.ts';
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project.ts';
 
 const POLL_MS = 1000;
+const BUILD_LOG_DRAIN_TIMEOUT_MS = 2 * 60_000;
+
+function isBuildLogComplete(page: BuildLogsResponse): boolean {
+  if (!page.terminal) {
+    return false;
+  }
+  if (page.logsComplete === null || page.logsComplete === undefined) {
+    throw new Error(
+      'This platform cannot confirm that the final build logs were captured. Ask its administrator to upgrade the platform runtime, or read the retained logs without --follow.',
+    );
+  }
+  return page.logsComplete === true;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -30,7 +43,7 @@ export function isFatalFollowError(err: unknown): boolean {
 
 /**
  * Pure follow-loop: repeatedly fetch pages since a cursor, write each new
- * line, and stop when the build reaches a terminal status. `fetchPage`,
+ * line, and stop when the terminal build confirms its final logs were captured. `fetchPage`,
  * `write`, and `sleep` are injected so this is unit-testable. Returns the
  * final status + terminal flag.
  *
@@ -52,6 +65,7 @@ export async function followBuildLogs(opts: {
 }): Promise<{ status: string; terminal: boolean }> {
   let cursor = opts.since;
   let status = opts.status;
+  let terminalSince: number | null = null;
   const pollMs = opts.pollMs ?? POLL_MS;
   for (;;) {
     await opts.sleep(pollMs);
@@ -71,8 +85,19 @@ export async function followBuildLogs(opts: {
     }
     cursor = pageResult.lastSeq;
     status = pageResult.status;
-    if (pageResult.terminal) {
+    if (isBuildLogComplete(pageResult)) {
       return { status, terminal: true };
+    }
+    if (pageResult.terminal) {
+      const now = Date.now();
+      terminalSince ??= now;
+      if (now - terminalSince >= BUILD_LOG_DRAIN_TIMEOUT_MS) {
+        throw new Error(
+          'Build finished, but its log producer did not confirm completion. Retry the command to recover the final log tail.',
+        );
+      }
+    } else {
+      terminalSince = null;
     }
   }
 }
@@ -191,7 +216,7 @@ async function runBuildLogsCommand(
   let status = first.status;
   let terminal = first.terminal;
 
-  if (args.follow && !terminal) {
+  if (args.follow && !isBuildLogComplete(first)) {
     ({ status, terminal } = await followBuildLogs({
       fetchPage: (since) => client.getBuildLogs(projectId, buildId!, since),
       write,

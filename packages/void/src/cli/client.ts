@@ -300,6 +300,7 @@ export type BuildLogsResponse = {
   lastSeq: number;
   status: string;
   terminal: boolean;
+  logsComplete?: boolean | null;
   external: string | null;
 };
 

@@ -1550,11 +1550,11 @@ void build logs [build] [--follow] [--output <file>] [--project <slug>]
 Stream, tail, or download the build logs for a **container** build. With no
 `[build]` argument, targets the project's most recent build.
 
-| Flag                     | Purpose                                                           | Default |
-| ------------------------ | ----------------------------------------------------------------- | ------- |
-| `--follow`, `-f`         | Live-tail: poll until the build reaches a terminal status.        | off     |
-| `--output <file>`, `-o`  | Write logs to a file instead of stdout (appends while following). | stdout  |
-| `--project <slug>`, `-p` | Target project.                                                   | linked  |
+| Flag                     | Purpose                                                                   | Default |
+| ------------------------ | ------------------------------------------------------------------------- | ------- |
+| `--follow`, `-f`         | Live-tail: poll until the build finishes and its final logs are captured. | off     |
+| `--output <file>`, `-o`  | Write logs to a file instead of stdout (appends while following).         | stdout  |
+| `--project <slug>`, `-p` | Target project.                                                           | linked  |
 
 **Project resolution** follows the same order as deploy: positional / `--project`,
 `VOID_PROJECT`, linked project (`.void/project.json`).
@@ -1562,6 +1562,8 @@ Stream, tail, or download the build logs for a **container** build. With no
 Builds run on **GitHub Actions** keep their logs on GitHub — the command prints
 the Actions run URL instead of streaming. Only the last 10,000 log lines of a
 container build are retained.
+
+Following waits for the platform to confirm the final log tail. If the platform cannot confirm it, upgrade the platform runtime or read the retained logs without `--follow`. An unfinished final tail reports an error after two minutes; retry to recover it.
 
 Examples:
 

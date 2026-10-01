@@ -4,12 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useFateClient } from 'react-fate';
 import { isTerminalBuildStatus } from '../../../build-status.ts';
 import type { Build } from '../../../types.ts';
-import {
-  BuildLogsView,
-  BuildStatusView,
-  buildLogsRequest,
-  buildStatusRequest,
-} from '../../fate/views.ts';
+import { BuildLogsView, buildLogsRequest } from '../../fate/views.ts';
 
 export { isTerminalBuildStatus };
 
@@ -17,14 +12,16 @@ type LogLine = { seq: number; line: string; stream: string };
 export function BuildLogs({ build }: { build: Build }) {
   const fate = useFateClient();
   const [lines, setLines] = useState<Array<LogLine> | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const pre = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
     let active = true;
     let cursor = 0;
     let polling = false;
-    let timer: ReturnType<typeof setInterval> | undefined;
+    let terminalSince: number | null = null;
     setLines(null);
+    setError(null);
 
     const pollLogs = async () => {
       if (polling) {
@@ -39,13 +36,19 @@ export function BuildLogs({ build }: { build: Build }) {
           return;
         }
         const { data } = (await fate.readView(BuildLogsView, ref)) as unknown as {
-          data: { lines: Array<LogLine>; lastSeq: number };
+          data: {
+            lines: Array<LogLine>;
+            lastSeq: number;
+            terminal: boolean;
+            logsComplete: boolean | null;
+          };
         };
         if (!active) {
           return;
         }
         cursor = Math.max(cursor, data.lastSeq);
         setLines((current) => [...(current ?? []), ...data.lines]);
+        return data;
       } catch {
         // A later poll can recover from a transient log request failure.
       } finally {
@@ -54,29 +57,36 @@ export function BuildLogs({ build }: { build: Build }) {
     };
 
     const poll = async () => {
-      await pollLogs();
-      try {
-        const { buildStatus: ref } = await fate.request(buildStatusRequest(build.id), {
-          mode: 'network-only',
-        });
-        const status = ref
-          ? ((await fate.readView(BuildStatusView, ref)) as unknown as {
-              data: { terminal: boolean };
-            })
-          : null;
-        if (status?.data.terminal) {
-          clearInterval(timer);
-          await pollLogs();
-        }
-      } catch {
-        // Keep polling while the status probe is unavailable.
+      const page = await pollLogs();
+      if (!page) {
+        return;
+      }
+      if (!page.terminal) {
+        terminalSince = null;
+        return;
+      }
+      if (page.logsComplete === true) {
+        clearInterval(timer);
+        return;
+      }
+      if (page.logsComplete == null) {
+        clearInterval(timer);
+        setError(
+          'Final log completion is unavailable. Upgrade the platform runtime to follow the complete log tail.',
+        );
+        return;
+      }
+      terminalSince ??= Date.now();
+      if (Date.now() - terminalSince >= 2 * 60_000) {
+        clearInterval(timer);
+        setError(
+          'The build finished, but its final logs have not been confirmed. Reload to recover the final log tail.',
+        );
       }
     };
 
-    void pollLogs();
-    if (!isTerminalBuildStatus(build.status)) {
-      timer = setInterval(() => void poll(), 2_000);
-    }
+    const timer = setInterval(() => void poll(), 2_000);
+    void poll();
     return () => {
       active = false;
       clearInterval(timer);
@@ -93,6 +103,7 @@ export function BuildLogs({ build }: { build: Build }) {
   return (
     <>
       <h2>Build Logs</h2>
+      {error && <p role="alert">{error}</p>}
       <pre
         ref={pre}
         id="build-log"

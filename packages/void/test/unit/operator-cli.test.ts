@@ -993,22 +993,54 @@ describe('operator transport and execution', () => {
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
-  it('uses a bounded quiet window for legacy terminal responses without completion state', async () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    let now = 0;
-    vi.spyOn(Date, 'now').mockImplementation(() => now);
-    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => {
-      now += 10_000;
-      return Response.json({ lines: [], lastSeq: 3, terminal: true });
-    });
+  it.each([undefined, null])(
+    'requires an upgrade instead of declaring logs complete for a terminal response with %s completion state',
+    async (logsComplete) => {
+      const write = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+        Response.json({
+          lines: [{ seq: 3, line: 'retained final row' }],
+          lastSeq: 3,
+          terminal: true,
+          logsComplete,
+        }),
+      );
 
-    await followOperatorLogs(
-      new OperatorClient('https://one.example', 'token', fetcher),
-      parseOperatorArgs(['build', 'logs', 'id', '--follow', '--since', '3', '--json']),
-      undefined,
-      0,
+      await expect(
+        followOperatorLogs(
+          new OperatorClient('https://one.example', 'token', fetcher),
+          parseOperatorArgs(['build', 'logs', 'id', '--follow', '--since', '2', '--json']),
+          undefined,
+          0,
+        ),
+      ).rejects.toMatchObject({
+        code: 'log_completion_unavailable',
+        message: expect.stringContaining('Upgrade the platform runtime'),
+      });
+
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(write.mock.calls.map(([line]) => String(line)).join('\n')).toContain(
+        'retained final row',
+      );
+    },
+  );
+
+  it('reads historical build logs without following when completion state is absent', async () => {
+    const write = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        lines: [{ seq: 3, line: 'historical row' }],
+        lastSeq: 3,
+        terminal: true,
+      }),
     );
+    vi.stubGlobal('fetch', fetcher);
+    vi.stubEnv('VOID_OPERATOR_TOKEN', 'operator-token');
+    vi.stubEnv('VOID_API_URL', 'https://one.example');
 
-    expect(fetcher).toHaveBeenCalledTimes(4);
+    await runOperatorCommand(parseOperatorArgs(['build', 'logs', 'id', '--json']));
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(write.mock.calls.map(([line]) => String(line)).join('\n')).toContain('historical row');
   });
 });

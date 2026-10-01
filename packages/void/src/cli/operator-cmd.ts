@@ -14,7 +14,6 @@ import { OperatorClient, OperatorClientError } from './operator-client.ts';
 
 const MAX_RUNTIME_FOLLOW_ROWS = 10_000;
 export const BUILD_LOG_DRAIN_TIMEOUT_MS: number = 2 * 60_000;
-export const LEGACY_BUILD_LOG_QUIET_MS: number = 30_000;
 
 function printable(value: unknown): string {
   if (value === null || value === undefined) {
@@ -366,8 +365,6 @@ export async function followOperatorLogs(
   const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   const query = { ...args.query };
   let terminalBuildSince: number | null = null;
-  let legacyQuietSince: number | null = null;
-  let legacyQuietSeq: number | null = null;
   let previousRuntimeRows = new Map<string, number>();
   let currentRuntimeRows = new Map<string, number>();
   let currentRuntimeRowCount = 0;
@@ -434,6 +431,12 @@ export async function followOperatorLogs(
           if (result.logsComplete === true) {
             return;
           }
+          if (result.logsComplete === null || result.logsComplete === undefined) {
+            throw new OperatorClientError(
+              'This platform cannot confirm that the final build logs were captured. Upgrade the platform runtime, or read the retained logs without --follow.',
+              'log_completion_unavailable',
+            );
+          }
           const now = Date.now();
           terminalBuildSince ??= now;
           if (now - terminalBuildSince >= BUILD_LOG_DRAIN_TIMEOUT_MS) {
@@ -442,21 +445,8 @@ export async function followOperatorLogs(
               'invalid_response',
             );
           }
-          if (result.logsComplete === null || result.logsComplete === undefined) {
-            if (legacyQuietSeq !== result.lastSeq) {
-              legacyQuietSeq = result.lastSeq;
-              legacyQuietSince = now;
-            } else {
-              legacyQuietSince ??= now;
-              if (now - legacyQuietSince >= LEGACY_BUILD_LOG_QUIET_MS) {
-                return;
-              }
-            }
-          }
         } else {
           terminalBuildSince = null;
-          legacyQuietSince = null;
-          legacyQuietSeq = null;
         }
       } else {
         if (typeof result.nextCursor === 'string' && result.nextCursor) {

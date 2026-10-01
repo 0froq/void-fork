@@ -2911,6 +2911,7 @@ const app = new Hono<ApiEnv>()
         lastSeq: 0,
         status: build.status,
         terminal,
+        logsComplete: terminal,
         external: build.logs_url ?? null,
       });
     }
@@ -2923,12 +2924,16 @@ const app = new Hono<ApiEnv>()
       lastSeq: number;
       status?: string;
       terminal?: boolean;
+      logsComplete?: boolean | null;
     };
+    // Claiming a container build durably sets started_at. Only a terminal row
+    // that was never claimed can prove completion without a producer marker.
+    const logsComplete = body.logsComplete ?? (terminal && build.started_at === null ? true : null);
     // The DO holds the authoritative live status. A completion path sets the DO
     // terminal FIRST, then does the Postgres CAS write — so if that PG write
     // throws, the PG `build.status` row can lag ACTIVE until the stale reaper.
-    // OR the two terminal signals (terminal is never resurrected) so a `--follow`
-    // client stops promptly instead of polling through that window.
+    // OR the two terminal signals (terminal is never resurrected) so a follower
+    // can finish once the DO also confirms its final log drain.
     const doTerminal = body.terminal === true;
     if (doTerminal && !terminal) {
       // Snapshot was non-terminal but the DO is terminal. Two cases:
@@ -2943,6 +2948,7 @@ const app = new Hono<ApiEnv>()
           lastSeq: body.lastSeq,
           status: fresh.status,
           terminal: true,
+          logsComplete,
           external: null,
         });
       }
@@ -2951,6 +2957,7 @@ const app = new Hono<ApiEnv>()
         lastSeq: body.lastSeq,
         status: body.status ?? build.status,
         terminal: true,
+        logsComplete,
         external: null,
       });
     }
@@ -2959,6 +2966,7 @@ const app = new Hono<ApiEnv>()
       lastSeq: body.lastSeq,
       status: build.status,
       terminal,
+      logsComplete,
       external: null,
     });
   })

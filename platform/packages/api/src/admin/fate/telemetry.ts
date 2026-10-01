@@ -23,6 +23,8 @@ export const buildLogsDataView = dataView<BuildLogRecord>('AdminBuildLogs')({
   id: true,
   lines: true,
   lastSeq: true,
+  terminal: true,
+  logsComplete: true,
 });
 export const buildStatusDataView = dataView<BuildStatusRecord>('AdminBuildStatus')({
   id: true,
