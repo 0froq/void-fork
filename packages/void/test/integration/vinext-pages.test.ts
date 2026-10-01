@@ -1,7 +1,12 @@
 import { join } from 'node:path';
 import spawn from 'cross-spawn';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
-import { getPort, waitForServer, killChild } from '../../../../test/integration-helpers.ts';
+import {
+  getPort,
+  waitForServer,
+  killChild,
+  collectServerOutput,
+} from '../../../../test/integration-helpers.ts';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const PLAYGROUND = 'playground/vinext-pages';
@@ -10,7 +15,7 @@ let DEV_BASE: string;
 
 describe('playground/vinext-pages dev', () => {
   let child: ReturnType<typeof spawn>;
-  let stderr = '';
+  let serverOutput = () => '';
 
   beforeAll(async () => {
     DEV_PORT = await getPort();
@@ -38,19 +43,20 @@ describe('playground/vinext-pages dev', () => {
       },
     );
 
-    child.stderr!.on('data', (chunk: Buffer) => {
-      stderr += String(chunk);
-    });
+    serverOutput = collectServerOutput(child);
 
-    await waitForServer(DEV_BASE, 20_000);
+    await waitForServer(DEV_BASE, 20_000, {
+      isAlive: () => child.exitCode === null && child.signalCode === null,
+      diagnostics: serverOutput,
+    });
   });
 
   afterAll(async () => {
     if (child) {
       await killChild(child);
     }
-    if (stderr.includes('error when starting dev server')) {
-      throw new Error(stderr);
+    if (serverOutput().includes('error when starting dev server')) {
+      throw new Error(serverOutput());
     }
   });
 
