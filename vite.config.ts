@@ -5,6 +5,10 @@ import { defineConfig } from 'vite-plus';
 import { SuiteSequencer } from './test/sequencer.ts';
 
 const maxWorkers = process.env.CI ? 2 : Math.max(2, Math.floor(availableParallelism() * 0.75));
+const apiTimezoneTests = [
+  'platform/packages/api/test/integration/api-delete-accounting.test.ts',
+  'platform/packages/api/test/integration/email-connections.test.ts',
+];
 
 // Vitest forwards a FILTERED env to test workers — in CI only VOID_E2E_CF_TOKEN survives, while
 // VOID_E2E_CF_ACCOUNT_ID and VOID_E2E_RUN_ID are dropped. The gated live Cloudflare deploy e2e
@@ -406,6 +410,7 @@ export default defineConfig({
         resolve: { alias: platformAlias },
         test: {
           name: 'platform-unit',
+          pool: 'threads',
           include: ['platform/packages/*/test/**/*.test.ts'],
           exclude: ['platform/packages/api/test/integration/**'],
           maxWorkers,
@@ -416,7 +421,21 @@ export default defineConfig({
         resolve: { alias: platformAlias },
         test: {
           name: 'platform-api-integration',
+          include: apiTimezoneTests,
+          globalSetup: ['platform/packages/api/test/integration/global-setup.ts'],
+          setupFiles: ['platform/packages/api/test/integration/setup.ts'],
+          ...(process.env.VOID_TEST_DATABASE_URL ? { fileParallelism: false } : {}),
+          maxWorkers,
+        },
+      },
+      {
+        extends: false,
+        resolve: { alias: platformAlias },
+        test: {
+          name: 'platform-api-integration-threads',
+          pool: 'threads',
           include: ['platform/packages/api/test/integration/**/*.test.ts'],
+          exclude: apiTimezoneTests,
           globalSetup: ['platform/packages/api/test/integration/global-setup.ts'],
           setupFiles: ['platform/packages/api/test/integration/setup.ts'],
           ...(process.env.VOID_TEST_DATABASE_URL ? { fileParallelism: false } : {}),

@@ -33,9 +33,11 @@ vpr test:all
 or hanging tests when they occur instead of routinely increasing timeouts.
 
 Platform projects run first; SDK unit and integration files then share a scheduling phase. Unit files
-use worker threads to reduce startup time; integration files use forks. This keeps database engines
-from competing with all framework compilers at startup. Keep module isolation enabled: these suites
-mock globals, keep database state, and exercise real process/lock boundaries.
+and most API integration files use isolated worker threads to reduce startup time. API tests that
+change the process timezone use forks, because threads cannot change Node's timezone. Select every
+API file with `vp test run --project 'platform-api-integration*'`. SDK integration files use forks.
+This keeps database engines from competing with all framework compilers at startup. Keep module
+isolation enabled: these suites mock globals, keep database state, and exercise real process/lock boundaries.
 The full verification command builds before running the platform's type-aware lint, so it also
 works without a pre-existing dashboard `.void/tsconfig.json`.
 

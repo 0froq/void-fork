@@ -80,7 +80,7 @@ jobs:
           node-version-file: .node-version
       - run: vp run build
       - run: vp run --filter './platform/packages/**' build
-      - run: vp test run --project ${{ matrix.project }}
+      - run: vp test run --project '${{ matrix.project }}*'
 
   # Upgrade a populated previous schema, then run that immutable runtime's tests.
   # The prod branch can already be the candidate, so never use it as the baseline.
@@ -172,6 +172,6 @@ jobs:
         run: |
           vp run build
           vp run --filter './platform/packages/**' build
-          vp test run --project platform-api-integration
+          vp test run --project 'platform-api-integration*'
         env:
           VOID_TEST_DATABASE_URL: ${{ env.COMPAT_DATABASE_URL }}
