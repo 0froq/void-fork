@@ -6,9 +6,9 @@ outline: deep
 
 ## Managing Email
 
-These commands apply to a platform that enables email. Every project can send from `<slug>+tag@<mail domain>` on the platform’s shared mail domain and receive there once its recipient rule is ready; the [email guide](/guide/email) describes what applications do with that.
+These commands apply to a platform that enables email. Every project can send from `<slug>+tag@<mail domain>` on the platform’s shared mail domain. Deploying an app with `email/` handlers sets up receiving at that address once its recipient rule is ready; the [email guide](/guide/email) describes what applications do with that.
 
-Shared inbound mail uses one exact routing rule per project and enables Cloudflare’s per-zone plus addressing. Existing rules and the apex catch-all remain in place. Cloudflare normally allows [200 routing rules per domain](https://developers.cloudflare.com/email-service/platform/limits/); remove unused rules or request a higher limit if the shared domain reaches capacity. An unrelated rule for a project’s base address or a plus address blocks its setup until that conflict is removed.
+Shared inbound mail uses one exact routing rule per receiving project and enables Cloudflare’s per-zone plus addressing. Creating a project or deploying an app that only sends mail consumes no inbound rule. Existing rules and the apex catch-all remain in place. Cloudflare normally allows [200 routing rules per domain](https://developers.cloudflare.com/email-service/platform/limits/); remove unused rules or request a higher limit if the shared domain reaches capacity. An unrelated rule for a project’s base address or a plus address blocks its setup until that conflict is removed.
 
 If recipient creation is interrupted, inspect its retained intent:
 

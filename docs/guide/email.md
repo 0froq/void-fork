@@ -395,7 +395,7 @@ remain available through that domain's sending capability.
 ### Configuring inbound delivery
 
 On an email-enabled platform, `<slug>+anything@<mail domain>` reaches your
-deployed `email/` handlers without per-project DNS setup once the platform has verified your recipient rule and enabled plus addressing. Deployment reports a routing conflict or capacity limit if setup cannot complete. A
+deployed `email/` handlers without per-project DNS setup once the platform has verified your recipient rule and enabled plus addressing. Void sets up that rule when you deploy handlers; creating a project or only sending mail requires no inbound rule. Deployment reports a routing conflict or capacity limit if setup cannot complete. A
 [registered custom domain](#your-own-domain-on-the-platform) reaches those
 handlers once its inbound readiness is `ready`. Use `void email domain status`
 to check current provider routing and any remaining setup steps.

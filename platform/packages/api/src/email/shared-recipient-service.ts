@@ -1,9 +1,10 @@
+import type { DeployManifest } from '@void/deploy-core';
 import { and, asc, eq, ne, sql } from 'drizzle-orm';
 import type { Db, DbOrTx } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { generateId } from '../id.ts';
 import { CloudflareApiError } from '../provisioning/cloudflare-api.ts';
-import { projects } from '../schema.ts';
+import { deployments, projects } from '../schema.ts';
 import { createCfCustomerClient, type CfEmailRoutingRule } from './cf-customer.ts';
 import {
   emailDomainRoutes,
@@ -21,6 +22,25 @@ import {
 type Bindings = ApiEnv['Bindings'];
 type Recipient = typeof emailSharedRecipients.$inferSelect;
 const LEASE_MS = 15 * 60_000;
+// Canonical deployment manifests already distinguish handlers from send-only apps.
+const inboundManifest = sql`${deployments.manifest}::jsonb -> 'emailProtocolVersion' = '1'::jsonb`;
+
+async function hasActiveEmailHandlers(db: DbOrTx, projectId: string) {
+  const rows = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .innerJoin(
+      deployments,
+      and(
+        eq(deployments.id, projects.active_deployment_id),
+        eq(deployments.project_id, projects.id),
+        eq(deployments.status, 'live'),
+      ),
+    )
+    .where(and(eq(projects.id, projectId), eq(projects.status, 'active'), inboundManifest))
+    .limit(1);
+  return rows.length > 0;
+}
 
 async function recipientConnection(db: DbOrTx, env: Bindings, row: Recipient) {
   const [resolved] = await db
@@ -396,7 +416,17 @@ export async function reconcileSharedEmailRecipient(
   db: Db,
   env: Bindings,
   projectId: string,
+  incomingManifest?: Pick<DeployManifest, 'emailProtocolVersion'>,
 ): Promise<void> {
+  // Admission supplies its validated incoming manifest so a first receiving
+  // deployment can provision before it has an active deployment pointer.
+  if (
+    incomingManifest
+      ? incomingManifest.emailProtocolVersion !== 1
+      : !(await hasActiveEmailHandlers(db, projectId))
+  ) {
+    return;
+  }
   const shared = await sharedRoute(db, env);
   if (!shared) {
     return;
@@ -417,7 +447,8 @@ export async function reconcileSharedEmailRecipient(
     if (
       !lockedProject ||
       lockedProject.status !== 'active' ||
-      lockedProject.slug !== project.slug
+      lockedProject.slug !== project.slug ||
+      (!incomingManifest && !(await hasActiveEmailHandlers(tx, projectId)))
     ) {
       return null;
     }
@@ -792,6 +823,14 @@ export async function reconcileSharedEmailRecipients(db: Db, env: Bindings, limi
   const rows = await db
     .select({ id: projects.id })
     .from(projects)
+    .innerJoin(
+      deployments,
+      and(
+        eq(deployments.id, projects.active_deployment_id),
+        eq(deployments.project_id, projects.id),
+        eq(deployments.status, 'live'),
+      ),
+    )
     .leftJoin(
       emailSharedRecipients,
       and(
@@ -802,7 +841,7 @@ export async function reconcileSharedEmailRecipients(db: Db, env: Bindings, limi
         ),
       ),
     )
-    .where(eq(projects.status, 'active'))
+    .where(and(eq(projects.status, 'active'), inboundManifest))
     .orderBy(sql`${emailSharedRecipients.updated_at} asc nulls first`, asc(projects.id))
     .limit(limit);
   for (const row of rows) {

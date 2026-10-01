@@ -2095,7 +2095,12 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     getPlatformCapabilities(context.env).email &&
     context.env.EMAIL_SENDER_DOMAIN
   ) {
-    await reconcileSharedEmailRecipient(context.get('db'), context.env, projectId);
+    await reconcileSharedEmailRecipient(
+      context.get('db'),
+      context.env,
+      projectId,
+      incomingManifest,
+    );
     const readiness = await getSharedEmailRecipientReadiness(
       context.get('db'),
       context.env,

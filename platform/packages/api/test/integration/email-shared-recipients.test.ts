@@ -24,13 +24,14 @@ import {
 } from '../../src/email/shared-recipient-service.ts';
 import type { ApiEnv } from '../../src/env.ts';
 import app from '../../src/index.ts';
-import { operatorEvents, projects, resources } from '../../src/schema.ts';
+import { deployments, operatorEvents, projects, resources } from '../../src/schema.ts';
 import { callsByTag, stubCustomerCf } from './email-domain-cf-stub.ts';
 import {
   clearTables,
   createTestProject,
   createTestUser,
   createOperatorToken,
+  createTestDeployment,
   setupEnv,
   teardownEnv,
   type TestEnv,
@@ -94,11 +95,154 @@ async function setup(config: NonNullable<Parameters<typeof stubCustomerCf>[0]> =
   );
   const user = await createTestUser(env.db);
   const project = await createTestProject(env.db, user.id, 'shared-project');
+  await deployEmailHandlers(project.id);
   return { provider, user, project };
+}
+async function deployEmailHandlers(projectId: string) {
+  const deployment = await createTestDeployment(env.db, projectId);
+  await env.db
+    .update(deployments)
+    .set({ manifest: JSON.stringify({ version: 3, bindings: {}, emailProtocolVersion: 1 }) })
+    .where(eq(deployments.id, deployment.id));
+  return deployment;
 }
 async function ledger() {
   return (await env.db.select().from(emailSharedRecipients))[0]!;
 }
+
+describe('shared inbound allocation', () => {
+  it('creates a project without allocating an inbound provider rule', async () => {
+    const { user, provider } = await setup();
+    const response = await app.fetch(
+      new Request('http://localhost/projects', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: 'created-project' }),
+      }),
+      bindings(),
+    );
+    expect(response.status).toBe(201);
+    expect(await env.db.select().from(emailSharedRecipients)).toHaveLength(0);
+    expect(callsByTag(provider.calls, 'literalRuleCreate')).toHaveLength(0);
+  });
+
+  it('allocates no inbound rule for static or send-only live apps, or inactive email builds', async () => {
+    const { project, provider } = await setup();
+    const [active] = await env.db
+      .select()
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id));
+    for (const manifest of [
+      { version: 3, type: 'static', bindings: {} },
+      // Outbound SDK use does not emit the inbound protocol declaration.
+      { version: 3, type: 'void', bindings: {}, workerMain: 'worker.js' },
+    ]) {
+      await env.db
+        .update(deployments)
+        .set({ manifest: JSON.stringify(manifest) })
+        .where(eq(deployments.id, active!.id));
+      await reconcileSharedEmailRecipient(env.db, bindings(), project.id);
+      await reconcileSharedEmailRecipients(env.db, bindings());
+    }
+    const inactive = await createTestDeployment(env.db, project.id, 'failed');
+    await env.db
+      .update(deployments)
+      .set({ manifest: JSON.stringify({ version: 3, bindings: {}, emailProtocolVersion: 1 }) })
+      .where(eq(deployments.id, inactive.id));
+    await reconcileSharedEmailRecipients(env.db, bindings());
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: inactive.id })
+      .where(eq(projects.id, project.id));
+    await reconcileSharedEmailRecipient(env.db, bindings(), project.id);
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: null })
+      .where(eq(projects.id, project.id));
+    await reconcileSharedEmailRecipient(env.db, bindings(), project.id);
+    expect(await env.db.select().from(emailSharedRecipients)).toHaveLength(0);
+    expect(callsByTag(provider.calls, 'literalRuleCreate')).toHaveLength(0);
+  });
+
+  it('reaches a receiving app in a bounded repair batch behind non-email projects', async () => {
+    const { user, project, provider } = await setup();
+    // These sort ahead of the receiving app and must not consume the repair limit.
+    for (let index = 0; index < 12; index++) {
+      const id = `proj_a_static_${index}`;
+      await env.db
+        .insert(projects)
+        .values({ id, user_id: user.id, slug: `static-project-${index}` });
+      await createTestDeployment(env.db, id);
+    }
+    await reconcileSharedEmailRecipients(env.db, bindings(), 1);
+    expect(await env.db.select().from(emailSharedRecipients)).toMatchObject([
+      { project_id: project.id, status: 'ready' },
+    ]);
+    expect(callsByTag(provider.calls, 'literalRuleCreate')).toHaveLength(1);
+  });
+
+  it('provisions the validated incoming receiving app before its first activation', async () => {
+    const { project, provider } = await setup();
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: null })
+      .where(eq(projects.id, project.id));
+    await env.db.delete(deployments).where(eq(deployments.project_id, project.id));
+    await reconcileSharedEmailRecipient(env.db, bindings(), project.id, {
+      emailProtocolVersion: 1,
+    });
+    expect(await getSharedEmailRecipientReadiness(env.db, bindings(), project.id)).toMatchObject({
+      status: 'ready',
+    });
+    expect(callsByTag(provider.calls, 'literalRuleCreate')).toHaveLength(1);
+  });
+
+  it('uses the incoming handler declaration during real first-deploy admission', async () => {
+    const { project, user, provider } = await setup({
+      failOn: { literalRuleCreate: { status: 409, message: 'routing rule capacity limit' } },
+      failBeforeEffect: ['literalRuleCreate'],
+    });
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: null })
+      .where(eq(projects.id, project.id));
+    await env.db.delete(deployments).where(eq(deployments.project_id, project.id));
+    const response = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          manifest: { version: 3, assetManifestVersion: 2, bindings: {}, emailProtocolVersion: 1 },
+          assetManifest: {},
+          hasWorker: true,
+        }),
+      }),
+      bindings(),
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      event: 'error',
+      message: expect.stringContaining('could not allocate an Email Routing rule'),
+    });
+    expect(callsByTag(provider.calls, 'literalRuleCreate')).toHaveLength(1);
+  });
+
+  it('retains existing owned rules when handlers are removed and still cleans them up on deletion', async () => {
+    const { project, provider } = await setup();
+    await reconcileSharedEmailRecipient(env.db, bindings(), project.id);
+    const before = await ledger();
+    await env.db
+      .update(deployments)
+      .set({ manifest: JSON.stringify({ version: 3, bindings: {} }) })
+      .where(eq(deployments.project_id, project.id));
+    await reconcileSharedEmailRecipients(env.db, bindings());
+    expect(await ledger()).toEqual(before);
+    expect(callsByTag(provider.calls, 'literalRuleDelete')).toHaveLength(0);
+    await removeSharedEmailRecipients(env.db, bindings(), project.id);
+    expect(await ledger()).toMatchObject({ status: 'removed' });
+    expect(callsByTag(provider.calls, 'literalRuleDelete')).toHaveLength(1);
+  });
+});
 
 async function recoveryOperator() {
   const admin = await createTestUser(
@@ -356,6 +500,7 @@ describe('managed shared subdomain recipients', () => {
     await removeSharedEmailRecipients(env.db, bindings(), project.id);
     await deleteProjectCascade(env.db, project.id);
     const replacement = await createTestProject(env.db, user.id, project.slug);
+    await deployEmailHandlers(replacement.id);
     await reconcileSharedEmailRecipient(env.db, bindings(), replacement.id);
     paused.release();
     await stale;
@@ -385,6 +530,7 @@ describe('managed shared subdomain recipients', () => {
     await removeSharedEmailRecipients(env.db, bindings(), project.id);
     await deleteProjectCascade(env.db, project.id);
     const replacement = await createTestProject(env.db, user.id, project.slug);
+    await deployEmailHandlers(replacement.id);
     await reconcileSharedEmailRecipient(env.db, bindings(), replacement.id);
     paused.release();
     await stale;
@@ -407,6 +553,7 @@ describe('managed shared subdomain recipients', () => {
     await removeSharedEmailRecipients(env.db, bindings(), project.id);
     await deleteProjectCascade(env.db, project.id);
     const replacement = await createTestProject(env.db, user.id, project.slug);
+    await deployEmailHandlers(replacement.id);
     await reconcileSharedEmailRecipient(env.db, bindings(), replacement.id);
     paused.release();
     await expect(stale).rejects.toThrow('superseded');
@@ -444,6 +591,7 @@ describe('managed shared subdomain recipients', () => {
     await deleteProjectCascade(env.db, project.id);
     expect(await ledger()).toMatchObject({ status: 'removed', project_id: project.id });
     const replacement = await createTestProject(env.db, user.id, project.slug);
+    await deployEmailHandlers(replacement.id);
     expect(replacement.id).not.toBe(project.id);
   });
   it('reports verified project readiness and blocks it when provider plus addressing drifts', async () => {
@@ -619,8 +767,9 @@ describe('managed shared subdomain recipients', () => {
     await removeSharedEmailRecipients(env.db, bindings(), project.id);
     expect(await ledger()).toMatchObject({ status: 'removed' });
     expect(provider.routingRuleStates.get('shared-zone')!.has('foreign')).toBe(true);
-    await env.db.delete(projects).where(eq(projects.id, project.id));
+    await deleteProjectCascade(env.db, project.id);
     const replacement = await createTestProject(env.db, user.id, project.slug);
+    await deployEmailHandlers(replacement.id);
     await reconcileSharedEmailRecipient(env.db, bindings(), replacement.id);
     const rows = await env.db.select().from(emailSharedRecipients);
     expect(rows).toHaveLength(2);
@@ -692,6 +841,7 @@ describe('managed shared subdomain recipients', () => {
     const { project, user } = await setup();
     await reconcileSharedEmailRecipient(env.db, bindings(), project.id);
     const second = await createTestProject(env.db, user.id, 'second-project');
+    await deployEmailHandlers(second.id);
     await reconcileSharedEmailRecipients(env.db, bindings(), 1);
     expect(await getSharedEmailRecipientReadiness(env.db, bindings(), second.id)).toMatchObject({
       status: 'ready',

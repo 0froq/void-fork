@@ -307,6 +307,12 @@ Recovery performs no provider writes and keeps deleting projects closed; normal
 reconciliation or cleanup verifies the remaining work. Operator intents and
 outcomes use the existing `operator_events` audit.
 
+Allocate shared inbound rules only for the validated incoming manifest or an
+active live deployment declaring `emailProtocolVersion: 1`. Project creation
+and send-only apps must not allocate them. Scheduled repair filters eligible
+deployments before its batch limit. Preserve existing ownership records for
+rollback and deletion cleanup when a later deployment removes its handlers.
+
 Every admin write is additionally same-origin checked in `admin/middleware/auth.ts` before authentication runs; a `POST` whose `Origin` (or, failing that, `Referer`) does not match the request host is rejected with `403`, as is one that carries neither.
 
 ## Usage and Plan Enforcement
