@@ -468,6 +468,330 @@ describe('PlatformClient.finalizeDeploy', () => {
       'index.mjs': Buffer.from('export default {};').toString('base64'),
     });
   });
+
+  function durableResponse(events: Array<unknown>): Response {
+    const response = ndjsonStreamResponse(events);
+    response.headers.set('x-void-deployment-id', 'dpl_durable');
+    return response;
+  }
+
+  const durableDone = {
+    event: 'done',
+    deployment: 'dpl_durable',
+    url: 'https://durable.void.app',
+    urls: ['https://durable.void.app'],
+    assets: 1,
+    workers: 0,
+    published: false,
+  };
+
+  function eventPage(events: Array<{ seq: number; event: unknown }>, terminal = true): Response {
+    return jsonResponse({
+      deploymentId: 'dpl_durable',
+      events,
+      lastSeq: events.at(-1)?.seq ?? 0,
+      terminal,
+    });
+  }
+
+  async function collectDeploy(): Promise<Array<unknown>> {
+    const events: Array<unknown> = [];
+    for await (const event of makeClient().finalizeDeploy(projectId, makePayload())) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  it('keeps one idempotency key across POST retries and chooses a new key for each invocation', async () => {
+    vi.useFakeTimers();
+    fetchMock
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(ndjsonStreamResponse([durableDone]))
+      .mockResolvedValueOnce(ndjsonStreamResponse([durableDone]));
+    try {
+      const first = collectDeploy();
+      await vi.runAllTimersAsync();
+      await first;
+      await collectDeploy();
+      const keys = fetchMock.mock.calls.map(
+        ([, init]) => (init.headers as Record<string, string>)['x-void-deploy-idempotency-key'],
+      );
+      expect(keys[0]).toMatch(/^[a-f0-9-]{36}$/);
+      expect(keys[1]).toBe(keys[0]);
+      expect(keys[2]).not.toBe(keys[0]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recovers the exact accepted deployment when EOF precedes start, preserving published:false', async () => {
+    fetchMock.mockResolvedValueOnce(durableResponse([])).mockResolvedValueOnce(
+      eventPage([
+        { seq: 1, event: { event: 'start', deploymentId: 'dpl_durable' } },
+        { seq: 2, event: durableDone },
+      ]),
+    );
+    expect(await collectDeploy()).toEqual([
+      { event: 'start', deploymentId: 'dpl_durable' },
+      durableDone,
+    ]);
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      `${apiUrl}/projects/${projectId}/deployments/dpl_durable/events?since=0`,
+    );
+    expect(deployPostCalls()).toHaveLength(1);
+  });
+
+  it('reconnects after a read failure from the last consumed sequence without duplicating progress', async () => {
+    const encoder = new TextEncoder();
+    let reads = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (reads++ === 0) {
+          controller.enqueue(
+            encoder.encode(
+              `${JSON.stringify({ event: 'start', deploymentId: 'dpl_durable', seq: 1 })}\n` +
+                `${JSON.stringify({ event: 'worker_readiness', seq: 2 })}\n`,
+            ),
+          );
+        } else {
+          controller.error(new Error('socket disconnected'));
+        }
+      },
+    });
+    const response = new Response(stream, {
+      headers: { 'x-void-deployment-id': 'dpl_durable' },
+    });
+    fetchMock.mockResolvedValueOnce(response).mockResolvedValueOnce(
+      eventPage([
+        { seq: 2, event: { event: 'worker_readiness' } },
+        { seq: 3, event: durableDone },
+      ]),
+    );
+    expect(await collectDeploy()).toEqual([
+      { event: 'start', deploymentId: 'dpl_durable' },
+      { event: 'worker_readiness', seq: 2 },
+      durableDone,
+    ]);
+    expect(fetchMock.mock.calls[1][0]).toContain('/dpl_durable/events?since=2');
+    expect(deployPostCalls()).toHaveLength(1);
+    expect(response.body!.locked).toBe(false);
+  });
+
+  it('observes the operation receipt when a verified no-op returns the existing active deployment', async () => {
+    const noOp = { ...durableDone, deployment: 'dpl_existing' };
+    fetchMock.mockResolvedValueOnce(durableResponse([])).mockResolvedValueOnce(
+      eventPage([
+        { seq: 1, event: { event: 'start', deploymentId: 'dpl_existing' } },
+        { seq: 2, event: noOp },
+      ]),
+    );
+    expect(await collectDeploy()).toEqual([{ event: 'start', deploymentId: 'dpl_durable' }, noOp]);
+    expect(fetchMock.mock.calls[1][0]).toContain('/dpl_durable/events?since=0');
+    expect(deployPostCalls()).toHaveLength(1);
+  });
+
+  it('retries transient observation errors from the same cursor and consumes partial pages', async () => {
+    vi.useFakeTimers();
+    fetchMock
+      .mockResolvedValueOnce(durableResponse([{ event: 'worker_readiness', seq: 2 }]))
+      .mockResolvedValueOnce(jsonResponse({ error: 'unavailable' }, 503))
+      .mockResolvedValueOnce(jsonResponse({ error: 'rate limited' }, 429))
+      .mockResolvedValueOnce(
+        eventPage([{ seq: 3, event: { event: 'worker_upload', modules: 1 } }], false),
+      )
+      .mockResolvedValueOnce(eventPage([{ seq: 4, event: durableDone }]));
+    try {
+      const result = collectDeploy();
+      await vi.runAllTimersAsync();
+      expect(await result).toEqual([
+        { event: 'start', deploymentId: 'dpl_durable' },
+        { event: 'worker_readiness', seq: 2 },
+        { event: 'worker_upload', modules: 1 },
+        durableDone,
+      ]);
+      expect(fetchMock.mock.calls.slice(1).map(([url]) => String(url).split('?')[1])).toEqual([
+        'since=2',
+        'since=2',
+        'since=2',
+        'since=3',
+      ]);
+      expect(deployPostCalls()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([401, 403, 404, 426])(
+    'preserves fatal observation HTTP %i without retrying or redeploying',
+    async (status) => {
+      fetchMock
+        .mockResolvedValueOnce(durableResponse([]))
+        .mockResolvedValueOnce(
+          jsonResponse(
+            { error: 'observation denied', message: 'Actionable platform message.' },
+            status,
+          ),
+        );
+      await expect(collectDeploy()).rejects.toMatchObject({
+        name: 'PlatformApiError',
+        status,
+        message: expect.stringContaining('Actionable platform message.'),
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(deployPostCalls()).toHaveLength(1);
+    },
+  );
+
+  it('bounds consecutive observation retries and retains the final platform error', async () => {
+    vi.useFakeTimers();
+    fetchMock
+      .mockResolvedValueOnce(durableResponse([]))
+      .mockImplementation(async () => jsonResponse({ error: 'unavailable' }, 503));
+    try {
+      const assertion = expect(collectDeploy()).rejects.toMatchObject({
+        name: 'PlatformApiError',
+        status: 503,
+      });
+      await vi.runAllTimersAsync();
+      await assertion;
+      expect(fetchMock).toHaveBeenCalledTimes(7);
+      expect(deployPostCalls()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps EOF behavior on an older platform without a durable receipt', async () => {
+    fetchMock.mockResolvedValueOnce(
+      ndjsonStreamResponse([{ event: 'start', deploymentId: 'dpl_legacy' }]),
+    );
+    expect(await collectDeploy()).toEqual([{ event: 'start', deploymentId: 'dpl_legacy' }]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a persisted cancellation error instead of reporting successful acceptance', async () => {
+    const canceled = { event: 'error', step: 'canceling', message: 'deployment canceled' };
+    fetchMock
+      .mockResolvedValueOnce(durableResponse([]))
+      .mockResolvedValueOnce(eventPage([{ seq: 1, event: canceled }]));
+    expect(await collectDeploy()).toEqual([
+      { event: 'start', deploymentId: 'dpl_durable' },
+      canceled,
+    ]);
+    expect(deployPostCalls()).toHaveLength(1);
+  });
+
+  it('bounds observation of a platform that never reports completion', async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    fetchMock.mockResolvedValueOnce(durableResponse([])).mockImplementation(async () => {
+      vi.setSystemTime(startedAt + 30 * 60_000);
+      return eventPage([], false);
+    });
+    try {
+      const assertion = expect(collectDeploy()).rejects.toThrow(
+        'Timed out observing deployment dpl_durable',
+      );
+      await vi.runAllTimersAsync();
+      await assertion;
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(deployPostCalls()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels and releases an open response after terminal delivery', async () => {
+    const cancel = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(`${JSON.stringify(durableDone)}\n`));
+      },
+      cancel,
+    });
+    const response = new Response(stream, { headers: { 'x-void-deployment-id': 'dpl_durable' } });
+    fetchMock.mockResolvedValueOnce(response);
+    expect(await collectDeploy()).toEqual([
+      { event: 'start', deploymentId: 'dpl_durable' },
+      durableDone,
+    ]);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(response.body!.locked).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers from a stalled stream and does not wait for a stalled cancellation', async () => {
+    vi.useFakeTimers();
+    const cancel = vi.fn(() => new Promise<void>(() => {}));
+    const response = new Response(new ReadableStream({ cancel }), {
+      headers: { 'x-void-deployment-id': 'dpl_durable' },
+    });
+    fetchMock
+      .mockResolvedValueOnce(response)
+      .mockResolvedValueOnce(eventPage([{ seq: 1, event: durableDone }]));
+    try {
+      const result = collectDeploy();
+      await vi.runAllTimersAsync();
+      expect(await result).toEqual([{ event: 'start', deploymentId: 'dpl_durable' }, durableDone]);
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(response.body!.locked).toBe(false);
+      expect(deployPostCalls()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects an oversized unfinished line, closes its reader, and does not mask it with reconnect', async () => {
+    const cancel = vi.fn();
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(1024 * 1024 + 1).fill(120));
+        },
+        cancel,
+      }),
+      { headers: { 'x-void-deployment-id': 'dpl_durable' } },
+    );
+    fetchMock.mockResolvedValueOnce(response);
+    await expect(collectDeploy()).rejects.toThrow('response limit');
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(response.body!.locked).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('parses a final complete event without a trailing newline', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(durableDone), {
+        headers: { 'x-void-deployment-id': 'dpl_durable' },
+      }),
+    );
+    expect(await collectDeploy()).toEqual([
+      { event: 'start', deploymentId: 'dpl_durable' },
+      durableDone,
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { deploymentId: 'dpl_other', events: [], lastSeq: 0, terminal: false },
+    {
+      deploymentId: 'dpl_durable',
+      events: [{ seq: 1, event: { ...durableDone, url: null } }],
+      lastSeq: 1,
+      terminal: true,
+    },
+    { deploymentId: 'dpl_durable', events: [], lastSeq: 0, terminal: true },
+    {
+      deploymentId: 'dpl_durable',
+      events: [{ seq: 2, event: durableDone }],
+      lastSeq: 1,
+      terminal: true,
+    },
+  ])('fails closed on invalid observation response %#', async (page) => {
+    fetchMock.mockResolvedValueOnce(durableResponse([])).mockResolvedValueOnce(jsonResponse(page));
+    await expect(collectDeploy()).rejects.toThrow(/Invalid deployment|without a terminal result/);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 // The deploy command keeps the CF Access service-token PAIR out of the untrusted
