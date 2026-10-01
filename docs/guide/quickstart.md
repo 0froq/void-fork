@@ -56,13 +56,13 @@ Void asks you to choose Vite+ or Vite, a UI framework, a starter, and a deployme
 
 With pnpm, you can start with `pnpm create void my-app`. It configures native build permissions before installing Void.
 
-If a manual pnpm install reports blocked build scripts, run `pnpm approve-builds` for `esbuild`, `sharp`, and `workerd`. Set `better-sqlite3: false` in `pnpm-workspace.yaml`'s `allowBuilds`; Void uses its bundled binaries. Setup updates the pnpm lockfile, including in CI. Later installs can use `pnpm install --frozen-lockfile`.
+If a manual pnpm install reports blocked build scripts, run `pnpm approve-builds` for `esbuild`, `sharp`, and `workerd`. Set `better-sqlite3: false` in `pnpm-workspace.yaml`'s `allowBuilds`; Void uses its bundled binaries.
 
 The examples below use `void` for brevity. Outside package scripts, run the local binary with `npx void`, `pnpm void`, `yarn void`, or `bunx void`. Keep Void installed in the project so the CLI and app use the same version.
 
 ## Using with Coding Agents
 
-`void init` detects your coding agent and installs its instructions and skills. If detection fails, choose an agent when prompted. In agents that support it, load the `/void` skill and describe the app you want to build. See [Coding Agents](../integrations/agents) for setup details.
+`void init` detects your coding agent and installs its instructions and skills. If no agent is detected, use the bundled docs linked in `AGENTS.md`. In agents that support it, load the `/void` skill and describe the app you want to build. See [Coding Agents](../integrations/agents) for setup details.
 
 ## Meta Frameworks
 
@@ -83,7 +83,7 @@ export default defineConfig({
 });
 ```
 
-Then run `void init` with your package manager to configure the remaining project files. Existing compatibility dates are preserved; new projects use Void's tested Workers compatibility date.
+Then run `void init` with your package manager to configure the remaining project files.
 
 ## Once You Have a Working App
 
