@@ -79,6 +79,8 @@ For Void platform project access, use `void project team`: invite only an email 
 
 For a self-hosted platform's project Zero Trust policy, installation administrators use `void platform zero-trust`; pass the Access management token only through `--token-stdin`. Project owners and project administrators use `void project zero-trust status|protect|public|reconcile`; these commands do not apply to direct Cloudflare deployments. When a deploy or rollback is refused because protection is not settled, check `void project zero-trust status`; an owner or project administrator can run `void project zero-trust reconcile` before retrying.
 
+For older platform asset storage, administrators inspect every page with `void platform system asset-migrations`, preview each affected deployment with `void platform deployment migrate-assets <id> --plan`, and apply with `--yes`. Include retained rollback targets and stored Worker bundles; investigate `invalid` inventory rows. Migration verifies copies, preserves originals, and supports `--cursor` from the last successful batch. Keep legacy reads until the full inventory and serving checks are complete.
+
 Use Void commands for every user-facing workflow. Never ask the user to install, authenticate, or run Wrangler directly. Say Cloudflare or Void instead, except when naming literal `wrangler.jsonc` / `wrangler.json` files or `WRANGLER_*` environment variables the user must inspect.
 
 `void auth login|status|logout` follows the saved deploy destination or asks the user to choose; `void account` explicitly manages a Void platform account. If updating Void stops recognizing an older login, run `void account login` again; preserve the saved platform and project links.

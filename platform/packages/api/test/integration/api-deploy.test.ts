@@ -2885,12 +2885,17 @@ describe('Deploy deduplication (skip identical deploys)', () => {
   // for-byte (the dedupe-skip path compares the persisted JSON strings).
   const manifest = { assetManifestVersion: 2, version: 3, bindings: {} };
   const assetContent = '<h1>hi</h1>';
-  let assetManifest: Record<string, { hash: string; size: number }>;
+  let assetManifest: Record<string, { hash: string; size: number; store: 'r2'; scope: 'project' }>;
 
   beforeEach(async () => {
     const buffer = await new Blob([assetContent]).arrayBuffer();
     assetManifest = {
-      '/index.html': { hash: computeAssetHash(buffer, '/index.html'), size: buffer.byteLength },
+      '/index.html': {
+        hash: computeAssetHash(buffer, '/index.html'),
+        size: buffer.byteLength,
+        store: 'r2',
+        scope: 'project',
+      },
     };
   });
 
@@ -2951,8 +2956,8 @@ describe('Deploy deduplication (skip identical deploys)', () => {
     // Simulate a previously stored merged manifest whose insertion order no
     // longer matches the raw JSON string the client sends on retry.
     const liveAssetManifest = {
-      '/assets/app.js': { hash: appHash, size: appBody.length },
-      '/index.html': { hash: indexHash, size: indexBody.length },
+      '/assets/app.js': { hash: appHash, size: appBody.length, store: 'r2', scope: 'project' },
+      '/index.html': { hash: indexHash, size: indexBody.length, store: 'r2', scope: 'project' },
     };
     const liveDeployId = 'dpl_live_dedupe_order';
     await env.db.insert(deployments).values({
@@ -2969,8 +2974,8 @@ describe('Deploy deduplication (skip identical deploys)', () => {
       .set({ active_deployment_id: liveDeployId })
       .where(eq(projects.id, project.id));
 
-    await env.STATIC_ASSETS.put(`assets/${project.id}/${indexHash}`, indexBody);
-    await env.STATIC_ASSETS.put(`assets/${project.id}/${appHash}`, appBody);
+    await env.STATIC_ASSETS_R2.put(`assets/${project.id}/${indexHash}`, indexBody);
+    await env.STATIC_ASSETS_R2.put(`assets/${project.id}/${appHash}`, appBody);
 
     const res = await app.fetch(
       await buildDeployRequest(env, project.id, user.jwt, {
@@ -3599,7 +3604,7 @@ describe('POST /projects/:id/deploy (static)', () => {
     expect(activeId).toBeTruthy();
     const active = await getDeployment(env.db, activeId!);
     expect(JSON.parse(active!.asset_hashes!)).toEqual({
-      '/index.html': { hash, size: bytes.length, store: 'r2' },
+      '/index.html': { hash, size: bytes.length, store: 'r2', scope: 'project' },
     });
   });
 
@@ -5512,6 +5517,8 @@ describe('POST /projects/:id/deploy/preflight', () => {
     }
     await env.ROUTING.put(`manifest:${prevDeploy.id}`, JSON.stringify(servingManifest));
 
+    await env.STATIC_ASSETS_R2.put(`assets/${project.id}/${'a'.repeat(32)}`, new Uint8Array(100));
+
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
         method: 'POST',
@@ -5522,7 +5529,7 @@ describe('POST /projects/:id/deploy/preflight', () => {
         body: JSON.stringify({
           assetManifest: {
             '/index.html': { hash: 'a'.repeat(32), size: 100 }, // unchanged
-            '/app.js': { hash: 'x'.repeat(32), size: 250 }, // changed
+            '/app.js': { hash: 'f'.repeat(32), size: 250 }, // changed
             '/new.js': { hash: 'd'.repeat(32), size: 400 }, // new
             // style.css removed
           },
@@ -5804,7 +5811,7 @@ describe('POST /projects/:id/deploy/preflight', () => {
   });
 
   describe('static → WfP project type transition', () => {
-    it('returns all assets as needed when previous deploy was static and current has worker', async () => {
+    it('requires scoped R2 uploads when a historical static deployment gains a Worker', async () => {
       const user = await createTestUser(env.db);
       const project = await createTestProject(env.db, user.id);
 
@@ -5835,9 +5842,7 @@ describe('POST /projects/:id/deploy/preflight', () => {
       }
       await env.ROUTING.put(`manifest:${prevDeploy.id}`, JSON.stringify(servingManifest));
 
-      // Preflight with hasWorker=true (converting to a Void/WfP deploy)
-      // All assets should be returned as needed since they must be uploaded
-      // to CF's asset API (they only exist in KV/R2 from the static deploy)
+      // Historical serving metadata alone cannot prove scoped R2 availability.
       const res = await app.fetch(
         new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
           method: 'POST',
@@ -5859,7 +5864,7 @@ describe('POST /projects/:id/deploy/preflight', () => {
 
       expect(res.status).toBe(200);
       const data = (await res.json()) as { needed: Array<string>; total: number; skipped: number };
-      // All assets must be re-uploaded — they're in KV/R2, not CF's asset store
+      // Every asset is absent from the scoped R2 store.
       expect(data.needed.sort()).toEqual(['/app.js', '/index.html', '/style.css']);
       expect(data.total).toBe(3);
       expect(data.skipped).toBe(0);
@@ -5894,6 +5899,8 @@ describe('POST /projects/:id/deploy/preflight', () => {
       await env.ROUTING.put(`manifest:${prevDeploy.id}`, JSON.stringify(servingManifest));
 
       // Preflight WITHOUT hasWorker (staying as static deploy)
+      await env.STATIC_ASSETS_R2.put(`assets/${project.id}/${'a'.repeat(32)}`, new Uint8Array(100));
+
       const res = await app.fetch(
         new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
           method: 'POST',
@@ -5904,7 +5911,7 @@ describe('POST /projects/:id/deploy/preflight', () => {
           body: JSON.stringify({
             assetManifest: {
               '/index.html': { hash: 'a'.repeat(32), size: 100 }, // unchanged
-              '/app.js': { hash: 'x'.repeat(32), size: 250 }, // changed
+              '/app.js': { hash: 'f'.repeat(32), size: 250 }, // changed
             },
           }),
         }),
@@ -5919,7 +5926,7 @@ describe('POST /projects/:id/deploy/preflight', () => {
       expect(data.skipped).toBe(1);
     });
 
-    it('does not crash on deploy when converting static project to WfP with preflight', async () => {
+    it('reuses scoped R2 assets when converting a current static deployment to WfP', async () => {
       const user = await createTestUser(env.db);
       const project = await createTestProject(env.db, user.id, 'static-to-void');
 
@@ -5939,8 +5946,9 @@ describe('POST /projects/:id/deploy/preflight', () => {
       );
       expect(staticDone).toBeDefined();
 
-      // 2. Now convert to a WfP deploy with preflight
-      // Preflight should return all assets as needed (hasWorker=true)
+      // Both deployment modes use the same scoped R2 bytes.
+      const indexBytes = new TextEncoder().encode('<h1>hello</h1>');
+      const appBytes = new TextEncoder().encode('console.log(1)');
       const preflightRes = await app.fetch(
         new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
           method: 'POST',
@@ -5950,8 +5958,14 @@ describe('POST /projects/:id/deploy/preflight', () => {
           },
           body: JSON.stringify({
             assetManifest: {
-              '/index.html': { hash: 'a'.repeat(32), size: 100 },
-              '/app.js': { hash: 'b'.repeat(32), size: 200 },
+              '/index.html': {
+                hash: computeAssetHash(indexBytes.buffer, '/index.html'),
+                size: indexBytes.length,
+              },
+              '/app.js': {
+                hash: computeAssetHash(appBytes.buffer, '/app.js'),
+                size: appBytes.length,
+              },
             },
             hasWorker: true,
           }),
@@ -5964,11 +5978,10 @@ describe('POST /projects/:id/deploy/preflight', () => {
         total: number;
         skipped: number;
       };
-      // All assets should be needed — they exist in KV/R2, not CF asset store
-      expect(pfData.skipped).toBe(0);
-      expect(pfData.needed.length).toBe(2);
+      expect(pfData.skipped).toBe(2);
+      expect(pfData.needed).toEqual([]);
 
-      // 3. Deploy as WfP with all assets (since preflight returned all as needed)
+      // Worker finalization hydrates the existing scoped R2 copy for Cloudflare.
       mockCfApi();
       const deployRes = await app.fetch(
         await buildDeployRequest(env, project.id, user.jwt, {

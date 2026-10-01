@@ -660,9 +660,16 @@ Find a deployment, inspect its manifest, or request cancellation:
 void platform deployment list [--project <id-or-slug>] [--status <status>] [--search <text>] [--page <n>] [--limit <n>]
 void platform deployment show <id>
 void platform deployment cancel <id>
+void platform deployment migrate-assets <id> [--cursor <cursor>] [--plan|--yes]
 ```
 
 Cancellation applies while a deployment is pending, uploading, migrating, or prerendering, and can be requested again while it is canceling. A deployment that has begun switching traffic, is compensating for a failure, or has finished cannot be canceled through this command.
+
+`migrate-assets` copies legacy assets to scoped R2 storage, verifies their contents, and updates each batch only after all its assets are verified. Original assets remain in place, and application traffic stays on the same deployment. Upgrade the platform runtime before using this command. Migrate both active deployments and retained rollback deployments before removing support for older asset storage.
+
+Use `--plan` to preview the first batch. Applying authorizes all remaining batches for that deployment; the CLI previews each batch and prints its result, including `nextCursor`. With `--json`, results are JSON Lines. If a later batch fails or the command is interrupted, resume with the cursor from the last successful result. An ambiguous request is never retried automatically; inspect the deployment before resuming. A completed migration reports `complete: true` and `nextCursor: null`.
+
+Use [`void platform system asset-migrations`](#operator-system) to find deployments requiring migration. Inspect every inventory page, migrate each deployment with `needsMigration` greater than zero, then inspect every page again. Include retained rollback deployments and stored bundles. Investigate rows marked `invalid` before considering migration complete. Keep the older asset readers until the full inventory is valid and no protected deployment needs migration.
 
 Read its runtime logs with:
 
@@ -791,12 +798,15 @@ Inspect activity, check service health, or review administrative changes:
 void platform system overview
 void platform system health
 void platform system cli-versions
+void platform system asset-migrations [--page <n>] [--limit <n>]
 void platform system events [--page <n>] [--limit <n>]
 void platform system backfill-queue-tokens
 void platform system sandbox-drain [--cursor <opaque-cursor>]
 ```
 
 `overview` shows platform totals and recent activity. `health` checks the configured services and database, and exits with a nonzero status if a check fails. `cli-versions` reports the CLI versions used by deployments.
+
+`asset-migrations` inventories active deployments, retained rollback deployments, and deployments with stored bundles. It reports their asset counts, `needsMigration`, and an `invalid` flag for unreadable metadata. Read all pages using the response's pagination fields. Migrate each deployment with `needsMigration` greater than zero through [`deployment migrate-assets`](#operator-deployments), then rerun the full inventory. Migration keeps the original assets; removing those assets or their older readers requires separate verification.
 
 `events` shows the administrator, target, and outcome of changes. A pending event means the outcome has not been recorded. Previews and session login/logout do not create these events. `backfill-queue-tokens` repairs older queue entries that are missing authentication tokens and supports `--plan` before applying the repair.
 

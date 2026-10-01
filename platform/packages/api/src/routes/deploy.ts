@@ -19,7 +19,7 @@ import {
   platformProjectHostnames,
   readPlatformApplication,
 } from '@void/platform';
-import { eq, sql as drizzleSql } from 'drizzle-orm';
+import { and, eq, or, sql as drizzleSql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { findMissingR2Assets, findR2Assets, persistedR2AssetSizes } from '../asset-inventory.ts';
 import {
@@ -65,12 +65,10 @@ import {
   countUserDeploymentsToday,
   getActiveDeployment,
   getInFlightDeploymentsExcluding,
-  getLastLiveAssetManifest,
   setActiveDeployment,
   markDeploymentRetained,
   setAppliedMigrations,
   appendProjectMigrations,
-  getRetainedDeployments,
   getRetainedDeploymentsExcluding,
   getProjectSecrets,
   getProjectResources,
@@ -1079,57 +1077,6 @@ function equalAssetManifests(
   return true;
 }
 
-async function buildComparableAssetManifestForDedupe(
-  db: Db,
-  projectId: string,
-  built: Record<string, AssetManifestEntry>,
-  declared: Record<string, AssetManifestEntry> | null,
-  preflightRaw: string | null,
-): Promise<Record<string, AssetManifestEntry> | null> {
-  const result: Record<string, AssetManifestEntry> = declared ? { ...declared } : { ...built };
-
-  for (const [path, entry] of Object.entries(built)) {
-    const declaredEntry = declared?.[path];
-    if (declared && !declaredEntry) {
-      continue;
-    }
-    if (
-      declaredEntry &&
-      typeof declaredEntry.hash === 'string' &&
-      declaredEntry.hash.length === 32 &&
-      Number.isFinite(declaredEntry.size) &&
-      declaredEntry.size >= 0
-    ) {
-      // The real deploy path must still surface this as an error event after
-      // createDeployment; returning null here only disables the dedupe
-      // short-circuit for an invalid request.
-      if (declaredEntry.hash !== entry.hash) {
-        return null;
-      }
-      if (declaredEntry.size === entry.size) {
-        result[path] = declaredEntry;
-      } else {
-        result[path] = entry;
-      }
-    } else {
-      result[path] = entry;
-    }
-  }
-
-  if (preflightRaw === 'true' && !declared) {
-    const fillManifest = await getLastLiveAssetManifest(db, projectId);
-    if (fillManifest) {
-      for (const [path, entry] of Object.entries(fillManifest)) {
-        if (!(path in result)) {
-          result[path] = entry;
-        }
-      }
-    }
-  }
-
-  return result;
-}
-
 function sanitizeDeployErrorMessage(message: string): string {
   const trimmed = message.trim();
   if (
@@ -1210,6 +1157,7 @@ function inferPersistedAssetStore(
 function attachServingStoreMetadata(
   assetManifest: Readonly<Record<string, AssetManifestEntry>>,
   servingManifest: Readonly<Record<string, string>>,
+  scopedR2 = false,
 ): Record<string, AssetManifestEntry> {
   const persisted: Record<string, AssetManifestEntry> = {};
   const missing: Array<string> = [];
@@ -1224,7 +1172,11 @@ function attachServingStoreMetadata(
       missing.push(path);
       continue;
     }
-    persisted[path] = { ...entry, store: serving.startsWith('!') ? 'r2' : 'kv' };
+    persisted[path] = {
+      ...entry,
+      store: serving.startsWith('!') ? 'r2' : 'kv',
+      ...(scopedR2 ? { scope: 'project' as const } : {}),
+    };
   }
   if (missing.length > 0) {
     throw new StaticAssetDisappearedError(missing);
@@ -2294,7 +2246,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
   const repositoryUrl = typeof body.repositoryUrl === 'string' ? body.repositoryUrl : null;
   const commitUrl = typeof body.commitUrl === 'string' ? body.commitUrl : null;
   const gitRef = typeof body.gitRef === 'string' ? body.gitRef : null;
-  const preflightRaw = body.preflight === 'true' ? 'true' : null;
 
   // workerFiles is the only meaningful body content beyond the manifest
   // tuples. Each entry is a base64-encoded module body keyed by relative
@@ -2394,8 +2345,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
   // (env vars travel inside `manifest.vars`; the JSON-mode wire contract
   // never accepted a top-level `body.vars` — every CLI version that ever
   // hit this endpoint populated `manifest.vars` instead.)
-
-  await ensureProjectIngress(context.env, project);
 
   // Pre-validation done — now run the atomic precheck-and-claim
   // transaction. FOR UPDATE on the project row, 10-minute stale-deploy
@@ -2922,7 +2871,17 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         // keep that lock through R2 deletion. A following static deploy performs
         // its last R2 existence check under this lock before committing live.
         const protectedHashes = new Set(knownRetainedHashes);
-        const retained = [...(await getRetainedDeployments(txDb, projectId))];
+        // Migrated stored bundles still reference their asset copies even when
+        // their historical deployment failed or is no longer retained.
+        const retained = await txDb
+          .select()
+          .from(deployments)
+          .where(
+            and(
+              eq(deployments.project_id, projectId),
+              or(eq(deployments.retained, true), eq(deployments.bundle_stored, true)),
+            ),
+          );
         if (
           lockedProject.active_deployment_id &&
           !retained.some((deployment) => deployment.id === lockedProject.active_deployment_id)
@@ -2963,6 +2922,16 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         }
         return await cleanup(protectedHashes);
       });
+    };
+    const evictStoredWorkerBundle = async (deploymentId: string): Promise<void> => {
+      await deleteWorkerBundle(context.env.STATIC_ASSETS_R2, projectId, deploymentId);
+      // Stored history protects its migrated asset copy until the bundle is
+      // actually gone. The following orphan sweep can now collect those bytes.
+      await context
+        .get('db')
+        .update(deployments)
+        .set({ bundle_stored: false })
+        .where(and(eq(deployments.id, deploymentId), eq(deployments.project_id, projectId)));
     };
     let remainingAssetGcHashBudget = ASSET_GC_MAX_HASHES_PER_DEPLOY;
     let orphanSweepAfterResponse: (() => Promise<void>) | null = null;
@@ -3139,30 +3108,11 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     let wfpMirroredManifestDeploymentId: string | null = null;
 
     try {
-      // === ASSET VERIFY (R2 head) ===
-      // Verify every NEW declared asset exists in R2 before claiming a
-      // deployment slot's worth of pipeline work. This is the JSON-mode
-      // analogue of the multipart path's "the bytes arrived in the body"
-      // invariant — without it, a buggy CLI that skipped an upload
-      // would deploy a serving manifest that 404s for the missing path.
-      //
-      // Carry-forward: hashes present in the prior live deployment's
-      // `asset_hashes` are preflight-skipped and already exist somewhere
-      // (KV OR R2) for the prior deploy. Skip R2.head() for those because
-      // (a) the CLI was never asked to upload them this deploy, and (b)
-      // the prior placement may be KV (small assets), in which case R2
-      // would correctly return null. We only verify hashes that are NEW
-      // to this deploy — those MUST exist in R2 because the CLI was
-      // supposed to direct-upload them via a presigned URL.
+      // New deployments use only project-scoped R2 assets. Historical KV and
+      // unscoped objects remain readable by their existing deployments, but a
+      // redeploy must upload any bytes not present in the current store.
       currentStep = 'asset_verify';
       markPhase('asset_verify');
-      const priorAssetManifest = await getLastLiveAssetManifest(context.get('db'), projectId);
-      const carryForwardHashes = new Set<string>();
-      if (priorAssetManifest) {
-        for (const entry of Object.values(priorAssetManifest)) {
-          carryForwardHashes.add(entry.hash);
-        }
-      }
       const declaredHashes = Array.from(
         new Set(Object.values(incomingAssetManifest).map((e) => e.hash)),
       );
@@ -3182,44 +3132,25 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           declaredSizeByHash.set(entry.hash, null);
         }
       }
-      let previousBackendIsStatic = false;
-      if (currentLiveDeployment) {
-        const routingRaw = await context.env.ROUTING.get(project.slug);
-        if (routingRaw) {
-          try {
-            const routing = JSON.parse(routingRaw) as { staticDeploymentId?: unknown };
-            previousBackendIsStatic = typeof routing.staticDeploymentId === 'string';
-          } catch {
-            // A missing/malformed/non-static route must conservatively require
-            // every asset, exactly like the preflight endpoint.
-          }
-        }
-      }
-      // Worker preflight reuses verified scoped R2 objects. Verify new and
-      // uncertain hashes again: a stale preflight cannot publish a missing
-      // upload. The admission row protects them from platform GC while the
-      // active deployment protects hashes with persisted R2 placement.
-      const newHashes = hasWorkerFiles
-        ? declaredHashes.filter((hash) => activeR2Sizes.get(hash) !== declaredSizeByHash.get(hash))
-        : !previousBackendIsStatic
-          ? declaredHashes
-          : declaredHashes.filter((hash) => !carryForwardHashes.has(hash));
+      // Only scoped placement verified by this runtime (or the migration)
+      // can skip inventory. Legacy store:'r2' alone does not prove scoping.
+      const unverifiedHashes = declaredHashes.filter(
+        (hash) => activeR2Sizes.get(hash) !== declaredSizeByHash.get(hash),
+      );
       const missingHashes: Array<string> = [];
-      const r2HeadCache = new Map<string, { size: number } | null>();
       // R2 binding operations count toward a Worker's per-request subrequest
       // budget. A valid manifest may contain 5,000 assets, so one HEAD per hash
       // can fail a healthy deployment before validation. Inventory the scoped
       // project prefix in paginated calls instead; this runs outside every
       // PostgreSQL transaction and stops as soon as all required hashes appear.
-      const foundNewAssets = await findR2Assets(
+      const foundAssets = await findR2Assets(
         context.env.STATIC_ASSETS_R2,
         projectId,
-        new Set(newHashes),
+        new Set(unverifiedHashes),
       );
-      for (const hash of newHashes) {
-        const object = foundNewAssets.get(hash);
-        r2HeadCache.set(hash, object ? { size: object.size } : null);
-        if (!object) {
+      for (const hash of unverifiedHashes) {
+        const object = foundAssets.get(hash);
+        if (!object || object.size !== declaredSizeByHash.get(hash)) {
           missingHashes.push(hash);
         }
       }
@@ -3236,6 +3167,8 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         });
         return;
       }
+
+      await ensureProjectIngress(context.env, project);
 
       // === MANIFEST VALIDATION & DEDUPE ===
       currentStep = 'validating';
@@ -3288,26 +3221,16 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         }
       }
 
-      // Dedupe-skip. JSON-mode CLIs always send the full assetManifest
-      // (including preflight-skipped paths), so `built` and `declared`
-      // collapse to the same object — the dedupe helper just normalises
-      // the comparison shape and returns it.
-      const builtAssetManifest = incomingAssetManifest;
-      const comparableAssetManifest = await buildComparableAssetManifestForDedupe(
-        context.get('db'),
-        projectId,
-        builtAssetManifest,
-        incomingAssetManifest,
-        preflightRaw,
-      );
-
       if (!hasWorkerFiles && currentLiveDeployment && currentLiveDeployment.status === 'live') {
         const sameManifest = currentLiveDeployment.manifest === finalManifestRaw;
         const sameAssets = equalAssetManifests(
-          comparableAssetManifest,
+          incomingAssetManifest,
           parseAssetManifest(currentLiveDeployment.asset_hashes),
         );
-        if (sameManifest && sameAssets) {
+        const sameScopedAssets = declaredHashes.every(
+          (hash) => activeR2Sizes.get(hash) === declaredSizeByHash.get(hash),
+        );
+        if (sameManifest && sameAssets && sameScopedAssets) {
           const application = readPlatformApplication(context.env);
           projectDomains ??= await getDomainsByProjectId(context.get('db'), projectId);
           const activeDomains = projectDomains.filter((d) => d.status === 'active');
@@ -3473,77 +3396,9 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           await assertProjectNotDeleting(context.get('db'), projectId);
           emit({ event: 'asset_upload_done' });
 
-          // Build serving manifest. Carry-forward hashes (declared in the
-          // prior live deploy's `asset_hashes`) MUST preserve the prior
-          // KV-vs-R2 placement: small assets in the prior deploy live in
-          // KV (no `!` prefix), and rewriting them as `!hash` would point
-          // dispatch's WfP fallback at R2 keys that don't exist. New
-          // hashes (not in the prior manifest) were just uploaded
-          // direct-to-R2 by the CLI and always use the `!` prefix.
-          //
-          // We always read the prior serving manifest (not just when
-          // preflight is used) — a CLI that re-declares the same
-          // hashes without preflight still relies on carry-forward to
-          // serve those bytes from their existing KV/R2 home.
-          let prevServingManifest: Record<string, string> | null = null;
-          if (originalActiveDeploymentId) {
-            const prev = await context.env.ROUTING.get(`manifest:${originalActiveDeploymentId}`);
-            if (prev) {
-              prevServingManifest = JSON.parse(prev) as Record<string, string>;
-            }
-          }
-          const prevHashEntry = new Map<string, string>();
-          if (prevServingManifest) {
-            for (const v of Object.values(prevServingManifest)) {
-              const hash = v.startsWith('!') ? v.slice(1) : v;
-              prevHashEntry.set(hash, v);
-            }
-          }
-          const priorHashStore = new Map<string, 'kv' | 'r2'>();
-          const priorStoredManifest = currentLiveDeployment?.asset_hashes
-            ? (JSON.parse(currentLiveDeployment.asset_hashes) as Record<
-                string,
-                { hash?: unknown; size?: unknown; store?: unknown }
-              >)
-            : null;
-          const priorDeployManifest = parseManifest(currentLiveDeployment?.manifest);
-          if (priorStoredManifest) {
-            for (const entry of Object.values(priorStoredManifest)) {
-              if (typeof entry.hash !== 'string') {
-                continue;
-              }
-              const store = inferPersistedAssetStore(entry, priorDeployManifest);
-              if (store) {
-                priorHashStore.set(entry.hash, store);
-              }
-            }
-          }
-          const convertingWorkerToStatic = !!currentLiveDeployment && !previousBackendIsStatic;
-
-          const servingManifest: Record<string, string> = {};
-          for (const [path, entry] of Object.entries(assetManifest)) {
-            if (carryForwardHashes.has(entry.hash) && prevHashEntry.has(entry.hash)) {
-              // Carry-forward — preserve prior placement (KV vs R2).
-              servingManifest[path] = prevHashEntry.get(entry.hash)!;
-            } else if (carryForwardHashes.has(entry.hash)) {
-              // A WfP -> static preflight requires every asset again, so the
-              // CLI just wrote these bytes to scoped R2. Otherwise recover a
-              // lagging/missing prior serving manifest from placement persisted
-              // with the active deployment (or the legacy multipart size split).
-              const store = convertingWorkerToStatic
-                ? 'r2'
-                : (priorHashStore.get(entry.hash) ??
-                  inferPersistedAssetStore(entry, priorDeployManifest));
-              if (!store) {
-                throw new StaticAssetDisappearedError([path]);
-              }
-              servingManifest[path] = store === 'r2' ? `!${entry.hash}` : entry.hash;
-            } else {
-              // New this deploy — verified in R2 above; direct-to-R2
-              // always uses the `!` prefix.
-              servingManifest[path] = `!${entry.hash}`;
-            }
-          }
+          const servingManifest = Object.fromEntries(
+            Object.entries(assetManifest).map(([path, entry]) => [path, `!${entry.hash}`]),
+          );
 
           await context.env.ROUTING.put(
             `manifest:${deployment.id}`,
@@ -3555,7 +3410,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             .update(deployments)
             .set({
               asset_hashes: JSON.stringify(
-                attachServingStoreMetadata(assetManifest, servingManifest),
+                attachServingStoreMetadata(assetManifest, servingManifest, true),
               ),
             })
             .where(eq(deployments.id, deployment.id));
@@ -3808,6 +3663,15 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                 await deleteAssetHashesWithProjectFence(retainedHashes, evictedHashes);
               }
               await context.env.ROUTING.delete(`manifest:${old.id}`);
+              if (old.bundle_stored) {
+                try {
+                  await evictStoredWorkerBundle(old.id);
+                } catch (e) {
+                  logger.error('retention_cleanup', 'evicted_worker_bundle_delete_failed', e, {
+                    evictedDeploymentId: old.id,
+                  });
+                }
+              }
             }
 
             // Presigned uploads without a finalized manifest become orphans.
@@ -3942,38 +3806,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         if (assetCount > 0) {
           currentStep = 'asset_upload';
           markPhase('asset_upload');
-          const previousServingManifest = originalActiveDeploymentId
-            ? ((await context.env.ROUTING.get(
-                `manifest:${originalActiveDeploymentId}`,
-                'json',
-              )) as Record<string, string> | null)
-            : null;
-          const previousHashEntry = new Map<string, string>();
-          if (previousServingManifest) {
-            for (const value of Object.values(previousServingManifest)) {
-              previousHashEntry.set(value.startsWith('!') ? value.slice(1) : value, value);
-            }
-          }
-          const previousHashStore = new Map<string, 'kv' | 'r2'>();
-          const previousStoredManifest = currentLiveDeployment?.asset_hashes
-            ? (JSON.parse(currentLiveDeployment.asset_hashes) as Record<
-                string,
-                { hash?: unknown; size?: unknown; store?: unknown }
-              >)
-            : null;
-          const previousDeployManifest = parseManifest(currentLiveDeployment?.manifest);
-          if (previousStoredManifest) {
-            for (const entry of Object.values(previousStoredManifest)) {
-              if (typeof entry.hash !== 'string') {
-                continue;
-              }
-              const store = inferPersistedAssetStore(entry, previousDeployManifest);
-              if (store) {
-                previousHashStore.set(entry.hash, store);
-              }
-            }
-          }
-
           const session = await createAssetUploadSession(
             context.env.CF_ACCOUNT_ID,
             context.env.CF_API_TOKEN,
@@ -3989,53 +3821,20 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             blobsAvailable: assetsByHash.size,
           });
 
-          // Hydrate only hashes Cloudflare's upload session actually requests.
-          // Carry-forward bytes may still use legacy unscoped KV/R2 keys, so
-          // mirror dispatch's scoped-first, legacy-second lookup exactly.
+          // Every declared asset was verified in scoped R2 before provisioning.
+          // Hydrate only the bytes Cloudflare actually requests; the cachebuster
+          // already has its deploy-local bytes in assetsByHash.
           const hashesNeedingBytes = Array.from(new Set(session.buckets.flat())).filter(
             (hash) => !assetsByHash.has(hash),
           );
-          const newHashSetForHydration = new Set(newHashes);
           const contentTypes = resolveAssetContentTypes(incomingAssetManifest, hashesNeedingBytes);
-          const hydratedStoreByHash = new Map<string, 'kv' | 'r2'>();
           await uploadPool(hashesNeedingBytes, R2_HEAD_VERIFY_CONCURRENCY, async (hash) => {
-            const previousEntry = previousHashEntry.get(hash);
-            const preferredStore = newHashSetForHydration.has(hash)
-              ? 'r2'
-              : previousEntry
-                ? previousEntry.startsWith('!')
-                  ? 'r2'
-                  : 'kv'
-                : previousHashStore.get(hash);
-            let assetBytes: ArrayBuffer | null = null;
-            let resolvedStore: 'kv' | 'r2' | undefined;
-            if (preferredStore === 'r2' || !preferredStore) {
-              const object =
-                (await context.env.STATIC_ASSETS_R2.get(`assets/${projectId}/${hash}`)) ??
-                (await context.env.STATIC_ASSETS_R2.get(`assets/${hash}`));
-              assetBytes = object ? await object.arrayBuffer() : null;
-              if (assetBytes) {
-                resolvedStore = 'r2';
-              }
+            const object = await context.env.STATIC_ASSETS_R2.get(`assets/${projectId}/${hash}`);
+            if (!object) {
+              throw new StaticAssetDisappearedError([hash]);
             }
-            if (!assetBytes && (preferredStore === 'kv' || !previousEntry)) {
-              assetBytes =
-                (await context.env.STATIC_ASSETS.get(
-                  `assets/${projectId}/${hash}`,
-                  'arrayBuffer',
-                )) ?? (await context.env.STATIC_ASSETS.get(`assets/${hash}`, 'arrayBuffer'));
-              if (assetBytes) {
-                resolvedStore = 'kv';
-              }
-            }
-            if (!assetBytes) {
-              throw new Error(
-                `serving asset ${hash} was not found in its persisted ${preferredStore} store`,
-              );
-            }
-            hydratedStoreByHash.set(hash, resolvedStore!);
             assetsByHash.set(hash, {
-              bytes: new Uint8Array(assetBytes),
+              bytes: new Uint8Array(await object.arrayBuffer()),
               contentType: contentTypes.get(hash)!,
             });
           });
@@ -4069,27 +3868,16 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           // in our R2; we just need to write the per-deploy serving
           // manifest so dispatch's WfP fallback can read them when CF's
           // asset store returns the dedupe-poisoning stub.
-          const newHashSet = new Set(newHashes);
-          const servingManifest: Record<string, string> = {};
-          for (const [path, entry] of Object.entries(assetManifest)) {
-            if (path.startsWith('/.void-deploy/')) {
-              continue;
-            }
-            if (newHashSet.has(entry.hash)) {
-              // Newly required direct uploads always live in scoped R2.
-              servingManifest[path] = `!${entry.hash}`;
-            } else if (previousHashEntry.has(entry.hash)) {
-              servingManifest[path] = previousHashEntry.get(entry.hash)!;
-            } else {
-              const store =
-                previousHashStore.get(entry.hash) ?? hydratedStoreByHash.get(entry.hash);
-              if (!store) {
-                throw new StaticAssetDisappearedError([path]);
-              }
-              servingManifest[path] = store === 'r2' ? `!${entry.hash}` : entry.hash;
-            }
-          }
-          const persistedAssetManifest = attachServingStoreMetadata(assetManifest, servingManifest);
+          const servingManifest = Object.fromEntries(
+            Object.entries(assetManifest)
+              .filter(([path]) => !path.startsWith('/.void-deploy/'))
+              .map(([path, entry]) => [path, `!${entry.hash}`]),
+          );
+          const persistedAssetManifest = attachServingStoreMetadata(
+            assetManifest,
+            servingManifest,
+            true,
+          );
           // Persist exact placement before the serving manifest/ready marker.
           // GC protects every nonterminal row with asset_hashes, and recovery
           // can reconstruct a lagging KV manifest without probing 5,000 keys.
@@ -5048,7 +4836,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               }
               if (old.bundle_stored) {
                 try {
-                  await deleteWorkerBundle(context.env.STATIC_ASSETS_R2, projectId, old.id);
+                  await evictStoredWorkerBundle(old.id);
                 } catch (e) {
                   logger.error('retention_cleanup', 'evicted_worker_bundle_delete_failed', e, {
                     evictedDeploymentId: old.id,
@@ -5683,86 +5471,37 @@ app.post('/:id/deploy/preflight', async (context) => {
     assetManifest: Record<string, { hash: string; size: number }>;
     hasWorker?: boolean;
   }>();
-  const { assetManifest, hasWorker } = body;
+  const { assetManifest } = body;
   const total = Object.keys(assetManifest).length;
-
-  if (hasWorker === true) {
-    // Worker finalization needs a platform-owned copy even when CF deduplicates
-    // its asset upload. Check actual scoped R2 objects rather than inferring
-    // availability from a prior Worker manifest (which may be CF-only or KV).
-    // This also reuses renamed assets and acknowledged PUTs from failed attempts.
-    const valid =
-      total <= MAX_UPLOAD_URLS_BATCH &&
-      Object.values(assetManifest).every(
-        (entry) =>
-          entry &&
-          typeof entry.hash === 'string' &&
-          HEX_32_REGEX.test(entry.hash) &&
-          Number.isSafeInteger(entry.size) &&
-          entry.size >= 0,
-      );
-    if (!valid) {
-      return context.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
-    }
-    const active = project.active_deployment_id
-      ? await getDeployment(context.get('db'), project.active_deployment_id)
-      : null;
-    const activeR2Sizes =
-      active?.status === 'live' && active.project_id === projectId
-        ? persistedR2AssetSizes(active.asset_hashes)
-        : new Map<string, number>();
-    const unverified = Object.fromEntries(
-      Object.entries(assetManifest).filter(
-        ([, entry]) => activeR2Sizes.get(entry.hash) !== entry.size,
-      ),
+  // Both static and Worker deployments require the platform-owned scoped R2
+  // copy. Provider asset deduplication and historical KV placement are not
+  // evidence that the current serving store has these bytes.
+  const valid =
+    total <= MAX_UPLOAD_URLS_BATCH &&
+    Object.values(assetManifest).every(
+      (entry) =>
+        entry &&
+        typeof entry.hash === 'string' &&
+        HEX_32_REGEX.test(entry.hash) &&
+        Number.isSafeInteger(entry.size) &&
+        entry.size >= 0,
     );
-    const needed = await findMissingR2Assets(context.env.STATIC_ASSETS_R2, projectId, unverified);
-    return context.json({ needed, total, skipped: total - needed.length });
-  }
-
-  const activeDeploymentId = project.active_deployment_id;
-
-  const prevManifest = await getLastLiveAssetManifest(context.get('db'), projectId);
-
-  if (!prevManifest) {
+  if (!valid) {
     return context.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
   }
-
-  // Preflight dedup is only safe when both the previous and current deploys
-  // use the same asset backend (KV/R2 for static, CF asset API for WfP).
-  // Read the live routing entry as the source of truth: it is what is
-  // actually serving traffic and survives post-routing recovery paths that
-  // silently swallow a failed `updateProjectType`. Presence of
-  // `staticDeploymentId` in the entry means the active backend is static
-  // (KV/R2); anything else — including a missing or malformed entry — is
-  // treated as non-static so we conservatively return all assets.
-  if (activeDeploymentId) {
-    const routingRaw = await context.env.ROUTING.get(project.slug);
-    let prevIsStatic = false;
-    if (routingRaw) {
-      try {
-        const parsed = JSON.parse(routingRaw) as { staticDeploymentId?: unknown };
-        prevIsStatic = typeof parsed.staticDeploymentId === 'string';
-      } catch {
-        // malformed routing entry — treat as non-static, safe default
-      }
-    }
-    const currentIsStatic = !hasWorker;
-    if (!(prevIsStatic && currentIsStatic)) {
-      // Backend transition, or previous deploy was WfP whose bytes live
-      // in CF's asset store (preflight cannot safely dedup those).
-      return context.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
-    }
-  }
-
-  const needed: Array<string> = [];
-  for (const [path, entry] of Object.entries(assetManifest)) {
-    const prev = prevManifest[path];
-    if (!prev || prev.hash !== entry.hash) {
-      needed.push(path);
-    }
-  }
-
+  const active = project.active_deployment_id
+    ? await getDeployment(context.get('db'), project.active_deployment_id)
+    : null;
+  const activeR2Sizes =
+    active?.status === 'live' && active.project_id === projectId
+      ? persistedR2AssetSizes(active.asset_hashes)
+      : new Map<string, number>();
+  const unverified = Object.fromEntries(
+    Object.entries(assetManifest).filter(
+      ([, entry]) => activeR2Sizes.get(entry.hash) !== entry.size,
+    ),
+  );
+  const needed = await findMissingR2Assets(context.env.STATIC_ASSETS_R2, projectId, unverified);
   return context.json({ needed, total, skipped: total - needed.length });
 });
 

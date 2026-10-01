@@ -1,5 +1,5 @@
 import { extname } from 'node:path';
-import { hash as blake3hash } from 'blake3-jit';
+import { createHasher } from 'blake3-jit';
 import mime from 'mime';
 import { retryWithBackoff } from './cf-api.ts';
 import type { AssetConfig } from './types.ts';
@@ -21,6 +21,8 @@ export type AssetManifestEntry = Readonly<{
   size: number;
   /** Platform serving store. Absent on deployments created before placement was persisted. */
   store?: 'kv' | 'r2';
+  /** Set only after the platform verifies the project-scoped R2 object. */
+  scope?: 'project';
 }>;
 
 export type AssetEntry = Readonly<{
@@ -352,10 +354,6 @@ function isJwtExpired(jwt: string): boolean {
   }
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  return bytesToBase64(new Uint8Array(buffer));
-}
-
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunkSize = 0x8000;
@@ -452,10 +450,93 @@ function digestToAssetHash(digest: Uint8Array): string {
  * Must match the CLI's computeAssetHash algorithm exactly.
  */
 export function computeAssetHash(content: ArrayBuffer, filePath: string): string {
-  const base64 = arrayBufferToBase64(content);
-  const ext = extname(filePath).substring(1);
-  const input = textEncoder.encode(base64 + ext);
-  return digestToAssetHash(blake3hash(input));
+  const hasher = createHasher();
+  const bytes = new Uint8Array(content);
+  // Align base64 chunks to three bytes so only the final chunk has padding.
+  // Avoid allocating a base64 string and encoded copy of the entire asset.
+  for (let offset = 0; offset < bytes.length; offset += 48 * 1024) {
+    hasher.update(textEncoder.encode(bytesToBase64(bytes.subarray(offset, offset + 48 * 1024))));
+  }
+  hasher.update(textEncoder.encode(extname(filePath).substring(1)));
+  return digestToAssetHash(hasher.finalize());
+}
+
+/** Verify large R2 objects without retaining the body or a whole base64 copy. */
+export async function computeAssetStreamHashes(
+  body: ReadableStream<Uint8Array>,
+  paths: ReadonlyArray<string>,
+  maxBytes: number,
+): Promise<{ size: number; hashes: ReadonlyArray<string> }> {
+  const hashers = new Map(
+    [...new Set(paths.map((path) => extname(path).substring(1)))].map((extension) => [
+      extension,
+      createHasher(),
+    ]),
+  );
+  const reader = body.getReader();
+  let tail = new Uint8Array(0);
+  let size = 0;
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error('Asset verification exceeded its two-minute deadline.'));
+      void reader.cancel().catch(() => {});
+    }, 2 * 60_000);
+  });
+  const update = (bytes: Uint8Array) => {
+    for (let offset = 0; offset < bytes.length; offset += 48 * 1024) {
+      const encoded = textEncoder.encode(bytesToBase64(bytes.subarray(offset, offset + 48 * 1024)));
+      for (const hasher of hashers.values()) {
+        hasher.update(encoded);
+      }
+    }
+  };
+  try {
+    for (;;) {
+      const { value, done } = await Promise.race([reader.read(), timeout]);
+      if (done) {
+        break;
+      }
+      size += value.byteLength;
+      if (size > maxBytes) {
+        throw new Error('Asset body exceeded its recorded size.');
+      }
+      // Only a two-byte remainder crosses reads; do not copy a large R2 chunk.
+      let offset = 0;
+      if (tail.length > 0) {
+        const count = Math.min(3 - tail.length, value.length);
+        const joined = new Uint8Array(tail.length + count);
+        joined.set(tail);
+        joined.set(value.subarray(0, count), tail.length);
+        offset = count;
+        if (joined.length < 3) {
+          tail = joined;
+          continue;
+        }
+        update(joined);
+        tail = new Uint8Array(0);
+      }
+      const aligned = offset + Math.floor((value.length - offset) / 3) * 3;
+      update(value.subarray(offset, aligned));
+      tail = value.slice(aligned);
+    }
+    if (tail.length > 0) {
+      update(tail);
+    }
+  } catch (error) {
+    void reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    clearTimeout(timer!);
+    reader.releaseLock();
+  }
+  return {
+    size,
+    hashes: [...hashers].map(([extension, hasher]) => {
+      hasher.update(textEncoder.encode(extension));
+      return digestToAssetHash(hasher.finalize());
+    }),
+  };
 }
 
 /**

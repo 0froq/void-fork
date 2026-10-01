@@ -19,6 +19,10 @@ import {
 } from '../../src/cli/platform-registry.ts';
 
 const keyring = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), remove: vi.fn() }));
+const mutationPrompt = vi.hoisted(() => ({ question: vi.fn(), close: vi.fn() }));
+vi.mock('node:readline/promises', () => ({
+  createInterface: () => mutationPrompt,
+}));
 vi.mock('../../src/cli/keyring.ts', () => ({
   readKeyringPassword: keyring.read,
   writeKeyringPassword: keyring.write,
@@ -283,6 +287,47 @@ describe('operator argument and help coverage', () => {
     expect(() => parseOperatorArgs(['email', 'logs', 'project', '--limit', '101'])).toThrow();
     expect(() => parseOperatorArgs(['email', 'logs', 'project', '--follow'])).toThrow();
   });
+  it('routes deployment asset migration and its resume cursor through mutation help', () => {
+    expect(
+      parsePlatformArgs([
+        'deployment',
+        'migrate-assets',
+        'deployment / id',
+        '--cursor',
+        'opaque-cursor',
+        '--plan',
+      ]),
+    ).toMatchObject({
+      method: 'POST',
+      path: '/deployments/deployment%20%2F%20id/migrate-assets',
+      body: { cursor: 'opaque-cursor' },
+      plan: true,
+    });
+    expect(hasHelpPage(['platform', 'deployment', 'migrate-assets'])).toBe(true);
+    expect(() =>
+      parseOperatorArgs(['deployment', 'migrate-assets', 'id', '--plan', '--yes']),
+    ).toThrow('--plan and --yes cannot be combined');
+  });
+  it('routes asset migration inventory with bounded pagination and nested help', () => {
+    expect(
+      parsePlatformArgs(['system', 'asset-migrations', '--page', '2', '--limit', '100']),
+    ).toMatchObject({
+      method: 'GET',
+      path: '/system/asset-migrations',
+      query: { page: '2', limit: '100' },
+      body: {},
+    });
+    expect(hasHelpPage(['platform', 'system', 'asset-migrations'])).toBe(true);
+    expect(() => parseOperatorArgs(['system', 'asset-migrations', '--limit', '101'])).toThrow(
+      '--limit must be an integer from 1 to 100',
+    );
+    expect(() => parseOperatorArgs(['system', 'asset-migrations', '--page', '0'])).toThrow(
+      '--page must be an integer from 1 to 1000000',
+    );
+    expect(() => parseOperatorArgs(['system', 'asset-migrations', '--yes'])).toThrow(
+      "Unknown flag '--yes'",
+    );
+  });
   it('routes attempt inspection and attested resolution with a bounded audit reason', () => {
     expect(
       parseOperatorArgs(['email', 'attempts', '--project', 'my-project', '--page', '2']),
@@ -433,6 +478,251 @@ describe('operator credential isolation', () => {
     );
     keyring.write.mockReturnValue(false);
     expect(() => saveOperatorToken('https://one.example', 'operator')).toThrow('keychain');
+  });
+});
+
+describe('deployment asset migration', () => {
+  const target = 'deployment / id';
+  const preview = (expected = 'digest-1') => ({
+    dryRun: true,
+    action: 'deployment.migrate-assets',
+    target,
+    expected,
+    assets: 2,
+  });
+  const applied = (nextCursor: string | null) => ({
+    dryRun: false,
+    action: 'deployment.migrate-assets',
+    target,
+    complete: nextCursor === null,
+    nextCursor,
+    verified: 2,
+  });
+  beforeEach(() => {
+    vi.stubEnv('VOID_API_URL', 'https://one.example');
+    vi.stubEnv('VOID_OPERATOR_TOKEN', 'operator');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  });
+  it.each([false, true])(
+    'reads asset inventory without a mutation in JSON=%s mode',
+    async (json) => {
+      const inventory = {
+        deployments: [
+          {
+            id: 'deployment-1',
+            projectId: 'project-1',
+            slug: 'example',
+            active: true,
+            retained: true,
+            bundleStored: true,
+            assets: 2,
+            needsMigration: 2,
+            invalid: false,
+          },
+        ],
+        pagination: { page: 2, limit: 100, total: 102, totalPages: 2 },
+      };
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json(inventory));
+      vi.stubGlobal('fetch', fetcher);
+      await runOperatorCommand(
+        parseOperatorArgs([
+          'system',
+          'asset-migrations',
+          '--page',
+          '2',
+          '--limit',
+          '100',
+          ...(json ? ['--json'] : []),
+        ]),
+      );
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(String(fetcher.mock.calls[0]![0])).toBe(
+        'https://one.example/operator/v1/system/asset-migrations?page=2&limit=100',
+      );
+      expect(fetcher.mock.calls[0]![1]).toMatchObject({ method: 'GET' });
+      expect(fetcher.mock.calls[0]![1]!.body).toBeUndefined();
+      if (json) {
+        expect(console.log).toHaveBeenCalledWith(JSON.stringify(inventory));
+      } else {
+        const printed = vi
+          .mocked(console.log)
+          .mock.calls.map(([line]) => String(line))
+          .join('\n');
+        expect(printed).toContain('needs Migration: 2');
+        expect(printed).toContain('invalid: false');
+        expect(printed).toContain('bundle Stored: true');
+        expect(printed).toContain('total Pages: 2');
+      }
+    },
+  );
+  it('previews only the requested starting batch in plan mode', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json(preview()));
+    vi.stubGlobal('fetch', fetcher);
+    await runOperatorCommand(
+      parseOperatorArgs([
+        'deployment',
+        'migrate-assets',
+        target,
+        '--cursor',
+        'resume-cursor',
+        '--plan',
+        '--json',
+      ]),
+    );
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(String(fetcher.mock.calls[0]![0])).toBe(
+      'https://one.example/operator/v1/deployments/deployment%20%2F%20id/migrate-assets',
+    );
+    expect(JSON.parse(String(fetcher.mock.calls[0]![1]!.body))).toEqual({
+      cursor: 'resume-cursor',
+      dryRun: true,
+    });
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('all remaining asset batches'),
+    );
+  });
+  it('previews and pins every batch until complete, retaining each successful cursor', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(preview('digest-1')))
+      .mockResolvedValueOnce(Response.json(applied('cursor-1')))
+      .mockResolvedValueOnce(Response.json(preview('digest-2')))
+      .mockResolvedValueOnce(Response.json(applied(null)));
+    vi.stubGlobal('fetch', fetcher);
+    await runOperatorCommand(
+      parseOperatorArgs(['deployment', 'migrate-assets', target, '--yes', '--json']),
+    );
+    expect(fetcher.mock.calls.map(([, init]) => JSON.parse(String(init!.body)))).toEqual([
+      { dryRun: true },
+      { expected: 'digest-1' },
+      { cursor: 'cursor-1', dryRun: true },
+      { cursor: 'cursor-1', expected: 'digest-2' },
+    ]);
+    expect(vi.mocked(console.log).mock.calls.map(([line]) => JSON.parse(String(line)))).toEqual([
+      applied('cursor-1'),
+      applied(null),
+    ]);
+    expect(process.stderr.write).not.toHaveBeenCalled();
+  });
+  it('applies the exact resumed cursor and stops at completed migration', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(preview()))
+      .mockResolvedValueOnce(Response.json(applied(null)));
+    vi.stubGlobal('fetch', fetcher);
+    await runOperatorCommand(
+      parseOperatorArgs([
+        'deployment',
+        'migrate-assets',
+        target,
+        '--cursor',
+        'resume-cursor',
+        '--yes',
+      ]),
+    );
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetcher.mock.calls[1]![1]!.body))).toEqual({
+      cursor: 'resume-cursor',
+      expected: 'digest-1',
+    });
+  });
+  it('asks once before continuing all previewed batches in an interactive terminal', async () => {
+    vi.stubGlobal('process', {
+      ...process,
+      stdin: { ...process.stdin, isTTY: true },
+      stderr: { ...process.stderr, isTTY: true, write: vi.fn() },
+    });
+    mutationPrompt.question.mockResolvedValue('yes');
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(preview()))
+      .mockResolvedValueOnce(Response.json(applied('cursor-1')))
+      .mockResolvedValueOnce(Response.json(preview('digest-2')))
+      .mockResolvedValueOnce(Response.json(applied(null)));
+    vi.stubGlobal('fetch', fetcher);
+    await runOperatorCommand(parseOperatorArgs(['deployment', 'migrate-assets', target]));
+    expect(mutationPrompt.question).toHaveBeenCalledTimes(1);
+    expect(mutationPrompt.close).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(process.stderr.write).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    { action: 'deployment.delete' },
+    { target: 'another-deployment' },
+    { expected: '' },
+    { expected: null },
+    { dryRun: false },
+  ])('rejects an invalid asset preview %j before applying', async (changes) => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ ...preview(), ...changes }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(
+      runOperatorCommand(parseOperatorArgs(['deployment', 'migrate-assets', target, '--yes'])),
+    ).rejects.toMatchObject({ code: 'invalid_preview' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    { nextCursor: undefined },
+    { nextCursor: '' },
+    { nextCursor: 1 },
+    { nextCursor: 'resume-cursor' },
+    { complete: true },
+    { action: 'deployment.delete' },
+    { target: 'another-deployment' },
+  ])('stops after a malformed or repeated continuation %j without retrying', async (changes) => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(preview()))
+      .mockResolvedValueOnce(Response.json({ ...applied('cursor-1'), ...changes }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(
+      runOperatorCommand(
+        parseOperatorArgs([
+          'deployment',
+          'migrate-assets',
+          target,
+          '--cursor',
+          'resume-cursor',
+          '--yes',
+        ]),
+      ),
+    ).rejects.toMatchObject({
+      code: 'invalid_response',
+      details: { lastSuccessfulCursor: 'resume-cursor' },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+  it('detects a cursor cycle after multiple successful batches', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(preview()))
+      .mockResolvedValueOnce(Response.json(applied('cursor-1')))
+      .mockResolvedValueOnce(Response.json(preview('digest-2')))
+      .mockResolvedValueOnce(Response.json(applied('cursor-2')))
+      .mockResolvedValueOnce(Response.json(preview('digest-3')))
+      .mockResolvedValueOnce(Response.json(applied('cursor-1')));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(
+      runOperatorCommand(parseOperatorArgs(['deployment', 'migrate-assets', target, '--yes'])),
+    ).rejects.toMatchObject({ code: 'invalid_response' });
+    expect(fetcher).toHaveBeenCalledTimes(6);
+    expect(console.log).toHaveBeenCalledTimes(2);
+  });
+  it('keeps the last successful cursor and never retries an ambiguous later apply', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(preview()))
+      .mockResolvedValueOnce(Response.json(applied('cursor-1')))
+      .mockResolvedValueOnce(Response.json(preview('digest-2')))
+      .mockRejectedValueOnce(new Error('connection lost'));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(
+      runOperatorCommand(parseOperatorArgs(['deployment', 'migrate-assets', target, '--yes'])),
+    ).rejects.toMatchObject({ code: 'connection_failed' });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('cursor-1'));
   });
 });
 

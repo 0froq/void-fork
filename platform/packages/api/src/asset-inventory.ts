@@ -60,9 +60,10 @@ export function persistedR2AssetSizes(raw: string | null): Map<string, number> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       continue;
     }
-    const entry = value as { hash?: unknown; size?: unknown; store?: unknown };
+    const entry = value as { hash?: unknown; size?: unknown; store?: unknown; scope?: unknown };
     if (
       entry.store === 'r2' &&
+      entry.scope === 'project' &&
       typeof entry.hash === 'string' &&
       /^[0-9a-f]{32}$/.test(entry.hash) &&
       typeof entry.size === 'number' &&

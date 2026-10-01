@@ -1,5 +1,9 @@
+import { extname } from 'node:path';
+import { hash as blake3hash } from 'blake3-jit';
 import { afterEach, describe, it, expect, vi } from 'vite-plus/test';
 import {
+  computeAssetHash,
+  computeAssetStreamHashes,
   createAssetUploadSession,
   deleteUnreferencedAssets,
   deleteWorkerBundle,
@@ -11,6 +15,78 @@ import {
 } from '../../src/assets.ts';
 
 const enc = new TextEncoder();
+
+describe('asset hash compatibility', () => {
+  it.each([0, 1, 2, 3, 48 * 1024 - 1, 48 * 1024, 48 * 1024 + 1, 96 * 1024 + 2])(
+    'preserves the provider base64 and extension hash for %i bytes',
+    (size) => {
+      const bytes = Uint8Array.from({ length: size }, (_, index) => index % 251);
+      for (const path of ['/asset.js', '/nested/file.css', '/extensionless']) {
+        const input = Buffer.from(bytes).toString('base64') + extname(path).substring(1);
+        const expected = Buffer.from(blake3hash(enc.encode(input)))
+          .subarray(0, 16)
+          .toString('hex');
+        expect(computeAssetHash(bytes.buffer, path)).toBe(expected);
+      }
+    },
+  );
+  it('preserves the provider hash across arbitrary streamed base64 boundaries', async () => {
+    const bytes = Uint8Array.from({ length: 96 * 1024 + 2 }, (_, index) => index % 251);
+    let offset = 0;
+    let step = 0;
+    const chunks = [1, 2, 0, 5, 48 * 1024 + 1, 7];
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (offset === bytes.length) {
+          controller.close();
+          return;
+        }
+        const end = Math.min(bytes.length, offset + chunks[step++ % chunks.length]!);
+        controller.enqueue(bytes.slice(offset, end));
+        offset = end;
+      },
+    });
+    expect(
+      await computeAssetStreamHashes(body, ['/a.js', '/same.js', '/file.css'], bytes.length),
+    ).toEqual({
+      size: bytes.length,
+      hashes: [
+        computeAssetHash(bytes.buffer, '/a.js'),
+        computeAssetHash(bytes.buffer, '/file.css'),
+      ],
+    });
+  });
+  it('cancels a stream that exceeds the recorded size', async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(3));
+      },
+      cancel,
+    });
+    await expect(computeAssetStreamHashes(body, ['/a.js'], 2)).rejects.toThrow('recorded size');
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+  it('times out a stalled read even when cancellation never settles', async () => {
+    vi.useFakeTimers();
+    try {
+      const cancel = vi.fn(() => new Promise<void>(() => {}));
+      const body = new ReadableStream<Uint8Array>({
+        pull: () => new Promise<void>(() => {}),
+        cancel,
+      });
+      const assertion = expect(computeAssetStreamHashes(body, ['/a.js'], 10)).rejects.toThrow(
+        'two-minute deadline',
+      );
+      await vi.advanceTimersByTimeAsync(120_000);
+      await assertion;
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(body.locked).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe('asset content-type indexing', () => {
   it('keeps the first matching path, requested order, and the unknown-type sentinel', () => {

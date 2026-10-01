@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { ApiEnv } from '../env.ts';
+import { assetMigrationInventory, migrateOperatorDeploymentAssets } from './asset-migration.ts';
 import { buildDetail, buildLogs } from './build-operations.ts';
 import { dryRun, OperatorError, pagination, preview, readBody, stringField } from './common.ts';
 import {
@@ -41,6 +42,21 @@ operationsRoutes.get('/deployments', async (context) =>
 operationsRoutes.get('/deployments/:id', async (context) =>
   context.json(await deploymentDetail(context.get('db'), context.req.param('id'))),
 );
+operationsRoutes.post('/deployments/:id/migrate-assets', async (context) => {
+  const body = await readBody(context);
+  if (body.cursor !== undefined && typeof body.cursor !== 'string') {
+    throw new OperatorError(400, 'cursor must be a string.', 'invalid_argument');
+  }
+  return context.json(
+    await migrateOperatorDeploymentAssets(
+      context,
+      context.req.param('id'),
+      dryRun(body),
+      body.cursor,
+      body.expected,
+    ),
+  );
+});
 operationsRoutes.post('/deployments/:id/cancel', async (context) => {
   const body = await readBody(context);
   const deployment = await requestDeploymentCancellation(
@@ -78,6 +94,9 @@ operationsRoutes.get('/builds/:id/logs', async (context) =>
 );
 operationsRoutes.get('/system/overview', async (context) =>
   context.json(await systemOverview(context.get('db'), context.env)),
+);
+operationsRoutes.get('/system/asset-migrations', async (context) =>
+  context.json(await assetMigrationInventory(context, pagination(context))),
 );
 operationsRoutes.get('/system/health', async (context) =>
   context.json(await systemHealth(context.get('db'), context.env, context.req.url)),

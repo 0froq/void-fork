@@ -216,6 +216,15 @@ export const operatorCommands: Array<OperatorCommand> = [
   },
   {
     group: 'deployment',
+    action: 'migrate-assets',
+    description: 'Copy and verify legacy deployment assets in scoped R2 storage',
+    path: '/deployments/:id/migrate-assets',
+    positional: ['id'],
+    values: { cursor: 'Resume from the last successful asset migration cursor' },
+    method: 'POST',
+  },
+  {
+    group: 'deployment',
     action: 'logs',
     description: 'Read runtime logs (JSON follow emits one object per line)',
     path: '/deployments/:id/logs',
@@ -326,6 +335,13 @@ export const operatorCommands: Array<OperatorCommand> = [
     action: 'cli-versions',
     description: 'Inspect CLI version adoption and deployment statistics',
     path: '/system/cli-versions',
+  },
+  {
+    group: 'system',
+    action: 'asset-migrations',
+    description: 'Inventory legacy assets in active and retained deployments',
+    path: '/system/asset-migrations',
+    values: { page: 'One-based page number', limit: 'Maximum 100 records per page' },
   },
   {
     group: 'system',

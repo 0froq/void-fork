@@ -22,7 +22,9 @@ import {
 import { computeAssetHash } from '../../src/assets.ts';
 import { cancelDeployment } from '../../src/db.ts';
 import app from '../../src/index.ts';
+import * as projectIngress from '../../src/project-ingress.ts';
 import { deployments, projects } from '../../src/schema.ts';
+import { STATIC_RETENTION_LIMIT } from '../../src/tiers.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -349,57 +351,62 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     });
   });
 
-  it('skips R2 inventory for unchanged hashes protected by the active deployment', async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'worker-active-reuse');
-    const reusedHash = HASH(0x41);
-    const missingHash = HASH(0x42);
-    await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, reusedHash, new Uint8Array(12));
-    const liveId = 'dpl_worker_active_reuse';
-    await env.db.insert(deployments).values({
-      id: liveId,
-      project_id: project.id,
-      status: 'live',
-      manifest: JSON.stringify(v2Manifest({ type: 'void' })),
-      asset_hashes: JSON.stringify({ '/app.js': { hash: reusedHash, size: 12, store: 'r2' } }),
-      created_at: sql`now()`,
-      deployed_at: sql`now()`,
-    });
-    await env.db
-      .update(projects)
-      .set({ active_deployment_id: liveId })
-      .where(eq(projects.id, project.id));
-    const head = vi.spyOn(env.STATIC_ASSETS_R2, 'head');
-    const list = vi.spyOn(env.STATIC_ASSETS_R2, 'list');
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          hasWorker: true,
-          assetManifest: {
-            '/app.js': { hash: reusedHash, size: 12 },
-            '/renamed.js': { hash: reusedHash, size: 12 },
-            '/wrong-size.js': { hash: reusedHash, size: 13 },
-            '/missing.js': { hash: missingHash, size: 5 },
-          },
+  it.each([false, true])(
+    'skips scoped R2 inventory for unchanged assets with hasWorker=%s',
+    async (hasWorker) => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, 'worker-active-reuse');
+      const reusedHash = HASH(0x41);
+      const missingHash = HASH(0x42);
+      await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, reusedHash, new Uint8Array(12));
+      const liveId = 'dpl_worker_active_reuse';
+      await env.db.insert(deployments).values({
+        id: liveId,
+        project_id: project.id,
+        status: 'live',
+        manifest: JSON.stringify(v2Manifest({ type: 'void' })),
+        asset_hashes: JSON.stringify({
+          '/app.js': { hash: reusedHash, size: 12, store: 'r2', scope: 'project' },
         }),
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      needed: ['/wrong-size.js', '/missing.js'],
-      total: 4,
-      skipped: 2,
-    });
-    expect(head.mock.calls).toEqual([
-      [`assets/${project.id}/${reusedHash}`],
-      [`assets/${project.id}/${missingHash}`],
-    ]);
-    expect(list).not.toHaveBeenCalled();
-  });
+        created_at: sql`now()`,
+        deployed_at: sql`now()`,
+      });
+      await env.db
+        .update(projects)
+        .set({ active_deployment_id: liveId })
+        .where(eq(projects.id, project.id));
+      const head = vi.spyOn(env.STATIC_ASSETS_R2, 'head');
+      const list = vi.spyOn(env.STATIC_ASSETS_R2, 'list');
+
+      const res = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hasWorker,
+            assetManifest: {
+              '/app.js': { hash: reusedHash, size: 12 },
+              '/renamed.js': { hash: reusedHash, size: 12 },
+              '/wrong-size.js': { hash: reusedHash, size: 13 },
+              '/missing.js': { hash: missingHash, size: 5 },
+            },
+          }),
+        }),
+        env,
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        needed: ['/wrong-size.js', '/missing.js'],
+        total: 4,
+        skipped: 2,
+      });
+      expect(head.mock.calls).toEqual([
+        [`assets/${project.id}/${reusedHash}`],
+        [`assets/${project.id}/${missingHash}`],
+      ]);
+      expect(list).not.toHaveBeenCalled();
+    },
+  );
 
   it('finalizes an unchanged Worker asset without scanning the R2 prefix', async () => {
     const user = await createTestUser(env.db);
@@ -412,7 +419,9 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
       project_id: project.id,
       status: 'live',
       manifest: JSON.stringify(v2Manifest({ type: 'void' })),
-      asset_hashes: JSON.stringify({ '/app.js': { hash, size: 12, store: 'r2' } }),
+      asset_hashes: JSON.stringify({
+        '/app.js': { hash, size: 12, store: 'r2', scope: 'project' },
+      }),
       created_at: sql`now()`,
       deployed_at: sql`now()`,
     });
@@ -705,6 +714,122 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     expect(await env.STATIC_ASSETS_R2.head(otherKey)).not.toBeNull();
   });
 
+  it.each([
+    { mode: 'spa', retained: false, failBundleDelete: false },
+    { mode: 'spa', retained: true, failBundleDelete: false },
+    { mode: 'void', retained: true, failBundleDelete: false },
+    { mode: 'void', retained: true, failBundleDelete: true },
+  ] as const)(
+    'protects stored-history assets until bundle eviction: $mode, retained=$retained, delete failure=$failBundleDelete',
+    async ({ mode, retained, failBundleDelete }) => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, 'stored-asset-gc');
+      mockCfApi();
+      const storedId = 'dpl_stored_asset_history';
+      const oldHash = HASH(0x4a50);
+      const oldKey = `assets/${project.id}/${oldHash}`;
+      const bundleKey = `worker-bundles/${project.id}/${storedId}/index.js`;
+      await stageAssetInR2(
+        env.STATIC_ASSETS_R2,
+        project.id,
+        oldHash,
+        new TextEncoder().encode('migrated history'),
+      );
+      await env.STATIC_ASSETS_R2.put(bundleKey, 'export default {};');
+      (
+        env.STATIC_ASSETS_R2 as unknown as { setUploadedAt: (key: string, value: Date) => void }
+      ).setUploadedAt(oldKey, new Date(Date.now() - 2 * 3600 * 1000));
+      await env.db.insert(deployments).values({
+        id: storedId,
+        project_id: project.id,
+        status: retained ? 'live' : 'failed',
+        retained,
+        bundle_stored: true,
+        manifest: JSON.stringify(v2Manifest({ type: 'void' })),
+        asset_hashes: JSON.stringify({
+          '/history.js': { hash: oldHash, size: 16, store: 'r2', scope: 'project' },
+        }),
+        created_at: sql`now() - interval '2 hours'`,
+        deployed_at: retained ? sql`now() - interval '2 hours'` : null,
+      });
+      if (retained) {
+        if (mode === 'spa') {
+          await env.db.insert(deployments).values(
+            Array.from({ length: STATIC_RETENTION_LIMIT - 1 }, (_, index) => ({
+              id: `dpl_newer_stored_history_${index}`,
+              project_id: project.id,
+              status: 'live' as const,
+              retained: true,
+              created_at: sql`now() - interval '1 hour'`,
+              deployed_at: sql`now() - interval '1 hour'`,
+            })),
+          );
+        }
+        await env.db
+          .update(projects)
+          .set({ active_deployment_id: storedId })
+          .where(eq(projects.id, project.id));
+        await env.ROUTING.put(
+          project.slug,
+          JSON.stringify({
+            projectId: project.id,
+            userId: user.id,
+            deploymentId: storedId,
+            workerName: `user-${project.slug}-${storedId}`,
+            type: 'void',
+          }),
+        );
+      }
+      if (failBundleDelete) {
+        const remove = env.STATIC_ASSETS_R2.delete.bind(env.STATIC_ASSETS_R2);
+        vi.spyOn(env.STATIC_ASSETS_R2, 'delete').mockImplementation(async (keys) => {
+          if ((typeof keys === 'string' ? [keys] : keys).includes(bundleKey)) {
+            throw new Error('bundle deletion unavailable');
+          }
+          await remove(keys);
+        });
+      }
+      const newHash = HASH(0x4a51);
+      const bytes = new TextEncoder().encode('current asset');
+      await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, newHash, bytes);
+      const originalDispatch = env.DISPATCH;
+      env.DISPATCH = {
+        get: () => ({ fetch: async () => Response.json({ ready: true }) }),
+      } as unknown as DispatchNamespace;
+      try {
+        const response = await app.fetch(
+          new Request(`http://localhost/projects/${project.id}/deploy`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              manifest: v2Manifest({ type: mode }),
+              assetManifest: {
+                '/index.html': { blake3: newHash, md5: MD5(0x4a51), size: bytes.length },
+              },
+              ...(mode === 'void'
+                ? { workerFiles: { 'index.js': btoa('export default {};') } }
+                : {}),
+            }),
+          }),
+          env,
+        );
+        const events = await readAllEvents(response);
+        expect(events.find((event) => isEvent(event, 'error'))).toBeUndefined();
+        expect(events.find((event) => isEvent(event, 'done'))).toBeDefined();
+        const preserve = !retained || failBundleDelete;
+        const history = (
+          await env.db.select().from(deployments).where(eq(deployments.id, storedId))
+        )[0];
+        expect(history?.bundle_stored).toBe(preserve);
+        expect(history?.retained).toBe(false);
+        expect(Boolean(await env.STATIC_ASSETS_R2.head(bundleKey))).toBe(preserve);
+        expect(Boolean(await env.STATIC_ASSETS_R2.head(oldKey))).toBe(preserve);
+      } finally {
+        env.DISPATCH = originalDispatch;
+      }
+    },
+  );
+
   // Regression: orphans uploaded inside the pending-upload protection
   // window MUST be preserved by the retention sweep — those bytes may be
   // in-flight uploads for a not-yet-finalized deploy on the same project.
@@ -825,6 +950,9 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     const assetBytes = new TextEncoder().encode('export const helper = 1;');
     const assetHash = HASH(0xb1b1);
     await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, assetHash, assetBytes);
+    await env.STATIC_ASSETS_R2.put(`assets/${assetHash}`, new TextEncoder().encode('legacy bytes'));
+    const r2Get = vi.spyOn(env.STATIC_ASSETS_R2, 'get');
+    const kvGet = vi.spyOn(env.STATIC_ASSETS, 'get');
 
     // Mock DISPATCH so the migration / readiness probe paths can run if invoked.
     const originalDispatch = env.DISPATCH;
@@ -878,6 +1006,10 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
         | undefined;
       expect(done).toBeDefined();
       expect(done!.workers).toBe(1);
+      expect(r2Get.mock.calls.filter(([key]) => key.startsWith('assets/'))).toEqual([
+        [`assets/${project.id}/${assetHash}`],
+      ]);
+      expect(kvGet).not.toHaveBeenCalled();
       const [dpl] = await env.db
         .select({ status: deployments.status })
         .from(deployments)
@@ -887,6 +1019,68 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
       env.DISPATCH = originalDispatch;
     }
   });
+
+  it.each([false, true])(
+    'requires reupload of historical unscoped R2 assets with hasWorker=%s',
+    async (hasWorker) => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, 'unscoped-r2-reupload');
+      const hash = HASH(0xb1b2);
+      const bytes = new TextEncoder().encode('old unscoped asset');
+      await env.STATIC_ASSETS_R2.put(`assets/${hash}`, bytes);
+      const liveId = 'dpl_live_unscoped_r2';
+      await env.db.insert(deployments).values({
+        id: liveId,
+        project_id: project.id,
+        status: 'live',
+        retained: true,
+        manifest: JSON.stringify(v2Manifest({ type: hasWorker ? 'void' : 'spa' })),
+        asset_hashes: JSON.stringify({ '/app.js': { hash, size: bytes.length, store: 'r2' } }),
+        created_at: sql`now()`,
+        deployed_at: sql`now()`,
+      });
+      await env.db
+        .update(projects)
+        .set({ active_deployment_id: liveId })
+        .where(eq(projects.id, project.id));
+      const preflight = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hasWorker,
+            assetManifest: { '/app.js': { hash, size: bytes.length } },
+          }),
+        }),
+        env,
+      );
+      expect(await preflight.json()).toEqual({ needed: ['/app.js'], total: 1, skipped: 0 });
+      const ingress = vi.spyOn(projectIngress, 'ensureProjectIngress');
+      const cf = mockCfApi();
+      const response = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            manifest: v2Manifest({ type: hasWorker ? 'void' : 'spa' }),
+            assetManifest: { '/app.js': { blake3: hash, md5: MD5(0xb1b2), size: bytes.length } },
+            ...(hasWorker ? { workerFiles: { 'index.js': btoa('export default {};') } } : {}),
+          }),
+        }),
+        env,
+      );
+      const events = await readAllEvents(response);
+      expect(events.find((event) => isEvent(event, 'error'))).toMatchObject({
+        step: 'asset_verify',
+      });
+      expect(ingress).not.toHaveBeenCalled();
+      expect(cf).not.toHaveBeenCalled();
+      expect(
+        (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0]
+          ?.active_deployment_id,
+      ).toBe(liveId);
+    },
+  );
 
   it('dedupe short-circuit fires when manifest matches the live deploy', async () => {
     const user = await createTestUser(env.db);
@@ -910,7 +1104,12 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
       assetConfig: { not_found_handling: 'single-page-application' },
     };
     const liveAssetManifest = {
-      '/index.html': { hash: indexHash, size: indexBytes.byteLength },
+      '/index.html': {
+        hash: indexHash,
+        size: indexBytes.byteLength,
+        store: 'r2',
+        scope: 'project',
+      },
     };
     await env.db.insert(deployments).values({
       id: liveId,
@@ -1277,10 +1476,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     expect(res.status).not.toBe(413);
   });
 
-  // Bug 1 — JSON static mode must not R2-head'verify carry-forward hashes
-  // (they may live in KV from a prior deploy). Mirrors the multipart path
-  // which writes small assets to KV via STATIC_ASSETS.
-  it('static deploy succeeds when a carry-forward asset lives in KV (not R2)', async () => {
+  it('reuploads legacy KV assets on an unchanged static redeploy and preserves the old deployment', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'jm-static-kv-cf');
     mockCfApi();
@@ -1291,9 +1487,9 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     // for this hash — the asset only exists in KV.
     const kvHash = HASH(0x4101);
     const kvBytes = new TextEncoder().encode('<h1>kv-prior</h1>');
-    // Stash the bytes in STATIC_ASSETS KV so the dispatch fallback
-    // chain would still work in production. We don't rely on this for
-    // the test assertion; we just want the prior placement to be KV.
+    const newR2Hash = HASH(0x4102);
+    const newR2Bytes = new TextEncoder().encode('body { color: blue }');
+    // Historical serving bytes must survive the failed and successful redeploy.
     await env.STATIC_ASSETS.put(
       `assets/${project.id}/${kvHash}`,
       kvBytes.buffer.slice(0, kvBytes.byteLength) as ArrayBuffer,
@@ -1308,12 +1504,14 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
       assetConfig: { not_found_handling: 'single-page-application' },
     };
     const liveAssetManifest = {
-      '/index.html': { hash: kvHash, size: kvBytes.byteLength },
+      '/index.html': { hash: kvHash, size: kvBytes.byteLength, store: 'kv' },
+      '/style.css': { hash: newR2Hash, size: newR2Bytes.byteLength, store: 'r2' },
     };
     await env.db.insert(deployments).values({
       id: liveId,
       project_id: project.id,
       status: 'live',
+      retained: true,
       manifest: JSON.stringify(liveManifest),
       asset_hashes: JSON.stringify(liveAssetManifest),
       created_at: sql`now()`,
@@ -1333,51 +1531,59 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
       }),
     );
     // Prior serving manifest with NO `!` prefix → KV placement.
-    await env.ROUTING.put(`manifest:${liveId}`, JSON.stringify({ '/index.html': kvHash }));
+    const oldServingManifest = { '/index.html': kvHash, '/style.css': `!${newR2Hash}` };
+    await env.ROUTING.put(`manifest:${liveId}`, JSON.stringify(oldServingManifest));
 
-    // New deploy: declares the same hash (carried forward) plus a new
-    // R2-uploaded asset. R2 bucket only has the new hash; the kvHash
-    // is intentionally absent from R2.
-    const newR2Hash = HASH(0x4102);
-    const newR2Bytes = new TextEncoder().encode('body { color: blue }');
+    // The unchanged redeploy initially has only its CSS in scoped R2.
     await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, newR2Hash, newR2Bytes);
 
     // Sanity-check: kvHash is NOT in R2.
     const headBefore = await env.STATIC_ASSETS_R2.head(`assets/${project.id}/${kvHash}`);
     expect(headBefore).toBeNull();
 
-    // Build a different manifest so the dedupe short-circuit doesn't
-    // fire (we want the full pipeline to run).
-    const newManifest = {
-      ...liveManifest,
-      // `redirectRules` differs from prior — forces dedupe miss.
-      redirectRules: [{ source: '/old', destination: '/new', status: 301 }],
-    };
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
+    const preflight = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${user.jwt}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          manifest: newManifest,
-          assetManifest: {
-            '/index.html': { blake3: kvHash, md5: MD5(0x4103), size: kvBytes.byteLength },
-            '/style.css': {
-              blake3: newR2Hash,
-              md5: MD5(0x4104),
-              size: newR2Bytes.byteLength,
-            },
-          },
-          source: null,
-          commit: null,
-          preflight: 'true',
-        }),
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assetManifest: liveAssetManifest }),
       }),
       env,
     );
+    expect(await preflight.json()).toEqual({ needed: ['/index.html'], total: 2, skipped: 1 });
 
+    const request = () =>
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          manifest: liveManifest,
+          assetManifest: {
+            '/index.html': { blake3: kvHash, md5: MD5(0x4103), size: kvBytes.byteLength },
+            '/style.css': { blake3: newR2Hash, md5: MD5(0x4104), size: newR2Bytes.byteLength },
+          },
+          preflight: 'true',
+        }),
+      });
+    const ingress = vi.spyOn(projectIngress, 'ensureProjectIngress');
+    const cf = mockCfApi();
+    const missing = await app.fetch(request(), env);
+    const missingEvents = await readAllEvents(missing);
+    expect(missingEvents.find((event) => isEvent(event, 'error'))).toMatchObject({
+      step: 'asset_verify',
+    });
+    expect(missingEvents.find((event) => isEvent(event, 'done'))).toBeUndefined();
+    expect(ingress).not.toHaveBeenCalled();
+    expect(
+      cf.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'PUT'),
+    ).toBe(false);
+    expect(await env.ROUTING.get(`manifest:${liveId}`, 'json')).toEqual(oldServingManifest);
+    expect(
+      (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0]
+        ?.active_deployment_id,
+    ).toBe(liveId);
+
+    await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, kvHash, kvBytes);
+    const res = await app.fetch(request(), env);
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
     const done = events.find((e) => isEvent(e, 'done')) as unknown as
@@ -1388,17 +1594,27 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     expect(done).toBeDefined();
     expect(done!.assets).toBe(2);
 
-    // The new serving manifest should preserve KV placement for the
-    // carry-forward hash (no `!` prefix) and write the new hash with
-    // `!` (direct-to-R2 always lands in R2).
+    expect(done!.deployment).not.toBe(liveId);
+    // New serving placement is uniformly scoped R2; historical state stays usable.
     const serving = (await env.ROUTING.get(`manifest:${done!.deployment}`, 'json')) as Record<
       string,
       string
     > | null;
     expect(serving).toEqual({
-      '/index.html': kvHash, // carried forward, KV placement preserved
+      '/index.html': `!${kvHash}`, // redeploy writes only scoped R2 placement
       '/style.css': `!${newR2Hash}`, // new this deploy, R2-prefixed
     });
+    const fresh = (
+      await env.db.select().from(deployments).where(eq(deployments.id, done!.deployment))
+    )[0];
+    expect(JSON.parse(fresh!.asset_hashes!)).toEqual({
+      '/index.html': { hash: kvHash, size: kvBytes.byteLength, store: 'r2', scope: 'project' },
+      '/style.css': { hash: newR2Hash, size: newR2Bytes.byteLength, store: 'r2', scope: 'project' },
+    });
+    expect(await env.ROUTING.get(`manifest:${liveId}`, 'json')).toEqual(oldServingManifest);
+    expect(await env.STATIC_ASSETS.get(`assets/${project.id}/${kvHash}`, 'arrayBuffer')).toEqual(
+      kvBytes.buffer,
+    );
   });
 
   // Bug 2 — JSON mode must reject `workerFiles` for static-typed manifests,

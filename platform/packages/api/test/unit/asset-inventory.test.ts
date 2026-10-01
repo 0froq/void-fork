@@ -2,18 +2,19 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 import { findR2Assets, persistedR2AssetSizes } from '../../src/asset-inventory.ts';
 
 describe('asset inventory', () => {
-  it('trusts only unambiguous R2 placement recorded in an active manifest', () => {
+  it('trusts only unambiguous project-scoped R2 placement recorded in an active manifest', () => {
     const hash = 'a'.repeat(32);
     const conflicting = 'b'.repeat(32);
     expect(
       persistedR2AssetSizes(
         JSON.stringify({
-          '/app.js': { hash, size: 12, store: 'r2' },
-          '/copy.js': { hash, size: 12, store: 'r2' },
+          '/app.js': { hash, size: 12, store: 'r2', scope: 'project' },
+          '/copy.js': { hash, size: 12, store: 'r2', scope: 'project' },
           '/legacy.js': { hash: 'c'.repeat(32), size: 10 },
           '/kv.js': { hash: 'd'.repeat(32), size: 10, store: 'kv' },
-          '/first.js': { hash: conflicting, size: 8, store: 'r2' },
-          '/second.js': { hash: conflicting, size: 9, store: 'r2' },
+          '/unscoped.js': { hash: 'e'.repeat(32), size: 10, store: 'r2' },
+          '/first.js': { hash: conflicting, size: 8, store: 'r2', scope: 'project' },
+          '/second.js': { hash: conflicting, size: 9, store: 'r2', scope: 'project' },
         }),
       ),
     ).toEqual(new Map([[hash, 12]]));
