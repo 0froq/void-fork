@@ -80,7 +80,7 @@ jobs:
         if: ${{ needs.scope.outputs.suite == 'full' && runner.os == 'Linux' }}
       - run: vp exec playwright install chromium
         if: ${{ needs.scope.outputs.suite == 'full' && runner.os != 'Linux' }}
-      - run: node --test --test-timeout=10000 .github/scripts/packed-init.test.mjs
+      - run: node --test --test-timeout=10000 .github/scripts/packed-init.test.mjs .github/scripts/packed-server.test.mjs
       - run: vp run build
       - name: Prepublish Test with ${{ matrix.pm }}
         env:

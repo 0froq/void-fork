@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
-import { once } from 'node:events';
 import {
   createWriteStream,
   existsSync,
@@ -10,12 +9,12 @@ import {
   readdirSync,
   writeFileSync,
 } from 'node:fs';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path/posix';
 import { fileURLToPath } from 'node:url';
 import { collectBrowserDiagnostics } from '../../test/browser-helpers.ts';
 import { inspectPackage, startPackedRegistry } from './packed-registry.mjs';
+import { packedServerUrl } from './packed-server.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const suite = process.env.VOID_PACKED_SUITE ?? 'smoke';
@@ -69,6 +68,9 @@ function launch(command, args, cwd, env = environment) {
     failure() {
       return `${command} ${args.join(' ')} failed; ${logPath}\n${tail}`;
     },
+    output() {
+      return tail;
+    },
     async stop() {
       if (child.exitCode === null) {
         try {
@@ -101,15 +103,6 @@ async function run(command, args, cwd, env = environment) {
     clearTimeout(timeout);
     await task.stop();
   }
-}
-
-async function port() {
-  const server = createServer();
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const value = server.address().port;
-  await new Promise((resolve) => server.close(resolve));
-  return value;
 }
 
 const packages = [];
@@ -302,27 +295,32 @@ if (runtime.manifest.platformVersion !== ${JSON.stringify(version)}) throw new E
           fixture,
         );
         for (const mode of full ? ['dev', 'preview'] : ['dev']) {
-          const httpPort = await port();
-          const base = `http://127.0.0.1:${httpPort}`;
           const task = launch(
             process.execPath,
-            [vite, mode, '--host', '127.0.0.1', '--port', String(httpPort), '--strictPort'],
+            [vite, mode, '--host', '127.0.0.1', '--port', '0', '--strictPort'],
             fixture,
           );
           try {
             const deadline = Date.now() + 90_000;
+            let base;
             let response;
             while (Date.now() < deadline) {
               if (task.child.exitCode !== null) {
                 throw new Error(task.failure());
               }
-              try {
-                response = await fetch(base, { signal: AbortSignal.timeout(2000) });
-                if (response.ok) {
-                  break;
+              // Let Vite bind port 0 and report the actual port. Reserving then
+              // releasing an ephemeral port lets workerd's RPC listener claim
+              // it during config loading; probing it sends HTTP to that RPC.
+              base ??= packedServerUrl(task.output());
+              if (base) {
+                try {
+                  response = await fetch(base, { signal: AbortSignal.timeout(2000) });
+                  if (response.ok) {
+                    break;
+                  }
+                } catch {
+                  /* server is starting */
                 }
-              } catch {
-                /* server is starting */
               }
               await new Promise((resolve) => setTimeout(resolve, 200));
             }
