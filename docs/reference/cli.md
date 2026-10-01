@@ -102,61 +102,31 @@ Resources recorded in `void.lock.json` without a matching definition appear sepa
 
 ### `void init`
 
-```
+```sh
 void init [--tsconfig] [--github] [--agents] [--git | --no-git]
 ```
 
-Setup wizard for Void projects (new or existing).
+Set up a new or existing Void project. In an empty directory, choose Vite+ or Vite, a framework, and a D1, PostgreSQL, MySQL, or Static Pages starter.
 
-Outside an existing Git repository or workspace package, the interactive wizard first asks **Initialize a git repository?**, with Yes selected. Accepting runs `git init` using your Git default branch. At the end, Void suggests an optional `git add -A && git commit -m "chore: initial commit"` command; it does not stage files or commit automatically. Git initialization failures produce a warning and setup continues.
+In an existing app, Void adds missing dependencies and scripts and updates the Vite config. If it cannot edit your config, it prints the snippet to add.
 
-Use `--git` to initialize without the Git prompt, or `--no-git` to skip it. In CI or without an interactive terminal, Git initialization requires `--git`. Existing repositories, including parent repositories, are preserved. Workspace packages skip Git initialization and do not accept these two flags.
+The wizard also sets up TypeScript, agent instructions, environment declarations, and a deployment target. Choose Cloudflare, a Void platform, or skip deployment setup. If you skip sign-in, run `void connect` when you're ready. See [Quick Start](../guide/quickstart.md).
 
-Void's `.gitignore` defaults exclude dependencies, generated files, `.env`, and `.env.*`, while allowing `.env.example` to be committed.
+Outside an existing repository or workspace package, Void offers to initialize Git. Use `--git` to initialize without a prompt or `--no-git` to skip it. CI requires `--git` to initialize. Workspace packages do not accept these flags.
 
-In an empty project, `void init` asks you to choose:
+Run selected setup steps with:
 
-- **Toolchain:** Vite+ (the default) or plain Vite.
-- **Framework:** React, Vue, Svelte, or Solid. If one Pages adapter is already installed, Void uses it.
-- **Starter:** D1, PostgreSQL, MySQL, or Static Pages.
+| Flag         | Purpose                                                        |
+| ------------ | -------------------------------------------------------------- |
+| `--tsconfig` | Update TypeScript configuration, preserving existing settings. |
+| `--agents`   | Set up agent instructions and skills for detected agents.      |
+| `--github`   | Create the GitHub Actions deployment workflow.                 |
 
-Database starters include the framework config, a page and server loader, schema, seed, initial migration, and `routes/api/hello.ts`. Static Pages includes the framework config and home page. Vite+ starters use `vp dev`, `vp build`, and `vp preview`.
+These flags can be combined and skip the other wizard steps. Add `--git` if you also want Git initialization.
 
-If the directory contains other files but isn't an app yet, Void offers to create a subfolder. You can choose to continue in the current directory instead.
+For Cloudflare workflows, add a `CLOUDFLARE_API_TOKEN` repository secret. PostgreSQL and MySQL apps also need `DATABASE_URL`.
 
-In an existing app, Void adds missing dependencies and scripts, then updates `vite.config.*` with `voidPlugin()`. Existing scripts are preserved. If the config is too dynamic to edit, Void prints the snippet for you to add.
-
-After that, the full interactive flow walks through:
-
-1. **TypeScript:** creates or updates `tsconfig.json`, including `extends .void/tsconfig.json`, `void/env` types, and root-level `files` / `compilerOptions.paths` merges when an existing config would otherwise replace Void's generated entries.
-2. **Database:** asks whether you want D1, PostgreSQL, MySQL, or no database yet. PostgreSQL writes `"database": "pg"`; MySQL writes `"database": "mysql"`; D1 stays implicit.
-3. **Agent instructions:** always creates or updates `AGENTS.md` with brief Void instructions and the bundled docs path, preserving content outside the versioned block.
-4. **Skills:** links Void skills for detected coding agents.
-5. **Demo code:** for existing non-Pages projects, optionally scaffolds a `db/migrations/` directory plus an API route and typed fetch example.
-6. **Deployment platform:** asks where `void deploy` should send the app: Cloudflare (the default), Void, or Skip deployment setup. The choice is stored as `platform` in `.void/project.json`. Choosing Cloudflare records settings in `void.config.ts` and `void.lock.json`, checks the Cloudflare session through Void's bundled tooling, opens secure browser sign-in when needed, and writes the selected account as `account_id` (automatically when only one account is available).
-7. **GitHub Actions:** optionally creates `.github/workflows/void-deploy.yml` for the selected target. Cloudflare workflows run `void deploy --platform cloudflare` with `CLOUDFLARE_API_TOKEN` and pass the optional `DATABASE_URL` secret needed by PostgreSQL/MySQL apps. Void workflows use the selected platform's API URL and are offered only when its discovery document advertises GitHub Actions support.
-8. **`env.ts` scaffold:** if the project has no `env.ts` but has a root `.env`, generates an `env.ts` pre-populated with its keys. Values get conservative type inference (`boolean`/`url`/`number`/`string`) — the file carries a banner nudging you to tighten anything the heuristic got wrong.
-9. **Void project setup:** when Void is selected, optionally logs you in, lets you select or create a project, and adds the link to `.void/project.json` so your first deploy can just be `void deploy`.
-
-If Cloudflare sign-in is declined or does not complete, initialization still finishes with the configuration in place. Rerun `void init`, or use `void cloudflare login`, when you are ready.
-
-Agent setup never asks which coding agent you use. If no agent is detected, skill linking is skipped; `AGENTS.md` still points to the complete docs at `node_modules/void/skills/void/docs/`.
-
-Use flags to run individual steps without prompts:
-
-| Flag         | Purpose                                        |
-| ------------ | ---------------------------------------------- |
-| `--tsconfig` | Only update `tsconfig.json`                    |
-| `--agents`   | Set up agent instructions and skills           |
-| `--github`   | Only create the GitHub Actions deploy workflow |
-
-These step flags can be combined. When any of them is provided, only the specified steps run and interactive prompts are skipped. Git setup is skipped unless `--git` is also supplied. `--git` and `--no-git` alone keep the full setup wizard and control only its Git step.
-
-For Cloudflare, the generated workflow needs a `CLOUDFLARE_API_TOKEN` repository secret with access to your app's account and resources. PostgreSQL and MySQL apps also need `DATABASE_URL`.
-
-For a Void platform with GitHub Actions support, the workflow uses that platform's API URL and short-lived GitHub OIDC credentials. Authorize the repository with `void github connect <project> --repo <owner/repo> --executor github_actions`. Core self-hosted platforms don't yet support this integration, so Void explains that limitation instead of generating a workflow.
-
-For projects that already have `"extends"`, `void init --tsconfig` preserves the existing config and adds `./.void/tsconfig.json`. If the existing config defines `files` or `compilerOptions.paths`, Void also merges its generated declaration files and aliases into the root config because TypeScript replaces those fields across `extends` instead of deeply merging them.
+Void platforms with GitHub Actions support use short-lived OIDC credentials. Authorize the repository with `void github connect <project> --repo <owner/repo> --executor github_actions`. Core self-hosted platforms do not support that integration. See [Deployment](../guide/deployment.md#github).
 
 ### `void prepare`
 
