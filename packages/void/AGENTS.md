@@ -125,8 +125,8 @@ A pre-link file containing only `{ "voidInternalStaging": true }` is valid for V
 
 When `voidInternalStaging` is true:
 
-- **Token**: reads/writes `stagingToken` in `~/.void/config.json` instead of `token`
-- **API URL**: defaults to `https://api.void.cloud` (prod); when staging is active, uses `https://api.staging.void.cloud` (unless overridden by `VOID_API_URL` or `api` config field)
+- **Token**: uses the origin-scoped system-keychain credential for `https://api.staging.void.cloud`. Historical `token`/`stagingToken` credentials select their original destination only and require a new login; never adopt them or infer production from a retired staging login. Keep existing origin-scoped file fallback and environment token binding.
+- **API URL**: the staging flag selects `https://api.staging.void.cloud` unless explicitly overridden by `VOID_API_URL`.
 - **Site domain**: uses `staging.void.app` for generated project URLs
 - **Proxy**: injects staging proxy bindings for local dev AI and prerendering
 

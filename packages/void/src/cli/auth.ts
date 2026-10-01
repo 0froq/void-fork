@@ -47,12 +47,10 @@ function keyringDelete(account: string): boolean {
 
 // ---------------------------------------------------------------------------
 // Config file — non-sensitive fields only (api).
-// Token fields are kept in the type for migration reads.
+// Origin-scoped file credentials remain readable when a keychain is unavailable.
 // ---------------------------------------------------------------------------
 
 type Config = {
-  token?: string;
-  stagingToken?: string;
   tokens?: Record<string, string>;
   api?: string;
 };
@@ -136,7 +134,7 @@ export function getToken(root: string = process.cwd()): string | null {
     return null;
   }
   const config = readConfig();
-  return readTokenForOrigin(apiUrl, config, legacyCredentialAccount(root, apiUrl, config));
+  return readTokenForOrigin(apiUrl, config);
 }
 
 /** Account actions follow the selected connection, independently of application metadata. */
@@ -149,6 +147,7 @@ export function getAccountCredential(): { apiUrl: string; token: string | null }
         : (getActivePlatformConnection()?.apiUrl ??
           config.api ??
           readLegacyHostedPlatformSelection()?.apiUrl ??
+          // Old entries select their original destination but require a new login.
           (keyringGet('token')
             ? DEFAULT_API_URL
             : keyringGet('stagingToken')
@@ -157,19 +156,11 @@ export function getAccountCredential(): { apiUrl: string; token: string | null }
   );
   return {
     apiUrl,
-    token: readTokenForOrigin(
-      apiUrl,
-      config,
-      legacyCredentialAccountForMode(apiUrl === STAGING_API_URL, apiUrl, config),
-    ),
+    token: readTokenForOrigin(apiUrl, config),
   };
 }
 
-function readTokenForOrigin(
-  apiUrl: string,
-  config: Config,
-  legacyAccount: 'token' | 'stagingToken' | null,
-): string | null {
+function readTokenForOrigin(apiUrl: string, config: Config): string | null {
   const envToken = process.env.VOID_TOKEN;
   if (envToken) {
     const tokenOrigin = process.env.VOID_API_URL
@@ -182,44 +173,7 @@ function readTokenForOrigin(
     }
     return envToken;
   }
-  const normalizedApiUrl = normalizePlatformApiUrl(apiUrl);
-  const originToken = readOriginScopedToken(normalizedApiUrl, config);
-  if (originToken) {
-    return originToken;
-  }
-
-  const account = platformCredentialAccount(normalizedApiUrl);
-
-  if (legacyAccount) {
-    const legacyKeyringToken = keyringGet(legacyAccount);
-    if (legacyKeyringToken) {
-      keyringSet(account, legacyKeyringToken);
-      return legacyKeyringToken;
-    }
-  }
-
-  // File fallback — auto-migrate to the origin-scoped keyring entry if applicable.
-  if (!legacyAccount) {
-    return null;
-  }
-  const legacyFileToken = config[legacyAccount];
-  if (legacyFileToken) {
-    if (keyringSet(account, legacyFileToken)) {
-      // Successfully migrated — best-effort cleanup of the config-file copy.
-      // Failures here (read-only FS, permission denied, full disk) must not
-      // crash callers. Token stays in the file; next invocation will retry.
-      config.api ??= normalizedApiUrl;
-      delete config[legacyAccount];
-      try {
-        writeConfig(config);
-      } catch {
-        // Ignore — migration is best-effort.
-      }
-    }
-    return legacyFileToken;
-  }
-
-  return null;
+  return readOriginScopedToken(apiUrl, config);
 }
 
 export function getTokenSource(): 'ci' | 'manual' {
@@ -266,15 +220,6 @@ export function removeToken(root: string = process.cwd()): boolean {
   try {
     const config = readConfig();
     let configChanged = false;
-    const legacyAccount = legacyCredentialAccount(root, apiUrl, config);
-    if (legacyAccount && keyringDelete(legacyAccount)) {
-      removed = true;
-    }
-    if (legacyAccount && config[legacyAccount]) {
-      delete config[legacyAccount];
-      configChanged = true;
-      removed = true;
-    }
     if (config.tokens?.[apiUrl]) {
       delete config.tokens[apiUrl];
       if (Object.keys(config.tokens).length === 0) {
@@ -295,31 +240,6 @@ export function removeToken(root: string = process.cwd()): boolean {
 
 const DEFAULT_API_URL = VOID_CLOUD_PLATFORM.apiUrl;
 const STAGING_API_URL = VOID_CLOUD_STAGING_PLATFORM.apiUrl;
-
-function legacyCredentialAccount(
-  root: string,
-  normalizedApiUrl: string,
-  config: Config,
-): 'token' | 'stagingToken' | null {
-  return legacyCredentialAccountForMode(isStagingMode(root), normalizedApiUrl, config);
-}
-
-function legacyCredentialAccountForMode(
-  staging: boolean,
-  normalizedApiUrl: string,
-  config: Config,
-): 'token' | 'stagingToken' | null {
-  const account = staging ? 'stagingToken' : 'token';
-  let configuredUrl: string;
-  try {
-    configuredUrl = normalizePlatformApiUrl(
-      config.api ?? (staging ? STAGING_API_URL : DEFAULT_API_URL),
-    );
-  } catch {
-    return null;
-  }
-  return configuredUrl === normalizedApiUrl ? account : null;
-}
 
 function base64Url(buffer: Buffer): string {
   return buffer.toString('base64').replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
@@ -413,6 +333,7 @@ export function getApiUrl(root: string = process.cwd()): string {
   // runners while still requiring new interactive users to select a platform.
   apiUrl ??= process.env.VOID_TOKEN ? DEFAULT_API_URL : undefined;
   if (!apiUrl) {
+    // Preserve the old destination without adopting its unscoped credential.
     apiUrl = keyringGet('token')
       ? DEFAULT_API_URL
       : keyringGet('stagingToken')

@@ -191,6 +191,8 @@ are Void account operations. Prefer `void auth status`, `void account link`, and
 
 Browser login through one of the platform's currently enabled methods. The token is saved in the operating-system keychain, scoped to the platform origin. Login fails closed when no keychain is available instead of writing the token to a plaintext file; headless environments use `VOID_TOKEN` from their secret manager.
 
+If an older CLI login is no longer recognized after updating Void, run `void account login` again. Your saved platform and project links remain unchanged.
+
 Set `VOID_API_URL` alongside `VOID_TOKEN` to identify the platform that issued it.
 A token without an API URL is only used for Void Cloud's production API; a saved
 connection or project cannot forward it to another platform. To use a platform's
