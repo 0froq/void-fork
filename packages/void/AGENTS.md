@@ -6,6 +6,13 @@ User-facing CLI output and documentation describe Cloudflare operations through 
 
 ## Architecture
 
+`application-analysis.ts` owns source feature enablement and handler inventories;
+`application-routing.ts` completes route/page analysis. The plugin, type preparation
+and deployment consumers share these snapshots. Apply binding overrides per field;
+auth and migrations still require a database. Provider identity and post-build
+artifact/SQL validation belong to the target. See the
+[shared analysis record](../../platform/meta/design-docs/0086-shared-application-analysis.md).
+
 Project settings live in `void.config.ts` through `void/config` and `defineConfig`. `void init` and `void deploy` migrate legacy `void.json` and root Wrangler JSON/JSONC files before using their settings. The `cloudflare` field is authored and checked in; `.void-wrangler.jsonc` is generated and ignored; `void.lock.json` records provisioned IDs and migration history and is checked in. Cloudflare writers must persist every generated change to the lock. Framework adapters that read Cloudflare config during development must point to the generated file. Direct Cloudflare deploys use pinned `cf` Build Output upload and activation. Ancillary operations run through the private `cf-compat.ts` adapter; do not reintroduce a direct Wrangler CLI dependency in the `void` package.
 
 Build-output config translation uses the public `@cloudflare/codemods` API pinned to the version used by `cf`. Migration and generated-config evaluation share one disposable, uncredentialed subprocess; unresolved blocking follow-ups must still fail closed. Keep real `cf` prebuilt dry-run coverage.

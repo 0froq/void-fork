@@ -53,12 +53,13 @@ import {
   type ApprovedCloudflareKvBinding,
 } from '@void/deploy-cloudflare';
 import { createDeployArtifact, createDeployUploadPayload } from '@void/deploy-core';
+import { analyzeApplicationSync, type ApplicationAnalysis } from '../application-analysis.ts';
+import { analyzeApplication, completeApplicationAnalysis } from '../application-routing.ts';
 import {
   hasApiRoutes as routeScanHasApiRoutes,
   hasDocumentRoutes as routeScanHasDocumentRoutes,
   resolveAssetConfig,
 } from '../asset-routing.ts';
-import { findVoidAuthConfig } from '../auth/config.ts';
 import type { VoidAuthMigrationSchema } from '../auth/drizzle.ts';
 import {
   materializeCloudflareConfig,
@@ -73,10 +74,8 @@ import {
   type NotFoundHandling,
   type RoutingConfig,
   type VoidConfig,
-  getDatabaseDialect,
   isNodeTarget,
 } from '../config.ts';
-import { scanJobsSync } from '../crons/scan.ts';
 import { writeDrizzleConfig } from '../drizzle/config.ts';
 import { discoverSchema } from '../drizzle/discover.ts';
 import { scanDurableObjectModules } from '../durable/scan.ts';
@@ -90,31 +89,17 @@ import {
   SqliteMigrationError,
 } from '../migrations/sqlite-validation.ts';
 import { assertJournalCoherence, validateMigrations } from '../migrations/validate.ts';
-import { scanPages } from '../pages/scan.ts';
 import type { PageScanResult } from '../pages/types.ts';
-import {
-  inferProjectBindings,
-  FRAMEWORK_SCAN_DIRS,
-  detectFramework,
-  type DetectedFramework,
-} from '../plugin-inference.ts';
+import { detectFramework, type DetectedFramework } from '../plugin-inference.ts';
 import {
   collectPrerenderPaths,
   collectPrerenderPathsNode,
   prerenderPages,
   prerenderPagesNode,
 } from '../prerender.ts';
-import { readProjectPaths, resolveProjectPaths } from '../project-paths.ts';
-import { scanQueuesSync } from '../queues/scan.ts';
+import { readProjectPaths } from '../project-paths.ts';
+import { hasEmailHandlers, type EmailHandlersScan } from '../router/email.ts';
 import {
-  hasEmailHandlers,
-  scanEmailHandlersSync,
-  type EmailHandlersScan,
-} from '../router/email.ts';
-import { scanRoutes } from '../router/scan.ts';
-import { scanWebSocketRoutesSync } from '../router/websocket.ts';
-import {
-  isSandboxEnabled,
   requiresSandboxPlatformImage,
   resolveSandboxConfig,
   sandboxContainerConfig,
@@ -1193,7 +1178,7 @@ export function reconstructExpectedDurableObjectState(
   config: VoidConfig,
   root: string,
   rootConfig: Record<string, unknown>,
-  options: { needsSandbox: boolean; needsLive: boolean },
+  options: { needsSandbox: boolean; needsLive: boolean; analysis?: ApplicationAnalysis },
 ): {
   bindings: Array<Record<string, unknown>>;
   migrations: Array<Record<string, unknown>>;
@@ -1227,9 +1212,9 @@ export function reconstructExpectedDurableObjectState(
     }
   }
 
-  const paths = resolveProjectPaths(root, config);
-  const websocketRoutes = scanWebSocketRoutesSync(root, paths);
-  const durableObjects = scanDurableObjectModules(root);
+  const analysis = options.analysis ?? analyzeApplicationSync(root, { config });
+  const websocketRoutes = analysis.allWebsockets;
+  const durableObjects = analysis.durableObjects;
   const live = options.needsLive
     ? resolveLiveBindingConfig(root, {
         reservedBindings: [
@@ -2765,10 +2750,8 @@ function assertDistinctKvNamespaces(
 /**
  * Compute the DESIRED id/name-bearing Cloudflare resources from SOURCE
  * (pre-build, fail-fast) — the single set shared by the provision and drift
- * paths. Reuses the deploy-time inference primitives directly
- * (`inferProjectBindings` + the scanners + the pg-dialect / `hasRevalidate`
- * signals) rather than `assembleVoidManifest`, which runs only inside the
- * managed `runFullDeploy` branches that need a `PlatformClient`.
+ * paths. Consumes the same application analysis as the plugin and managed
+ * packaging; provider identities and stored resource names are resolved here.
  *
  * Resource NAMES prefer the value already stored in the root wrangler config
  * (so a re-provision reuses the same database/bucket and the provisioner's
@@ -2779,6 +2762,7 @@ export async function computeDesiredCloudflareResources(
   root: string,
   voidConfig: VoidConfig,
   configPath: string,
+  application?: ApplicationAnalysis,
 ): Promise<{
   desired: DesiredResourceSet;
   reasons: Map<string, string>;
@@ -2808,6 +2792,7 @@ export async function computeDesiredCloudflareResources(
   needsSandbox: boolean;
   /** Whether the source imports void/live and the build may emit its Durable Object. */
   needsLive: boolean;
+  analysis: ApplicationAnalysis;
   /**
    * The exact cron trigger schedules Void's build emits into `dist/ssr/wrangler.json`
    * `triggers.crons`, reconstructed PRE-BUILD from the SAME `scanJobsSync(root, paths.cronsDir)`
@@ -2834,40 +2819,20 @@ export async function computeDesiredCloudflareResources(
   // helper works when called directly in unit tests (outside the fork) without a
   // static provision edge that would eagerly load the provision lifecycle.
   const { isRealD1Id, isRealKvId } = await loadProvisionModule();
-  const paths = resolveProjectPaths(root, voidConfig);
+  const analysis = application
+    ? await completeApplicationAnalysis(application)
+    : await analyzeApplication(root, { config: voidConfig, environment: 'prod' });
+  const { paths, bindings, authEnabled, dialect, bindingNames, migrations, needsDatabase } =
+    analysis;
   const config = parseRootWranglerConfig(configPath);
   const workerName = readWranglerTopLevelString(config, 'name') ?? deriveWorkerName(root);
 
-  // Match runFullDeploy's inference: framework (Class-A) apps expand the scan
-  // dirs so bindings used in framework-specific dirs are still discovered.
-  const isFrameworkMode = detectFramework(root) != null;
-  const scanDirs =
-    voidConfig.inference?.scanDirs ?? (isFrameworkMode ? FRAMEWORK_SCAN_DIRS : undefined);
-  // Mirror voidPlugin's inference options EXACTLY (index.ts): when `void.config.ts`
-  // declares `inference.bindings`, those explicit overrides (forced `true`, a
-  // custom binding name, or disabled `false`) drive the build — so the desired set
-  // must consume the same overrides, or a `false` override would still provision a
-  // binding the build never emits (and a forced/custom one would be missed).
-  const inferenceOptions = voidConfig.inference?.bindings
-    ? { bindings: voidConfig.inference.bindings }
-    : undefined;
-  const bindings = inferProjectBindings(
-    root,
-    { ...inferenceOptions, paths, environment: 'prod' },
-    scanDirs,
-  );
-  const authEnabled =
-    bindings.needsAuth || findVoidAuthConfig(root, paths) !== null || voidConfig.auth !== undefined;
-  const dialect = getDatabaseDialect(voidConfig);
-  const bindingNames = resolveBindingNames(voidConfig.inference?.bindings);
   // Checked-in migrations count toward the database gate, matching the managed
   // manifest (`buildVoidManifest`: `needsD1 || needsAuth || hasMigrations`). Without
   // this a migration-only SQLite app would provision no D1 and silently skip remote
   // migrations. Collected ONCE pre-build from `db/migrations/` (sourceDir-aware) and
   // carried through so the migrate step can skip when there are none and run the
   // deploy gates on the exact same files.
-  const migrations = collectMigrations(paths.migrationsDir);
-  const hasMigrations = migrations.length > 0;
   // Config-relative migrations dir wrangler will resolve from the config-file dir
   // (the root). sourceDir moves the files to `<sourceDir>/db/migrations`, so the
   // written `migrations_dir` must include it — a hardcoded `./db/migrations` would
@@ -2884,12 +2849,7 @@ export async function computeDesiredCloudflareResources(
   // vs Hyperdrive (PostgreSQL/MySQL). This keeps provision/drift equivalent to the build:
   // a migration-only SQLite app still provisions D1, and an unused pg config does
   // not needlessly require Hyperdrive.
-  const needsDatabase = bindings.needsD1 || authEnabled || hasMigrations;
-  const databaseReason = bindings.needsD1
-    ? 'app uses env.DB (D1)'
-    : authEnabled
-      ? 'auth requires a D1 database'
-      : 'checked-in migrations need a D1 database';
+  const databaseReason = analysis.reasons.database[0]!;
   if (needsDatabase && dialect === 'sqlite') {
     const binding = bindingNames?.d1 ?? 'DB';
     // An explicitly authored name is the intended remote identity even before Void
@@ -2917,7 +2877,7 @@ export async function computeDesiredCloudflareResources(
   if (bindings.needsKV) {
     const binding = bindingNames?.kv ?? 'KV';
     desired.kvNamespaces.push({ binding, title: suffixedResourceName(workerName, 'kv') });
-    reasons.set(binding, 'app uses env.KV');
+    reasons.set(binding, analysis.reasons.kv[0]!);
   }
 
   // R2
@@ -2936,11 +2896,11 @@ export async function computeDesiredCloudflareResources(
     const bucketName =
       storedName && !generatedDefault ? storedName : suffixedResourceName(workerName, 'storage');
     desired.r2 = { binding, bucketName };
-    reasons.set(binding, 'app uses env.STORAGE (R2)');
+    reasons.set(binding, analysis.reasons.r2[0]!);
   }
 
   // Queues (resource names — account-unique; the build binds them for native apps).
-  desired.queues = scanQueuesSync(root, paths.queuesDir).map((q) => q.name);
+  desired.queues = analysis.queues.map((q) => q.name);
 
   // Hyperdrive (PostgreSQL/MySQL apps) — same database gate as D1, dialect-selected. The
   // connection string is only consumed on a fresh create; a re-provision reads-first
@@ -2962,9 +2922,7 @@ export async function computeDesiredCloudflareResources(
   // when the merged revalidate config (void.config.ts `routing.revalidate` + per-page
   // `export const revalidate`) turns ISR on — the SAME gate the build's `emitIsr`
   // uses (`plugin-routing.ts`).
-  const pageScan = existsSync(paths.pagesDir)
-    ? await scanPages(root, { output: voidConfig.output, paths })
-    : null;
+  const pageScan = analysis.scan.pages;
   if (hasRevalidate(collectRevalidate(voidConfig, pageScan))) {
     const binding = 'ISR_CACHE';
     desired.kvNamespaces.push({ binding, title: suffixedResourceName(workerName, 'isr-cache') });
@@ -2979,16 +2937,15 @@ export async function computeDesiredCloudflareResources(
   // (`scanJobsSync(root, paths.cronsDir).flatMap((job) => job.crons)`), from the SAME scan and the
   // SAME `paths` the build's emission sees, so a legitimate build's emitted schedules multiset-equal
   // this reconstruction.
-  const expectedCrons = [
-    ...new Set(scanJobsSync(root, paths.cronsDir).flatMap((job) => job.crons)),
-  ];
+  const expectedCrons = [...new Set(analysis.jobs.flatMap((job) => job.crons))];
 
   // Email — the handler directory is scanned from the SAME sourceRoot index.ts compiles it from
   // (`scanEmailHandlersSync(paths.sourceRoot)`); outbound-only use shows up as the import walk's
   // `needsEmail` (a `void/email` import anywhere in the scan dirs).
-  const emailHandlers = scanEmailHandlersSync(paths.sourceRoot);
+  const emailHandlers = analysis.email;
 
   return {
+    analysis,
     desired,
     reasons,
     authEnabled,
@@ -3004,7 +2961,7 @@ export async function computeDesiredCloudflareResources(
     // `void.config.ts` enables it OR the source imports `void/sandbox` (the import-walk signal). Using
     // `isSandboxEnabled` alone would miss an import-only sandbox app (e.g. kitchen-sink) and the
     // container pin would then FALSE-POSITIVE a legitimate build.
-    needsSandbox: isSandboxEnabled(voidConfig) || bindings.needsSandbox,
+    needsSandbox: bindings.needsSandbox,
     needsLive: bindings.needsLive === true,
   };
 }
@@ -4516,7 +4473,14 @@ async function prepareCloudflareDeploySource(
   // here BEFORE any sync helper that calls `requireProvisionModule()`.
   // 1. App-class narrowing — reject every artifact shape the current native
   // verifier cannot prove safe before any account, provision, or build op.
-  const classification = classifyCloudflareDeployApp(root, voidConfig, options);
+  let application: ApplicationAnalysis;
+  try {
+    application = analyzeApplicationSync(root, { config: voidConfig, environment: 'prod' });
+  } catch (error) {
+    log.error(`deploy: ${getErrorMessage(error)}`);
+    return null;
+  }
+  const classification = classifyCloudflareDeployApp(root, voidConfig, options, application);
   if (!classification.supported) {
     log.error(classification.reason);
     return null;
@@ -4529,7 +4493,7 @@ async function prepareCloudflareDeploySource(
   // build (see step 8), because `vite build` runs arbitrary project plugins that could
   // add/rewrite migration SQL, and the remote apply reads the live post-build files.
   const configPath = discoverRootWranglerConfig(root);
-  const facts = await computeDesiredCloudflareResources(root, voidConfig, configPath);
+  const facts = await computeDesiredCloudflareResources(root, voidConfig, configPath, application);
   const { desired, dialect, migrations: preBuildMigrations, migrationsDir } = facts;
 
   // 2a. External-database migrations are applied directly after every local gate
@@ -5459,9 +5423,7 @@ export async function runCloudflareDeploy(
   // below could never confirm the pin. Persisting it makes the documented env-only pin
   // deploy the verified account. (`workerName` was resolved from the same root `name` before the
   // email step, which never touches it.)
-  const frameworkQueues = detectedFramework
-    ? scanQueuesSync(root, resolveProjectPaths(root, voidConfig).queuesDir)
-    : [];
+  const frameworkQueues = detectedFramework ? source.analysis.queues : [];
   writeProvisionedWranglerConfig(
     root,
     {
@@ -5542,7 +5504,7 @@ export async function runCloudflareDeploy(
     voidConfig,
     root,
     preBuildRootConfig,
-    { needsSandbox, needsLive },
+    { needsSandbox, needsLive, analysis: source.analysis },
   );
 
   // (The LOCAL migration gates run POST-build at step 8d, immediately before the remote
@@ -6465,9 +6427,9 @@ export async function prepareCloudflareFrameworkArtifact(
       `framework ${framework.name} did not emit its asset directory at ${preset.assetsDir}`,
     );
   }
-  const paths = resolveProjectPaths(root, voidConfig);
-  const crons = scanJobsSync(root, paths.cronsDir);
-  const queues = scanQueuesSync(root, paths.queuesDir);
+  const analysis = analyzeApplicationSync(root, { config: voidConfig, environment: 'prod' });
+  const crons = analysis.jobs;
+  const queues = analysis.queues;
   const revalidate = collectRevalidate(voidConfig, null);
   await generateDeployWrapperIfNeeded(root, join(root, preset.workerDir), preset.workerMain, {
     crons,
@@ -6475,7 +6437,7 @@ export async function prepareCloudflareFrameworkArtifact(
     // Direct deployment applies migrations before upload; it does not need the
     // hosted platform's internal migration endpoint in its framework wrapper.
     hasMigrations: false,
-    migrationDialect: getDatabaseDialect(voidConfig),
+    migrationDialect: analysis.dialect,
     readiness: true,
     ...(hasRevalidate(revalidate) && {
       isr: {
@@ -6561,20 +6523,13 @@ export async function resolveCloudflareVoidStaticPreset(
     return null;
   }
 
-  const paths = resolveProjectPaths(root, voidConfig);
+  const analysis = await analyzeApplication(root, { config: voidConfig, environment: 'prod' });
+  const { paths, authEnabled, bindings, scan: routeScan } = analysis;
   if (!existsSync(paths.pagesDir) || validateSsrEntry(root, paths) !== null) {
     return null;
   }
 
-  const routeScan = await scanRoutes(root, {
-    output: voidConfig.output,
-    paths,
-    environment: 'prod',
-  });
-  const pageScan =
-    routeScan.pages.pages.length > 0
-      ? routeScan.pages
-      : await scanPages(root, { output: voidConfig.output, paths });
+  const pageScan = routeScan.pages;
   if (
     pageScan.pages.length === 0 ||
     !pageScan.pages.every(
@@ -6586,9 +6541,6 @@ export async function resolveCloudflareVoidStaticPreset(
     return null;
   }
 
-  const bindings = inferProjectBindings(root, { paths, environment: 'prod' });
-  const authEnabled =
-    bindings.needsAuth || findVoidAuthConfig(root, paths) !== null || voidConfig.auth !== undefined;
   // The SAME predicate the managed path's fully-static optimization uses
   // (`hasNonPageBackend`), so the two static branches can never disagree on
   // whether an `email/` handler needs a worker: the thin static edge Worker
@@ -6602,8 +6554,8 @@ export async function resolveCloudflareVoidStaticPreset(
       authEnabled,
       hasLive: bindings.needsLive === true,
     }) ||
-    scanJobsSync(root, paths.cronsDir).length > 0 ||
-    scanQueuesSync(root, paths.queuesDir).length > 0;
+    analysis.jobs.length > 0 ||
+    analysis.queues.length > 0;
   if (hasRuntimeBackend) {
     return null;
   }
@@ -8147,8 +8099,6 @@ async function runFrameworkDeploy(
   log.info(`${detected.name} framework deploy`);
   cliLog?.info('deploy_mode', { mode: 'framework', framework: detected.name });
 
-  const dialect = getDatabaseDialect(voidConfig);
-
   // 1. Build
   const buildCmd = voidConfig.inference?.build ?? formatProjectCommand(root, fwPreset.buildCommand);
   if (!skipBuild) {
@@ -8203,19 +8153,9 @@ async function runFrameworkDeploy(
     process.exit(1);
   }
 
-  // 3. Infer or read bindings
-  const inferenceOptions = voidConfig.inference?.bindings
-    ? { bindings: voidConfig.inference.bindings }
-    : undefined;
-  const paths = resolveProjectPaths(root, voidConfig);
-  const scanDirs = voidConfig.inference?.scanDirs ?? FRAMEWORK_SCAN_DIRS;
-  const bindings = inferProjectBindings(
-    root,
-    { ...inferenceOptions, paths, environment: 'prod' },
-    scanDirs,
-  );
-  const authEnabled =
-    bindings.needsAuth || findVoidAuthConfig(root, paths) !== null || voidConfig.auth !== undefined;
+  // Resolve the same application requirements consumed by build and native planning.
+  const analysis = analyzeApplicationSync(root, { config: voidConfig, environment: 'prod' });
+  const { paths, bindings, authEnabled, dialect } = analysis;
 
   if (authEnabled) {
     log.error(
@@ -8233,7 +8173,7 @@ async function runFrameworkDeploy(
   assertDeploySchemaDriftFree(root, dialect);
 
   // 4. Collect migrations (before Hyperdrive check so migrations can gate provisioning)
-  const rawMigrations = collectMigrations(migrationsDir);
+  const rawMigrations = analysis.migrations;
   let validatedMigrations;
   try {
     assertJournalCoherence(migrationsDir, rawMigrations);
@@ -8252,7 +8192,7 @@ async function runFrameworkDeploy(
   }
 
   // Pre-deploy: ensure Hyperdrive is provisioned for external SQL projects.
-  if (dialect !== 'sqlite' && (bindings.needsD1 || rawMigrations.length > 0)) {
+  if (dialect !== 'sqlite' && analysis.needsDatabase) {
     let resources: Array<ResourceSummary> | null = null;
     try {
       resources = await client.getResources(config.projectId);
@@ -8294,8 +8234,8 @@ async function runFrameworkDeploy(
   }
 
   // 5. Generate wrapper if needed (crons or queues present)
-  const rawJobs = scanJobsSync(root, paths.cronsDir);
-  const rawQueues = scanQueuesSync(root, paths.queuesDir);
+  const rawJobs = analysis.jobs;
+  const rawQueues = analysis.queues;
   const originalEntry = join(workerDir, fwPreset.workerMain);
 
   const wrapperFeatures: WrapperFeatures = {
@@ -8387,7 +8327,7 @@ async function runFrameworkDeploy(
   const packageStartedAt = Date.now();
   const neededSet = skipped > 0 ? new Set(needed) : null;
   const packageOptions = {
-    bindingNames: resolveBindingNames(voidConfig.inference?.bindings),
+    bindingNames: analysis.bindingNames,
     workerMain: actualWorkerMain,
     compatibilityDate: wranglerCompat?.compatibilityDate,
     compatibilityFlags: wranglerCompat?.compatibilityFlags,
@@ -8595,21 +8535,9 @@ async function runFullDeploy(
     }
   }
 
-  const paths = resolveProjectPaths(root, deployConfig);
-  const dialect = getDatabaseDialect(deployConfig);
-  const deployScanDirs =
-    deployConfig.inference?.scanDirs ?? (isFrameworkMode ? FRAMEWORK_SCAN_DIRS : undefined);
-  const bindings = inferProjectBindings(root, { paths, environment: 'prod' }, deployScanDirs);
-  if (isSandboxEnabled(deployConfig)) {
-    bindings.needsSandbox = true;
-  }
-  const authEnabled =
-    bindings.needsAuth ||
-    findVoidAuthConfig(root, paths) !== null ||
-    deployConfig.auth !== undefined;
-  const effectiveBindings = authEnabled
-    ? { ...bindings, needsAuth: true, needsD1: true }
-    : bindings;
+  const analysis = await analyzeApplication(root, { config: deployConfig, environment: 'prod' });
+  const { paths, dialect, bindings, authEnabled, scan: routeScan } = analysis;
+  const effectiveBindings = bindings;
 
   if (isFrameworkMode && authEnabled) {
     log.error(
@@ -8660,7 +8588,7 @@ async function runFullDeploy(
   assertDeploySchemaDriftFree(root, dialect);
 
   // 7. Collect and validate migrations (before Hyperdrive check so migrations can gate provisioning)
-  const rawMigrations = collectMigrations(migrationsDir);
+  const rawMigrations = analysis.migrations;
   let validatedMigrations;
   try {
     assertJournalCoherence(migrationsDir, rawMigrations);
@@ -8681,7 +8609,7 @@ async function runFullDeploy(
   // Pre-deploy: ensure Hyperdrive is provisioned for external SQL projects.
   // Migrations on disk also gate this — even if inference says needsD1: false,
   // buildVoidManifest will add the hyperdrive binding when migrations are present.
-  if (dialect !== 'sqlite' && (effectiveBindings.needsD1 || rawMigrations.length > 0)) {
+  if (dialect !== 'sqlite' && analysis.needsDatabase) {
     let resources: Array<ResourceSummary> | null = null;
     try {
       resources = await client.getResources(config.projectId);
@@ -8721,20 +8649,15 @@ async function runFullDeploy(
       }
     }
   }
-  const rawJobs = scanJobsSync(root, paths.cronsDir);
-  const rawQueues = scanQueuesSync(root, paths.queuesDir);
+  const rawJobs = analysis.jobs;
+  const rawQueues = analysis.queues;
   const schedules = rawJobs.flatMap((job) =>
     job.crons.map((cron) => ({
       name: job.name,
       cron,
     })),
   );
-  const routeScan = await scanRoutes(root, {
-    output: deployConfig.output,
-    paths,
-    environment: 'prod',
-  });
-  const webSockets = routeScan.websockets ?? scanWebSocketRoutesSync(root, paths, 'prod');
+  const webSockets = analysis.websockets;
   const liveConfig = await resolveDeployLiveBindingConfig(root, client, config.projectId, {
     isFrameworkMode,
     needsLive: effectiveBindings.needsLive,
@@ -8764,11 +8687,7 @@ async function runFullDeploy(
 
   // Resolve revalidate config from void.config.ts + per-page .server.ts exports.
   // The page scan is also reused by the fully-static optimization below.
-  const pageScan = existsSync(paths.pagesDir)
-    ? routeScan.pages.pages.length > 0
-      ? routeScan.pages
-      : await scanPages(root, { output: deployConfig.output, paths })
-    : null;
+  const pageScan = hasPages ? routeScan.pages : null;
   const revalidate = collectRevalidate(deployConfig, pageScan);
 
   // Fully-static optimization: if output: "static" and all pages are prerendered

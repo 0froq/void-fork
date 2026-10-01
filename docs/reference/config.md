@@ -488,7 +488,7 @@ Configuration for build-time inference, including how Void detects your app type
 
 #### `inference.bindings`
 
-Explicitly control inferred Cloudflare bindings. If omitted, bindings are [automatically inferred](./resource-inference.md) by scanning your source files for binding usage. If provided, explicit values take precedence and inference is skipped entirely.
+Explicitly control inferred Cloudflare bindings. If omitted, bindings are [automatically inferred](./resource-inference.md) by scanning your source files for binding usage. Explicit values override the named bindings; omitted bindings are still inferred. Auth and checked-in migrations still require a database even when `db` is `false`.
 
 Each binding accepts `true` (use default name), `false` (disable), or a string (custom binding name):
 

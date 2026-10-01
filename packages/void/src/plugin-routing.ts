@@ -3,13 +3,15 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'pathslash';
 import { normalizePath, type Plugin } from 'vite';
+import { analyzeApplicationSync, type ApplicationAnalysis } from './application-analysis.ts';
+import { completeApplicationAnalysis } from './application-routing.ts';
 import {
   hasApiRoutes,
   hasDocumentRoutes,
   resolveAssetRoutingPolicy,
   type AssetRoutingPolicy,
 } from './asset-routing.ts';
-import { findVoidAuthConfig, loadVoidAuthConfig } from './auth/config.ts';
+import { loadVoidAuthConfig } from './auth/config.ts';
 import { generateVoidAuthDatabaseModule, generateVoidAuthDrizzleSchema } from './auth/drizzle.ts';
 import { lintDestinationSplats, lintDuplicateSources, mergeRoutingRules } from './cli/headers.ts';
 import { findEnvFileForPaths } from './codegen/env-types.ts';
@@ -32,7 +34,7 @@ import {
   type PagesCompileOptions,
 } from './router/compile.ts';
 import type { RouteEnvironment } from './router/parse-filename.ts';
-import { scanRoutes, type ScanResult } from './router/scan.ts';
+import type { ScanResult } from './router/scan.ts';
 import type { VoidAuthRuntimeOptions } from './runtime/better-auth-shared.ts';
 import { loadLocalEnv } from './shared/env.ts';
 import {
@@ -67,6 +69,10 @@ const LOAD_ID_FILTER =
  * - Watches for file changes and triggers HMR
  */
 type RoutingPluginOptions = {
+  getApplicationAnalysis?: (
+    environment: RouteEnvironment,
+    refresh?: boolean,
+  ) => ApplicationAnalysis;
   isAuthEnabled: () => boolean;
   devTriggerToken?: string;
   headConfig?: import('./pages/head.ts').HeadConfig;
@@ -153,9 +159,17 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     writeFileIfChanged(join(outDir, 'queues.d.ts'), dts);
   }
 
-  async function rescan() {
-    scan = await scanRoutes(root, { output: options.output, paths, environment: routeEnvironment });
-    authConfigPath = findVoidAuthConfig(root, paths);
+  async function rescan(refresh = false) {
+    let analysis = options.getApplicationAnalysis?.(routeEnvironment, refresh);
+    if (!analysis) {
+      const config = readConfig(root);
+      analysis = analyzeApplicationSync(root, {
+        config: { ...config, output: options.output ?? config.output },
+        environment: routeEnvironment,
+      });
+    }
+    scan = (await completeApplicationAnalysis(analysis)).scan;
+    authConfigPath = analysis.authConfigPath;
     const entries = validateSsrEntries(root, paths);
     ssr = entries
       ? {
@@ -725,7 +739,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         // Re-scan and invalidate the virtual module in ALL environments.
         // The route table virtual module lives in the workerd environment,
         // not the client — so we must iterate all environments.
-        await rescan();
+        await rescan(true);
         resolveAuthCompileOptions();
         const shouldRestartForAssetRouting =
           event !== 'change' &&

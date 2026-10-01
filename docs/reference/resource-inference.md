@@ -101,7 +101,7 @@ If inference doesn't match your setup, you can skip it entirely and declare bind
 }
 ```
 
-When `inference.bindings` is set, explicit values take full precedence and inference is skipped entirely.
+Explicit values override only their named bindings. Omitted bindings continue to be inferred, so setting `kv` does not disable storage, auth, or other features. Auth and checked-in migrations still require a database even when `db` is `false`.
 
 ## File Types
 

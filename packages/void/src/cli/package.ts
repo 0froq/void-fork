@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { hash as blake3hash } from 'blake3-jit';
 import ignore from 'ignore';
 import { extname, join, relative } from 'pathslash';
+import { needsApplicationDatabase } from '../application-features.ts';
 import type { NotFoundHandling } from '../config.ts';
 import type { InferredBindings } from '../inference/walk.ts';
 import { buildMigrationPlanBundle } from '../migrations/plan.ts';
@@ -556,8 +557,7 @@ export function buildVoidManifest(opts: {
   if (bindings.needsAuth) {
     manifest.auth = true;
   }
-  const hasMigrations = migrations && migrations.length > 0;
-  if (bindings.needsD1 || bindings.needsAuth || hasMigrations) {
+  if (needsApplicationDatabase(bindings, migrations?.length ?? 0)) {
     if (resolvedDialect !== 'sqlite') {
       manifest.bindings.hyperdrive = ['HYPERDRIVE'];
     } else {
@@ -809,8 +809,7 @@ export function buildFrameworkManifest(opts: {
   const dialect = opts.dialect ?? 'sqlite';
 
   const manifest: DeployManifest = { version: 3, assetManifestVersion: 2, bindings: {} };
-  const hasMigrations = opts.migrations && opts.migrations.length > 0;
-  if (opts.bindings.needsD1 || opts.bindings.needsAuth || hasMigrations) {
+  if (needsApplicationDatabase(opts.bindings, opts.migrations?.length ?? 0)) {
     if (dialect !== 'sqlite') {
       manifest.bindings.hyperdrive = ['HYPERDRIVE'];
     } else {

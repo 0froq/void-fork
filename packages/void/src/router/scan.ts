@@ -84,42 +84,46 @@ export async function scanRoutes(
     output?: 'server' | 'static';
     paths?: ProjectPaths;
     environment?: RouteEnvironment;
+    /** Reuse the inventories already resolved for this application phase. */
+    inventory?: Omit<ScanResult, 'pages'>;
   },
 ): Promise<ScanResult> {
   const paths = options?.paths ?? readProjectPaths(root);
   const [routeFiles, websockets, middlewareFiles, jobs, queues, pages, email] = await Promise.all([
-    glob(ROUTE_PATTERN, { cwd: paths.routesDir, absolute: false }),
-    scanWebSocketRoutes(root, paths, options?.environment),
-    glob(ROUTE_PATTERN, { cwd: paths.middlewareDir, absolute: false }).catch(
-      () => [] as Array<string>,
-    ),
-    scanJobs(root, paths.cronsDir),
-    scanQueues(root, paths.queuesDir),
+    options?.inventory ? [] : glob(ROUTE_PATTERN, { cwd: paths.routesDir, absolute: false }),
+    options?.inventory?.websockets ?? scanWebSocketRoutes(root, paths, options?.environment),
+    options?.inventory
+      ? []
+      : glob(ROUTE_PATTERN, { cwd: paths.middlewareDir, absolute: false }).catch(
+          () => [] as Array<string>,
+        ),
+    options?.inventory?.jobs ?? scanJobs(root, paths.cronsDir),
+    options?.inventory?.queues ?? scanQueues(root, paths.queuesDir),
     scanPages(root, { output: options?.output, paths }),
     // `email/` is a source convention like `crons/` and `queues/`, so it lives
     // under `sourceRoot` — which is `root` when no `sourceDir` is configured.
     // `scanEmailHandlers` joins its own `email` segment, so this resolves to
     // `paths.emailDir`.
-    scanEmailHandlers(paths.sourceRoot),
+    options?.inventory?.email ?? scanEmailHandlers(paths.sourceRoot),
   ]);
 
   const routesDir = paths.routesDir;
 
   // Parse routes, filtering out files starting with _
-  const routes = routeFiles
-    .filter((f) => !isWebSocketPatternFile(f))
-    .filter((f) => !f.split('/').some((s) => s.startsWith('_')))
-    .map((file) => parseRouteFilename(file))
-    .filter((route) => isRouteEnabledForEnvironment(route, options?.environment))
-    .map((route) => {
-      route.methods = detectHttpExports(join(routesDir, route.filePath));
-      return route;
-    })
+  const parsedRoutes =
+    options?.inventory?.routes ??
+    routeFiles
+      .filter((f) => !isWebSocketPatternFile(f))
+      .filter((f) => !f.split('/').some((s) => s.startsWith('_')))
+      .map((file) => parseRouteFilename(file))
+      .filter((route) => isRouteEnabledForEnvironment(route, options?.environment));
+  const routes = parsedRoutes
+    .map((route) => ({ ...route, methods: detectHttpExports(join(routesDir, route.filePath)) }))
     // Sort by specificity: static routes before dynamic params, catch-all last.
     .sort(compareRouteSpecificity);
 
   // Parse middleware, sorted by numeric prefix
-  const middleware = parseMiddlewareDefinitions(middlewareFiles);
+  const middleware = options?.inventory?.middleware ?? parseMiddlewareDefinitions(middlewareFiles);
 
   return { routes, websockets, middleware, jobs, queues, pages, email };
 }

@@ -1,13 +1,11 @@
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'pathslash';
-import { findVoidAuthConfig, loadVoidAuthConfig } from '../auth/config.ts';
+import { analyzeApplication } from '../application-routing.ts';
+import { loadVoidAuthConfig } from '../auth/config.ts';
 import { generateVoidAuthDatabaseModule, generateVoidAuthDrizzleSchema } from '../auth/drizzle.ts';
-import { getDatabaseDialect, readConfig } from '../config.ts';
+import { readConfig } from '../config.ts';
 import { discoverSchema } from '../drizzle/discover.ts';
-import { FRAMEWORK_SCAN_DIRS, detectFramework, inferProjectBindings } from '../plugin-inference.ts';
-import { resolveProjectPaths } from '../project-paths.ts';
-import { scanRoutes } from '../router/scan.ts';
 import { loadLocalEnv } from '../shared/env.ts';
 import { generateDbDts } from './db-types.ts';
 import { findEnvFile, generateEnvTypes } from './env-types.ts';
@@ -44,23 +42,13 @@ function removeGeneratedFile(outDir: string, fileName: string, removed: Array<st
 
 export async function prepareProject(root: string): Promise<PrepareProjectResult> {
   const config = readConfig(root);
-  const paths = resolveProjectPaths(root, config);
+  const analysis = await analyzeApplication(root, { config });
+  const { paths, authConfigPath, authEnabled, dialect, scan } = analysis;
   const outDir = join(root, '.void');
   const written: Array<string> = [];
   const removed: Array<string> = [];
 
   mkdirSync(outDir, { recursive: true });
-
-  const detectedFramework = detectFramework(root);
-  const inferenceOptions = config.inference?.bindings
-    ? { bindings: config.inference.bindings }
-    : undefined;
-  const scanDirs =
-    config.inference?.scanDirs ?? (detectedFramework ? FRAMEWORK_SCAN_DIRS : undefined);
-  const bindings = inferProjectBindings(root, { ...inferenceOptions, paths }, scanDirs);
-  const authConfigPath = findVoidAuthConfig(root, paths);
-  const authEnabled = bindings.needsAuth || authConfigPath !== null || config.auth !== undefined;
-  const dialect = getDatabaseDialect(config);
 
   const envFile = findEnvFile(root);
   if (envFile) {
@@ -70,7 +58,6 @@ export async function prepareProject(root: string): Promise<PrepareProjectResult
     removeGeneratedFile(outDir, 'env.d.ts', removed);
   }
 
-  const scan = await scanRoutes(root, { output: config.output, paths });
   const hasRouteTypes =
     scan.routes.length > 0 || (scan.websockets?.length ?? 0) > 0 || scan.pages.pages.length > 0;
   if (hasRouteTypes) {

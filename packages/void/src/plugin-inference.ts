@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, relative, toSlash } from 'pathslash';
 import { globSync } from 'tinyglobby';
+import { applyBindingOverrides } from './application-features.ts';
 import { inferBindingsFromSource, mergeBindings, type InferredBindings } from './inference/walk.ts';
 import { readProjectPaths, type ProjectPaths } from './project-paths.ts';
 import {
@@ -140,27 +141,17 @@ export function inferProjectBindings(
   options?: InferenceOptions,
   scanDirs?: ReadonlyArray<string>,
 ): InferredBindings {
-  // If user provided explicit overrides, use those
-  if (options?.bindings) {
-    return {
-      needsD1: Boolean(options.bindings.db),
-      needsKV: Boolean(options.bindings.kv),
-      needsR2: Boolean(options.bindings.storage),
-      needsAuth: false,
-      needsQueues: false,
-      needsAI: Boolean(options.bindings.ai),
-      needsSandbox: false,
-      needsLive: false,
-      needsEmail: Boolean(options.bindings.email),
-    };
-  }
-
   const paths = options?.paths ?? readProjectPaths(root);
   const dirs = scanDirs ?? (paths.sourceDir ? [paths.sourceDir] : DEFAULT_SCAN_DIRS);
   const allBindings: Array<InferredBindings> = [];
+  const scannedFiles = new Set<string>();
   const routesPrefix = `${toSlash(paths.routesDir).replace(/\/$/, '')}/`;
   const addFile = (file: string): void => {
     const normalizedFile = toSlash(file);
+    if (scannedFiles.has(normalizedFile)) {
+      return;
+    }
+    scannedFiles.add(normalizedFile);
     if (
       options?.environment &&
       normalizedFile.startsWith(routesPrefix) &&
@@ -194,9 +185,7 @@ export function inferProjectBindings(
 
   const ssrEntry = getSsrServerEntryPath(root, paths);
   if (ssrEntry) {
-    const code = readFileSync(ssrEntry, 'utf-8');
-    const filename = ssrEntry.split('/').pop() ?? 'main.ssr.ts';
-    allBindings.push(inferBindingsFromSource(code, filename));
+    addFile(ssrEntry);
   }
 
   // Custom scan directories should still see client/auth helpers and colocated
@@ -216,5 +205,7 @@ export function inferProjectBindings(
     }
   }
 
-  return mergeBindings(allBindings);
+  // Overrides apply to their named binding only. Setting KV must not suppress
+  // auth, Sandbox, queues, or any other feature found in the same application.
+  return applyBindingOverrides(mergeBindings(allBindings), options?.bindings);
 }

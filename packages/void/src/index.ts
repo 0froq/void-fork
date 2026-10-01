@@ -15,13 +15,14 @@ import { appendSqliteClassMigration } from '@void/deploy-core';
 import { join, resolve } from 'pathslash';
 import pc from 'picocolors';
 import { type Plugin } from 'vite';
+import { analyzeApplicationSync, type ApplicationAnalysis } from './application-analysis.ts';
+import { applyBindingOverrides } from './application-features.ts';
 import {
   hasApiRoutes as routeScanHasApiRoutes,
   hasDocumentRoutes as routeScanHasDocumentRoutes,
   resolveAssetRoutingPolicy,
   type AssetRoutingPolicy,
 } from './asset-routing.ts';
-import { findVoidAuthConfig } from './auth/config.ts';
 import { getApiUrl, getProxyUrl, getToken, isStagingMode } from './cli/auth.ts';
 import { ensurePlatformProxyAccess } from './cli/cf-access.ts';
 import { SEND_EMAIL_BINDING } from './cli/email-cloudflare.ts';
@@ -49,15 +50,7 @@ import {
   stashCloudflareDeployPointer,
 } from './cloudflare-config.ts';
 import { writeFileIfChanged } from './codegen/write-if-changed.ts';
-import {
-  readConfig,
-  resolveBindingNames,
-  isNodeTarget,
-  getDatabaseDialect,
-  type NotFoundHandling,
-} from './config.ts';
-import { scanJobsSync } from './crons/scan.ts';
-import { scanDurableObjectModules } from './durable/scan.ts';
+import { readConfig, isNodeTarget, type NotFoundHandling } from './config.ts';
 import { inferBindingsFromSource } from './inference/walk.ts';
 import { resolveLocalD1Target, writeLocalD1PersistState } from './local-d1.ts';
 import { voidLog, voidWarn, voidError } from './log.ts';
@@ -77,29 +70,19 @@ import {
   nitroDevTriggerInjectPlugin,
   writeFrameworkTriggersDispatch,
 } from './plugin-framework-triggers.ts';
-import {
-  DEFAULT_SCAN_DIRS,
-  inferProjectBindings,
-  detectFramework,
-  FRAMEWORK_SCAN_DIRS,
-  type Framework,
-} from './plugin-inference.ts';
+import { DEFAULT_SCAN_DIRS, FRAMEWORK_SCAN_DIRS, type Framework } from './plugin-inference.ts';
 import { migrationPlugin } from './plugin-migration.ts';
 import { nodeTargetPlugin } from './plugin-node-target.ts';
 import { prerenderPlugin } from './plugin-prerender.ts';
 import { restartPlugin } from './plugin-restart.ts';
 import { routingPlugin } from './plugin-routing.ts';
-import { assertNoRootSourceConventionConflicts, resolveProjectPaths } from './project-paths.ts';
-import { scanQueuesSync } from './queues/scan.ts';
+import { assertNoRootSourceConventionConflicts } from './project-paths.ts';
 import { compileAssetFallbackHelper } from './router/compile.ts';
-import { hasEmailHandlers, scanEmailHandlersSync } from './router/email.ts';
+import { hasEmailHandlers } from './router/email.ts';
 import { isRouteEnabledForEnvironment, type RouteEnvironment } from './router/parse-filename.ts';
-import { scanMiddlewareSync, scanRoutePatternsSync } from './router/scan.ts';
-import { scanWebSocketRoutesSync } from './router/websocket.ts';
 import { DEV_INBOX_ENV_VAR, DEV_INBOX_TOKEN_ENV_VAR } from './runtime/email/dev-inbox.ts';
 import {
   SANDBOX_MIGRATION_TAG,
-  isSandboxEnabled,
   resolveSandboxConfig,
   sandboxContainerConfig,
   assertSandboxNamespaceConfig,
@@ -839,19 +822,27 @@ export function voidPlugin(options?: {
       }
     },
   };
-  const paths = resolveProjectPaths(root, config);
+  let application = analyzeApplicationSync(root, { config });
+  const { paths, dialect, bindingNames, authConfigPath } = application;
+  const analyses = new Map<RouteEnvironment | undefined, ApplicationAnalysis>([
+    [undefined, application],
+  ]);
+  const getApplicationAnalysis = (environment: RouteEnvironment, refresh = false) => {
+    let result = refresh ? undefined : analyses.get(environment);
+    if (!result) {
+      result = analyzeApplicationSync(root, { config, environment });
+      analyses.set(environment, result);
+    }
+    application = result;
+    return result;
+  };
   let routeEnvironment: RouteEnvironment = 'prod';
   assertNoRootSourceConventionConflicts(paths);
-  const dialect = getDatabaseDialect(config);
-  const detected = detectFramework(root);
+  const detected = application.framework;
   const framework = detected?.class === 'a' ? (detected.name as Framework) : undefined;
 
   // Infer bindings synchronously from source files
   const scanDirs = config.inference?.scanDirs ?? (detected ? FRAMEWORK_SCAN_DIRS : undefined);
-  const inferenceOptions = config.inference?.bindings
-    ? { bindings: config.inference.bindings }
-    : undefined;
-  const bindingNames = resolveBindingNames(config.inference?.bindings);
   const frameworkOwnsCloudflareRuntime =
     detected !== undefined && (detected.class === 'b' || detected.class === 'c');
   const localD1PersistRoot = frameworkOwnsCloudflareRuntime
@@ -867,12 +858,9 @@ export function voidPlugin(options?: {
       ? options?.persistTo
       : undefined,
   );
-  const inferredBindings = inferProjectBindings(root, { ...inferenceOptions, paths }, scanDirs);
-  const sandboxEnabled = isSandboxEnabled(config);
-  let bindings = sandboxEnabled ? { ...inferredBindings, needsSandbox: true } : inferredBindings;
+  let bindings = application.bindings;
   const sandboxConfig = bindings.needsSandbox ? resolveSandboxConfig(config, root) : undefined;
-  const authConfigPath = findVoidAuthConfig(root, paths);
-  let authEnabled = bindings.needsAuth || authConfigPath !== null || config.auth !== undefined;
+  let authEnabled = application.authEnabled;
 
   if (detected && authEnabled) {
     throw new Error(
@@ -894,7 +882,7 @@ export function voidPlugin(options?: {
   // Gated on the handler DIRECTORY, not on `bindings.needsEmail`. Outbound
   // `sendEmail` is a binding rather than a compiled export, so it keeps
   // working in every framework and must not be caught here.
-  const hasInboundEmail = hasEmailHandlers(scanEmailHandlersSync(paths.sourceRoot));
+  const hasInboundEmail = hasEmailHandlers(application.email);
   if (detected && hasInboundEmail) {
     throw new Error(
       'email: inbound email handlers are only supported in Void apps. Remove the email/ directory — `sendEmail` from void/email keeps working.',
@@ -1019,7 +1007,7 @@ export function voidPlugin(options?: {
 
   // Scan queues/websocket routes early so both framework-mode and default-mode
   // branches can safely close over these bindings.
-  const queues = framework ? [] : scanQueuesSync(root, paths.queuesDir);
+  const queues = framework ? [] : application.queues;
   // Deliberately scanned with NO environment: this list is the superset used to
   // RESERVE binding and Durable Object class names below, and reservation must
   // not depend on which command is running. A filtered list would let the live
@@ -1027,8 +1015,8 @@ export function voidPlugin(options?: {
   // `vite build` for the same project. Consumers that emit config rather than
   // reserve names re-filter by `routeEnvironment` (see `mergeBindings` and
   // `resolveConfiguredAssetRoutingPolicy`).
-  const websocketRoutes = framework ? [] : scanWebSocketRoutesSync(root, paths);
-  const durableObjects = scanDurableObjectModules(root);
+  const websocketRoutes = framework ? [] : application.allWebsockets;
+  const durableObjects = application.durableObjects;
   if (detected && durableObjects.length > 0) {
     throw new Error(
       'durable: durable-objects/ is currently supported in Void apps only, not framework adapter mode.',
@@ -1130,7 +1118,7 @@ export function voidPlugin(options?: {
         root,
         {
           ...bindings,
-          needsD1: dialect === 'sqlite' && bindings.needsD1,
+          needsD1: dialect === 'sqlite' && application.needsDatabase,
         },
         {
           bindingNames,
@@ -1257,7 +1245,7 @@ export function voidPlugin(options?: {
   // Core worker config — always set by voidPlugin (main, triggers, assets).
   // Bindings are handled separately in the config function below.
   const workerConfig: Record<string, unknown> = {};
-  const jobs = scanJobsSync(root, paths.cronsDir);
+  const jobs = application.jobs;
   if (jobs.length > 0) {
     workerConfig.triggers = {
       crons: [...new Set(jobs.flatMap((job) => job.crons))],
@@ -1373,7 +1361,7 @@ export function voidPlugin(options?: {
     const d1: Array<Record<string, unknown>> = [];
     if (
       dialect === 'sqlite' &&
-      (bindings.needsD1 || authEnabled) &&
+      application.needsDatabase &&
       !hasBinding(resolved.d1_databases, d1Name)
     ) {
       d1.push({ binding: d1Name, database_name: 'default', database_id: 'local' });
@@ -1829,15 +1817,9 @@ export function voidPlugin(options?: {
       // `dev` is the Vite dev server only. Every build, `void deploy`, and
       // `vite preview` (which reports `command: 'serve'`) is `prod`.
       routeEnvironment = command === 'serve' && !isPreview ? 'dev' : 'prod';
-      const environmentBindings = inferProjectBindings(
-        root,
-        { ...inferenceOptions, paths, environment: routeEnvironment },
-        scanDirs,
-      );
-      bindings = sandboxEnabled
-        ? { ...environmentBindings, needsSandbox: true }
-        : environmentBindings;
-      authEnabled = bindings.needsAuth || authConfigPath !== null || config.auth !== undefined;
+      application = getApplicationAnalysis(routeEnvironment);
+      bindings = application.bindings;
+      authEnabled = application.authEnabled;
       // `void cloudflare login` stores OAuth in Wrangler's OS-keychain-backed
       // credential store. The Cloudflare Vite plugin runs in this process, so
       // select that same store before it opens the remote Workers AI session.
@@ -2004,7 +1986,7 @@ export function voidPlugin(options?: {
 
   // Binding watch plugin — detects new binding imports mid-session and
   // notifies the developer via terminal log + browser toast.
-  const autoDetectBindings = !inferenceOptions;
+  const autoDetectBindings = true;
   const autoDetectAuth = !authEnabled;
   const bindingWatchPlugin: Plugin = {
     name: 'void:binding-watch',
@@ -2025,7 +2007,10 @@ export function voidPlugin(options?: {
         }
         try {
           const code = readFileSync(path, 'utf-8');
-          const fileBindings = inferBindingsFromSource(code, path.split('/').pop()!);
+          const fileBindings = applyBindingOverrides(
+            inferBindingsFromSource(code, path.split('/').pop()!),
+            config.inference?.bindings,
+          );
           const newBindings: Array<string> = [];
           if (autoDetectBindings) {
             if (fileBindings.needsD1 && !bindings.needsD1) {
@@ -2200,14 +2185,14 @@ export function voidPlugin(options?: {
       clientStubsPlugin,
       serverRuntimeOptimizerPlugin,
       bindingRuntimePlugin(bindingNames),
-      drizzlePlugin(root, false, getDatabaseDialect(config), {
+      drizzlePlugin(root, false, dialect, {
         d1BindingName: bindingNames?.d1,
         forceVirtualDb: authEnabled || bindingNames?.d1 !== undefined,
         localD1DatabaseId: localD1.databaseId,
         localD1PersistRoot: localD1.persistRoot,
         redirectDbTypePaths,
       }),
-      migrationPlugin(root, getDatabaseDialect(config), localD1.databaseId, localD1.persistRoot),
+      migrationPlugin(root, dialect, localD1.databaseId, localD1.persistRoot),
       ...(vinextCompat ? [vinextCompat] : []),
       frameworkBuildWrapperPlugin,
       frameworkTriggersPlugin(root, { devTriggerToken }),
@@ -2282,6 +2267,7 @@ export function voidPlugin(options?: {
       envSchemaPlugin(root),
       ...pagesDevCssAssetsPlugin(root, devTriggerToken),
       routingPlugin(root, {
+        getApplicationAnalysis,
         isAuthEnabled: () => false,
         devTriggerToken,
         headConfig: config.head,
@@ -2314,12 +2300,11 @@ export function voidPlugin(options?: {
 
   const ssrEntry = validateSsrEntry(root, paths);
   const hasPages = existsSync(paths.pagesDir);
-  const hasMiddleware = scanMiddlewareSync(root, paths).length > 0;
   let assetRoutingPublicDir: string | null = join(root, 'public');
   let managedCloudflareBuild = false;
 
   function resolveConfiguredAssetRoutingPolicy(): AssetRoutingPolicy {
-    const routePatterns = scanRoutePatternsSync(root, paths, routeEnvironment);
+    const routePatterns = application.routes;
     const environmentWebsocketRoutes = websocketRoutes.filter((route) =>
       isRouteEnabledForEnvironment(route, routeEnvironment),
     );
@@ -2331,7 +2316,7 @@ export function voidPlugin(options?: {
         routeScanHasApiRoutes(environmentWebsocketRoutes) ||
         authEnabled,
       hasDocumentRoutes: routeScanHasDocumentRoutes(routePatterns),
-      hasMiddleware,
+      hasMiddleware: application.middleware.length > 0,
       hasWebSockets: routeScanHasDocumentRoutes(environmentWebsocketRoutes),
       authEnabled,
       liveEnabled: shouldEmitLive() && liveConfig !== undefined,
@@ -2415,6 +2400,7 @@ export function voidPlugin(options?: {
     ...(bindings.needsSandbox ? [createSandboxSdkResolvePlugin()] : []),
     ...pagesDevCssAssetsPlugin(root, devTriggerToken),
     routingPlugin(root, {
+      getApplicationAnalysis,
       isAuthEnabled: () => authEnabled,
       devTriggerToken,
       headConfig: config.head,

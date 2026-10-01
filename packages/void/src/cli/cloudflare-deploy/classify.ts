@@ -1,9 +1,7 @@
+import { analyzeApplicationSync, type ApplicationAnalysis } from '../../application-analysis.ts';
 import { isNodeTarget, type VoidConfig } from '../../config.ts';
-import { scanJobsSync } from '../../crons/scan.ts';
-import { scanDurableObjectModules } from '../../durable/scan.ts';
 import { detectFramework } from '../../plugin-inference.ts';
-import { assertNoRootSourceConventionConflicts, resolveProjectPaths } from '../../project-paths.ts';
-import { scanWebSocketRoutesSync } from '../../router/websocket.ts';
+import { assertNoRootSourceConventionConflicts } from '../../project-paths.ts';
 import { validateSsrEntry } from '../../ssr/entry.ts';
 import { detectPreset, FRAMEWORK_PRESETS, hasBackendFiles } from '../preset.ts';
 import { syncWranglerDurableObjects, syncWranglerWebSockets } from '../wrangler.ts';
@@ -25,6 +23,7 @@ export function classifyCloudflareDeployApp(
   root: string,
   voidConfig: VoidConfig,
   options: CloudflareDeployAppOptions,
+  application?: ApplicationAnalysis,
 ): CloudflareDeployAppClassification {
   if (isNodeTarget(voidConfig.target)) {
     return unsupported(
@@ -36,7 +35,7 @@ export function classifyCloudflareDeployApp(
     );
   }
 
-  const framework = detectFramework(root);
+  const framework = application?.framework ?? detectFramework(root);
   if (framework) {
     const preset = FRAMEWORK_PRESETS[framework.name];
     if (!preset) {
@@ -74,13 +73,18 @@ export function classifyCloudflareDeployApp(
     );
   }
 
-  const paths = resolveProjectPaths(root, voidConfig);
   try {
+    const analysis =
+      application ??
+      analyzeApplicationSync(root, {
+        config: voidConfig,
+        environment: 'prod',
+      });
+    const paths = analysis.paths;
     assertNoRootSourceConventionConflicts(paths);
     validateSsrEntry(root, paths);
-    scanJobsSync(root, paths.cronsDir);
-    syncWranglerDurableObjects(root, scanDurableObjectModules(root));
-    syncWranglerWebSockets(root, scanWebSocketRoutesSync(root, paths, 'prod'));
+    syncWranglerDurableObjects(root, analysis.durableObjects);
+    syncWranglerWebSockets(root, analysis.websockets);
   } catch (error) {
     return unsupported(`deploy: ${getErrorMessage(error)}`);
   }
