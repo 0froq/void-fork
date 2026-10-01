@@ -32,7 +32,7 @@ export const Counter = defineDurableState({
 export default Counter;
 ```
 
-The default export must be the object returned by `defineDurableState()`. Void uses it to export the generated Cloudflare class and associate the inferred binding at worker startup.
+Default-export the object returned by `defineDurableState()`.
 
 For `counter.ts`, Void generates:
 
@@ -100,8 +100,6 @@ export const POST = defineHandler(async () => {
 The same name always resolves to the same Durable Object. Use `getById(id)` when you already have a `DurableObjectId`. For advanced cases, both helpers also accept an explicit `DurableObjectNamespace` as their first argument.
 
 ## Execution and persistence
-
-Typed methods run through Cloudflare RPC on the generated Durable Object class. Only your declared methods are exposed; Void’s state-loading and persistence helpers stay private.
 
 Void loads state before the first operation and runs RPC methods one at a time. After a method, `fetch`, or `alarm` handler succeeds, it saves the updated state.
 
