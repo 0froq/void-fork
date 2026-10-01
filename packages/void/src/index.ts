@@ -32,6 +32,7 @@ import {
   ensureWranglerCompat,
   ensureWranglerCompatibilityDate,
   ensureWranglerNodejsAlsFlag,
+  findBindingNameOwner,
   hasDurableObjectSqliteMigration,
   LIVE_MIGRATION_TAG,
   normalizeWranglerCompatibilityFlags,
@@ -49,6 +50,7 @@ import {
   restoreCloudflarePreviewPointer,
   stashCloudflareDeployPointer,
 } from './cloudflare-config.ts';
+import { finalizeDurableObjectPatch } from './cloudflare-durable-patch.ts';
 import { writeFileIfChanged } from './codegen/write-if-changed.ts';
 import { readConfig, isNodeTarget, type NotFoundHandling } from './config.ts';
 import { inferBindingsFromSource } from './inference/walk.ts';
@@ -83,6 +85,7 @@ import { isRouteEnabledForEnvironment, type RouteEnvironment } from './router/pa
 import { DEV_INBOX_ENV_VAR, DEV_INBOX_TOKEN_ENV_VAR } from './runtime/email/dev-inbox.ts';
 import {
   SANDBOX_MIGRATION_TAG,
+  hasSandboxSqliteMigration,
   resolveSandboxConfig,
   sandboxContainerConfig,
   assertSandboxNamespaceConfig,
@@ -94,6 +97,10 @@ import {
   resolveRemoteMode,
   stripInternalEnvKeys,
 } from './shared/env.ts';
+import {
+  CLOUDFLARE_PRESERVE_BINDINGS_BUILD_ENV,
+  selectNativeVersionMetadataBinding,
+} from './shared/version-metadata.ts';
 import { validateSsrEntry } from './ssr/entry.ts';
 import { injectSvelteKitHooks } from './sveltekit-hooks-transform.ts';
 
@@ -1260,6 +1267,7 @@ export function voidPlugin(options?: {
   // Tracks whether vite is running in dev or build mode. Set early in
   // envPlugin.config so mergeBindings can gate credential injection on 'serve'.
   let viteCommand: 'serve' | 'build' = 'build';
+  let versionMetadataBinding: string | undefined;
 
   // Merge curated wrangler fields from void.config.ts
   const wranglerCompat = isNodeTarget(config.target) ? undefined : readWranglerCompat(root, config);
@@ -1694,13 +1702,7 @@ export function voidPlugin(options?: {
             new_sqlite_classes?: Array<string>;
           }>)
         : [];
-      if (
-        !existingMigrations.some(
-          (migration) =>
-            migration.tag === SANDBOX_MIGRATION_TAG ||
-            migration.new_sqlite_classes?.includes(sandboxConfig.className),
-        )
-      ) {
+      if (!hasSandboxSqliteMigration(existingMigrations, sandboxConfig.className)) {
         (result as Record<string, unknown>).migrations = [
           ...existingMigrations,
           {
@@ -1800,6 +1802,40 @@ export function voidPlugin(options?: {
       }
     }
 
+    versionMetadataBinding = selectNativeVersionMetadataBinding(
+      resolved as Record<string, unknown>,
+      {
+        nativeBuild: viteCommand === 'build' && process.env[CLOUDFLARE_DEPLOY_BUILD_ENV] === '1',
+        preserveBindings: process.env[CLOUDFLARE_PRESERVE_BINDINGS_BUILD_ENV] === '1',
+      },
+    );
+    if (versionMetadataBinding) {
+      const owner = findBindingNameOwner(result, 'version_metadata', versionMetadataBinding);
+      if (owner) {
+        throw new Error(
+          `Cloudflare version metadata binding ${versionMetadataBinding} conflicts with ${owner}.`,
+        );
+      }
+      if (!resolved.version_metadata) {
+        result.version_metadata = { binding: versionMetadataBinding };
+      }
+    }
+    finalizeDurableObjectPatch(resolved as Record<string, unknown>, result, [
+      ...environmentWebsocketRoutes.map((route) => ({
+        name: route.bindingName,
+        class_name: route.className,
+      })),
+      ...durableObjects.map((module) => ({
+        name: module.bindingName,
+        class_name: module.className,
+      })),
+      ...(bindings.needsSandbox && sandboxConfig
+        ? [{ name: sandboxConfig.binding, class_name: sandboxConfig.className }]
+        : []),
+      ...(shouldEmitLive() && liveConfig
+        ? [{ name: liveConfig.bindingName, class_name: liveConfig.className }]
+        : []),
+    ]);
     return result as Partial<WorkerConfig>;
   }
 
@@ -2402,6 +2438,7 @@ export function voidPlugin(options?: {
     routingPlugin(root, {
       getApplicationAnalysis,
       isAuthEnabled: () => authEnabled,
+      getVersionMetadataBinding: () => versionMetadataBinding,
       devTriggerToken,
       headConfig: config.head,
       output: config.output,

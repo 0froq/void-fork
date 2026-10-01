@@ -5,6 +5,7 @@ import { log } from '@clack/prompts';
 import {
   CloudflareWorkerInspectionError,
   parseCloudflareVersionMessage,
+  type CloudflareOperation,
 } from '@void/deploy-cloudflare';
 import { toSlash } from 'pathslash';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -260,6 +261,20 @@ describe('Cloudflare activation diagnostics', () => {
     expect(message).toContain('create an Access application');
   });
 
+  it.each(['bootstrap-readiness-failed', 'atomic-readiness-failed'] as const)(
+    'prints Custom Domain propagation retry guidance after %s',
+    (reason) => {
+      const message = formatCloudflareActivationError({
+        ok: false,
+        reason,
+        diagnostic: 'Check DNS and TLS, then retry `void deploy --platform cloudflare`.',
+      });
+      expect(message).toContain('Worker');
+      expect(message).toContain('Check DNS and TLS');
+      expect(message).toContain('retry `void deploy --platform cloudflare`');
+    },
+  );
+
   it('distinguishes opaque trigger recovery from a first deployment', () => {
     const opaque = formatCloudflareActivationError({
       ok: false,
@@ -267,8 +282,8 @@ describe('Cloudflare activation diagnostics', () => {
       rollback: 'unavailable',
       previousVersionId: '11111111-1111-4111-8111-111111111111',
     });
-    expect(opaque).toContain('Traffic was restored to the previous version');
-    expect(opaque).toContain('trigger configuration was unavailable');
+    expect(opaque).toContain('Traffic or trigger restoration could not be completed');
+    expect(opaque).not.toContain('Traffic was restored');
     expect(opaque).not.toContain('first deployment');
 
     expect(
@@ -279,6 +294,21 @@ describe('Cloudflare activation diagnostics', () => {
         previousVersionId: null,
       }),
     ).toContain('This was the first deployment');
+  });
+
+  it('reports uncertain status after publication without claiming nothing was uploaded', () => {
+    const published = formatCloudflareActivationError({
+      ok: false,
+      reason: 'status-failed',
+      versionId: '22222222-2222-4222-8222-222222222222',
+      status: 1,
+    });
+    expect(published).toContain('was published');
+    expect(published).toContain('Inspect `void project status` before retrying');
+    expect(published).not.toContain('no version was uploaded');
+    expect(
+      formatCloudflareActivationError({ ok: false, reason: 'status-failed', status: 1 }),
+    ).toContain('no version was uploaded');
   });
 });
 
@@ -2329,6 +2359,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(config).toMatchObject({
       name: 'spaapp',
       account_id: 'acc123',
+      version_metadata: { binding: '__VOID_VERSION_METADATA' },
       main: 'static-edge.mjs',
       assets: {
         directory: '../../../dist',
@@ -2394,6 +2425,8 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     const { deps, exitCalls } = harness({
       activateVersion: async (options) => {
         readinessHeaders = options.readinessHeaders;
+        expect(options.requireVersionMetadata).toBe(true);
+        expect(options.requirePreviewForReadiness).toBe(false);
         return {
           ok: true,
           versionId: '22222222-2222-4222-8222-222222222222',
@@ -3061,6 +3094,33 @@ describe('runCloudflareDeploy — preflight', () => {
     expect(wranglerArgs.some((args) => args[0] === 'containers')).toBe(false);
   });
 
+  it.each([
+    { tag: 'occupied', new_classes: ['SandboxV1'] },
+    {
+      tag: 'transfer',
+      transferred_classes: [{ from_script: 'foreign', from: 'Original', to: 'SandboxV1' }],
+    },
+    { tag: 'void-sandbox-v2', new_sqlite_classes: ['Unrelated'] },
+  ])(
+    'rejects incompatible Sandbox history before account probes, resource provisioning or build',
+    async (migration) => {
+      const root = sandboxProject();
+      const configPath = join(root, 'wrangler.jsonc');
+      const original = JSON.stringify({
+        ...parseRootWranglerConfig(configPath),
+        migrations: [migration],
+      });
+      writeFileSync(configPath, original);
+      const { deps, trace, exitCalls } = harness();
+      await expect(
+        runCloudflareDeploy(root, { platform: 'cloudflare', provision: true }, silentCliLog, deps),
+      ).rejects.toBeInstanceOf(ExitError);
+      expect(exitCalls).toEqual([1]);
+      expect(trace).toEqual([]);
+      expect(readFileSync(configPath, 'utf8')).toBe(original);
+    },
+  );
+
   it('translates a Sandbox upload entitlement error into Workers Paid guidance', async () => {
     const root = sandboxProject();
     const errors: Array<string> = [];
@@ -3396,22 +3456,22 @@ describe('runCloudflareDeploy — secrets gate', () => {
     const current = '11111111-1111-4111-8111-111111111111';
     const next = '22222222-2222-4222-8222-222222222222';
     let active = current;
-    const commands: Array<Array<string>> = [];
-    const runWrangler: DeployWranglerRun = operationFixture((args) => {
-      commands.push(args);
-      if (args[0] === 'whoami') {
-        return { ...cleanExit, stdout: '{"loggedIn":true,"accounts":[]}' };
+    const operations: Array<CloudflareOperation> = [];
+    const runWrangler: DeployWranglerRun = (operation) => {
+      operations.push(operation);
+      if (operation.type === 'auth.whoami') {
+        return { ...cleanExit, data: { loggedIn: true, accounts: [] } };
       }
-      if (args[0] === 'deployments') {
+      if (operation.type === 'deployments.status') {
         return {
           ...cleanExit,
-          stdout: JSON.stringify({ versions: [{ version_id: active, percentage: 100 }] }),
+          data: { versions: [{ version_id: active, percentage: 100 }] },
         };
       }
-      if (args[0] === 'versions' && args[1] === 'list') {
+      if (operation.type === 'versions.list') {
         return {
           ...cleanExit,
-          stdout: JSON.stringify([
+          data: [
             {
               id: current,
               number: 1,
@@ -3426,25 +3486,34 @@ describe('runCloudflareDeploy — secrets gate', () => {
                 script_runtime: { usage_model: 'standard', limits: {} },
               },
             },
-          ]),
+          ],
         };
       }
-      if (args[0] === 'versions' && args[1] === 'upload') {
+      if (operation.type === 'versions.upload') {
         return {
           ...cleanExit,
           status: 1,
+          failure: 'durable-migration',
+          errorCode: 10211,
           stderr: 'Durable Object migrations require deploy. [code: 10211]',
         };
       }
-      if (args[0] === 'deploy') {
+      if (operation.type === 'worker.deploy') {
         active = next;
         return {
           ...cleanExit,
-          stdout: `Current Version ID: ${next}\nhttps://secret-do-app.example.workers.dev`,
+          data: {
+            versionId: next,
+            workersDevUrl: 'https://secret-do-app.example.workers.dev',
+          },
         };
       }
-      return cleanExit;
-    });
+      if (operation.type === 'triggers.deploy' || operation.type === 'triggers.clear-crons') {
+        expect(active).toBe(next);
+        return cleanExit;
+      }
+      throw new Error(`Unexpected Cloudflare operation: ${operation.type}`);
+    };
     let explicitBootstrapProof: boolean | undefined;
     const { deps } = harness({
       runWrangler,
@@ -3462,7 +3531,11 @@ describe('runCloudflareDeploy — secrets gate', () => {
         explicitBootstrapProof = options.allowFirstDeploymentBootstrap;
         return activateCloudflareVersionPrimitive({
           ...options,
-          fetch: async () => Response.json({ ready: true }),
+          fetch: async () => {
+            expect(operations.at(-2)?.type).toBe('triggers.clear-crons');
+            expect(operations.at(-1)?.type).toBe('deployments.status');
+            return Response.json({ ready: true, versionId: active });
+          },
         });
       },
     });
@@ -3470,8 +3543,15 @@ describe('runCloudflareDeploy — secrets gate', () => {
     await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
     expect(explicitBootstrapProof).not.toBe(true);
-    expect(commands.some((args) => args[0] === 'versions' && args[1] === 'upload')).toBe(true);
-    expect(commands.some((args) => args[0] === 'deploy')).toBe(true);
+    expect(
+      operations
+        .map((operation) => operation.type)
+        .filter(
+          (type) =>
+            type !== 'auth.whoami' && type !== 'deployments.status' && type !== 'versions.list',
+        ),
+    ).toEqual(['versions.upload', 'worker.deploy', 'triggers.deploy', 'triggers.clear-crons']);
+    expect(active).toBe(next);
   });
 });
 

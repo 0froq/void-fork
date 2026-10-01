@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Duplex } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { expect, it } from 'vite-plus/test';
 import {
@@ -470,6 +472,157 @@ it('finds existing Queues beyond the first cf API page', async () => {
     rmSync(directory, { recursive: true, force: true });
   }
 }, 30_000);
+
+it.each([
+  {
+    label: 'Cloudflare script_name',
+    consumers: [{ script_name: 'test-worker', consumer_id: 'owned-consumer', type: 'worker' }],
+    deleted: ['owned-consumer'],
+    status: 0,
+  },
+  {
+    label: 'matching legacy alias',
+    consumers: [
+      { script_name: 'test-worker', script: 'test-worker', consumer_id: 'owned-consumer' },
+    ],
+    deleted: ['owned-consumer'],
+    status: 0,
+  },
+  {
+    label: 'foreign Worker and HTTP pull consumers',
+    consumers: [
+      { script_name: 'other-worker', consumer_id: 'foreign-consumer', type: 'worker' },
+      { consumer_id: 'pull-consumer', type: 'http_pull' },
+    ],
+    deleted: [],
+    status: 0,
+  },
+  {
+    label: 'conflicting aliases',
+    consumers: [
+      { script_name: 'other-worker', script: 'test-worker', consumer_id: 'foreign-consumer' },
+    ],
+    deleted: [],
+    status: 1,
+  },
+  {
+    label: 'missing Worker identity',
+    consumers: [{ consumer_id: 'unknown-consumer', type: 'worker' }],
+    deleted: [],
+    status: 1,
+  },
+  {
+    label: 'null Worker identity',
+    consumers: [{ script_name: null, consumer_id: 'unknown-consumer' }],
+    deleted: [],
+    status: 1,
+  },
+  {
+    label: 'missing consumer ID',
+    consumers: [{ script_name: 'test-worker', type: 'worker' }],
+    deleted: [],
+    status: 1,
+  },
+  {
+    label: 'duplicate owned consumers',
+    consumers: [
+      { script_name: 'test-worker', consumer_id: 'first-consumer', type: 'worker' },
+      { script_name: 'test-worker', consumer_id: 'second-consumer', type: 'worker' },
+    ],
+    deleted: [],
+    status: 1,
+  },
+  {
+    label: 'option-shaped consumer ID',
+    consumers: [{ script_name: 'test-worker', consumer_id: '--help', type: 'worker' }],
+    deleted: [],
+    status: 1,
+  },
+])(
+  'cleans up Queue consumers using verified identities: $label',
+  async ({ consumers, deleted, status }) => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-cf-queue-cleanup-'));
+    const deletes: Array<string> = [];
+    const server = createServer((request, response) => {
+      const url = new URL(request.url ?? '', 'http://127.0.0.1');
+      request.resume();
+      response.setHeader('Content-Type', 'application/json');
+      const queuePath = '/client/v4/accounts/test-account/queues';
+      if (request.method === 'GET' && url.pathname === queuePath) {
+        response.end(
+          JSON.stringify({
+            success: true,
+            result: [{ queue_id: 'queue-id', queue_name: 'existing-queue' }],
+            result_info: { page: 1, total_pages: 1 },
+          }),
+        );
+      } else if (request.method === 'GET' && url.pathname === `${queuePath}/queue-id/consumers`) {
+        response.end(JSON.stringify({ success: true, result: consumers }));
+      } else if (
+        request.method === 'DELETE' &&
+        url.pathname.startsWith(`${queuePath}/queue-id/consumers/`)
+      ) {
+        deletes.push(url.pathname.split('/').at(-1)!);
+        response.end(JSON.stringify({ success: true, result: {} }));
+      } else {
+        response.statusCode = 400;
+        response.end(
+          JSON.stringify({ success: false, errors: [{ message: 'Unexpected request' }] }),
+        );
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const configPath = join(directory, 'wrangler.json');
+      writeFileSync(
+        configPath,
+        JSON.stringify({ account_id: 'test-account', name: 'test-worker' }),
+      );
+      const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
+      const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
+        (resolve) => {
+          execFile(
+            command!,
+            [
+              ...prefix,
+              ...encodeCloudflareOperation({
+                type: 'queues.consumer.remove',
+                queueName: 'existing-queue',
+                workerName: 'test-worker',
+                configPath,
+              }),
+            ],
+            {
+              cwd: directory,
+              encoding: 'utf8',
+              timeout: 20_000,
+              env: {
+                PATH: process.env.PATH,
+                SYSTEMROOT: process.env.SYSTEMROOT,
+                WINDIR: process.env.WINDIR,
+                CI: 'true',
+                CF_API_TOKEN: 'synthetic-token',
+                CLOUDFLARE_ACCOUNT_ID: 'test-account',
+                CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`,
+              },
+            },
+            (error, stdout, stderr) => resolve({ status: error ? 1 : 0, stdout, stderr }),
+          );
+        },
+      );
+      expect(output.status, output.stderr).toBe(status);
+      expect(deletes).toEqual(deleted);
+      expect(output.stderr).not.toContain('synthetic-token');
+    } finally {
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      });
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+  30_000,
+);
 
 it('uses pinned cf despite a project-local CLI and preserves D1 results and the CF token alias', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'void-cf-d1-contract-'));
@@ -1274,3 +1427,159 @@ it('rejects a changed tail target before any provider request', async () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+it('renders binary and text frames from a real Node WebSocket in order and removes the captured tail', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'void-tail-binary-'));
+  const sockets = new Set<Duplex>();
+  const requests: Array<{ method: string | undefined; url: string | undefined; body: string }> = [];
+  let initialization: string | undefined;
+  const server = createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) {
+      body += chunk;
+    }
+    requests.push({ method: request.method, url: request.url, body });
+    response.setHeader('Content-Type', 'application/json');
+    response.end(
+      JSON.stringify({
+        success: true,
+        ...(request.method === 'POST'
+          ? {
+              result: {
+                id: 'owned-tail',
+                url: `ws://127.0.0.1:${(server.address() as AddressInfo).port}/stream`,
+              },
+            }
+          : {}),
+      }),
+    );
+  });
+  server.on('upgrade', (request, socket) => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+    const key = request.headers['sec-websocket-key'];
+    const accept = createHash('sha1')
+      .update(String(key) + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+      .digest('base64');
+    socket.write(
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: trace-v1\r\n\r\n`,
+    );
+    let input = Buffer.alloc(0);
+    const started = (chunk: Buffer) => {
+      input = Buffer.concat([input, chunk]);
+      if (input.length < 6) {
+        return;
+      }
+      const length = input[1]! & 127;
+      if (length >= 126 || input.length < 6 + length) {
+        return;
+      }
+      initialization = Buffer.from(
+        input.subarray(6, 6 + length).map((value, index) => value ^ input[2 + (index % 4)]!),
+      ).toString();
+      socket.off('data', started);
+      const frame = (value: unknown, opcode: number) => {
+        const data = Buffer.from(JSON.stringify(value));
+        const header =
+          data.length < 126 ? Buffer.from([0x80 | opcode, data.length]) : Buffer.alloc(4);
+        if (data.length >= 126) {
+          header[0] = 0x80 | opcode;
+          header[1] = 126;
+          header.writeUInt16BE(data.length, 2);
+        }
+        return Buffer.concat([header, data]);
+      };
+      socket.write(
+        Buffer.concat([
+          frame(
+            {
+              event: { request: { method: 'POST', url: 'https://isolated.invalid/runtime' } },
+              eventTimestamp: 1790000000000,
+              outcome: 'ok',
+              logs: [
+                { level: 'log', message: ['binary marker'] },
+                { level: 'error', message: ['error marker'] },
+              ],
+            },
+            2,
+          ),
+          frame(
+            {
+              event: { queue: 'owned-queue' },
+              eventTimestamp: 1790000000001,
+              outcome: 'ok',
+              logs: [{ level: 'log', message: ['text marker'] }],
+            },
+            1,
+          ),
+          Buffer.from([0x88, 0]),
+        ]),
+      );
+      socket.once('data', () => socket.end());
+    };
+    socket.on('data', started);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const configPath = join(directory, 'wrangler.json');
+    writeFileSync(configPath, JSON.stringify({ name: 'test-worker', account_id: 'test-account' }));
+    const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
+    const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
+      (resolve) => {
+        execFile(
+          command!,
+          [
+            ...prefix,
+            ...encodeCloudflareOperation({
+              type: 'tail',
+              workerName: 'test-worker',
+              configPath,
+              search: 'marker',
+              versionId: '11111111-2222-3333-4444-555555555555',
+            }),
+          ],
+          {
+            cwd: directory,
+            encoding: 'utf8',
+            timeout: 20_000,
+            env: {
+              PATH: process.env.PATH,
+              SYSTEMROOT: process.env.SYSTEMROOT,
+              WINDIR: process.env.WINDIR,
+              CLOUDFLARE_API_TOKEN: 'synthetic-token',
+              CLOUDFLARE_ACCOUNT_ID: 'test-account',
+              CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`,
+            },
+          },
+          (error, stdout, stderr) => resolve({ status: error ? 1 : 0, stdout, stderr }),
+        );
+      },
+    );
+    expect(output.status, output.stderr).toBe(0);
+    expect(initialization).toBe('{"debug":false}');
+    expect(output.stderr).not.toContain('malformed tail');
+    expect(output.stdout).toContain('POST https://isolated.invalid/runtime - ok');
+    expect(output.stdout).toContain('  (log) binary marker');
+    expect(output.stdout).toContain('  (error) error marker');
+    expect(output.stdout).toContain('Queue owned-queue - ok');
+    expect(output.stdout.indexOf('binary marker')).toBeLessThan(
+      output.stdout.indexOf('text marker'),
+    );
+    expect(requests).toHaveLength(2);
+    expect(JSON.parse(requests[0]!.body)).toEqual({
+      filters: [{ query: 'marker' }, { scriptVersion: '11111111-2222-3333-4444-555555555555' }],
+    });
+    expect(requests[1]).toEqual({
+      method: 'DELETE',
+      url: '/client/v4/accounts/test-account/workers/scripts/test-worker/tails/owned-tail',
+      body: '',
+    });
+  } finally {
+    for (const socket of sockets) {
+      socket.destroy();
+    }
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 30_000);

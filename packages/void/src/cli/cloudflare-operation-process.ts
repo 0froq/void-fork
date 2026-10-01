@@ -12,7 +12,12 @@ import { parse } from 'jsonc-parser';
 import { dirname, join, resolve } from 'pathslash';
 import { EnvHttpProxyAgent, fetch as httpFetch } from 'undici';
 import { persistCfKeyringPreference, readCfSessionCredential } from './cf-session.ts';
-import { cloudflareDeviceCode, printCloudflareLoginPrompt } from './cloudflare-login-output.ts';
+import {
+  cloudflareDeviceCode,
+  cloudflareVerificationUrl,
+  printCloudflareLoginLink,
+  printCloudflareLoginPrompt,
+} from './cloudflare-login-output.ts';
 
 type Result = {
   status: number;
@@ -124,6 +129,7 @@ function runInteractiveCf(command: Array<string>): Promise<Result> {
     });
     let output = '';
     let announced = false;
+    let announcedLink = false;
     let settled = false;
     const finish = (value: Result) => {
       if (!settled) {
@@ -138,6 +144,13 @@ function runInteractiveCf(command: Array<string>): Promise<Result> {
         if (code) {
           announced = true;
           printCloudflareLoginPrompt(code);
+        }
+      }
+      if (!announcedLink) {
+        const url = cloudflareVerificationUrl(output);
+        if (url) {
+          announcedLink = true;
+          printCloudflareLoginLink(url);
         }
       }
     };
@@ -974,11 +987,37 @@ async function workerChanges(): Promise<Result> {
     if (!Array.isArray(members)) {
       throw new Error('Queue consumer list was malformed.');
     }
-    for (const item of members
-      .map(object)
-      .filter((entry) => entry.script === operation.workerName)) {
-      if (typeof item.consumer_id !== 'string') {
-        throw new Error('Queue consumer ID is missing.');
+    const matching = members.map(object).filter((entry) => {
+      const name = entry.script_name ?? entry.script;
+      if (
+        (entry.script_name !== undefined &&
+          (typeof entry.script_name !== 'string' || !entry.script_name)) ||
+        (entry.script !== undefined && (typeof entry.script !== 'string' || !entry.script)) ||
+        (entry.script_name !== undefined &&
+          entry.script !== undefined &&
+          entry.script_name !== entry.script) ||
+        (entry.type === 'worker' && name === undefined)
+      ) {
+        throw new Error('Queue consumer Worker identity is ambiguous.');
+      }
+      return name === operation.workerName;
+    });
+    if (matching.length > 1) {
+      throw new Error('Queue consumer Worker identity is ambiguous.');
+    }
+    for (const item of matching) {
+      if (
+        typeof item.consumer_id !== 'string' ||
+        !item.consumer_id ||
+        item.consumer_id.startsWith('-') ||
+        /\s/.test(item.consumer_id) ||
+        [...item.consumer_id].some((character) => {
+          const code = character.charCodeAt(0);
+          return code < 32 || code === 127;
+        }) ||
+        (item.type !== undefined && item.type !== 'worker')
+      ) {
+        throw new Error('Queue consumer ID or type is invalid.');
       }
       const deleted = runCf([
         'queues',
@@ -1125,46 +1164,63 @@ async function tail(): Promise<Result> {
     }
     await new Promise<void>((resolve, reject) => {
       finish = resolve;
+      let pendingMessages = Promise.resolve();
       socket = new WebSocket(tailUrl, 'trace-v1');
       socket.addEventListener('open', () => {
         socket!.send(JSON.stringify({ debug: false }));
       });
       socket.addEventListener('message', (event) => {
-        try {
-          const log = object(parsedJson(String(event.data)));
-          const detail = object(log.event ?? {});
-          const request = object(detail.request ?? {});
-          const prefix =
-            typeof request.url === 'string'
-              ? `${request.method ?? 'GET'} ${request.url}`
-              : typeof detail.queue === 'string'
-                ? `Queue ${detail.queue}`
-                : typeof detail.mailFrom === 'string'
-                  ? `Email from ${detail.mailFrom}`
-                  : 'Worker event';
-          process.stdout.write(
-            `${prefix} - ${log.outcome ?? 'unknown'} @ ${new Date(Number(log.eventTimestamp)).toLocaleString()}\n`,
-          );
-          if (Array.isArray(log.logs)) {
-            for (const line of log.logs.map(object)) {
-              process.stdout.write(
-                `  (${line.level ?? 'log'}) ${Array.isArray(line.message) ? line.message.join(' ') : ''}\n`,
-              );
+        pendingMessages = pendingMessages
+          .then(async () => {
+            const data: unknown = event.data;
+            const text =
+              typeof data === 'string'
+                ? data
+                : data instanceof Blob
+                  ? await data.text()
+                  : data instanceof ArrayBuffer
+                    ? new TextDecoder().decode(data)
+                    : null;
+            if (text === null) {
+              throw new Error('Unsupported Cloudflare tail frame.');
             }
-          }
-          if (Array.isArray(log.exceptions)) {
-            for (const exception of log.exceptions.map(object)) {
-              process.stderr.write(`  ${exception.name ?? 'Error'}: ${exception.message ?? ''}\n`);
+            const log = object(parsedJson(text));
+            const detail = object(log.event ?? {});
+            const request = object(detail.request ?? {});
+            const prefix =
+              typeof request.url === 'string'
+                ? `${request.method ?? 'GET'} ${request.url}`
+                : typeof detail.queue === 'string'
+                  ? `Queue ${detail.queue}`
+                  : typeof detail.mailFrom === 'string'
+                    ? `Email from ${detail.mailFrom}`
+                    : 'Worker event';
+            process.stdout.write(
+              `${prefix} - ${log.outcome ?? 'unknown'} @ ${new Date(Number(log.eventTimestamp)).toLocaleString()}\n`,
+            );
+            if (Array.isArray(log.logs)) {
+              for (const line of log.logs.map(object)) {
+                process.stdout.write(
+                  `  (${line.level ?? 'log'}) ${Array.isArray(line.message) ? line.message.join(' ') : ''}\n`,
+                );
+              }
             }
-          }
-        } catch {
-          process.stderr.write('Cloudflare returned a malformed tail event.\n');
-        }
+            if (Array.isArray(log.exceptions)) {
+              for (const exception of log.exceptions.map(object)) {
+                process.stderr.write(
+                  `  ${exception.name ?? 'Error'}: ${exception.message ?? ''}\n`,
+                );
+              }
+            }
+          })
+          .catch(() => {
+            process.stderr.write('Cloudflare returned a malformed tail event.\n');
+          });
       });
       socket.addEventListener('error', () =>
         reject(new Error('Cloudflare Worker tail connection failed.')),
       );
-      socket.addEventListener('close', () => resolve());
+      socket.addEventListener('close', () => void pendingMessages.then(resolve));
       if (stopped.signal.aborted) {
         resolve();
       }

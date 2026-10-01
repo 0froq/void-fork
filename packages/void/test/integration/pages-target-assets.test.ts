@@ -22,7 +22,27 @@ const targets = [
 ];
 
 for (const { target, command, args } of targets) {
-  const available = spawn.sync(command, ['--version']).status === 0;
+  let available = spawn.sync(command, ['--version']).status === 0;
+  if (target === 'deno' && available) {
+    // Deno resolves the user's npm configuration before evaluating even a
+    // no-import script. Check that optional runtime without altering registries;
+    // failures in the built app still fail normally after this probe succeeds.
+    const probe = spawn.sync(
+      command,
+      ['eval', '--no-config', '--no-npm', '--no-remote', 'void 0;'],
+      { encoding: 'utf8', timeout: 10_000 },
+    );
+    if (probe.status !== 0) {
+      if (probe.stderr?.includes('Failed to resolve .npmrc options')) {
+        available = false;
+        console.warn(
+          'Skipping optional Deno Pages tests: the installed runtime cannot resolve user .npmrc configuration in a no-import preflight. No registry settings were changed.',
+        );
+      } else {
+        throw new Error(`Deno no-import preflight failed (exit ${probe.status ?? 'unknown'}).`);
+      }
+    }
+  }
   describe.skipIf(!available)(`${target} production Pages assets`, () => {
     let root: string;
     let playground: IsolatedPlayground;
@@ -31,8 +51,7 @@ for (const { target, command, args } of targets) {
     let errors = '';
 
     beforeAll(async () => {
-      // Keep relative workspace dependency links at the same depth and on the
-      // same drive. A junction into the Windows system temp directory breaks them.
+      // Keep the copy on the same drive as the installed dependency links.
       playground = createIsolatedPlayground(repository, 'playground/node-app');
       root = playground.root;
       const config = readConfig(root);
