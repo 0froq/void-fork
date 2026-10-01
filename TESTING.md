@@ -2,15 +2,64 @@
 
 ## Local verification
 
-Run the smallest relevant test target while developing:
+Start with the smallest relevant test file or case while developing:
 
 ```sh
-vp test run packages/void
+vp test run packages/void/test/unit/plugin-routing.test.ts
+vp test run packages/void/test/unit/plugin-routing.test.ts -t 'routing'
 vp run check
 ```
 
 Type-only contracts use `*.typecheck.ts`. Package typechecking verifies them; the Vitest runtime
 does not need to execute their `expectTypeOf` assertions.
+
+### Affected local tests
+
+`vp run test` is the local affected-tests default; `vp test run`, `vp run test:full`, and CI still
+run the full suite. The selector's result caching is disabled: Git state must be inspected on every run.
+Do not pass `vp run --cache` to this task.
+
+```sh
+vp run test --list                 # Preview files and fallback reasons; no builds or test hooks
+vp run test                       # Staged, unstaged, and untracked changes against HEAD
+vp run test --base origin/main     # Merge-base to working tree, including committed changes
+vp run test --unit                 # Faster iteration only; explicitly skips integration projects
+```
+
+Pass shortcut arguments directly after the task name, without an extra `--`. A clean working tree
+selects nothing unless `--base` includes earlier commits. Invalid Git refs or selection failures
+fail the command rather than silently skipping coverage.
+
+The runner uses Vitest's static import graph, including transitive and literal dynamic imports.
+It adds coverage that imports cannot describe:
+
+- SDK source changes rebuild public packages, select all SDK build/server/browser integrations,
+  and include built public exports in the related graph so platform and adapter consumers are covered.
+- Platform source, migration, and fixture changes select the owning package's tests, including
+  both API integration worker pools. Ordinary changed test files use the native related graph.
+- Playground changes select suites mentioning that fixture path. An unmapped playground selects
+  all SDK integrations; shared test tooling, configuration, dependencies, deletions/renames,
+  and unknown ownership fall back to the full selection.
+- Documentation-only changes skip runtime tests. Verify documentation rendering/examples separately.
+
+`--list` does not refresh builds, so built-export coverage can expand when the command executes.
+Affected selection is conservative, not a proof that all behavior is covered: computed imports,
+filesystem reads, generated artifacts, and external services can introduce additional dependencies.
+Explicitly run a known consumer when changing one of those boundaries, and add a selector regression
+when introducing a new fixture layout. Changes to packaging still need the packed checks below;
+changes to metaframework output still need `build:all` and the artifact check.
+
+For a leaf-module edit with known import-based consumers, Vitest's native related command is useful:
+
+```sh
+vp test related --run packages/void/src/runtime/sse.ts --project unit --project cli-unit
+vp test list packages/void/test/unit/plugin-routing.test.ts --filesOnly
+```
+
+Agents should run a focused regression first, then affected verification and `vp run check` after a
+batch. Use unit-only runs during iteration, but run the affected integration selection before
+handoff. Run the full suite once for final verification, not after every edit. For interactive
+development, `vp test watch <test-file>` keeps the transform graph in memory between edits.
 
 The named shortcuts select the current test projects:
 
