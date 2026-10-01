@@ -996,11 +996,24 @@ async function verifyContainerUpload(
     | 'local'
     | 'lost-image-metadata'
     | 'foreign-namespace'
+    | 'settings-change'
+    | 'keys-change'
+    | 'omitted-defaults'
+    | 'readiness-failure'
     | 'key-order',
 ) {
   const prepared = await containerOutput();
   const built = await readBuildOutput(prepared.directory);
-  const existing = ['existing', 'foreign', 'lost-readback', 'key-order'].includes(mode);
+  const existing = [
+    'existing',
+    'foreign',
+    'lost-readback',
+    'settings-change',
+    'keys-change',
+    'omitted-defaults',
+    'readiness-failure',
+    'key-order',
+  ].includes(mode);
   const expectedImages =
     mode === 'key-order'
       ? { first: containerImage, second: containerImage }
@@ -1011,9 +1024,21 @@ async function verifyContainerUpload(
     config: OutputContainerSchema.parse({
       ...built.containers[0].config,
       observability: { logs: { enabled: true } },
+      ...(mode === 'keys-change'
+        ? { authorizedKeys: [{ name: 'new-key', publicKey: 'ssh-ed25519 new' }] }
+        : {}),
+      ...(mode === 'omitted-defaults'
+        ? {
+            observability: { logs: { enabled: false } },
+            ssh: { enabled: false, port: 22 },
+            authorizedKeys: [],
+            unsafe: { configuration: { experimental_flags: [] } },
+          }
+        : {}),
       ...(mode === 'key-order'
         ? {
             ssh: { enabled: true, port: 2222 },
+            unsafe: { configuration: { experimental_flags: ['fixture-b', 'fixture-a'] } },
             images: { first: { reference: containerImage }, second: { reference: containerImage } },
           }
         : {}),
@@ -1029,15 +1054,31 @@ async function verifyContainerUpload(
         name: mode === 'foreign' ? 'foreign-app' : 'sandbox',
         scheduling_policy: 'durable_object',
         durable_objects: { namespace_id: containerNamespace },
-        observability: { logs: { enabled: mode === 'key-order' } },
+        ...(mode === 'omitted-defaults'
+          ? {}
+          : { observability: { logs: { enabled: mode !== 'settings-change' } } }),
+        ...(mode === 'keys-change'
+          ? {
+              configuration: {
+                authorized_keys: [{ name: 'old-key', public_key: 'ssh-ed25519 old' }],
+              },
+            }
+          : {}),
         ...(mode === 'key-order'
-          ? { configuration: { wrangler_ssh: { port: 2222, enabled: true } } }
+          ? {
+              configuration: {
+                wrangler_ssh: { port: 2222, enabled: true },
+                authorized_keys: [],
+                experimental_flags: ['fixture-a', 'fixture-b'],
+              },
+            }
           : {}),
       }
     : undefined;
   let imageAttempts = 0;
   let versionVisibleAttempts = 0;
-  let patched = false;
+  let applicationReads = 0;
+  const originalApplication = structuredClone(application);
   const server = createServer(async (request, response) => {
     const chunks: Array<Buffer> = [];
     for await (const chunk of request) {
@@ -1074,7 +1115,10 @@ async function verifyContainerUpload(
               : 'ready',
       };
     } else if (row.method === 'POST' && row.url.includes('/workers/workers/void-test/versions')) {
-      result = { id: uploadedPinnedVersion };
+      result = {
+        id: uploadedPinnedVersion,
+        urls: ['https://22222222-void-test.account.workers.dev'],
+      };
     } else if (row.url.endsWith(`/scripts/void-test/versions/${uploadedPinnedVersion}`)) {
       if (mode === 'pending' && ++versionVisibleAttempts === 1) {
         status = 404;
@@ -1110,11 +1154,10 @@ async function verifyContainerUpload(
         status = 404;
       } else if (row.method === 'PATCH') {
         application = { ...application, ...row.body };
-        patched = true;
         result = application;
       } else {
         result =
-          mode === 'lost-readback' && patched
+          mode === 'lost-readback' && ++applicationReads > 1
             ? { ...application, durable_objects: { namespace_id: 'f'.repeat(32) } }
             : application;
       }
@@ -1154,6 +1197,68 @@ async function verifyContainerUpload(
       : undefined;
   syncBuiltinESMExports();
   try {
+    const changedSettings = mode === 'settings-change' || mode === 'keys-change';
+    if (changedSettings || mode === 'readiness-failure') {
+      const commands: Array<Array<string>> = [];
+      const configPath = join(roots.at(-1)!, 'dist/ssr/wrangler.json');
+      const runner = createCfVersionRunner({
+        output: prepared,
+        workerName: 'void-test',
+        verifyResources: async () => ({ status: 0, stdout: '', stderr: '' }),
+        runCf: (args) => {
+          commands.push(args);
+          if (args.slice(0, 3).join(' ') === 'workers deployments list') {
+            return {
+              status: 0,
+              stdout: JSON.stringify({
+                deployments: [{ versions: [{ version_id: activePinnedVersion, percentage: 100 }] }],
+              }),
+              stderr: '',
+            };
+          }
+          expect(args.slice(0, 3)).toEqual(['workers', 'versions', 'get']);
+          return {
+            status: 0,
+            stdout: JSON.stringify({ id: activePinnedVersion, bindings: [] }),
+            stderr: '',
+          };
+        },
+        pinnedUpload: {
+          accountId: 'account-id',
+          apiBaseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`,
+          getToken: async () => 'synthetic-token',
+          verifyUploader: () => true,
+        },
+      });
+      const readiness = vi.fn(async () => Response.json({ ready: false }, { status: 503 }));
+      const result = await activateCloudflareVersion({
+        runWrangler: runner,
+        workerName: 'void-test',
+        configPath,
+        verifyUploader: () => true,
+        message: 'Verify Container candidate isolation.',
+        readinessAttempts: 1,
+        fetch: readiness,
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        reason: changedSettings ? 'upload-failed' : 'readiness-failed',
+      });
+      expect(readiness).toHaveBeenCalledTimes(changedSettings ? 0 : 1);
+      expect(requests.filter((row) => row.method === 'PATCH')).toEqual([]);
+      expect(application).toEqual(originalApplication);
+      expect(
+        commands.some((args) => args.slice(0, 3).join(' ') === 'workers deployments create'),
+      ).toBe(false);
+      if (changedSettings) {
+        expect(result).toHaveProperty(
+          'diagnostic',
+          expect.stringContaining('settings differ from the live application'),
+        );
+        expect(requests.every((row) => row.method === 'GET')).toBe(true);
+      }
+      return;
+    }
     const upload = uploadPinnedCloudflareVersion({
       output: prepared,
       accountId: 'account-id',
@@ -1177,9 +1282,7 @@ async function verifyContainerUpload(
       await expect(upload).rejects.toThrow(
         `version ${uploadedPinnedVersion} was uploaded and may already be published`,
       );
-      expect(requests.filter((row) => row.method === 'PATCH')).toHaveLength(
-        mode === 'lost-readback' ? 1 : 0,
-      );
+      expect(requests.filter((row) => row.method === 'PATCH')).toHaveLength(0);
       if (mode !== 'lost-readback') {
         expect(requests.some((row) => row.url.includes('/applications'))).toBe(false);
       }
@@ -1227,9 +1330,7 @@ async function verifyContainerUpload(
           observability: { logs: { enabled: true } },
         });
       } else {
-        expect(requests.filter((row) => row.method === 'PATCH')).toHaveLength(
-          mode === 'key-order' ? 0 : 1,
-        );
+        expect(requests.filter((row) => row.method === 'PATCH')).toHaveLength(0);
       }
       expect(requests.at(-1)?.method).toBe('GET');
       if (mode === 'pending') {
@@ -1282,6 +1383,10 @@ it.each([
   'local',
   'lost-image-metadata',
   'foreign-namespace',
+  'settings-change',
+  'keys-change',
+  'omitted-defaults',
+  'readiness-failure',
   'key-order',
 ] as const)('preserves pinned Sandbox image and application lifecycle: %s', verifyContainerUpload);
 

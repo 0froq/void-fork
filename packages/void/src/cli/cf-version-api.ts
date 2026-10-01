@@ -436,6 +436,40 @@ function assertContainerApplicationIdentity(
   }
 }
 
+function assertContainerApplicationSettings(application: Json, plan: ContainerPlan): void {
+  const desired = object(plan.settings.configuration) ?? {};
+  const current = object(application.configuration) ?? {};
+  const changedConfiguration = Object.entries(desired).some(([key, value]) => {
+    if (key === 'wrangler_ssh') {
+      const ssh = object(current.wrangler_ssh) ?? {};
+      const expected = object(value) ?? {};
+      return (
+        !isDeepStrictEqual(ssh.enabled ?? false, expected.enabled) ||
+        (expected.enabled === true &&
+          expected.port !== undefined &&
+          !isDeepStrictEqual(ssh.port, expected.port))
+      );
+    }
+    if (key === 'experimental_flags' && Array.isArray(value)) {
+      const flags = current.experimental_flags ?? [];
+      return !Array.isArray(flags) || !isDeepStrictEqual([...flags].sort(), [...value].sort());
+    }
+    return !isDeepStrictEqual(current[key] ?? [], value);
+  });
+  // The provider may omit disabled/default settings or add unrelated configuration fields.
+  // Compare only authored fields; an explicit empty key list still rejects existing keys.
+  const logs = object(object(plan.settings.observability)?.logs);
+  const currentLogs = object(object(application.observability)?.logs);
+  if (
+    changedConfiguration ||
+    (logs !== null && !isDeepStrictEqual(currentLogs?.enabled ?? false, logs.enabled))
+  ) {
+    throw new Error(
+      `Cloudflare Container ${plan.name} settings differ from the live application. Version-aware deployment cannot safely change these shared settings. Keep the existing Container settings in your configuration, or update this Container explicitly in the Cloudflare dashboard before retrying.`,
+    );
+  }
+}
+
 async function preflightContainerApplications(
   plans: Array<ContainerPlan>,
   bindings: Array<unknown>,
@@ -481,6 +515,7 @@ async function preflightContainerApplications(
         verifyUploader,
       );
       assertContainerApplicationIdentity(application, plan, namespace);
+      assertContainerApplicationSettings(application, plan);
     } catch (cause) {
       if (
         !(cause instanceof CloudflareApiError) ||
@@ -822,39 +857,12 @@ async function ensureContainerApplications(options: {
       );
     }
     assertContainerApplicationIdentity(application, plan, namespace);
-    const changed = Object.entries(plan.settings).some(
-      ([key, value]) => !isDeepStrictEqual(application[key], value),
-    );
-    if (changed) {
-      const updated = await apiResult(
-        url,
-        options.token,
-        'PATCH',
-        plan.settings,
-        options.verifyUploader,
-      );
-      assertContainerApplicationIdentity(updated, plan, namespace);
-      if (
-        Object.entries(plan.settings).some(
-          ([key, value]) => !isDeepStrictEqual(updated[key], value),
-        )
-      ) {
-        throw new Error(
-          `Cloudflare Container ${plan.name} application changed during configuration.`,
-        );
-      }
-    }
+    // Candidate upload must not mutate settings shared with the live version. Traffic-only
+    // activation cannot publish or roll back these settings, so reject differences instead.
+    assertContainerApplicationSettings(application, plan);
     const confirmed = await apiResult(url, options.token, 'GET', undefined, options.verifyUploader);
     assertContainerApplicationIdentity(confirmed, plan, namespace);
-    if (
-      Object.entries(plan.settings).some(
-        ([key, value]) => !isDeepStrictEqual(confirmed[key], value),
-      )
-    ) {
-      throw new Error(
-        `Cloudflare Container ${plan.name} settings were not confirmed after deployment.`,
-      );
-    }
+    assertContainerApplicationSettings(confirmed, plan);
   }
 }
 
