@@ -40,8 +40,6 @@ import {
   builds,
   deployments,
   githubConnections,
-  githubInstallations,
-  githubInstallationMembers,
   projectMembers,
   projects,
   resources,
@@ -66,17 +64,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await teardownEnv();
 });
-
-// The shared `clearTables` helper does not know about the builds/github_*
-// tables (they reference projects/users without ON DELETE cascade, except
-// github_connections which cascades). Clear them here BEFORE clearTables runs
-// so the project/user deletes inside clearTables don't trip FK constraints.
-async function clearBuildTables(db: Db): Promise<void> {
-  await db.delete(builds);
-  await db.delete(githubConnections);
-  await db.delete(githubInstallationMembers);
-  await db.delete(githubInstallations);
-}
 
 // The immutable numeric repo id (as text) used by the in-tx install
 // re-check. The build txns now confirm the install still covers this repo, so
@@ -121,7 +108,6 @@ async function seedActiveInstall(
 }
 
 beforeEach(async () => {
-  await clearBuildTables(env.db);
   await clearTables(env.db);
 });
 
@@ -448,7 +434,7 @@ describe('builds', () => {
     expect(await hasQueuedContainerBuilds(env.db)).toBe(true);
 
     // Only a queued github_actions build — not a container build.
-    await clearBuildTables(env.db);
+    await env.db.delete(builds);
     await createBuild(env.db, {
       projectId: project.id,
       userId: user.id,

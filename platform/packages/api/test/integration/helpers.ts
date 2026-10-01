@@ -529,8 +529,8 @@ export async function teardownEnv(): Promise<void> {
 }
 
 export async function clearTables(db: Db): Promise<void> {
-  await db.delete(schema.projectCleanupJobs);
-  for (const table of [
+  const tables = [
+    schema.projectCleanupJobs,
     schema.emailDestinationCleanups,
     schema.emailOperationSteps,
     schema.emailOperations,
@@ -544,43 +544,39 @@ export async function clearTables(db: Db): Promise<void> {
     schema.emailReceipts,
     schema.emailProjectControls,
     schema.emailMonthlyUsage,
-  ]) {
-    await db.delete(table);
-  }
-  await db.delete(sandboxDrainCheckpoints);
-  await db.delete(domains);
-  await db.delete(resources);
-  await db.delete(projectSecrets);
-  // `builds` references deployments/projects/users WITHOUT `onDelete: 'cascade'`
-  // (a project delete in prod is expected to remove its builds explicitly), so a
-  // leftover build row would block the deletes below. Delete it first. Under the
-  // shared real-Postgres run (schema-compat, `fileParallelism: false`) rows survive
-  // across files, so this must mirror `clearBuildTables` in the build-creating tests.
-  await db.delete(builds);
-  await db.delete(githubConnections);
-  // FK to users (cascade) — clear before the users delete below.
-  await db.delete(githubInstallationMembers);
-  await db.delete(githubInstallationRevocations);
-  await db.delete(githubInstallations);
-  // Isolated ledger (no FK to any other table) — clear it so replay tests start
-  // from an empty redelivery ledger.
-  await db.delete(githubWebhookRedeliveries);
-  await db.delete(deployments);
-  await db.delete(projects);
-  await db.delete(invitations);
-  await db.delete(oauthAccounts);
-  await db.delete(users);
-  await db.delete(oauthNonces);
-  await db.delete(authCodes);
-  await db.delete(operatorSessions);
-  await db.delete(operatorEvents);
-  await db.delete(schema.platformAuthAttempts);
-  await db.delete(schema.platformAuthBootstrap);
-  await db.delete(schema.platformLoginTests);
-  await db.delete(schema.platformLoginRevisions);
-  await db.delete(schema.platformLoginConnections);
-  await db.delete(schema.platformAuthSettings);
-  await db.delete(platformSettings);
+    sandboxDrainCheckpoints,
+    domains,
+    resources,
+    projectSecrets,
+    builds,
+    githubConnections,
+    githubInstallationMembers,
+    githubInstallationRevocations,
+    githubInstallations,
+    githubWebhookRedeliveries,
+    deployments,
+    projects,
+    invitations,
+    oauthAccounts,
+    users,
+    oauthNonces,
+    authCodes,
+    operatorSessions,
+    operatorEvents,
+    schema.platformAuthAttempts,
+    schema.platformAuthBootstrap,
+    schema.platformLoginTests,
+    schema.platformLoginRevisions,
+    schema.platformLoginConnections,
+    schema.platformAuthSettings,
+    platformSettings,
+  ];
+  await db.execute(sql`do $$ begin
+    ${sql.join(
+      tables.map((table) => sql`delete from ${table};`),
+      sql`\n`,
+    )}
+  end $$;`);
 }
 
 /** Keep both orphan sweeps while skipping the provider-settling wait in in-memory tests. */

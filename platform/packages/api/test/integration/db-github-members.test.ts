@@ -38,16 +38,7 @@ afterAll(async () => {
   await teardownEnv();
 });
 
-// `github_installation_members` FKs users (cascade) but `github_installations`
-// does not, so clear both BEFORE `clearTables` deletes users/projects.
-async function clearMemberTables(db: Db): Promise<void> {
-  await db.delete(githubInstallationMembers);
-  await db.delete(githubInstallationRevocations);
-  await db.delete(githubInstallations);
-}
-
 beforeEach(async () => {
-  await clearMemberTables(env.db);
   await clearTables(env.db);
 });
 

@@ -70,6 +70,10 @@ The in-memory API deletion tests schedule the fixed container-orphan sweep delay
 They still execute both sweeps and all provider/database assertions. Production timing and the
 real subprocess/lock deadline tests retain their actual timing semantics.
 
+API integration fixtures reset their tables with one ordered SQL block. Use `clearTables` rather
+than repeating per-table cleanup; it keeps foreign-key delete behavior and migration history
+intact in both PGlite and the shared PostgreSQL compatibility run.
+
 CLI and deploy tests that stub their network boundary and call production functions directly run
 in the unit project. The integration project is reserved for real builds, subprocesses, servers,
 and browser behavior.
