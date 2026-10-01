@@ -7442,7 +7442,14 @@ describe('createDefaultRunWrangler — post-spawn child `error` events confirm/q
     expect(result.signal).toBeNull();
   });
 
-  it('an early closed stdin rejects a buffered success envelope and confirms child termination', async () => {
+  it('an early closed stdin rejects a buffered success envelope and confirms child termination', async (ctx) => {
+    // Even after closing fd 0 and destroying its stream, a live Node process on
+    // Windows retains inherited pipe handles. Real peer-exit and Writable-error
+    // regressions below cover Windows without relying on POSIX descriptor closure.
+    ctx.skip(
+      process.platform === 'win32',
+      'closing a live child stdin descriptor does not close inherited Windows pipe handles',
+    );
     const script = join(POST_SPAWN_TMP, 'closed-stdin.cjs');
     const pidFile = join(POST_SPAWN_TMP, 'closed-stdin.pid');
     writeFileSync(
@@ -7450,11 +7457,7 @@ describe('createDefaultRunWrangler — post-spawn child `error` events confirm/q
       `const fs = require('fs');\n` +
         `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\n` +
         `fs.writeSync(1, JSON.stringify({ operationResult: 1, data: { id: 'provider-id' } }));\n` +
-        // Windows libuv duplicates stdio handles when opening a pipe stream. Close
-        // both the descriptor and the initialized stream's handle to close the peer.
-        `const input = process.stdin;\n` +
         `fs.closeSync(0);\n` +
-        `input.destroy();\n` +
         `setInterval(() => {}, 1 << 30);\n`,
     );
     const run = createRunner({
@@ -7481,6 +7484,66 @@ describe('createDefaultRunWrangler — post-spawn child `error` events confirm/q
     } finally {
       reapPidFile(pidFile);
     }
+  }, 15_000);
+
+  it('a provider exiting after reporting success rejects unread stdin through its real pipe error', async () => {
+    const script = join(POST_SPAWN_TMP, 'exited-stdin.cjs');
+    const pidFile = join(POST_SPAWN_TMP, 'exited-stdin.pid');
+    writeFileSync(
+      script,
+      `const fs = require('fs');\n` +
+        `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\n` +
+        `fs.writeSync(1, JSON.stringify({ operationResult: 1, data: { id: 'provider-id' } }));\n` +
+        // Exit closes every inherited handle on Windows as well as POSIX. The
+        // oversized unread input is still pending, so the parent gets a real EPIPE.
+        `process.exit(0);\n`,
+    );
+    let observedOutput = '';
+    let childClosed = Promise.resolve();
+    const run = createRunner({
+      launcher: [process.execPath, script],
+      timeoutMs: 30_000,
+      onSpawnedChild: (child) => {
+        child.stdout!.on('data', (chunk: string) => {
+          observedOutput += chunk;
+        });
+        childClosed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+      },
+    });
+    let result: Awaited<ReturnType<typeof run>> | undefined;
+    let failure: unknown;
+    try {
+      result = await run(
+        {
+          type: 'hyperdrive.create',
+          name: 'exited-stdin-db',
+          binding: 'HYPERDRIVE',
+          configPath: 'literal config.jsonc',
+        },
+        { accountId: 'acct', input: 'x'.repeat(2 * 1024 * 1024) },
+      );
+    } catch (error) {
+      failure = error;
+    }
+    if (failure !== undefined) {
+      // macOS can return EPERM when signalling an already-exiting process group.
+      // The runner must quarantine that unconfirmed group, never trust its output.
+      expect(failure).toBeInstanceOf(WranglerQuarantineError);
+      expect((failure as Error).message).toMatch(
+        /post-spawn child error \(.*EPIPE.*\).*failed process-group kill/s,
+      );
+    } else {
+      expect(result!.status).toBe(1);
+      // The stdin error owns termination even if exit 0 is concurrently observed.
+      expect(result!.signal).toBe('SIGKILL');
+      expect(result!.stderr).toMatch(/EPIPE|broken pipe/i);
+      expect(result!.stdout).toContain('"operationResult":1');
+      expect(result!.data).toBeUndefined();
+    }
+    expect(observedOutput).toContain('"operationResult":1');
+    await childClosed;
+    const pid = Number(readFileSync(pidFile, 'utf-8'));
+    expect(() => process.kill(pid, 0)).toThrow();
   }, 15_000);
 
   it('a stdin Writable error rejects buffered success only after the child is confirmed dead', async () => {
