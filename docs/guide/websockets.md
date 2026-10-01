@@ -242,6 +242,4 @@ Each socket connects to one route instance. Applications that need to switch roo
 
 ## Deployment
 
-`void deploy --platform cloudflare` persists the required binding and append-only SQLite class migration in `void.lock.json`, then deploys the generated Worker directly to your account. Commit this migration history and never delete or reorder a step after deployment.
-
-`void deploy --platform void` uses the same shared migration planner in the hosted uploader. Existing hosted WebSocket classes created on legacy storage remain there; only genuinely new classes use SQLite.
+WebSocket routes work on Cloudflare and Void platform deployments. Commit `void.lock.json` when Void adds a binding or migration. Do not delete or reorder deployed migration steps.
