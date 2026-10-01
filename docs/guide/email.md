@@ -466,163 +466,79 @@ The harness uses the same precedence rules as the production dispatcher. Reserve
 
 ## Your own Cloudflare account
 
-For direct Cloudflare deployment, set a sender address on a zone you own. Void checks the zone and asks before changing its email settings.
+Set a sender on a Cloudflare zone you own:
+
+```ts
+import { defineConfig } from 'void/config';
+
+export default defineConfig({
+  email: { from: 'Acme <support@mail.acme.com>' },
+});
+```
+
+Use a mail subdomain to keep existing mail on `acme.com` with its current provider. Void refuses to replace another provider's MX records.
 
 ### Setup
 
-1. Set the default sender and mail domain in `void.config.ts`:
+Sign in with `void cloudflare login`, or use a `CLOUDFLARE_API_TOKEN` with **Email Routing Edit** and **Email Sending Edit** in addition to deploy permissions. If your browser session lacks email permissions, log out and sign in again. Global API Keys aren't supported.
 
-   ```ts
-   import { defineConfig } from 'void/config';
+Run `void deploy --platform cloudflare`. Void shows the domain, routing, sending, DNS, and handler addresses it would configure. Accept to set up email and deploy. Later deploys reuse the setup. Without `email.from`, or if you decline the initial setup, the app deploys without email.
 
-   export default defineConfig({
-     email: { from: 'Acme <support@mail.acme.com>' },
-   });
-   ```
+If subdomain setup needs a dashboard step, follow the checklist under **Email → Settings → Subdomains**, then retry. After DNS changes, check readiness with:
 
-   The host (`mail.acme.com`) must be a zone in your selected Cloudflare account or a subdomain of one. If you omit `email.from`, Void deploys without email and tells you to set it. It does not choose a zone for you.
-
-2. Run `void cloudflare login`, or set `CLOUDFLARE_API_TOKEN` with **Email Routing Edit** and **Email Sending Edit** permissions in addition to deploy permissions. If an older browser session lacks email scopes, log out and sign in again. Void names missing token permissions in its checklist. Global API Keys are not supported for email setup.
-
-### The first deploy
-
-Before building, Void checks the zone, DNS, routing rules, and sending status. It shows a checklist of the changes it would make:
-
-```
-  Email in use   email/support+[ticket].ts · email/_default.ts · sendEmail() in 2 files
-    domain    mail.acme.com          (void.config.ts email.from)
-    zone      acme.com               account Acme (f721b8e5…) · session dev@acme.com
-    apex MX   aspmx.l.google.com     left alone — mail lives on the subdomain
-    routing   mail.acme.com  not enabled · subaddressing off
-    sending   mail.acme.com  not onboarded
-    rules     support@mail.acme.com → acme-support   (absent)
-    binding   SEND_EMAIL             (absent)
-    sender    noreply@mail.acme.com  (vars.__VOID_EMAIL_FROM absent)
-
-  This changes YOUR Cloudflare account. acme.com itself is not touched.
-    + enable Email Routing on mail.acme.com       Cloudflare writes and locks 3 MX + 1 SPF record there
-    + turn on subaddressing for acme.com          support+anything@ reaches support@
-    + onboard mail.acme.com for Email Sending     MX/SPF/DKIM on cf-bounce.mail.acme.com, _dmarc.mail.acme.com (p=reject)
-    + Cloudflare config                              send_email: [{ name: "SEND_EMAIL" }], addresses: ["support@mail.acme.com"], vars.__VOID_EMAIL_FROM: "noreply@mail.acme.com"
-    + routing rule (created on deploy)            support@mail.acme.com → acme-support
-    ! email/_default.ts                           a catch-all exists only on an apex; other @mail.acme.com mail bounces
-
-◆  Set up email on mail.acme.com?  ● Yes / ○ No
+```sh
+void email status --platform cloudflare
 ```
 
-Accepting the prompt applies the missing setup, builds and deploys your app, then shows its email address map:
+### Inbound addresses
 
-```
-  ✔ deployed  acme-support
-    inbound   support@mail.acme.com  →  email/support+[ticket].ts
-    outbound  sendEmail() from support@mail.acme.com
-```
+With `email.from` on `mail.acme.com`, handlers receive:
 
-Later deploys skip the prompt when setup is ready. Declining before any setup is saved deploys without email.
+| Handler                             | Subdomain address       | Zone apex address  |
+| ----------------------------------- | ----------------------- | ------------------ |
+| `support.ts`, `support+[ticket].ts` | `support@mail.acme.com` | `support@acme.com` |
+| `_default.ts`                       | No catch-all rule       | `*@acme.com`       |
+| `[user].ts`, `[user]+[tag].ts`      | Not supported           | `*@acme.com`       |
 
-DNS can take a few minutes to become visible to the resolver running the deploy. If `void email setup` has already written the exact `addresses` plan but that resolver still sees no subdomain MX, Void preserves the plan and stops before the build or upload. Run `void email status --platform cloudflare`, then retry the deploy after it sees Cloudflare's MX records.
+Cloudflare catch-alls cover only a zone apex. On a subdomain, `_default.ts` can handle mail admitted by an explicit rule, but cannot receive arbitrary addresses.
 
-Void updates the configured addresses when handlers change and keeps the default sender in sync with `email.from`. `void email setup` records the setup; the next deploy creates routing rules and may mark them as `(rule created by this deploy)` in the address map.
+Setup enables the zone's plus addressing so `support+T-42@mail.acme.com` reaches `support+[ticket].ts`. This setting also applies to the apex and other subdomains.
 
-If Email Routing is off on the apex, Void does not enable it while setting up a subdomain; doing so could replace the apex's live mail records. The checklist directs you to **Email → Settings → Subdomains** in the Cloudflare dashboard. Deploy does not add addresses until the subdomain is ready.
-
-### Subdomain or apex
-
-Put mail on a **subdomain** (`mail.acme.com`) unless you have a reason not to. Cloudflare writes its MX and SPF records there and locks them; `acme.com` itself is not touched, so mail you already receive on the apex keeps flowing. The one rule Void enforces: **it never enables routing over live mail.** If the mail domain already has MX records that are not Cloudflare's, the email step stops:
-
-```
-acme.com already receives mail (aspmx.l.google.com). Void never enables routing over live mail. Use something@mail.acme.com.
-```
-
-The apex path (`email.from` on `acme.com` itself) is allowed with the same one Enter when the apex receives no mail yet (no MX records, or only Cloudflare's own). It is the only path with a catch-all — see the derivation table below.
-
-**Subaddressing** is a per-zone Cloudflare setting, and it is off by default. Until it is on, a rule for `support@mail.acme.com` does not match `support+T-42@mail.acme.com`. The checklist's `turn on subaddressing for acme.com` row flips it for the whole zone — on the apex and every subdomain — so `email/support+[ticket].ts` works the way it does on the platform.
-
-### What Void records in `void.lock.json`
-
-The relevant fields appear under `resolved`:
-
-```jsonc
-{
-  "resolved": {
-    "send_email": [{ "name": "SEND_EMAIL" }],
-    "vars": { "__VOID_EMAIL_FROM": "Acme <support@mail.acme.com>" },
-    "addresses": ["support@mail.acme.com"],
-  },
-}
-```
-
-- **`send_email`** — the binding used by `sendEmail()`. An existing binding under another name must be renamed before Void can use it.
-- **`__VOID_EMAIL_FROM`** — the default sender from `email.from`.
-- **`addresses`** — addresses derived from your `email/` handlers. Deploy creates the corresponding Email Routing rules for this Worker.
-
-Void derives `addresses` from your handlers on each deploy. If routing is not ready, it withholds the array and explains why. It also protects rules it does not own:
-
-- An address routed to another Worker or a forwarding rule is excluded and reported; Void leaves that rule alone.
-- If the array contains addresses Void did not derive, deploy skips email setup and lists them. Remove them, or manage `addresses` yourself and leave `email.from` unset.
-
-If you delete a handler, the next deploy reports its stale address and skips email setup until you set the desired `cloudflare.addresses` in `void.config.ts`. Removing a routing rule requires confirmation in a terminal and fails in CI without it. If you remove all email use, deploy keeps the existing setup and warns about remaining routes. To detach it, remove `addresses`, `send_email`, and `vars.__VOID_EMAIL_FROM` from `resolved` in `void.lock.json`, remove any authored overrides in `void.config.ts`, then delete the routing rules in Cloudflare.
-
-How handlers become addresses, with `email.from` on `mail.acme.com` under the zone `acme.com`:
-
-| Handler                                                         | Address on a subdomain                               | Address on the apex          |
-| --------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------- |
-| `email/support.ts`, `email/support+[ticket].ts`                 | `support@mail.acme.com`                              | `support@acme.com`           |
-| `email/_default.ts`                                             | **none** — a catch-all exists only on an apex        | `*@acme.com` (the catch-all) |
-| `email/[user].ts`, `email/[user]+[tag].ts` (dynamic local part) | **refused** — a dynamic local part needs a catch-all | `*@acme.com` (the catch-all) |
-
-On a subdomain, `email/_default.ts` gets no rule of its own, so it cannot make arbitrary `@mail.acme.com` addresses reach the worker. Mail admitted by an explicit rule can still fall through to `_default` when no handler pattern matches—for example, bare `support@mail.acme.com` admitted by the rule for `support+anything@`. Addresses that match no Cloudflare rule bounce before the worker runs. The checklist says so in a `!` row, and the handler is absent from the address map.
-
-Inside the worker, a message reaches your handlers exactly as addressed — `support+T-42@mail.acme.com` matches `email/support+[ticket].ts` with `info.params.ticket === "T-42"` — and `setReject`, `forward` and `replyEmail` act on the real message. `replyEmail` defaults `from` to `message.to`, the address on your zone the mail was delivered to.
+`replyEmail()` defaults its sender to the address that received the message. Forwarding requires a verified Cloudflare destination.
 
 ### Sending
 
-`sendEmail()` uses the Worker's `SEND_EMAIL` binding. Cloudflare's limits apply, with `QUOTA_EXCEEDED` on failure. The `void email usage`, `logs`, `destinations`, `allow`, and `disallow` commands are for Void platforms.
+On Workers Free, `sendEmail()` can send to verified destinations listed under **Email Routing → Destination addresses** in Cloudflare.
 
-Email setup covers both inbound and outbound mail for the domain, even if your app uses only one. Cloudflare meters outbound messages; `replyEmail` uses Email Routing and does not need Email Sending onboarding.
+Sending to arbitrary recipients requires [Workers Paid](https://dash.cloudflare.com/?to=/:account/workers/plans) and Email Sending onboarding. After upgrading, run `void email setup --platform cloudflare`. Void doesn't retry onboarding during ordinary deploys.
 
-Who you can send to depends on your Workers plan. Onboarding the mail domain for Email Sending is what allows **arbitrary recipients**, and it needs **Workers Paid** — billing is dashboard-only, so Void cannot do that for you. On Workers Free the onboarding row fails and the deploy prints:
+Existing DMARC or bounce-domain records can block onboarding; the checklist identifies conflicts to resolve. Inbound mail remains available.
 
-```
-Workers Paid needed for arbitrary recipients. Inbound works; sendEmail() to verified destinations only.
-```
+The `void email usage`, `logs`, `destinations`, `allow`, and `disallow` commands apply to Void platforms.
 
-Everything else — routing, rules, the binding — still goes through, and the address map ends with `outbound  sendEmail() from support@mail.acme.com   (verified destinations only)`. Verified destinations are the addresses under **Email Routing → Destination addresses** in your Cloudflare dashboard; a handler that `forward()`s to a new address needs the same verification click.
+### Configuration changes
 
-Void remembers when Email Sending onboarding was refused. Later deploys keep inbound mail and sends to verified destinations working; this state also satisfies `--require-email`. Void does not retry onboarding automatically. After upgrading to Workers Paid, run `void email setup --platform cloudflare` to enable arbitrary recipients. `void email status --platform cloudflare` shows whether sending is still limited to verified destinations.
+Commit `void.lock.json` after setup. Void derives routing addresses from your handlers and creates their rules during deployment.
 
-If `_dmarc.mail.acme.com` or `cf-bounce.mail.acme.com` already has a TXT record, sending onboarding is refused — it writes its own `_dmarc` (`p=reject`) and DKIM records and Cloudflare would answer with a conflict. Inbound is unaffected; remove the records or keep sending off.
+Existing rules owned by another Worker or forwarding service are left in place. If you manage `cloudflare.addresses` yourself, follow the checklist rather than combining it with automatic email setup.
+
+After deleting a handler, review the reported stale address and set the desired `cloudflare.addresses`. Deleting a routing rule requires confirmation in an interactive terminal.
+
+To remove all email setup, remove `addresses`, `send_email`, and `vars.__VOID_EMAIL_FROM` from `resolved` in `void.lock.json`, remove corresponding overrides in `void.config.ts`, and delete the routing rules in Cloudflare.
 
 ### CI
 
-In CI or when input or output is redirected, Void cannot prompt. If email is not ready, it prints the checklist and:
+Set up email locally first:
 
-```
-deploy: email on mail.acme.com is not set up, and this shell cannot ask.
-Run `void email setup --platform cloudflare` once locally, commit void.lock.json, then redeploy — deploying without email.
-```
-
-Void then deploys without email. Pass `--require-email` to fail instead. If setup has recorded the subdomain addresses but its MX records are not visible yet, deploy stops until DNS can be verified. Check progress with `void email status --platform cloudflare`.
-
-For CI, run `void email setup --platform cloudflare` once locally and commit `void.lock.json`. Then run `void deploy --platform cloudflare --require-email` in CI. After DNS is ready, later deploys need no prompt. Workers Free can still send to verified destinations; see [Sending](#sending).
-
-### If the subdomain step is refused
-
-If Cloudflare refuses subdomain routing or subaddressing, Void prints the response and the dashboard step to complete:
-
-```
-✘ routing   mail.acme.com: Cloudflare answered 403 …
-  Cloudflare dashboard → your zone → Email → Settings → Subdomains → add the subdomain, then redeploy
+```sh
+void email setup --platform cloudflare
+void email status --platform cloudflare
 ```
 
-Void withholds the addresses until routing is ready. Complete the dashboard step and deploy again.
+Commit `void.lock.json`, then deploy in CI with:
 
-### What stays manual
+```sh
+void deploy --platform cloudflare --require-email
+```
 
-1. One Enter on the first deploy — it changes your account and locks DNS records.
-2. `void cloudflare login` once — or a `CLOUDFLARE_API_TOKEN` with Email Routing Edit + Email Sending Edit (what a CI runner needs).
-3. `email.from` typed once.
-4. Workers Paid, if you need `sendEmail()` to arbitrary recipients.
-5. A verification click when a handler `forward()`s to a new destination.
-6. The Subdomains form in the dashboard, only if the subdomain step above is refused.
-7. Confirmation when a deploy would delete a routing rule.
+CI cannot answer setup prompts. Without `--require-email`, an unconfigured app can deploy without email. If setup is saved but DNS hasn't propagated, deployment waits for a later retry. Workers Free setup for verified recipients satisfies `--require-email`.
