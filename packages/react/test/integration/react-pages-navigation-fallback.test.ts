@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { chromium, type Browser } from 'playwright';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, expect, it } from 'vite-plus/test';
+import { collectBrowserDiagnostics } from '../../../../test/browser-helpers.ts';
 
 const FIXTURE = join(import.meta.dirname, '..', 'fixtures', 'navigation-fallback');
 let server: ViteDevServer;
@@ -12,6 +13,19 @@ beforeAll(async () => {
   server = await createServer({
     root: FIXTURE,
     configFile: false,
+    // Match the adapter's React setup so dependency discovery cannot reload
+    // the bare fixture while a page is mounting or a navigation is gated.
+    resolve: { dedupe: ['react', 'react-dom'] },
+    optimizeDeps: {
+      include: [
+        'react',
+        'react/jsx-runtime',
+        'react/jsx-dev-runtime',
+        'react-dom',
+        'react-dom/client',
+        'react-dom/server',
+      ],
+    },
     server: { host: '127.0.0.1', port: 0 },
   });
   await server.listen();
@@ -96,6 +110,7 @@ it('restores the previous page when the destination request fails', async () => 
 
 it('returns to the initial page before its shell refresh finishes', async () => {
   const page = await browser.newPage();
+  const diagnostics = collectBrowserDiagnostics(page);
   let releaseRefresh!: () => void;
   const refreshGate = new Promise<void>((resolve) => {
     releaseRefresh = resolve;
@@ -157,6 +172,8 @@ it('returns to the initial page before its shell refresh finishes', async () => 
       initialLayout,
     );
     expect(page.url()).toBe(base);
+  } catch (error) {
+    throw new Error(`Initial-page shell refresh failed:\n${diagnostics()}`, { cause: error });
   } finally {
     releaseRefresh();
     await page.close();
