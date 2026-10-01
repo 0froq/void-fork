@@ -1,3 +1,4 @@
+import { tokenizeSql } from '@void/deploy-core';
 import type { ProjectZeroTrustRouting } from '@void/edge';
 import { PLATFORM_HEALTH_HOSTNAME_LABEL } from '@void/platform';
 import { sql as drizzleSql } from 'drizzle-orm';
@@ -83,7 +84,6 @@ import {
   computeDispatchLimits,
   resolveRoutingUndo,
 } from '../routing.ts';
-import { tokenizeSql } from '../sql/tokenize.ts';
 import { getPlanLimits } from '../tiers.ts';
 import type { Build, DeployManifest, Project, ProjectRole, User } from '../types.ts';
 import { zeroTrustNotReadyMessage } from '../zero-trust/errors.ts';

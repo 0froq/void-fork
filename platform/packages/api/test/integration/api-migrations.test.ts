@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { canonicalJson } from '@void/deploy-core';
 import { eq } from 'drizzle-orm';
 import {
   describe,
@@ -12,7 +13,6 @@ import {
 } from 'vite-plus/test';
 import { deleteRollbackLease, type Db } from '../../src/db.ts';
 import app from '../../src/index.ts';
-import { canonicalJson } from '../../src/migrations/canonical-json.ts';
 import * as projectAccess from '../../src/project-access.ts';
 import {
   deployments,

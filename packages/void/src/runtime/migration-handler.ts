@@ -1,4 +1,4 @@
-import { canonicalJson } from '../migrations/canonical-json.ts';
+import { canonicalJson } from '@void/deploy-core';
 
 export type MigrationEntry = {
   name: string;

@@ -1,4 +1,5 @@
 import { existsSync, readdirSync } from 'node:fs';
+import { tokenizeSql } from '@void/deploy-core';
 import { join } from 'pathslash';
 import {
   readJournal,
@@ -7,7 +8,6 @@ import {
   type DrizzleJournalEntry,
 } from './collect.ts';
 import { DESTRUCTIVE_PRAGMA } from './plan.ts';
-import { tokenizeSql } from './tokenize.ts';
 
 export type MigrationFile = {
   name: string;

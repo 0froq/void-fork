@@ -335,3 +335,17 @@ export type {
   DeployTargetAdapter,
   DeployTargetCapabilities,
 } from './target.ts';
+
+export { canonicalJson } from './canonical-json.ts';
+export { tokenizeSql, type SqlSegment } from './sql-tokenize.ts';
+export {
+  canonicalSql,
+  classifySqlMigration,
+  getMigrationPlanHashInput,
+  hasStandalonePragma,
+  isSingleStatement,
+  MIGRATION_CLASSIFIER_VERSION,
+  UNSPLIT_MULTI_STATEMENT_PRAGMA,
+  type MigrationPlanHashInput,
+  type SqlMigrationClassification,
+} from './migration-plan.ts';

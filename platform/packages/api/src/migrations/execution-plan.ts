@@ -1,9 +1,13 @@
-import { tokenizeSql } from '../sql/tokenize.ts';
-import { canonicalJson } from './canonical-json.ts';
+import {
+  canonicalJson,
+  canonicalSql,
+  classifySqlMigration,
+  getMigrationPlanHashInput,
+  MIGRATION_CLASSIFIER_VERSION,
+  type MigrationPlanHashInput,
+} from '@void/deploy-core';
 
-export const MIGRATION_CLASSIFIER_VERSION = 1;
-
-const UNSPLIT_MULTI_STATEMENT_PRAGMA = '-- void:allow-unsplit-multi-statement';
+export { canonicalSql, isSingleStatement, MIGRATION_CLASSIFIER_VERSION } from '@void/deploy-core';
 
 export type ServerMigrationPlan = {
   name: string;
@@ -17,11 +21,6 @@ export type ServerMigrationPlan = {
   | { kind: 'breakpoint-framed'; statements: Array<string> }
   | { kind: 'legacy-unsplit-multi-statement'; allowLegacy: boolean }
 );
-
-type ServerMigrationPlanWithoutHash =
-  | Omit<Extract<ServerMigrationPlan, { kind: 'single-statement' }>, 'planHash'>
-  | Omit<Extract<ServerMigrationPlan, { kind: 'breakpoint-framed' }>, 'planHash'>
-  | Omit<Extract<ServerMigrationPlan, { kind: 'legacy-unsplit-multi-statement' }>, 'planHash'>;
 
 export async function validateSubmittedExecutionPlans(
   migrations: ReadonlyArray<{ name: string; sql: string }>,
@@ -102,114 +101,10 @@ export async function validateSubmittedExecutionPlans(
   return null;
 }
 
-export function canonicalSql(sql: string): string {
-  const withoutBom = sql.charCodeAt(0) === 0xfeff ? sql.slice(1) : sql;
-  return withoutBom.replace(/\r\n?/g, '\n');
-}
-
 export async function sha256Hex(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
   const hash = await crypto.subtle.digest('SHA-256', bytes);
   return `sha256:${[...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
-}
-
-function isBreakpointComment(text: string): boolean {
-  return text.trim() === '--> statement-breakpoint';
-}
-
-function splitBreakpointFramedSql(sql: string): Array<string> {
-  const normalized = canonicalSql(sql);
-  const statements: Array<string> = [];
-  let cursor = 0;
-
-  for (const segment of tokenizeSql(normalized)) {
-    if (segment.kind !== 'line-comment') {
-      continue;
-    }
-    const comment = normalized.slice(segment.start, segment.end);
-    if (isBreakpointComment(comment)) {
-      const statement = normalized.slice(cursor, segment.start).trim();
-      if (statement) {
-        statements.push(statement);
-      }
-      cursor = segment.end;
-    }
-  }
-
-  const statement = normalized.slice(cursor).trim();
-  if (statement) {
-    statements.push(statement);
-  }
-  return statements;
-}
-
-function hasStatementBreakpointOutsideLiterals(sql: string): boolean {
-  const normalized = canonicalSql(sql);
-  for (const segment of tokenizeSql(normalized)) {
-    if (segment.kind !== 'line-comment') {
-      continue;
-    }
-    const comment = normalized.slice(segment.start, segment.end);
-    if (isBreakpointComment(comment)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-export function isSingleStatement(sql: string): boolean {
-  const normalized = canonicalSql(sql);
-  let statements = 0;
-  let inStatement = false;
-
-  for (const segment of tokenizeSql(normalized)) {
-    if (segment.kind === 'line-comment' || segment.kind === 'block-comment') {
-      continue;
-    }
-    if (segment.kind === 'string' || segment.kind === 'ident-quote') {
-      inStatement = true;
-      continue;
-    }
-    for (let index = segment.start; index < segment.end; index++) {
-      const character = normalized[index];
-      if (character === ';') {
-        if (inStatement) {
-          statements++;
-          inStatement = false;
-        }
-        continue;
-      }
-      if (character !== ' ' && character !== '\t' && character !== '\n' && character !== '\r') {
-        inStatement = true;
-      }
-    }
-  }
-
-  if (inStatement) {
-    statements++;
-  }
-  return statements === 1;
-}
-
-function hasStandalonePragma(sql: string, pragma: string): boolean {
-  return canonicalSql(sql)
-    .split('\n')
-    .some((line) => line.trim() === pragma);
-}
-
-function getPlanHashInput(plan: ServerMigrationPlan | ServerMigrationPlanWithoutHash): unknown {
-  const base: Record<string, unknown> = {
-    classifierVersion: plan.classifierVersion,
-    dialect: plan.dialect,
-    kind: plan.kind,
-    name: plan.name,
-    sqlHash: plan.sqlHash,
-    stability: plan.stability,
-  };
-  if (plan.kind === 'breakpoint-framed') {
-    base.statements = plan.statements;
-  }
-  return base;
 }
 
 export async function classifyServerMigrationPlan(migration: {
@@ -217,40 +112,15 @@ export async function classifyServerMigrationPlan(migration: {
   sql: string;
 }): Promise<ServerMigrationPlan> {
   const sql = canonicalSql(migration.sql);
-  const sqlHash = await sha256Hex(sql);
-  const common = {
+  const planWithoutHash: MigrationPlanHashInput = {
+    ...classifySqlMigration(sql),
     classifierVersion: MIGRATION_CLASSIFIER_VERSION,
-    dialect: 'sqlite' as const,
+    dialect: 'sqlite',
     name: migration.name,
-    sqlHash,
+    sqlHash: await sha256Hex(sql),
   };
-  let planWithoutHash: ServerMigrationPlanWithoutHash;
-  if (hasStatementBreakpointOutsideLiterals(sql)) {
-    const statements = splitBreakpointFramedSql(sql);
-    planWithoutHash = {
-      ...common,
-      kind: 'breakpoint-framed',
-      stability: 'stable',
-      statements,
-    };
-  } else if (isSingleStatement(sql)) {
-    planWithoutHash = {
-      ...common,
-      kind: 'single-statement',
-      stability: 'stable',
-    };
-  } else {
-    planWithoutHash = {
-      ...common,
-      allowLegacy: hasStandalonePragma(sql, UNSPLIT_MULTI_STATEMENT_PRAGMA),
-      kind: 'legacy-unsplit-multi-statement',
-      stability: 'legacy',
-    };
-  }
-
-  const plan = {
+  return {
     ...planWithoutHash,
-    planHash: await sha256Hex(canonicalJson(getPlanHashInput(planWithoutHash))),
-  } as ServerMigrationPlan;
-  return plan;
+    planHash: await sha256Hex(canonicalJson(getMigrationPlanHashInput(planWithoutHash))),
+  };
 }

@@ -1,5 +1,5 @@
+import { canonicalJson } from '@void/deploy-core';
 import { describe, expect, it } from 'vite-plus/test';
-import { canonicalJson } from '../../src/migrations/canonical-json.ts';
 import {
   classifyServerMigrationPlan,
   sha256Hex,
