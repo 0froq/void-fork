@@ -2662,17 +2662,19 @@ describe('createDefaultRunWrangler — hard timeout kills the REAL process', () 
 
   it('a DIRECT hung CLI is SIGKILLed and the runner REJECTS-as-hard-failure within the timeout', async () => {
     // Simulate the post-fix launcher: a direct CLI entry (no wrapper) that ignores SIGTERM
-    // and hangs forever, writing its pid so the test can confirm it was actually killed.
-    const pidFile = join(TIMEOUT_TMP, 'cli.pid');
+    // and hangs forever.
     const hungCli = join(TIMEOUT_TMP, 'hung-cli.cjs');
     writeFileSync(
       hungCli,
-      `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\n` +
-        `process.on('SIGTERM', () => {});\n` + // survives a plain SIGTERM (like the wrapper sends)
+      `process.on('SIGTERM', () => {});\n` + // survives a plain SIGTERM (like the wrapper sends)
         `setInterval(() => {}, 1 << 30);\n`,
     );
+    let pid: number | undefined;
     const run = createDefaultRunWrangler(TIMEOUT_TMP, {
       launcher: [process.execPath, hungCli],
+      onSpawnedChild: (child) => {
+        pid = child.pid;
+      },
       timeoutMs: 400,
     });
     const start = Date.now();
@@ -2688,8 +2690,8 @@ describe('createDefaultRunWrangler — hard timeout kills the REAL process', () 
     expect(result.stderr).toMatch(/exceeded the 400ms command timeout/);
     // No lingering process — the SIGKILL reached the real CLI. Poll for the OUTCOME
     // (dead pid) with a generous bound rather than racing a tight deadline.
-    const pid = Number(readFileSync(pidFile, 'utf-8'));
-    expect(await waitForDead(pid, 10_000)).toBe(true);
+    expect(pid).toBeTypeOf('number');
+    expect(await waitForDead(pid!, 10_000)).toBe(true);
   }, 20_000);
 
   it('a WRAPPER that re-spawns a hung grandchild: runner still settles in time AND the grandchild is reaped', async () => {
@@ -7616,8 +7618,12 @@ describe('createDefaultRunWrangler — confirmed child termination + kill classi
       `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\n` +
         `setInterval(() => {}, 1 << 30);\n`,
     );
+    let spawnedPid: number | undefined;
     const run = createDefaultRunWrangler(killClassifyTmp, {
       launcher: [process.execPath, hungCli],
+      onSpawnedChild: (child) => {
+        spawnedPid = child.pid;
+      },
       timeoutMs: 300,
       // Simulate a kill that FAILS for a non-ESRCH reason (the child is still alive).
       killProcessGroup: () => {
@@ -7640,7 +7646,8 @@ describe('createDefaultRunWrangler — confirmed child termination + kill classi
     expect(err.message).toMatch(/intentionally RETAINED/);
     expect(err.message).toMatch(/pid \d+/);
     // The child is genuinely STILL ALIVE (the bug scenario) — prove it, then clean up.
-    const pid = Number(readFileSync(pidFile, 'utf-8'));
+    const pid = spawnedPid!;
+    expect(pid).toBeTypeOf('number');
     expect(() => process.kill(pid, 0)).not.toThrow();
     try {
       process.kill(pid, 'SIGKILL');
@@ -7658,8 +7665,12 @@ describe('createDefaultRunWrangler — confirmed child termination + kill classi
       `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\n` +
         `setInterval(() => {}, 1 << 30);\n`,
     );
+    let spawnedPid: number | undefined;
     const run = createDefaultRunWrangler(killClassifyTmp, {
       launcher: [process.execPath, hungCli],
+      onSpawnedChild: (child) => {
+        spawnedPid = child.pid;
+      },
       timeoutMs: 250,
       confirmKillGraceMs: 500,
       // A killer that CLAIMS success but kills nothing: the group stays alive, so
@@ -7676,7 +7687,8 @@ describe('createDefaultRunWrangler — confirmed child termination + kill classi
     expect((rejected as Error).message).toMatch(/could not be confirmed terminated within 500ms/);
     expect((rejected as Error).message).toMatch(/intentionally RETAINED/);
     // Clean up the real child the fake killer left alive.
-    const pid = Number(readFileSync(pidFile, 'utf-8'));
+    const pid = spawnedPid!;
+    expect(pid).toBeTypeOf('number');
     try {
       process.kill(pid, 'SIGKILL');
     } catch {
@@ -7693,8 +7705,12 @@ describe('createDefaultRunWrangler — confirmed child termination + kill classi
       `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\n` +
         `setInterval(() => {}, 1 << 30);\n`,
     );
+    let spawnedPid: number | undefined;
     const run = createDefaultRunWrangler(killClassifyTmp, {
       launcher: [process.execPath, hungCli],
+      onSpawnedChild: (child) => {
+        spawnedPid = child.pid;
+      },
       timeoutMs: 300,
       // Kill FOR REAL, then report ESRCH (the child exited in the race window) → treated as gone.
       killProcessGroup: (target, signal) => {
@@ -7708,7 +7724,8 @@ describe('createDefaultRunWrangler — confirmed child termination + kill classi
     // ESRCH is NOT a kill failure — no "could not be killed" surfaced.
     expect(result.stderr).not.toMatch(/could not be killed/);
     expect(result.error).toBeNull();
-    const pid = Number(readFileSync(pidFile, 'utf-8'));
+    const pid = spawnedPid!;
+    expect(pid).toBeTypeOf('number');
     expect(await waitForDead(pid, 10_000)).toBe(true);
   }, 15_000);
 
@@ -7728,8 +7745,12 @@ describe('createDefaultRunWrangler — confirmed child termination + kill classi
         `process.on('SIGTERM', () => {});\n` +
         `setInterval(() => {}, 1 << 30);\n`,
     );
+    let spawnedPid: number | undefined;
     const runner = createDefaultRunWrangler(cfgDir, {
       launcher: [process.execPath, hungCli],
+      onSpawnedChild: (child) => {
+        spawnedPid = child.pid;
+      },
       timeoutMs: 400,
     });
     const lockMutex = `${realpathSync(cfgPath)}.void-provision.lock.lock`;
@@ -7741,7 +7762,8 @@ describe('createDefaultRunWrangler — confirmed child termination + kill classi
         { runWrangler: runner, log: silentLog },
       ),
     ).rejects.toThrow(/d1 list.*(failed|timeout)/s);
-    const pid = Number(readFileSync(pidFile, 'utf-8'));
+    const pid = spawnedPid!;
+    expect(pid).toBeTypeOf('number');
     // The child (and its group) was confirmed terminated...
     expect(await waitForDead(pid, 5_000)).toBe(true);
     // ...and the lock was released (never leaked past the child).
