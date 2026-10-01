@@ -611,15 +611,36 @@ describe('syncWranglerBindings', () => {
     const result = syncWranglerBindings(tmpDir, { ...noBindings, needsSandbox: true });
     expect(result).toBe(true);
     const parsed = JSON.parse(readFileSync(join(tmpDir, 'wrangler.jsonc'), 'utf-8'));
-    expect(parsed.durable_objects.bindings).toEqual([{ name: 'SANDBOX', class_name: 'Sandbox' }]);
+    expect(parsed.durable_objects.bindings).toEqual([{ name: 'SANDBOX', class_name: 'SandboxV1' }]);
     expect(parsed.containers[0]).toMatchObject({
-      name: 'void-sandbox',
-      class_name: 'Sandbox',
+      name: 'void-sandbox-v1',
+      class_name: 'SandboxV1',
     });
-    expect(parsed.containers[0].image).toMatch(/^docker\.io\/cloudflare\/sandbox:/);
+    expect(parsed.containers[0].images.default.dockerfile).toMatch(/sandbox\.Dockerfile$/);
+    expect(parsed.containers[0].scheduling_policy).toBe('durable_object');
     expect(parsed.migrations).toEqual([
-      { tag: 'void-sandbox-v1', new_sqlite_classes: ['Sandbox'] },
+      { tag: 'void-sandbox-v2', new_sqlite_classes: ['SandboxV1'] },
     ]);
+  });
+
+  it('refuses to reuse a legacy Sandbox namespace before changing the deployment config', () => {
+    const original = JSON.stringify({
+      name: 'legacy',
+      durable_objects: { bindings: [{ name: 'SANDBOX', class_name: 'Sandbox' }] },
+      containers: [
+        {
+          name: 'void-sandbox',
+          class_name: 'Sandbox',
+          image: 'docker.io/cloudflare/sandbox:0.12.10',
+        },
+      ],
+      migrations: [{ tag: 'void-sandbox-v1', new_sqlite_classes: ['Sandbox'] }],
+    });
+    setup('wrangler.jsonc', original);
+    expect(() => syncWranglerBindings(tmpDir, { ...noBindings, needsSandbox: true })).toThrow(
+      'new Durable Object namespace',
+    );
+    expect(readFileSync(join(tmpDir, 'wrangler.jsonc'), 'utf8')).toBe(original);
   });
 
   it('appends typed Durable Object migrations when new files sort earlier', () => {
@@ -749,9 +770,9 @@ describe('syncWranglerBindings', () => {
           className: 'CodeSandbox',
           containerName: 'code-sandbox',
           image: '/project/Dockerfile.sandbox',
-          platformImage: 'registry.example.com/code-sandbox:latest',
+          platformImage:
+            'registry.cloudflare.com/account/code-sandbox@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
           instanceType: 'lite',
-          maxInstances: 2,
         },
       },
     );
@@ -763,9 +784,8 @@ describe('syncWranglerBindings', () => {
     expect(parsed.containers[0]).toMatchObject({
       name: 'code-sandbox',
       class_name: 'CodeSandbox',
-      image: '/project/Dockerfile.sandbox',
-      instance_type: 'lite',
-      max_instances: 2,
+      scheduling_policy: 'durable_object',
+      images: { default: { dockerfile: '/project/Dockerfile.sandbox' } },
     });
   });
 

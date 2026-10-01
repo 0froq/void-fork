@@ -14,6 +14,12 @@ vi.mock('@cloudflare/vite-plugin', () => ({
   },
 }));
 
+// Binding inference must not consult a developer's system keychain.
+vi.mock('../../src/cli/auth.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/cli/auth.ts')>()),
+  getToken: () => null,
+}));
+
 const roots: Array<string> = [];
 
 afterEach(() => {

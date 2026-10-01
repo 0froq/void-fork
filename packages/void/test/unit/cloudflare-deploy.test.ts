@@ -5562,11 +5562,11 @@ describe('verifyGeneratedDeployConfig', () => {
       },
     );
     expect(state.bindings).toEqual([
-      { name: 'SANDBOX', class_name: 'Sandbox' },
+      { name: 'SANDBOX', class_name: 'SandboxV1' },
       { name: 'VOID_LIVE', class_name: 'VoidLiveStreamDurableObject' },
     ]);
     expect(state.migrations).toEqual([
-      { tag: 'void-sandbox-v1', new_sqlite_classes: ['Sandbox'] },
+      { tag: 'void-sandbox-v2', new_sqlite_classes: ['SandboxV1'] },
       { tag: 'live-v1', new_sqlite_classes: ['VoidLiveStreamDurableObject'] },
     ]);
     const emitted = deployConfigProject({
@@ -5597,12 +5597,12 @@ describe('verifyGeneratedDeployConfig', () => {
       durable_objects: {
         bindings: [
           { name: 'ROOM', class_name: 'Room' },
-          { name: 'SANDBOX', class_name: 'Sandbox' },
+          { name: 'SANDBOX', class_name: 'SandboxV1' },
         ],
       },
       migrations: [
         { tag: 'room-v1', new_sqlite_classes: ['Room'] },
-        { tag: 'void-sandbox-v1', new_sqlite_classes: ['Sandbox'] },
+        { tag: 'void-sandbox-v2', new_sqlite_classes: ['SandboxV1'] },
       ],
     };
     const state = reconstructExpectedDurableObjectState({ sandbox: true }, root, rootConfig, {

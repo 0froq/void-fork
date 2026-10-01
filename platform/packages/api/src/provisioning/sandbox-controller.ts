@@ -43,7 +43,7 @@ export function sandboxControllerWorkerName(projectId: string, deploymentId: str
 }
 
 export function isManagedSandbox(manifest: DeployManifest | null | undefined): boolean {
-  return manifest?.sandbox?.runtime?.protocol === 1;
+  return manifest?.sandbox?.runtime?.protocol === 1 || manifest?.sandbox?.runtime?.protocol === 2;
 }
 
 export async function assertManagedSandboxEntitlement(
@@ -119,6 +119,8 @@ function assertConfiguration(
   identity: SandboxControllerIdentity,
   apiService: string,
   digest: string,
+  image: string,
+  instance: string,
 ): void {
   assertOwnership(settings, identity.projectId, identity.deploymentId);
   const expectedText = {
@@ -127,6 +129,8 @@ function assertConfiguration(
     __PROJECT_ID: identity.projectId,
     __VOID_PROJECT_SLUG: identity.slug,
     __VOID_DEPLOYMENT_ID: identity.deploymentId,
+    __VOID_SANDBOX_IMAGE: image,
+    __VOID_SANDBOX_INSTANCE: instance,
   };
   for (const [name, value] of Object.entries(expectedText)) {
     if (plainTextBinding(settings, name) !== value) {
@@ -160,7 +164,14 @@ export async function provisionSandboxController(input: {
   ).join('');
   let settings = await readSettings(accountId, apiToken, workerName);
   if (settings) {
-    assertConfiguration(settings, identity, apiService, digest);
+    assertConfiguration(
+      settings,
+      identity,
+      apiService,
+      digest,
+      sandbox.image,
+      sandbox.instanceType ?? 'lite',
+    );
   } else {
     const form = new FormData();
     const metadata = {
@@ -191,10 +202,22 @@ export async function provisionSandboxController(input: {
           __PROJECT_ID: identity.projectId,
           __VOID_PROJECT_SLUG: identity.slug,
           __VOID_DEPLOYMENT_ID: identity.deploymentId,
+          __VOID_SANDBOX_IMAGE: sandbox.image,
+          __VOID_SANDBOX_INSTANCE: sandbox.instanceType ?? 'lite',
         }).map(([name, text]) => ({ type: 'plain_text', name, text })),
       ],
       migrations: { new_tag: 'v1', steps: [{ new_sqlite_classes: [CONTROLLER_CLASS] }] },
-      containers: [{ class_name: CONTROLLER_CLASS }],
+      containers: [
+        {
+          class_name: CONTROLLER_CLASS,
+          name: perDeployContainerApplicationName(
+            identity.projectId,
+            identity.deploymentId,
+            sandbox.containerName ?? 'void-sandbox-v1',
+          ),
+          images: sandbox.image === 'cloudflare/debian-trixie' ? {} : { default: sandbox.image },
+        },
+      ],
     };
     form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
     form.append(
@@ -216,7 +239,14 @@ export async function provisionSandboxController(input: {
     if (!settings) {
       throw new Error('Sandbox controller was not visible after upload. Retry the deployment.');
     }
-    assertConfiguration(settings, identity, apiService, digest);
+    assertConfiguration(
+      settings,
+      identity,
+      apiService,
+      digest,
+      sandbox.image,
+      sandbox.instanceType ?? 'lite',
+    );
   }
   await cfFetch(`${workerUrl(accountId, workerName)}/subdomain`, apiToken, {
     method: 'POST',
@@ -226,14 +256,14 @@ export async function provisionSandboxController(input: {
   const applicationName = perDeployContainerApplicationName(
     identity.projectId,
     identity.deploymentId,
-    sandbox.containerName ?? 'void-sandbox',
+    sandbox.containerName ?? 'void-sandbox-v1',
   );
   const created = await tryCreateContainerApplication(accountId, apiToken, {
     name: applicationName,
     namespaceId: namespace,
     image: sandbox.image,
     instanceType: sandbox.instanceType,
-    maxInstances: sandbox.maxInstances,
+    durableObjectManaged: true,
   });
   const application =
     created ?? (await findContainerApplication(accountId, apiToken, applicationName));
@@ -385,7 +415,7 @@ export async function retrySandboxControllerCleanup(
         sql`${deployments.admission_protocol} >= 3`,
         sql`${deployments.status} IN ('live', 'failed', 'canceled')`,
         sql`${projects.active_deployment_id} IS DISTINCT FROM ${deployments.id}`,
-        sql`${deployments.manifest}::jsonb #>> '{sandbox,runtime,protocol}' = '1'`,
+        sql`${deployments.manifest}::jsonb #>> '{sandbox,runtime,protocol}' IN ('1', '2')`,
         sql`COALESCE(${deployments.manifest}::jsonb #>> '{sandbox,runtime,cleanupComplete}', 'false') <> 'true'`,
       ),
     )

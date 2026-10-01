@@ -2450,7 +2450,7 @@ describe('compileWorkerEntry', () => {
       'import { VoidPlatformSandbox as __VoidSandbox, __setSandboxBindingName } from "void/sandbox"',
     );
     expect(code).not.toContain('from "@cloudflare/sandbox"');
-    expect(code).toContain('export { __VoidSandbox as Sandbox };');
+    expect(code).toContain('export { __VoidSandbox as SandboxV1 };');
     expect(code).toContain('__setSandboxBindingName("SANDBOX");');
   });
 
@@ -2471,8 +2471,6 @@ describe('compileWorkerEntry', () => {
       'import { VoidPlatformSandbox as __VoidSandbox, __setSandboxBindingName } from "void/sandbox"',
     );
     expect(code).not.toContain('from "@cloudflare/sandbox"');
-    // User subclass syntax (`class X extends Sandbox`) stays unchanged because
-    // VoidPlatformSandbox itself extends Sandbox.
     expect(code).toContain('export class CodeSandbox extends __VoidSandbox {}');
     expect(code).toContain('__setSandboxBindingName("CODE");');
   });

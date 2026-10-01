@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join, normalize } from 'node:path';
+import { join, normalize, resolve } from 'node:path';
 import spawn from 'cross-spawn';
 import { toSlash } from 'pathslash';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
@@ -19,6 +19,11 @@ import {
 import { materializeCloudflareConfig } from '../../src/cloudflare-config.ts';
 import { renderVoidConfig } from '../../src/config-write.ts';
 import { readConfig } from '../../src/config.ts';
+import {
+  resolveSandboxConfig,
+  sandboxContainerConfig,
+  SANDBOX_MIGRATION_TAG,
+} from '../../src/sandbox/config.ts';
 import { CLOUDFLARE_DEPLOY_BUILD_ENV } from '../../src/shared/env.ts';
 
 // Real-build FP-safety lock for `void deploy --backend cloudflare`. The 600+ unit tests drive
@@ -118,11 +123,20 @@ describe('playground/kitchen-sink --backend cloudflare real-build deploy guard',
     playground = createIsolatedPlayground(ROOT, SOURCE_PLAYGROUND);
     pg = playground.root;
     const typedPath = join(pg, 'void.config.ts');
+    // A normal deploy syncs the inferred Sandbox before Vite resolves its config.
+    // Exercise that existing entry, rather than only the initially empty config.
+    const sandbox = resolveSandboxConfig({ sandbox: { instanceType: 'standard-1' } }, pg);
     writeFileSync(
       typedPath,
       renderVoidConfig({
         ...readConfig(pg),
-        cloudflare: OVERLAY_WRANGLER,
+        sandbox: { instanceType: 'standard-1' },
+        cloudflare: {
+          ...OVERLAY_WRANGLER,
+          durable_objects: { bindings: [{ name: sandbox.binding, class_name: sandbox.className }] },
+          migrations: [{ tag: SANDBOX_MIGRATION_TAG, new_sqlite_classes: [sandbox.className] }],
+          containers: [sandboxContainerConfig(sandbox)],
+        },
       }),
     );
     configPath = materializeCloudflareConfig(pg);
@@ -218,8 +232,9 @@ describe('playground/kitchen-sink --backend cloudflare real-build deploy guard',
   });
 
   it('emits the sandbox container, injected AI binding, cron trigger, and queue bindings', () => {
+    expect(pristineEmitted.containers).toHaveLength(1);
     expect(pristineEmitted.containers).toContainEqual(
-      expect.objectContaining({ name: 'void-sandbox', class_name: 'Sandbox' }),
+      expect.objectContaining({ name: 'void-sandbox-v1', class_name: 'SandboxV1' }),
     );
     expect(pristineEmitted.ai).toEqual({ binding: 'AI' });
     expect(pristineEmitted.triggers).toEqual({ crons: ['* * * * *'] });
@@ -234,7 +249,17 @@ describe('playground/kitchen-sink --backend cloudflare real-build deploy guard',
   it('reconstructs a container set byte-identical to the emitted sandbox container', () => {
     // The highest-value FP-safety lock: `reconstructExpectedContainers` (a pure pre-build function)
     // must produce EXACTLY what the CF plugin emitted, or every sandbox deploy would false-positive.
-    expect(expectedPayload.expectedContainers).toEqual(pristineEmitted.containers);
+    const actual = structuredClone(pristineEmitted.containers) as Array<{
+      images: { default: { dockerfile: string } };
+    }>;
+    for (const container of actual) {
+      container.images.default.dockerfile = resolve(
+        pg,
+        'dist/ssr',
+        container.images.default.dockerfile,
+      );
+    }
+    expect(expectedPayload.expectedContainers).toEqual(actual);
   });
 
   // --- Positive: the real emission passes the real guard unmodified (FP-lock) -------------------

@@ -6,6 +6,7 @@ import type { MigrationPlanBundle } from '../migrations/plan.ts';
 import { resolveLayoutIds } from '../pages/layout-resolution.ts';
 import { generateQueueResolverSource } from '../queues/dispatch.ts';
 import { INTERNAL_BINDING_EXACT_NAMES, INTERNAL_BINDING_PREFIXES } from '../runtime/env-raw.ts';
+import { DEFAULT_SANDBOX_CLASS_NAME } from '../sandbox/config.ts';
 import type { ScanResult } from './scan.ts';
 
 /**
@@ -2662,7 +2663,9 @@ export interface WorkerEntryOptions {
    */
   runtimeEmailPath?: string;
   envSchemaModule?: { importPath: string; helperPath: string };
-  sandbox?: boolean | { bindingName?: string; className?: string; runtimePath?: string };
+  sandbox?:
+    | boolean
+    | { bindingName?: string; className?: string; instanceType?: string; runtimePath?: string };
   /**
    * Emit an SPA-style fallback in the asset-fallthrough path: when
    * `assetConfig.not_found_handling = "none"`, the worker returns
@@ -2721,7 +2724,9 @@ export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
   })`;
   const hasSandbox = sandbox === true || typeof sandbox === 'object';
   const sandboxClassName =
-    typeof sandbox === 'object' ? (sandbox.className ?? 'Sandbox') : 'Sandbox';
+    typeof sandbox === 'object'
+      ? (sandbox.className ?? DEFAULT_SANDBOX_CLASS_NAME)
+      : DEFAULT_SANDBOX_CLASS_NAME;
   const sandboxBindingName =
     typeof sandbox === 'object' ? (sandbox.bindingName ?? 'SANDBOX') : 'SANDBOX';
   const sandboxRuntimePath =
@@ -2729,10 +2734,11 @@ export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
   const sandboxImport = hasSandbox
     ? `import { VoidPlatformSandbox as __VoidSandbox, __setSandboxBindingName } from ${JSON.stringify(sandboxRuntimePath)};\n`
     : '';
+  const sandboxInstanceType = typeof sandbox === 'object' ? sandbox.instanceType : undefined;
   const sandboxExport = hasSandbox
-    ? sandboxClassName === 'Sandbox'
-      ? `export { __VoidSandbox as Sandbox };\n__setSandboxBindingName(${JSON.stringify(sandboxBindingName)});\n`
-      : `export class ${sandboxClassName} extends __VoidSandbox {}\n__setSandboxBindingName(${JSON.stringify(sandboxBindingName)});\n`
+    ? sandboxClassName === DEFAULT_SANDBOX_CLASS_NAME && !sandboxInstanceType
+      ? `export { __VoidSandbox as SandboxV1 };\n__setSandboxBindingName(${JSON.stringify(sandboxBindingName)});\n`
+      : `export class ${sandboxClassName} extends __VoidSandbox {${sandboxInstanceType ? ` protected override instanceType = ${JSON.stringify(sandboxInstanceType)} as const; ` : ''}}\n__setSandboxBindingName(${JSON.stringify(sandboxBindingName)});\n`
     : '';
   const hasLive = live === true || typeof live === 'object';
   const liveBindingName =

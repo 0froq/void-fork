@@ -45,12 +45,14 @@ describe('worker packaging', () => {
           binding: 'SANDBOX',
           className: 'Sandbox',
           containerName: 'void-sandbox',
-          image: 'docker.io/cloudflare/sandbox:0.12.9',
-          platformImage: 'docker.io/cloudflare/sandbox:0.12.9',
+          image:
+            'registry.cloudflare.com/account/code-sandbox@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          platformImage:
+            'registry.cloudflare.com/account/code-sandbox@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         },
       },
     });
-    expect(manifest.sandbox).toMatchObject({ controllerProtocol: 1, bindingName: 'SANDBOX' });
+    expect(manifest.sandbox).toMatchObject({ controllerProtocol: 2, bindingName: 'SANDBOX' });
     expect(
       buildVoidManifest({ bindings: { ...bindings, needsSandbox: false } }).sandbox,
     ).toBeUndefined();

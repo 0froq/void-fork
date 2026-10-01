@@ -297,9 +297,11 @@
       "description": "Connect to remote D1/KV/R2 bindings during local development. Can also be set via VOID_REMOTE=1 environment variable."
     },
     "sandbox": {
-      "description": "Enable Cloudflare Sandboxes. `true` uses the default SANDBOX binding and Cloudflare sandbox image; an object customizes the Durable Object binding, container image, and scaling.",
+      "description": "Enable Cloudflare Sandboxes. `true` uses the default SANDBOX binding and Node.js environment; an object customizes the Durable Object binding, container image, and instance size.",
       "oneOf": [
-        { "type": "boolean" },
+        {
+          "type": "boolean"
+        },
         {
           "type": "object",
           "properties": {
@@ -309,42 +311,28 @@
             },
             "className": {
               "type": "string",
-              "description": "Durable Object class name. Defaults to Sandbox."
+              "description": "Durable Object class name. Defaults to SandboxV1."
             },
             "containerName": {
               "type": "string",
-              "description": "Cloudflare Container application name. Defaults to void-sandbox."
+              "description": "Cloudflare Container application name. Defaults to void-sandbox-v1."
             },
             "image": {
               "type": "string",
-              "description": "Container image or Dockerfile path used by local Wrangler development."
+              "description": "Dockerfile path or digest-pinned Cloudflare managed registry image for local and native Cloudflare use."
             },
             "imageBuildContext": {
               "type": "string",
-              "description": "Optional Docker build context path for local Wrangler development."
+              "description": "Optional Docker build context path for local development and native Cloudflare deploys."
             },
             "platformImage": {
               "type": "string",
-              "description": "Registry image reference used by `void deploy`. Required when `image` is a custom local Dockerfile path."
+              "description": "Cloudflare managed registry image pinned by digest, containing the SDK 1.0 sandbox-shim. Defaults to Cloudflare’s managed Node.js image."
             },
             "instanceType": {
               "type": "string",
-              "enum": [
-                "dev",
-                "lite",
-                "basic",
-                "standard",
-                "standard-1",
-                "standard-2",
-                "standard-3",
-                "standard-4"
-              ],
+              "enum": ["lite", "standard-1", "standard-2", "standard-3", "standard-4"],
               "description": "Cloudflare Container instance type."
-            },
-            "maxInstances": {
-              "type": "integer",
-              "minimum": 1,
-              "description": "Maximum number of sandbox container instances."
             }
           },
           "additionalProperties": false

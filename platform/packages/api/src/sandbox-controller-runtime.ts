@@ -1,17 +1,11 @@
-import {
-  Sandbox,
-  getSandbox,
-  isProcess,
-  type ExecutionSession,
-  type Process,
-  type ProcessOptions,
-  type SandboxOptions,
-} from '@cloudflare/sandbox';
 import { RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
-
-// Required by the SDK's bucket mounts and outbound interception. This class is
-// platform code; neither it nor the raw namespace is bound to the application.
-export { ContainerProxy } from '@cloudflare/sandbox';
+import {
+  SandboxContainer,
+  validateSandboxOptions,
+  type SandboxOptions,
+  type SandboxInstance,
+} from 'void/_sandbox-container';
+import { getSandboxShim } from './sandbox-shim.ts';
 
 type Admission = { ok: true } | { ok: false; reason: string };
 type Control = {
@@ -23,207 +17,21 @@ type Control = {
 type ControllerEnv = {
   SANDBOX: DurableObjectNamespace<SandboxController>;
   __VOID_SANDBOX_CONTROL: Control;
+  __VOID_SANDBOX_IMAGE?: string;
+  __VOID_SANDBOX_INSTANCE?: SandboxInstance;
 };
 type Lease = { generation: string; phase: 'pending' | 'running' | 'stopped' };
 const LEASE_KEY = '__voidSandboxLease';
-const HEARTBEAT_SECONDS = 30;
+const ACTIVITY_KEY = '__voidSandboxActivity';
+type Activity = { lastActivity: number; idleDeadline: number };
+const HEARTBEAT_MS = 30_000;
 const CONTROL_TIMEOUT_MS = 5_000;
 
-// Only application operations cross the capability boundary. In particular,
-// do not forward arbitrary inherited Container/DO methods or SDK properties.
-const OPERATIONS = new Set([
-  'exec',
-  'execStream',
-  'startProcess',
-  'listProcesses',
-  'getProcess',
-  'killProcess',
-  'killAllProcesses',
-  'cleanupCompletedProcesses',
-  'getProcessLogs',
-  'streamProcessLogs',
-  'writeFile',
-  'readFile',
-  'readFileStream',
-  'watch',
-  'checkChanges',
-  'mkdir',
-  'deleteFile',
-  'renameFile',
-  'moveFile',
-  'listFiles',
-  'exists',
-  'gitCheckout',
-  'setEnvVars',
-  'mountBucket',
-  'unmountBucket',
-  'createSession',
-  'getSession',
-  'deleteSession',
-  'getContainerPlacementId',
-  'createCodeContext',
-  'runCode',
-  'runCodeStream',
-  'listCodeContexts',
-  'deleteCodeContext',
-  'createBackup',
-  'restoreBackup',
-  'exposePort',
-  'unexposePort',
-  'getExposedPorts',
-  'isPortExposed',
-  'validatePortToken',
-  'terminal',
-  'wsConnect',
-  'fetch',
-  'destroy',
-  'stop',
-  'getState',
-  'setSleepAfter',
-  'setKeepAlive',
-  'setContainerTimeouts',
-  'setTransport',
-  'setLabels',
-]);
-const OPTIONS = new Set([
-  'sleepAfter',
-  'keepAlive',
-  'enableDefaultSession',
-  'normalizeId',
-  'containerTimeouts',
-  'transport',
-  'labels',
-]);
-const SESSION_OPERATIONS = new Set([
-  'exec',
-  'execStream',
-  'startProcess',
-  'listProcesses',
-  'getProcess',
-  'killProcess',
-  'killAllProcesses',
-  'cleanupCompletedProcesses',
-  'getProcessLogs',
-  'streamProcessLogs',
-  'writeFile',
-  'readFile',
-  'readFileStream',
-  'watch',
-  'checkChanges',
-  'mkdir',
-  'deleteFile',
-  'renameFile',
-  'moveFile',
-  'listFiles',
-  'exists',
-  'gitCheckout',
-  'setEnvVars',
-  'mountBucket',
-  'unmountBucket',
-  'createCodeContext',
-  'runCode',
-  'runCodeStream',
-  'listCodeContexts',
-  'deleteCodeContext',
-  'createBackup',
-  'restoreBackup',
-  'terminal',
-]);
-const PROCESS_OPERATIONS = new Set([
-  'kill',
-  'getStatus',
-  'getLogs',
-  'waitForLog',
-  'waitForPort',
-  'waitForExit',
-]);
-
-type ProcessWire = Readonly<{
-  __voidSandboxType: 'process';
-  capability: ProcessCapability;
-  command: string;
-  endTime?: Date;
-  exitCode?: number;
-  id: string;
-  pid?: number;
-  sessionId?: string;
-  startTime: Date;
-  status: Process['status'];
-}>;
-
-type SessionWire = Readonly<{
-  __voidSandboxType: 'session';
-  capability: SessionCapability;
-  id: string;
-}>;
-
-function validateOptions(options: SandboxOptions): void {
-  if (!options || typeof options !== 'object' || Array.isArray(options)) {
-    throw new TypeError('Sandbox options must be an object.');
-  }
-  for (const key of Object.keys(options)) {
-    if (!OPTIONS.has(key)) {
-      throw new TypeError(`Unsupported Sandbox option: ${key}`);
-    }
-  }
-  for (const key of ['keepAlive', 'enableDefaultSession', 'normalizeId'] as const) {
-    if (options[key] !== undefined && typeof options[key] !== 'boolean') {
-      throw new TypeError(`Sandbox ${key} must be a boolean.`);
-    }
-  }
-  if (
-    options.sleepAfter !== undefined &&
-    !(
-      (typeof options.sleepAfter === 'number' &&
-        Number.isFinite(options.sleepAfter) &&
-        options.sleepAfter > 0) ||
-      (typeof options.sleepAfter === 'string' && /^\d+(?:\.\d+)?[smh]$/.test(options.sleepAfter))
-    )
-  ) {
-    throw new TypeError('Sandbox sleepAfter must be a positive duration.');
-  }
-  if (
-    options.transport !== undefined &&
-    !['http', 'websocket', 'rpc'].includes(options.transport)
-  ) {
-    throw new TypeError('Invalid Sandbox transport.');
-  }
-  if (options.containerTimeouts !== undefined) {
-    const timeouts = options.containerTimeouts;
-    if (!timeouts || typeof timeouts !== 'object' || Array.isArray(timeouts)) {
-      throw new TypeError('Sandbox containerTimeouts must be an object.');
-    }
-    for (const [name, value] of Object.entries(timeouts)) {
-      if (
-        !['instanceGetTimeoutMS', 'portReadyTimeoutMS', 'waitIntervalMS'].includes(name) ||
-        typeof value !== 'number' ||
-        !Number.isFinite(value) ||
-        value <= 0 ||
-        value > 300_000
-      ) {
-        throw new TypeError(`Invalid Sandbox container timeout: ${name}`);
-      }
-    }
-  }
-  if (
-    options.labels !== undefined &&
-    (!options.labels ||
-      typeof options.labels !== 'object' ||
-      Array.isArray(options.labels) ||
-      Object.values(options.labels).some((value) => typeof value !== 'string'))
-  ) {
-    throw new TypeError('Sandbox labels must be strings.');
-  }
-}
-
 function denied(reason: string): Error {
-  // Workers RPC preserves Error messages, not arbitrary custom properties.
-  // The SDK maps these stable prefixes back to the public error classes.
   return new Error(
     `VOID_SANDBOX_${reason === 'concurrency' || reason === 'runtime_budget' ? reason : 'unavailable'}`,
   );
 }
-
 async function bounded<T>(operation: Promise<T>): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -239,148 +47,18 @@ async function bounded<T>(operation: Promise<T>): Promise<T> {
 }
 
 class SandboxCapability extends RpcTarget {
-  #sandbox: Sandbox;
-
-  constructor(sandbox: Sandbox) {
+  #sandbox: DurableObjectStub<SandboxController>;
+  constructor(sandbox: DurableObjectStub<SandboxController>) {
     super();
     this.#sandbox = sandbox;
   }
-
   async invoke(operation: string, args: Array<unknown>): Promise<unknown> {
-    if (!Array.isArray(args)) {
-      throw new TypeError('Sandbox arguments must be an array.');
-    }
-    if (operation === 'tunnels') {
-      const [method, ...parameters] = args;
-      if (typeof method !== 'string' || !['get', 'list', 'destroy'].includes(method)) {
-        throw new TypeError('Unsupported Sandbox tunnel operation.');
-      }
-      return this.#sandbox.callTunnels(method, parameters);
-    }
-    if (!OPERATIONS.has(operation)) {
+    // No raw stub, control binding, configuration, alarm or startup authority.
+    if (!['exec', 'files', 'fetch', 'running', 'destroy'].includes(operation)) {
       throw new TypeError(`Unsupported Sandbox operation: ${operation}`);
     }
-    const optionName = {
-      setSleepAfter: 'sleepAfter',
-      setKeepAlive: 'keepAlive',
-      setContainerTimeouts: 'containerTimeouts',
-      setTransport: 'transport',
-      setLabels: 'labels',
-    }[operation];
-    if (optionName) {
-      validateOptions({ [optionName]: args[0] });
-    }
-    // Reuse the SDK's enhanced client for sessions, terminal connections, streams,
-    // callbacks and Process methods. Its domain objects contain only application
-    // operations; none contains a DurableObjectStub, namespace or lifecycle hook.
-    const target = this.#sandbox as unknown as Record<
-      string,
-      (...values: Array<unknown>) => unknown
-    >;
-    const result = await target[operation]!(...prepareProcessCallbacks(args));
-    if (operation === 'createSession' || operation === 'getSession') {
-      return sessionWire(result as ExecutionSession);
-    }
-    return transferableResult(result);
+    return this.#sandbox.invoke(operation, args);
   }
-}
-
-class ProcessCapability extends RpcTarget {
-  #process: Process;
-
-  constructor(process: Process) {
-    super();
-    this.#process = process;
-  }
-
-  async invoke(operation: string, args: Array<unknown>): Promise<unknown> {
-    if (!Array.isArray(args)) {
-      throw new TypeError('Process arguments must be an array.');
-    }
-    if (!PROCESS_OPERATIONS.has(operation)) {
-      throw new TypeError(`Unsupported Sandbox process operation: ${operation}`);
-    }
-    const target = this.#process as unknown as Record<
-      string,
-      (...values: Array<unknown>) => unknown
-    >;
-    return target[operation]!(...args);
-  }
-}
-
-class SessionCapability extends RpcTarget {
-  #session: ExecutionSession;
-
-  constructor(session: ExecutionSession) {
-    super();
-    this.#session = session;
-  }
-
-  async invoke(operation: string, args: Array<unknown>): Promise<unknown> {
-    if (!Array.isArray(args)) {
-      throw new TypeError('Session arguments must be an array.');
-    }
-    if (!SESSION_OPERATIONS.has(operation)) {
-      throw new TypeError(`Unsupported Sandbox session operation: ${operation}`);
-    }
-    const target = this.#session as unknown as Record<
-      string,
-      (...values: Array<unknown>) => unknown
-    >;
-    return transferableResult(await target[operation]!(...prepareProcessCallbacks(args)));
-  }
-}
-
-function prepareProcessCallbacks(args: Array<unknown>): Array<unknown> {
-  const [command, options, ...rest] = args;
-  if (!options || typeof options !== 'object' || Array.isArray(options)) {
-    return args;
-  }
-  const processOptions = options as ProcessOptions;
-  if (typeof processOptions.onStart !== 'function') {
-    return args;
-  }
-  return [
-    command,
-    {
-      ...processOptions,
-      onStart: (process: Process) => processOptions.onStart!(processWire(process) as never),
-    },
-    ...rest,
-  ];
-}
-
-function processWire(process: Process): ProcessWire {
-  return {
-    __voidSandboxType: 'process',
-    capability: new ProcessCapability(process),
-    id: process.id,
-    ...(process.pid === undefined ? {} : { pid: process.pid }),
-    command: process.command,
-    status: process.status,
-    startTime: process.startTime,
-    ...(process.endTime === undefined ? {} : { endTime: process.endTime }),
-    ...(process.exitCode === undefined ? {} : { exitCode: process.exitCode }),
-    ...(process.sessionId === undefined ? {} : { sessionId: process.sessionId }),
-  };
-}
-
-function sessionWire(session: ExecutionSession): SessionWire {
-  return {
-    __voidSandboxType: 'session',
-    capability: new SessionCapability(session),
-    id: session.id,
-  };
-}
-
-function transferableResult(result: unknown): unknown {
-  if (isProcess(result)) {
-    return processWire(result);
-  }
-  if (Array.isArray(result) && result.every(isProcess)) {
-    return result.map(processWire);
-  }
-  return result;
 }
 
 export default class SandboxService extends WorkerEntrypoint<ControllerEnv> {
@@ -388,42 +66,178 @@ export default class SandboxService extends WorkerEntrypoint<ControllerEnv> {
     if (typeof id !== 'string' || id.length === 0 || id.length > 63) {
       throw new TypeError('Sandbox id must contain between 1 and 63 characters.');
     }
-    validateOptions(options);
-    const sandbox = getSandbox(this.env.SANDBOX, id, options);
-    // Upstream getSandbox configures asynchronously. Await the same explicit
-    // configuration before the service request ends so transport/session calls
-    // cannot race a cancelled fire-and-forget setup request.
-    await sandbox.configure({
-      sandboxName: {
-        name: options.normalizeId ? id.toLowerCase() : id,
-        normalizeId: options.normalizeId,
-      },
-      sleepAfter: options.sleepAfter,
-      keepAlive: options.keepAlive,
-      containerTimeouts: options.containerTimeouts,
-      transport: options.transport,
-      labels: options.labels,
-    });
-    return new SandboxCapability(sandbox);
+    validateSandboxOptions(options);
+    const stub = this.env.SANDBOX.getByName(id);
+    await stub.configure(options);
+    return new SandboxCapability(stub);
   }
-
   fetch(): Response {
     return new Response('Not found', { status: 404 });
   }
 }
 
-/** Platform-owned container lifecycle. No application module is loaded here. */
-export class SandboxController extends Sandbox<ControllerEnv> {
-  #starting: Promise<void> | undefined;
+/** Platform-owned lifecycle; no application code is loaded in this Worker. */
+export class SandboxController extends SandboxContainer<ControllerEnv> {
   #finishing: Promise<void> | undefined;
+  #activity: Activity | undefined;
+  #activityReady: Promise<void> | undefined;
+  #busy = 0;
+
+  async #loadActivity(): Promise<void> {
+    this.#activityReady ??= (async () => {
+      this.#activity = await this.ctx.storage.get<Activity>(ACTIVITY_KEY);
+    })();
+    await this.#activityReady;
+  }
+  async #touch(): Promise<void> {
+    await this.#loadActivity();
+    const lastActivity = Date.now();
+    this.#activity = { lastActivity, idleDeadline: lastActivity + this.inactivityTimeoutMs };
+    await this.ctx.storage.put(ACTIVITY_KEY, this.#activity);
+  }
+  async #active(): Promise<() => Promise<void>> {
+    this.#busy++;
+    try {
+      await this.#touch();
+    } catch (error) {
+      this.#busy--;
+      throw error;
+    }
+    let finished = false;
+    return async () => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      try {
+        if (this.container.running) {
+          await this.#touch();
+        }
+      } finally {
+        this.#busy--;
+      }
+    };
+  }
+  override async configure(options: SandboxOptions): Promise<void> {
+    await super.configure(options);
+    await this.#loadActivity();
+    if (this.#activity) {
+      this.#activity = {
+        ...this.#activity,
+        idleDeadline: this.#activity.lastActivity + this.inactivityTimeoutMs,
+      };
+      await this.ctx.storage.put(ACTIVITY_KEY, this.#activity);
+    }
+  }
+  protected override async waitForProcessExit(exitCode: Promise<number>): Promise<number> {
+    const finish = await this.#active();
+    try {
+      return await exitCode;
+    } finally {
+      await finish();
+    }
+  }
+  #readable(stream: ReadableStream, finish?: () => Promise<void>): ReadableStream {
+    const reader = stream.getReader();
+    return new ReadableStream(
+      {
+        pull: async (controller) => {
+          try {
+            const chunk = await reader.read();
+            if (chunk.done) {
+              controller.close();
+              await finish?.();
+            } else {
+              // Workers RPC eagerly pumps transferred streams, even if the
+              // application never reads them. A pending transport read must
+              // not keep an unattended background process alive forever.
+              if (!finish) {
+                await this.#touch();
+              }
+              controller.enqueue(chunk.value);
+            }
+          } catch (error) {
+            controller.error(error);
+            await finish?.();
+          }
+        },
+        cancel: async (reason) => {
+          try {
+            await reader.cancel(reason);
+          } finally {
+            if (finish) {
+              await finish();
+            }
+          }
+        },
+      },
+      { highWaterMark: 0 },
+    );
+  }
+  #writable(stream: WritableStream): WritableStream {
+    const writer = stream.getWriter();
+    const run = async (operation: () => Promise<void>) => {
+      const finish = await this.#active();
+      try {
+        await operation();
+      } finally {
+        await finish();
+      }
+    };
+    return new WritableStream({
+      write: (chunk) => run(() => writer.write(chunk)),
+      close: () => run(() => writer.close()),
+      abort: (reason) => run(() => writer.abort(reason)),
+    });
+  }
+  override async invoke(operation: string, args: Array<unknown>): Promise<unknown> {
+    if (!['exec', 'files', 'fetch'].includes(operation)) {
+      return super.invoke(operation, args);
+    }
+    const finish = await this.#active();
+    let streaming = false;
+    try {
+      const result = await super.invoke(operation, args);
+      if (result instanceof Response && result.body) {
+        streaming = true;
+        return new Response(this.#readable(result.body, finish), result);
+      }
+      if (operation === 'exec') {
+        const process = result as {
+          stdout: ReadableStream | null;
+          stderr: ReadableStream | null;
+          stdin: WritableStream | null;
+        };
+        if (process.stdout) {
+          process.stdout = this.#readable(process.stdout);
+        }
+        if (process.stderr) {
+          process.stderr = this.#readable(process.stderr);
+        }
+        if (process.stdin) {
+          process.stdin = this.#writable(process.stdin);
+        }
+      }
+      return result;
+    } finally {
+      if (!streaming) {
+        await finish();
+      }
+    }
+  }
+  protected override get image(): string {
+    return this.env.__VOID_SANDBOX_IMAGE === 'cloudflare/debian-trixie'
+      ? 'cloudflare/debian-trixie'
+      : this.container.images.default!;
+  }
+  protected override get entrypoint(): Array<string> | undefined {
+    return this.image === 'cloudflare/debian-trixie' ? ['sleep', 'infinity'] : undefined;
+  }
+  protected override instanceType: SandboxInstance = 'lite';
 
   async #arm(): Promise<void> {
-    // Use the SDK scheduler: assigning the DO alarm directly loses its idle
-    // timeout, and super.alarm can otherwise overwrite a metering alarm.
-    this.deleteSchedules('voidHeartbeat');
-    await this.schedule(HEARTBEAT_SECONDS, 'voidHeartbeat');
+    await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_MS);
   }
-
   async #control(method: 'reserve' | 'started' | 'heartbeat', lease: Lease): Promise<void> {
     const result = await bounded(
       this.env.__VOID_SANDBOX_CONTROL[method](this.ctx.id.toString(), lease.generation),
@@ -432,77 +246,77 @@ export class SandboxController extends Sandbox<ControllerEnv> {
       throw denied(result.reason);
     }
   }
-
-  async #prepare(): Promise<void> {
+  protected override async beforeStart(): Promise<void> {
+    this.instanceType = this.env.__VOID_SANDBOX_INSTANCE ?? 'lite';
     let lease = await this.ctx.storage.get<Lease>(LEASE_KEY);
-    if (lease?.phase === 'running' && this.ctx.container?.running) {
+    if (lease?.phase === 'running' && this.container.running) {
       await this.#control('heartbeat', lease);
+      await this.#arm();
       return;
     }
     if (lease) {
-      // A restart must settle the previous generation before claiming another.
-      // A pending generation after eviction cannot prove successful startup.
-      await this.#terminate();
+      if (this.container.running) {
+        await this.container.destroy();
+      }
+      await this.stopped();
+    }
+    // A container with no durable admission record must never be adopted.
+    if (this.container.running) {
+      await this.container.destroy();
     }
     lease = { generation: crypto.randomUUID(), phase: 'pending' };
     await this.ctx.storage.put(LEASE_KEY, lease);
     await this.#arm();
     await this.#control('reserve', lease);
   }
-
-  #start(operation: () => Promise<void>): Promise<void> {
-    if (this.#starting) {
-      return this.#starting;
-    }
-    const pending = (async () => {
-      try {
-        await this.#prepare();
-        await operation();
-      } catch (error) {
-        // Startup can fail after the process has booted but before its port is
-        // ready. Kill it before relinquishing concurrency, even on gate failure.
-        await this.#terminate().catch(() => {});
-        throw error;
+  protected override async initialize(): Promise<void> {
+    await super.initialize();
+    if (this.env.__VOID_SANDBOX_IMAGE === 'cloudflare/debian-trixie') {
+      const bytes = await getSandboxShim();
+      const result = await this.initializationOutput(
+        [
+          'node',
+          '-e',
+          'const fs=require("node:fs");const chunks=[];process.stdin.on("data",c=>chunks.push(c));process.stdin.on("end",()=>{const path="/usr/local/bin/sandbox-shim-"+require("node:crypto").randomUUID();fs.writeFileSync(path,Buffer.concat(chunks),{mode:0o755});fs.renameSync(path,"/usr/local/bin/sandbox-shim");});',
+        ],
+        { stdin: new Blob([bytes as Uint8Array<ArrayBuffer>]).stream() },
+        30_000,
+      );
+      if (result.exitCode !== 0) {
+        throw denied('unavailable');
       }
-    })();
-    this.#starting = pending;
-    void pending
-      .finally(() => {
-        if (this.#starting === pending) {
-          this.#starting = undefined;
-        }
-      })
-      .catch(() => {});
-    return pending;
+    }
   }
-
-  override start(...args: Parameters<Sandbox<ControllerEnv>['start']>): Promise<void> {
-    return this.#start(() => super.start(...args));
-  }
-
-  override startAndWaitForPorts(
-    ...args: Parameters<Sandbox<ControllerEnv>['startAndWaitForPorts']>
-  ): Promise<void> {
-    return this.#start(() => super.startAndWaitForPorts(...args));
-  }
-
-  override async onStart(): Promise<void> {
+  protected override async afterStart(): Promise<void> {
     const lease = await this.ctx.storage.get<Lease>(LEASE_KEY);
-    if (!lease || lease.phase === 'stopped' || !this.ctx.container?.running) {
+    if (!lease || lease.phase === 'stopped' || !this.container.running) {
       throw denied('unavailable');
     }
-    await this.#control('started', lease);
-    await this.ctx.storage.put(LEASE_KEY, { ...lease, phase: 'running' } satisfies Lease);
+    if (lease.phase === 'pending') {
+      await this.#control('started', lease);
+      await this.ctx.storage.put(LEASE_KEY, { ...lease, phase: 'running' } satisfies Lease);
+      await this.#touch();
+    }
     await this.#arm();
-    await super.onStart();
   }
-
-  async #finish(): Promise<void> {
+  protected override async beforeUse(): Promise<void> {
+    const lease = await this.ctx.storage.get<Lease>(LEASE_KEY);
+    if (!lease || lease.phase !== 'running') {
+      throw denied('unavailable');
+    }
+    try {
+      await this.#control('heartbeat', lease);
+    } catch (error) {
+      await this.destroy().catch(() => {});
+      throw error;
+    }
+  }
+  protected override async stopped(): Promise<void> {
     if (this.#finishing) {
       return this.#finishing;
     }
     const pending = (async () => {
-      if (this.ctx.container?.running) {
+      if (this.container.running) {
         return;
       }
       const lease = await this.ctx.storage.get<Lease>(LEASE_KEY);
@@ -515,7 +329,9 @@ export class SandboxController extends Sandbox<ControllerEnv> {
         this.env.__VOID_SANDBOX_CONTROL.stopped(this.ctx.id.toString(), lease.generation),
       );
       await this.ctx.storage.delete(LEASE_KEY);
-      this.deleteSchedules('voidHeartbeat');
+      await this.ctx.storage.delete(ACTIVITY_KEY);
+      this.#activity = undefined;
+      await this.ctx.storage.deleteAlarm();
     })();
     this.#finishing = pending;
     try {
@@ -526,39 +342,27 @@ export class SandboxController extends Sandbox<ControllerEnv> {
       }
     }
   }
-
-  async #terminate(): Promise<void> {
-    // Sandbox.destroy performs application cleanup (including container commands)
-    // before killing. Quota enforcement must not depend on that cleanup finishing.
-    if (this.ctx.container?.running) {
-      await this.ctx.container.destroy();
-    }
-    if (this.ctx.container?.running) {
-      throw denied('unavailable');
-    }
-    await this.#finish();
-  }
-
-  override async onStop(...args: Parameters<Sandbox<ControllerEnv>['onStop']>): Promise<void> {
-    // onActivityExpired only requests SIGTERM, and keepAlive may ignore it.
-    // Only a confirmed stopped process releases capacity and finalizes usage.
-    await this.#finish();
-    await super.onStop(...args);
-  }
-
-  async voidHeartbeat(): Promise<void> {
+  async alarm(): Promise<void> {
     try {
       const lease = await this.ctx.storage.get<Lease>(LEASE_KEY);
       if (!lease) {
         return;
       }
-      if (lease.phase === 'running' && this.ctx.container?.running) {
+      if (lease.phase === 'running' && this.container.running) {
+        await this.#loadActivity();
+        if (!this.#activity) {
+          await this.#touch();
+        }
+        if (this.#busy === 0 && Date.now() >= this.#activity!.idleDeadline) {
+          await this.destroy();
+          return;
+        }
         await this.#control('heartbeat', lease);
-      } else if (lease.phase !== 'pending' || !this.#starting) {
-        await this.#terminate();
+      } else if (lease.phase !== 'pending' || !this.starting) {
+        await this.destroy();
       }
     } catch (error) {
-      await this.#terminate().catch(() => {});
+      await this.destroy().catch(() => {});
       console.error('[void/sandbox] lifecycle check failed', error);
     } finally {
       if (await this.ctx.storage.get(LEASE_KEY)) {

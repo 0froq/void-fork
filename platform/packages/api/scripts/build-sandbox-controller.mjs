@@ -18,6 +18,12 @@ export function buildSandboxController(outputDirectory = join(packageRoot, 'dist
         main: join(packageRoot, 'src/sandbox-controller-runtime.ts'),
         compatibility_date: '2026-02-24',
         compatibility_flags: ['nodejs_compat'],
+        alias: {
+          'void/_sandbox-container': join(
+            packageRoot,
+            '../../../packages/void/src/runtime/sandbox-container.ts',
+          ),
+        },
       }),
     );
     const result = spawnSync(

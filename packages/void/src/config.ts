@@ -203,10 +203,7 @@ const VALID_DATABASE_VALUES = new Set(['pg', 'mysql']);
 /** Cloudflare's hard maximum for Workers CPU time per request (5 minutes). */
 const MAX_WORKER_CPU_MS = 300000;
 const VALID_SANDBOX_INSTANCE_TYPES = new Set<SandboxInstanceType>([
-  'dev',
   'lite',
-  'basic',
-  'standard',
   'standard-1',
   'standard-2',
   'standard-3',
@@ -922,11 +919,10 @@ function validateConfigObject(config: unknown): VoidConfig {
             'imageBuildContext',
             'platformImage',
             'instanceType',
-            'maxInstances',
           ].includes(key)
         ) {
           throw new Error(
-            `config: Unknown key 'sandbox.${key}' in ${CONFIG_FILE}. Valid: binding, className, containerName, image, imageBuildContext, platformImage, instanceType, maxInstances.`,
+            `config: Unknown key 'sandbox.${key}' in ${CONFIG_FILE}. Valid: binding, className, containerName, image, imageBuildContext, platformImage, instanceType.`,
           );
         }
       }
@@ -949,16 +945,6 @@ function validateConfigObject(config: unknown): VoidConfig {
       ) {
         throw new Error(
           `config: "sandbox.instanceType" in ${CONFIG_FILE} must be one of: ${[...VALID_SANDBOX_INSTANCE_TYPES].join(', ')}.`,
-        );
-      }
-      if (
-        sandbox.maxInstances !== undefined &&
-        (typeof sandbox.maxInstances !== 'number' ||
-          !Number.isInteger(sandbox.maxInstances) ||
-          sandbox.maxInstances < 1)
-      ) {
-        throw new Error(
-          `config: "sandbox.maxInstances" in ${CONFIG_FILE} must be a positive integer.`,
         );
       }
     } else {

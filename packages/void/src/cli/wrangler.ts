@@ -27,7 +27,9 @@ import type { WebSocketRouteDefinition } from '../router/websocket.ts';
 import {
   DEFAULT_SANDBOX_BINDING,
   SANDBOX_MIGRATION_TAG,
+  assertSandboxNamespaceConfig,
   resolveSandboxConfig,
+  sandboxContainerConfig,
   type ResolvedSandboxConfig,
 } from '../sandbox/config.ts';
 
@@ -718,7 +720,8 @@ export function syncWranglerBindings(
     const sandbox = options?.sandbox ?? resolveSandboxConfig({ sandbox: true }, root);
     const bindingName =
       options?.bindingNames?.sandbox ?? sandbox?.binding ?? DEFAULT_SANDBOX_BINDING;
-    const className = sandbox?.className ?? 'Sandbox';
+    const className = sandbox.className;
+    assertSandboxNamespaceConfig(parsed, sandbox);
     const existingDurableObjectBindings =
       ((
         parsed.durable_objects as
@@ -740,20 +743,12 @@ export function syncWranglerBindings(
 
     const existingContainers =
       (parsed.containers as Array<{ name?: string; class_name?: string }> | undefined) ?? [];
-    if (!existingContainers.some((container) => container.class_name === className)) {
-      parsed.containers = [
-        ...existingContainers,
-        {
-          name: sandbox?.containerName ?? 'void-sandbox',
-          class_name: className,
-          image: sandbox?.image,
-          ...(sandbox?.imageBuildContext && {
-            image_build_context: sandbox.imageBuildContext,
-          }),
-          ...(sandbox?.instanceType && { instance_type: sandbox.instanceType }),
-          ...(sandbox?.maxInstances != null && { max_instances: sandbox.maxInstances }),
-        },
-      ];
+    const containers = [
+      ...existingContainers.filter((container) => container.class_name !== className),
+      sandboxContainerConfig(sandbox),
+    ];
+    if (JSON.stringify(containers) !== JSON.stringify(existingContainers)) {
+      parsed.containers = containers;
       modified = true;
     }
 

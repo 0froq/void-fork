@@ -281,14 +281,15 @@ function containersFromWrangler(raw: JsonObject, exports: JsonObject): Array<Jso
     throw new Error('Invalid Containers in the built Cloudflare config.');
   }
   return (values as Array<JsonObject>).map((value) => {
-    if (
-      typeof value.name !== 'string' ||
-      typeof value.class_name !== 'string' ||
-      typeof value.image !== 'string'
-    ) {
-      throw new Error('cf requires a name, class_name and image for each Container.');
+    if (typeof value.name !== 'string' || typeof value.class_name !== 'string') {
+      throw new Error('cf requires a name and class_name for each Container.');
     }
-    const fields = new Set(['name', 'class_name', 'image', 'max_instances', 'instance_type']);
+    const managed = value.scheduling_policy === 'durable_object';
+    const fields = new Set(
+      managed
+        ? ['name', 'class_name', 'scheduling_policy', 'images']
+        : ['name', 'class_name', 'image', 'max_instances', 'instance_type'],
+    );
     for (const key of Object.keys(value)) {
       if (!fields.has(key)) {
         throw new Error(`cf cannot migrate Container setting ${key}.`);
@@ -299,10 +300,52 @@ function containersFromWrangler(raw: JsonObject, exports: JsonObject): Array<Jso
       throw new Error(`Container ${value.name} needs a SQLite Durable Object export.`);
     }
     declaration.container = value.name;
+    if (managed) {
+      const images = record(value.images);
+      if (!images) {
+        throw new Error('A Sandbox requires a named image.');
+      }
+      return {
+        name: value.name,
+        schedulingPolicy: 'durable-object',
+        images: Object.fromEntries(
+          Object.entries(images).map(([name, image]) => {
+            const source = record(image);
+            if (
+              !source ||
+              Object.keys(source).some(
+                (key) => !['dockerfile', 'build_context', 'image'].includes(key),
+              ) ||
+              (source.dockerfile !== undefined && source.image !== undefined) ||
+              (source.build_context !== undefined && typeof source.build_context !== 'string')
+            ) {
+              throw new Error('Invalid Sandbox image.');
+            }
+            if (typeof source.dockerfile === 'string') {
+              return [
+                name,
+                {
+                  dockerfile: source.dockerfile,
+                  ...(typeof source.build_context === 'string'
+                    ? { buildContext: source.build_context }
+                    : {}),
+                },
+              ];
+            }
+            if (typeof source.image === 'string') {
+              return [name, { reference: source.image }];
+            }
+            throw new Error('Invalid Sandbox image source.');
+          }),
+        ),
+      };
+    }
+    if (typeof value.image !== 'string') {
+      throw new Error('A Container requires an image.');
+    }
     return {
       name: value.name,
-      schedulingPolicy: 'durable-object',
-      images: { default: { reference: value.image } },
+      image: { reference: value.image },
       ...(typeof value.max_instances === 'number' ? { maxInstances: value.max_instances } : {}),
       ...(typeof value.instance_type === 'string' ? { instanceType: value.instance_type } : {}),
     };

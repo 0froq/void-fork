@@ -446,13 +446,12 @@ function toWebSocketManifest(
 
 function toSandboxManifest(sandbox: ResolvedSandboxConfig): SandboxManifestMeta {
   return {
-    controllerProtocol: 1,
+    controllerProtocol: 2,
     bindingName: sandbox.binding,
     className: sandbox.className,
     containerName: sandbox.containerName,
     image: sandbox.platformImage,
     ...(sandbox.instanceType && { instanceType: sandbox.instanceType }),
-    ...(sandbox.maxInstances != null && { maxInstances: sandbox.maxInstances }),
   };
 }
 

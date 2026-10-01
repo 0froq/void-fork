@@ -175,17 +175,17 @@ describe('playground/kitchen-sink build', () => {
     expect(wranglerConfig.compatibility_flags).toContain('nodejs_compat');
     expect(wranglerConfig.durable_objects.bindings).toContainEqual({
       name: 'SANDBOX',
-      class_name: 'Sandbox',
+      class_name: 'SandboxV1',
     });
     expect(wranglerConfig.containers).toEqual([
       expect.objectContaining({
-        name: 'void-sandbox',
-        class_name: 'Sandbox',
+        name: 'void-sandbox-v1',
+        class_name: 'SandboxV1',
       }),
     ]);
     expect(wranglerConfig.migrations).toContainEqual({
-      tag: 'void-sandbox-v1',
-      new_sqlite_classes: ['Sandbox'],
+      tag: 'void-sandbox-v2',
+      new_sqlite_classes: ['SandboxV1'],
     });
   });
 });

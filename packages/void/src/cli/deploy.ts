@@ -117,6 +117,7 @@ import {
   isSandboxEnabled,
   requiresSandboxPlatformImage,
   resolveSandboxConfig,
+  sandboxContainerConfig,
   SANDBOX_MIGRATION_TAG,
 } from '../sandbox/config.ts';
 import { trustedCloudflareWorkerAccessHeaders } from '../shared/cf-access.ts';
@@ -1150,21 +1151,43 @@ export function reconstructExpectedContainers(
   const expected: Array<Record<string, unknown>> = [...rootContainers];
   if (needsSandbox) {
     const sandbox = resolveSandboxConfig(config, root);
-    const alreadyDeclared = rootContainers.some(
+    const index = expected.findIndex(
       (container) => readD1EntryString(container, 'class_name') === sandbox.className,
     );
-    if (!alreadyDeclared) {
-      expected.push({
-        name: sandbox.containerName,
-        class_name: sandbox.className,
-        image: sandbox.image,
-        ...(sandbox.imageBuildContext && { image_build_context: sandbox.imageBuildContext }),
-        ...(sandbox.instanceType && { instance_type: sandbox.instanceType }),
-        ...(sandbox.maxInstances != null && { max_instances: sandbox.maxInstances }),
-      });
+    if (index >= 0) {
+      expected.splice(index, 1);
     }
+    expected.push(sandboxContainerConfig(sandbox));
   }
   return expected;
+}
+
+/** Normalize only the named-image path fields Vite relocates into its output config. */
+function normalizeContainerImagePaths(container: unknown, base: string): unknown {
+  if (!container || typeof container !== 'object' || Array.isArray(container)) {
+    return container;
+  }
+  const value = container as Record<string, unknown>;
+  if (!value.images || typeof value.images !== 'object' || Array.isArray(value.images)) {
+    return container;
+  }
+  return {
+    ...value,
+    images: Object.fromEntries(
+      Object.entries(value.images).map(([name, source]) => {
+        if (!source || typeof source !== 'object' || Array.isArray(source)) {
+          return [name, source];
+        }
+        const image = { ...source } as Record<string, unknown>;
+        for (const key of ['dockerfile', 'build_context']) {
+          if (typeof image[key] === 'string') {
+            image[key] = resolve(base, image[key]);
+          }
+        }
+        return [name, image];
+      }),
+    ),
+  };
 }
 
 /** Reconstruct the Durable Object state emitted after the pre-build root config is synced. */
@@ -2276,7 +2299,12 @@ export function verifyGeneratedDeployConfig(
             reason: `generated config declares a container application ${JSON.stringify(className)} that Void did not derive from source — refusing to deploy a container application the build injected.`,
           };
         }
-        if (!deepEqual(container, expectedContainer)) {
+        if (
+          !deepEqual(
+            normalizeContainerImagePaths(container, dirname(redirectedPath)),
+            normalizeContainerImagePaths(expectedContainer, root),
+          )
+        ) {
           return {
             ok: false,
             reason: `generated config container application ${JSON.stringify(className)} does not match the pre-build config — refusing to deploy a container application the build retargeted.`,
@@ -5865,7 +5893,7 @@ export async function runCloudflareDeploy(
       log.error('deploy: cf could not prepare the built Worker for deployment.');
       return exit(1);
     }
-    preflight.dispose();
+    await preflight.dispose();
   }
 
   // Remember whether a secret operation proved the Worker was absent before it wrote anything.

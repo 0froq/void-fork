@@ -97,7 +97,13 @@ import { isRouteEnabledForEnvironment, type RouteEnvironment } from './router/pa
 import { scanMiddlewareSync, scanRoutePatternsSync } from './router/scan.ts';
 import { scanWebSocketRoutesSync } from './router/websocket.ts';
 import { DEV_INBOX_ENV_VAR, DEV_INBOX_TOKEN_ENV_VAR } from './runtime/email/dev-inbox.ts';
-import { SANDBOX_MIGRATION_TAG, isSandboxEnabled, resolveSandboxConfig } from './sandbox/config.ts';
+import {
+  SANDBOX_MIGRATION_TAG,
+  isSandboxEnabled,
+  resolveSandboxConfig,
+  sandboxContainerConfig,
+  assertSandboxNamespaceConfig,
+} from './sandbox/config.ts';
 import { scopedAccessCredentials } from './shared/cf-access.ts';
 import {
   CLOUDFLARE_DEPLOY_BUILD_ENV,
@@ -1646,6 +1652,7 @@ export function voidPlugin(options?: {
     }
 
     if (bindings.needsSandbox && sandboxConfig) {
+      assertSandboxNamespaceConfig({ ...resolved, ...result }, sandboxConfig);
       const currentDurableObjects =
         ((result as Record<string, unknown>).durable_objects as
           | { bindings?: Array<{ name: string; class_name: string }> }
@@ -1679,25 +1686,15 @@ export function voidPlugin(options?: {
           | Array<{ class_name?: string }>
           | undefined) ??
         [];
-      if (
-        !existingContainers.some((container) => container.class_name === sandboxConfig.className)
-      ) {
-        (result as Record<string, unknown>).containers = [
-          ...existingContainers,
-          {
-            name: sandboxConfig.containerName,
-            class_name: sandboxConfig.className,
-            image: sandboxConfig.image,
-            ...(sandboxConfig.imageBuildContext && {
-              image_build_context: sandboxConfig.imageBuildContext,
-            }),
-            ...(sandboxConfig.instanceType && { instance_type: sandboxConfig.instanceType }),
-            ...(sandboxConfig.maxInstances != null && {
-              max_instances: sandboxConfig.maxInstances,
-            }),
-          },
-        ];
-      }
+      (result as Record<string, unknown>).containers = [
+        ...existingContainers.filter(
+          (container) => container.class_name !== sandboxConfig.className,
+        ),
+        sandboxContainerConfig(sandboxConfig),
+      ];
+      // Cloudflare concatenates callback arrays with the resolved config. This
+      // patch already contains every existing Container, so emit the list once.
+      (resolved as Record<string, unknown>).containers = [];
 
       const currentMigrations =
         (result as Record<string, unknown>).migrations ??
@@ -2435,6 +2432,7 @@ export function voidPlugin(options?: {
       },
       sandboxBindingName: sandboxConfig?.binding,
       sandboxClassName: sandboxConfig?.className,
+      sandboxInstanceType: sandboxConfig?.instanceType,
       get live() {
         return shouldEmitLive() ? liveConfig : undefined;
       },

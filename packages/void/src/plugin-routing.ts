@@ -92,6 +92,7 @@ type RoutingPluginOptions = {
   hasSandbox?: boolean;
   sandboxBindingName?: string;
   sandboxClassName?: string;
+  sandboxInstanceType?: string;
   live?: { bindingName: string; className: string };
   durableObjects?: Array<{ bindingName: string; className: string; filePath: string }>;
   /** Data-preserving exports for removed WebSocket Durable Object routes. */
@@ -452,6 +453,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
           ? {
               bindingName: options.sandboxBindingName,
               className: options.sandboxClassName,
+              instanceType: options.sandboxInstanceType,
               runtimePath: sandboxRuntimePath,
             }
           : false,
@@ -612,6 +614,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
               ? {
                   bindingName: options.sandboxBindingName,
                   className: options.sandboxClassName,
+                  instanceType: options.sandboxInstanceType,
                   runtimePath: sandboxRuntimePath,
                 }
               : false,
@@ -758,6 +761,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
                 ? {
                     bindingName: options.sandboxBindingName,
                     className: options.sandboxClassName,
+                    instanceType: options.sandboxInstanceType,
                     runtimePath: sandboxRuntimePath,
                   }
                 : false,

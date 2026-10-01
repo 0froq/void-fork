@@ -22,6 +22,7 @@ export type SandboxContainerConfig = Readonly<{
   namespaceId: string;
   instanceType?: string;
   maxInstances?: number;
+  durableObjectManaged?: boolean;
 }>;
 
 type ScriptBinding = Readonly<{
@@ -137,18 +138,24 @@ export async function tryCreateContainerApplication(
   apiToken: string,
   config: SandboxContainerConfig,
 ): Promise<ContainerApplicationInfo | undefined> {
-  const createBody = {
-    name: config.name,
-    scheduling_policy: 'default',
-    configuration: {
-      image: config.image,
-      instance_type: config.instanceType ?? 'lite',
-    },
-    instances: 0,
-    max_instances: config.maxInstances ?? 20,
-    durable_objects: { namespace_id: config.namespaceId },
-    rollout_active_grace_period: 0,
-  };
+  const createBody = config.durableObjectManaged
+    ? {
+        name: config.name,
+        scheduling_policy: 'durable_object',
+        durable_objects: { namespace_id: config.namespaceId },
+      }
+    : {
+        name: config.name,
+        scheduling_policy: 'default',
+        configuration: {
+          image: config.image,
+          instance_type: config.instanceType ?? 'lite',
+        },
+        instances: 0,
+        max_instances: config.maxInstances ?? 20,
+        durable_objects: { namespace_id: config.namespaceId },
+        rollout_active_grace_period: 0,
+      };
 
   try {
     return await cfFetch<ContainerApplicationInfo>(

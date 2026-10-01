@@ -90,6 +90,14 @@ describe('private SandboxControl authority', () => {
     );
   });
 
+  it.each([1, 2])('authorizes controller protocol %s', async (protocol) => {
+    const row = authority();
+    row.deployment.manifest = JSON.stringify({ sandbox: { runtime: { protocol } } });
+    mocks.authority.mockResolvedValue([row]);
+    const { control } = setup();
+    expect(await control.reserve('instance', 'run')).toEqual({ ok: true });
+  });
+
   it('fails closed when invoked without the private binding identity', async () => {
     const { control, counter } = setup({});
     expect(await control.reserve('instance', 'run')).toEqual({ ok: false, reason: 'unavailable' });

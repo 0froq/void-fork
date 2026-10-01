@@ -163,7 +163,7 @@ async function withBuildOutput(
       await assertExistingProvisionableResources(output.directory, accountId);
       return action(output.directory);
     } finally {
-      output.dispose();
+      await output.dispose();
     }
   } finally {
     rmSync(scratch, { recursive: true, force: true });

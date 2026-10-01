@@ -3,6 +3,7 @@ import {
   MAX_ROUTING_RULES,
   planWebSocketMigrations,
   validateManifestShape,
+  isSandboxRegistryImage,
 } from '@void/deploy-core';
 import { isrCacheKey, isrCachePrefix, isrLegacyCachePrefix } from '@void/isr';
 import {
@@ -2214,12 +2215,30 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     return context.json({ event: 'error', message: shapeError }, 400);
   }
   const incomingManifest = body.manifest as DeployManifest;
-  if (incomingManifest.sandbox && incomingManifest.sandbox.controllerProtocol !== 1) {
+  if (incomingManifest.sandbox && incomingManifest.sandbox.controllerProtocol !== 2) {
     return context.json(
       {
         event: 'error',
         message:
           'Managed Sandboxes require an updated Void runtime. Upgrade void, rebuild the app, and deploy again.',
+      },
+      400,
+    );
+  }
+  if (
+    incomingManifest.sandbox &&
+    ((incomingManifest.sandbox.image !== 'cloudflare/debian-trixie' &&
+      !isSandboxRegistryImage(incomingManifest.sandbox.image)) ||
+      (incomingManifest.sandbox.instanceType !== undefined &&
+        !['lite', 'standard-1', 'standard-2', 'standard-3', 'standard-4'].includes(
+          incomingManifest.sandbox.instanceType,
+        )))
+  ) {
+    return context.json(
+      {
+        event: 'error',
+        message:
+          'Sandbox requires a digest-pinned Cloudflare registry image and a supported instance type.',
       },
       400,
     );
@@ -3321,7 +3340,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         liveManifestResult.changed;
       manifest = liveManifestResult.manifest;
       if (manifest.sandbox) {
-        manifest = { ...manifest, sandbox: { ...manifest.sandbox, runtime: { protocol: 1 } } };
+        manifest = { ...manifest, sandbox: { ...manifest.sandbox, runtime: { protocol: 2 } } };
       }
       if (hasWorkerFiles && manifest.type === undefined) {
         // Rollback identifies retained Workers from their manifest, including

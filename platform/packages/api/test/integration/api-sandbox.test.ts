@@ -51,7 +51,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const SANDBOX_IMAGE_V1 = 'registry.cloudflare.com/sandbox:1.0.0';
+const SANDBOX_IMAGE_V1 =
+  'registry.cloudflare.com/account/code-sandbox@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 function buildSandboxManifest(overrides?: {
   image?: string;
@@ -61,7 +62,7 @@ function buildSandboxManifest(overrides?: {
     version: 3,
     bindings: {},
     sandbox: {
-      controllerProtocol: 1,
+      controllerProtocol: 2,
       bindingName: 'SANDBOX',
       className: 'Sandbox',
       containerName: overrides?.containerName ?? 'void-sandbox',
@@ -180,7 +181,7 @@ describe('per-deploy sandbox integration', () => {
       props: { projectId: project.id, deploymentId: deployId, userId: user.id, slug: project.slug },
     });
     const [stored] = await env.db.select().from(deployments).where(eq(deployments.id, deployId));
-    expect(JSON.parse(stored!.manifest!).sandbox.runtime).toEqual({ protocol: 1 });
+    expect(JSON.parse(stored!.manifest!).sandbox.runtime).toEqual({ protocol: 2 });
     cf.expectCallOrder(
       { method: 'PUT', url: '/workers/scripts/' + controllerName },
       { method: 'POST', url: '/containers/applications' },
@@ -197,7 +198,10 @@ describe('per-deploy sandbox integration', () => {
     );
     expect(containerApp).toBeDefined();
     expect(containerApp!.durable_objects.namespace_id).toBe(namespaceId);
-    expect(containerApp!.configuration.image).toBe(SANDBOX_IMAGE_V1);
+    expect(containerApp!.scheduling_policy).toBe('durable_object');
+    expect(controller.metadata.containers).toEqual([
+      expect.objectContaining({ images: { default: SANDBOX_IMAGE_V1 } }),
+    ]);
 
     // Per-deploy containers do NOT write a `resources` row (no DB pointer —
     // teardown finds them via orphan-recovery enumeration).

@@ -195,6 +195,11 @@ export type SandboxMigrationMeta = {
   deletedClasses?: ReadonlyArray<string>;
 };
 
+/** Named images under the Durable Object scheduling policy must be digest-pinned. */
+export function isSandboxRegistryImage(image: string): boolean {
+  return /^registry\.cloudflare\.com\/[^/@\s]+\/[^@\s]+@sha256:[a-f\d]{64}$/.test(image);
+}
+
 export type SandboxManifestMeta = {
   bindingName: string;
   className: string;
@@ -204,9 +209,9 @@ export type SandboxManifestMeta = {
   maxInstances?: number;
   migrations?: ReadonlyArray<SandboxMigrationMeta>;
   /** Written by the managed platform, never accepted from deployment clients. */
-  runtime?: { protocol: 1 };
+  runtime?: { protocol: 1 | 2 };
   /** Managed transport implemented by the application's bundled Void runtime. */
-  controllerProtocol?: 1;
+  controllerProtocol?: 1 | 2;
 };
 
 export type LiveMigrationMeta = {

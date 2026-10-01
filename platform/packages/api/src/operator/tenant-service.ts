@@ -304,7 +304,7 @@ async function getOwnershipTransferBlockers(
         and(
           eq(deployments.project_id, projectId),
           inArray(deployments.status, TERMINAL_DEPLOYMENT_STATUSES),
-          sql`${deployments.manifest}::jsonb #>> '{sandbox,runtime,protocol}' = '1'`,
+          sql`${deployments.manifest}::jsonb #>> '{sandbox,runtime,protocol}' IN ('1', '2')`,
           sql`COALESCE(${deployments.manifest}::jsonb #>> '{sandbox,runtime,cleanupComplete}', 'false') <> 'true'`,
         ),
       )

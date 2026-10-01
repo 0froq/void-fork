@@ -8,3 +8,5 @@ export class DurableObject {}
 // integration test that imports index.ts loads this stub — it must provide both
 // base classes or the class-definition `extends` evaluates to undefined and throws.
 export class WorkerEntrypoint {}
+
+export class RpcTarget {}

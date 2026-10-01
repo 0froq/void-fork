@@ -58,7 +58,7 @@ export interface CloudBindings extends VoidGeneratedEnvBindings {
   KV: KVNamespace;
   STORAGE: R2Bucket;
   AI: Ai;
-  SANDBOX: DurableObjectNamespace<import('@cloudflare/sandbox').Sandbox>;
+  SANDBOX: DurableObjectNamespace<import('./sandbox.ts').VoidPlatformSandbox>;
   [key: string]: unknown;
 }
 

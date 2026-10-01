@@ -1,63 +1,55 @@
-import {
-  Sandbox,
-  getSandbox as getCloudflareSandbox,
-  type ExecutionSession,
-  type Process,
-  type SandboxOptions,
-} from '@cloudflare/sandbox';
+import type { Files } from '@cloudflare/sandbox';
 import { getRawRuntimeEnv } from './env-raw.ts';
 import { requireRuntimeBinding } from './env.ts';
+import {
+  SandboxContainer,
+  validateSandboxOptions,
+  type SandboxCapability,
+  type SandboxOptions,
+  type SandboxExecOptions,
+  type SandboxProcessWire,
+} from './sandbox-container.ts';
 
-export { Sandbox };
-export type { SandboxOptions };
-
+export * from '@cloudflare/sandbox';
+export type { SandboxOptions, SandboxExecOptions };
 export const DEFAULT_SANDBOX_ID = 'default';
 export const DEFAULT_SANDBOX_BINDING = 'SANDBOX';
 export const SANDBOX_SERVICE_BINDING = '__VOID_SANDBOX';
-export type VoidSandboxOptions = SandboxOptions & { binding?: string };
+export type VoidSandboxOptions = SandboxOptions & { binding?: string; normalizeId?: boolean };
+export type SandboxProcess = {
+  pid: number;
+  isPty: boolean;
+  stdin: WritableStream | null;
+  stdout: ReadableStream | null;
+  stderr: ReadableStream | null;
+  readonly exitCode: Promise<number>;
+  output(): Promise<ExecOutput>;
+  kill(signal?: number): Promise<void>;
+  resize(cols: number, rows: number): Promise<void>;
+};
+export type SandboxClient = {
+  exec(argv: Array<string>, options?: SandboxExecOptions): Promise<SandboxProcess>;
+  files: Files;
+  fetch(port: number, request: Request): Promise<Response>;
+  running(): Promise<boolean>;
+  destroy(): Promise<void>;
+};
 
 export class SandboxLimitError extends Error {
   override readonly name = 'SandboxLimitError';
   readonly reason: 'concurrency' | 'runtime_budget';
-
   constructor(reason: 'concurrency' | 'runtime_budget', message?: string) {
     super(message ?? `Sandbox limit reached: ${reason}`);
     this.reason = reason;
   }
 }
-
 export class SandboxUnavailableError extends Error {
   override readonly name = 'SandboxUnavailableError';
-
   constructor(message = 'Managed Sandbox is unavailable on this Void platform.') {
     super(message);
   }
 }
-
-type SandboxCapability = {
-  invoke(operation: string, args: Array<unknown>): Promise<unknown>;
-};
-type NestedCapability = {
-  invoke(operation: string, args: Array<unknown>): Promise<unknown>;
-};
-type ProcessWire = Omit<
-  Process,
-  'kill' | 'getStatus' | 'getLogs' | 'waitForLog' | 'waitForPort' | 'waitForExit'
-> & {
-  __voidSandboxType: 'process';
-  capability: NestedCapability;
-};
-type SessionWire = {
-  __voidSandboxType: 'session';
-  capability: NestedCapability;
-  id: string;
-};
-type SandboxService = {
-  getSandbox(id: string, options: SandboxOptions): Promise<SandboxCapability>;
-};
-
 let sandboxBindingName = DEFAULT_SANDBOX_BINDING;
-
 export function __setSandboxBindingName(bindingName: string): void {
   sandboxBindingName = bindingName;
 }
@@ -75,153 +67,162 @@ function rethrowSandboxError(error: unknown): never {
   throw error;
 }
 
-function managedClient<T extends Sandbox>(capability: SandboxCapability): T {
-  const call = async (
-    target: NestedCapability,
-    operation: string,
-    args: Array<unknown>,
-  ): Promise<unknown> => {
+function encodeOptions(value: unknown): { options: unknown; finish(): void } {
+  if (!value || typeof value !== 'object') {
+    return { options: value, finish() {} };
+  }
+  const { signal, ...options } = value as SandboxExecOptions;
+  if (!signal) {
+    return { options, finish() {} };
+  }
+  signal.throwIfAborted();
+  let closed = false;
+  let remove!: () => void;
+  let finish!: () => void;
+  const abort = new ReadableStream({
+    start(controller) {
+      const listener = () => finish();
+      remove = () => signal.removeEventListener('abort', listener);
+      finish = () => {
+        remove();
+        if (!closed) {
+          closed = true;
+          controller.close();
+        }
+      };
+      signal.addEventListener('abort', listener, { once: true });
+    },
+    cancel() {
+      closed = true;
+      remove();
+    },
+  });
+  return { options: { ...options, abort }, finish };
+}
+
+function client(capability: SandboxCapability): SandboxClient {
+  const call = async (operation: string, args: Array<unknown>): Promise<unknown> => {
     try {
-      return decodeManagedResult(
-        await target.invoke(operation, prepareManagedArgs(operation, args)),
-      );
+      return await capability.invoke(operation, args);
     } catch (error) {
       rethrowSandboxError(error);
     }
   };
-  // The server owns the operation allowlist. The Proxy preserves the upstream
-  // SDK's method-shaped API without serializing streams, callback functions or
-  // session/process objects through JSON. It never contains a raw DO stub.
-  return new Proxy(Object.create(null) as T, {
-    get(_target, property) {
-      if (typeof property !== 'string' || property === 'then') {
+  const callWithOptions = async (
+    operation: string,
+    args: Array<unknown>,
+    index: number,
+  ): Promise<unknown> => {
+    const encoded = encodeOptions(args[index]);
+    args[index] = encoded.options;
+    try {
+      return await call(operation, args);
+    } catch (error) {
+      // Admission and validation can fail before the receiver reads the channel.
+      encoded.finish();
+      throw error;
+    }
+  };
+  const files = new Proxy(Object.create(null) as Files, {
+    get(_target, method) {
+      if (typeof method !== 'string' || method === 'then') {
         return undefined;
       }
-      if (property === 'tunnels') {
-        return new Proxy(Object.create(null) as object, {
-          get(_tunnels, method) {
-            if (typeof method !== 'string' || method === 'then') {
-              return undefined;
-            }
-            return (...args: Array<unknown>) => call(capability, 'tunnels', [method, ...args]);
-          },
-        });
-      }
-      return (...args: Array<unknown>) => call(capability, property, args);
+      return (...args: Array<unknown>) => {
+        const index = method === 'writeFile' || method === 'rename' ? 3 : 2;
+        return callWithOptions('files', [method, ...args], index);
+      };
     },
   });
-
-  function decodeManagedResult(value: unknown): unknown {
-    if (Array.isArray(value)) {
-      return value.map(decodeManagedResult);
-    }
-    if (!value || typeof value !== 'object') {
-      return value;
-    }
-    const record = value as Record<string, unknown>;
-    if (record.__voidSandboxType === 'process') {
-      const {
-        capability: processCapability,
-        __voidSandboxType: _type,
-        ...snapshot
-      } = value as ProcessWire;
-      return Object.assign(snapshot, {
-        kill: (...args: Array<unknown>) => call(processCapability, 'kill', args),
-        getStatus: (...args: Array<unknown>) => call(processCapability, 'getStatus', args),
-        getLogs: (...args: Array<unknown>) => call(processCapability, 'getLogs', args),
-        waitForLog: (...args: Array<unknown>) => call(processCapability, 'waitForLog', args),
-        waitForPort: (...args: Array<unknown>) => call(processCapability, 'waitForPort', args),
-        waitForExit: (...args: Array<unknown>) => call(processCapability, 'waitForExit', args),
-      } as unknown as Pick<
-        Process,
-        'kill' | 'getStatus' | 'getLogs' | 'waitForLog' | 'waitForPort' | 'waitForExit'
-      >);
-    }
-    if (record.__voidSandboxType === 'session') {
-      const session = value as SessionWire;
-      return new Proxy({ id: session.id } as ExecutionSession, {
-        get(target, property) {
-          if (property === 'id') {
-            return target.id;
-          }
-          if (typeof property !== 'string' || property === 'then') {
-            return undefined;
-          }
-          return (...args: Array<unknown>) => call(session.capability, property, args);
+  return {
+    files,
+    async exec(argv, options) {
+      const wire = (await callWithOptions('exec', [argv, options], 1)) as SandboxProcessWire;
+      let exitCode: Promise<number> | undefined;
+      let output: Promise<ExecOutput> | undefined;
+      const process: SandboxProcess = {
+        pid: wire.pid,
+        isPty: wire.isPty,
+        stdin: wire.stdin,
+        stdout: wire.stdout,
+        stderr: wire.stderr,
+        get exitCode() {
+          return (exitCode ??= wire.capability.invoke('exitCode', []) as Promise<number>);
         },
-      });
-    }
-    return value;
-  }
-
-  function prepareManagedArgs(operation: string, args: Array<unknown>): Array<unknown> {
-    if (operation !== 'startProcess') {
-      return args;
-    }
-    const [command, options, ...rest] = args;
-    if (!options || typeof options !== 'object' || Array.isArray(options)) {
-      return args;
-    }
-    const onStart = (options as { onStart?: unknown }).onStart;
-    if (typeof onStart !== 'function') {
-      return args;
-    }
-    return [
-      command,
-      {
-        ...options,
-        onStart: (process: unknown) => onStart(decodeManagedResult(process)),
-      },
-      ...rest,
-    ];
-  }
+        output() {
+          return (output ??= Promise.all([
+            wire.stdout ? new Response(wire.stdout).arrayBuffer() : new ArrayBuffer(0),
+            wire.stderr ? new Response(wire.stderr).arrayBuffer() : new ArrayBuffer(0),
+            process.exitCode,
+          ]).then(([stdout, stderr, exitCode]) => ({ stdout, stderr, exitCode })));
+        },
+        kill: async (signal) => {
+          await wire.capability.invoke('kill', [signal]);
+        },
+        resize: async (cols, rows) => {
+          await wire.capability.invoke('resize', [cols, rows]);
+        },
+      };
+      return process;
+    },
+    fetch: async (port, request) => (await call('fetch', [port, request])) as Response,
+    running: async () => (await call('running', [])) as boolean,
+    destroy: async () => {
+      await call('destroy', []);
+    },
+  };
 }
 
-/**
- * Retained for generated native/local Worker entries. Managed deployments host
- * the platform-owned Sandbox class in a separate Worker and never use this DO.
- */
-export class VoidPlatformSandbox<Env = unknown> extends Sandbox<Env> {
-  override async onStart(): Promise<void> {
+/** Generated local/native DO. Managed execution uses the trusted controller. */
+export class VoidPlatformSandbox<Env = unknown> extends SandboxContainer<Env> {
+  protected override async beforeStart(): Promise<void> {
     const env = this.env as Record<string, unknown>;
     if (env.__PROJECT_ID !== undefined || env.__VOID_PROXY !== undefined) {
       throw new SandboxUnavailableError(
         'Managed Sandboxes require the platform Sandbox controller. Redeploy this application.',
       );
     }
-    await super.onStart();
   }
 }
 
-/** Resolve an isolated Sandbox on the current deployment. Starts on first use. */
-export async function getSandbox<T extends Sandbox = Sandbox>(
+/** Resolve a container by name. Starts on the first command, file or port operation. */
+export async function getSandbox(
   id: string = DEFAULT_SANDBOX_ID,
-  options?: VoidSandboxOptions,
-): Promise<T> {
-  const { binding = sandboxBindingName, ...sandboxOptions } = options ?? {};
-  const runtimeEnv = getRawRuntimeEnv();
-  const service = runtimeEnv[SANDBOX_SERVICE_BINDING] as SandboxService | undefined;
+  options: VoidSandboxOptions = {},
+): Promise<SandboxClient> {
+  const { binding = sandboxBindingName, normalizeId = true, ...sandboxOptions } = options;
+  if (typeof normalizeId !== 'boolean') {
+    throw new TypeError('Sandbox normalizeId must be a boolean.');
+  }
+  validateSandboxOptions(sandboxOptions);
+  if (typeof id !== 'string' || id.length === 0 || id.length > 63) {
+    throw new TypeError('Sandbox id must contain between 1 and 63 characters.');
+  }
+  if (normalizeId) {
+    id = id.toLowerCase();
+  }
+  const env = getRawRuntimeEnv();
+  const service = env[SANDBOX_SERVICE_BINDING] as
+    | { getSandbox(id: string, options: SandboxOptions): Promise<SandboxCapability> }
+    | undefined;
   if (service) {
     if (binding !== sandboxBindingName) {
       throw new SandboxUnavailableError(`Managed Sandbox binding ${binding} is unavailable.`);
     }
     try {
-      return managedClient<T>(
-        await service.getSandbox(id, { normalizeId: true, ...sandboxOptions }),
-      );
+      return client(await service.getSandbox(id, sandboxOptions));
     } catch (error) {
       rethrowSandboxError(error);
     }
   }
-  if (runtimeEnv.__PROJECT_ID !== undefined || runtimeEnv.__VOID_PROXY !== undefined) {
+  if (env.__PROJECT_ID !== undefined || env.__VOID_PROXY !== undefined) {
     throw new SandboxUnavailableError(
       'This deployment has no managed Sandbox controller. Redeploy this application.',
     );
   }
-  return getCloudflareSandbox<T>(requireRuntimeBinding<DurableObjectNamespace<T>>(binding), id, {
-    normalizeId: true,
-    ...sandboxOptions,
-  });
+  const stub =
+    requireRuntimeBinding<DurableObjectNamespace<VoidPlatformSandbox>>(binding).getByName(id);
+  await stub.configure(sandboxOptions);
+  return client(stub);
 }
-
 export const sandbox: { get: typeof getSandbox } = { get: getSandbox };

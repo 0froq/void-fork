@@ -14,7 +14,8 @@
     "schema.json",
     "skills",
     "AGENTS_TEMPLATE.md",
-    "README.md"
+    "README.md",
+    "sandbox.Dockerfile"
   ],
   "type": "module",
   "imports": {
@@ -316,6 +317,10 @@
       "types": "./dist/runtime/db-mysql.d.mts",
       "import": "./dist/runtime/db-mysql.mjs",
       "require": "./dist/runtime/db-mysql.mjs"
+    },
+    "./_sandbox-container": {
+      "types": "./dist/runtime/sandbox-container.d.mts",
+      "import": "./dist/runtime/sandbox-container.mjs"
     }
   },
   "scripts": {
@@ -326,7 +331,7 @@
   "dependencies": {
     "@cloudflare/build-output-utils": "0.8.4",
     "@cloudflare/config": "0.22.0",
-    "@cloudflare/sandbox": "~0.12.10",
+    "@cloudflare/sandbox": "1.0.0",
     "@cloudflare/vite-plugin": "1.62.2",
     "@cloudflare/workers-auth": "0.9.5",
     "@cloudflare/workers-types": "catalog:",

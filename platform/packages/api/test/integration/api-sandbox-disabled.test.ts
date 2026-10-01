@@ -54,11 +54,12 @@ describe('managed Sandbox capability disablement', () => {
             assetManifestVersion: 2,
             bindings: {},
             sandbox: {
-              controllerProtocol: 1,
+              controllerProtocol: 2,
               bindingName: 'SANDBOX',
               className: 'Sandbox',
               containerName: 'void-sandbox',
-              image: 'registry.cloudflare.com/sandbox:1.0.0',
+              image:
+                'registry.cloudflare.com/account/code-sandbox@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
               migrations: [{ tag: 'sandbox-v1', newSqliteClasses: ['Sandbox'] }],
             },
           },
@@ -91,7 +92,8 @@ describe('managed Sandbox capability disablement', () => {
             bindingName: 'SANDBOX',
             className: 'Sandbox',
             containerName: 'void-sandbox',
-            image: 'registry.cloudflare.com/sandbox:1.0.0',
+            image:
+              'registry.cloudflare.com/account/code-sandbox@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
           },
         }),
       })

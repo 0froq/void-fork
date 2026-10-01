@@ -114,7 +114,7 @@ export class SandboxControl extends WorkerEntrypoint<
     } catch {
       return { ok: false, reason: 'unavailable' };
     }
-    if (manifest?.sandbox?.runtime?.protocol !== 1) {
+    if (manifest?.sandbox?.runtime?.protocol !== 1 && manifest?.sandbox?.runtime?.protocol !== 2) {
       return { ok: false, reason: 'unavailable' };
     }
     if (

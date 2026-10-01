@@ -48,35 +48,37 @@ export const POST = defineHandler(async (c) => {
   try {
     const sandbox = await getSandbox('kitchen-sink-code-lab');
 
-    await sandbox.mkdir(WORKDIR, { recursive: true });
-    await sandbox.writeFile(
+    await sandbox.files.mkdir(WORKDIR, { recursive: true });
+    await sandbox.files.writeFile(
       `${WORKDIR}/input.json`,
       JSON.stringify({ requests: sampleRequests }, null, 2),
     );
-    await sandbox.writeFile(`${WORKDIR}/user-code.mjs`, code);
-    await sandbox.writeFile(`${WORKDIR}/run.mjs`, RUNNER);
+    await sandbox.files.writeFile(`${WORKDIR}/user-code.mjs`, code);
+    await sandbox.files.writeFile(`${WORKDIR}/run.mjs`, RUNNER);
 
-    const result = await sandbox.exec('node run.mjs', {
+    const started = performance.now();
+    const process = await sandbox.exec(['node', 'run.mjs'], {
       cwd: WORKDIR,
-      timeout: 5_000,
+      signal: AbortSignal.timeout(5_000),
       env: {
         NODE_OPTIONS: '--disable-proto=throw',
       },
     });
 
+    const result = await process.output();
     let output: unknown = null;
-    if (result.success) {
-      const file = await sandbox.readFile(`${WORKDIR}/output.json`, { encoding: 'utf-8' });
-      output = JSON.parse(file.content);
+    if (result.exitCode === 0) {
+      const file = await sandbox.files.readFile(`${WORKDIR}/output.json`);
+      output = JSON.parse(await file.text());
     }
 
     return c.json({
-      ok: result.success,
+      ok: result.exitCode === 0,
       output,
-      stdout: result.stdout,
-      stderr: result.stderr,
+      stdout: new TextDecoder().decode(result.stdout),
+      stderr: new TextDecoder().decode(result.stderr),
       exitCode: result.exitCode,
-      duration: result.duration,
+      duration: performance.now() - started,
     });
   } catch (err) {
     // Quota denials from the platform gate are user-facing 4xx, not server

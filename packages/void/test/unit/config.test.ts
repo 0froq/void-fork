@@ -129,7 +129,6 @@ describe('readConfig', () => {
           binding: 'CODE',
           image: './Dockerfile.sandbox',
           instanceType: 'lite',
-          maxInstances: 2,
         },
       }),
     );
@@ -150,7 +149,6 @@ describe('readConfig', () => {
       binding: 'CODE',
       image: './Dockerfile.sandbox',
       instanceType: 'lite',
-      maxInstances: 2,
     });
     cleanup();
   });
@@ -284,9 +282,9 @@ describe('readConfig', () => {
           containerName: 'code-sandbox',
           image: './Dockerfile.sandbox',
           imageBuildContext: '.',
-          platformImage: 'registry.example.com/code-sandbox:latest',
-          instanceType: 'basic',
-          maxInstances: 3,
+          platformImage:
+            'registry.cloudflare.com/account/code-sandbox@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          instanceType: 'standard-1',
         },
       }),
     );
@@ -296,9 +294,9 @@ describe('readConfig', () => {
       containerName: 'code-sandbox',
       image: './Dockerfile.sandbox',
       imageBuildContext: '.',
-      platformImage: 'registry.example.com/code-sandbox:latest',
-      instanceType: 'basic',
-      maxInstances: 3,
+      platformImage:
+        'registry.cloudflare.com/account/code-sandbox@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      instanceType: 'standard-1',
     });
     cleanup();
   });
@@ -307,21 +305,38 @@ describe('readConfig', () => {
     const config = resolveSandboxConfig(
       {
         sandbox: {
-          image: 'docker.io/cloudflare/sandbox:0.8.11',
+          image:
+            'registry.cloudflare.com/account/code-sandbox@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         },
       },
       tmpDir,
     );
 
-    expect(config.image).toBe('docker.io/cloudflare/sandbox:0.8.11');
-    expect(config.platformImage).toBe('docker.io/cloudflare/sandbox:0.8.11');
+    expect(config.image).toBe(
+      'registry.cloudflare.com/account/code-sandbox@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    );
+    expect(config.platformImage).toBe(
+      'registry.cloudflare.com/account/code-sandbox@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    );
   });
 
-  it('uses the matching published sandbox image by default', () => {
+  it('rejects external registries and mutable tags for Sandbox scheduling', () => {
+    expect(() =>
+      resolveSandboxConfig({ sandbox: { image: 'docker.io/cloudflare/sandbox:1.0.0' } }, tmpDir),
+    ).toThrow('digest-pinned');
+    expect(() =>
+      resolveSandboxConfig(
+        { sandbox: { platformImage: 'registry.cloudflare.com/account/sandbox:latest' } },
+        tmpDir,
+      ),
+    ).toThrow('digest-pinned');
+  });
+
+  it('uses a packaged native Dockerfile and the managed Node image by default', () => {
     const config = resolveSandboxConfig({ sandbox: true }, tmpDir);
 
-    expect(config.image).toMatch(/^docker\.io\/cloudflare\/sandbox:/);
-    expect(config.platformImage).toBe(config.image);
+    expect(config.image).toMatch(/sandbox\.Dockerfile$/);
+    expect(config.platformImage).toBe('cloudflare/debian-trixie');
   });
 
   it('throws on invalid sandbox config', () => {
@@ -330,7 +345,7 @@ describe('readConfig', () => {
     cleanup();
 
     setup(JSON.stringify({ sandbox: { maxInstances: 0 } }));
-    expect(() => readConfig(tmpDir)).toThrow('"sandbox.maxInstances"');
+    expect(() => readConfig(tmpDir)).toThrow('sandbox.maxInstances');
     cleanup();
   });
 
