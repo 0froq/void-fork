@@ -92,6 +92,13 @@ isolation enabled: these suites mock globals, keep database state, and exercise 
 The full verification command builds before running the platform's type-aware lint, so it also
 works without a pre-existing dashboard `.void/tsconfig.json`.
 
+## Reusing transforms
+
+Persistent `fsModuleCache` is enabled to reuse transformations across invocations. It does not
+cache test results or remove per-file module isolation. The first run primes it; compare repeated
+runs with the same selection and machine load. For a control use `--no-fsModuleCache`; use
+`vp test --clearCache` only when diagnosing cache problems, not before ordinary tests.
+
 ## Suite organization and CI scheduling
 
 CI builds and typechecks every playground once per OS in a dedicated required job. Integration

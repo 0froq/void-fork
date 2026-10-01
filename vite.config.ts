@@ -394,6 +394,7 @@ export default defineConfig({
   },
   resolve: { alias: platformAlias },
   test: {
+    fsModuleCache: true,
     silent: 'passed-only',
     sequence: { sequencer: SuiteSequencer },
     projects: [
@@ -401,6 +402,7 @@ export default defineConfig({
         extends: false,
         test: {
           name: 'cli-unit',
+          fsModuleCache: true,
           include: cliUnitTests,
           pool: 'threads',
           maxWorkers,
@@ -411,6 +413,7 @@ export default defineConfig({
         extends: false,
         test: {
           name: 'unit',
+          fsModuleCache: true,
           include: ['packages/*/test/unit/**/*.test.ts'],
           exclude: cliUnitTests,
           sequence: { groupOrder: 2 },
@@ -426,6 +429,7 @@ export default defineConfig({
         resolve: { alias: platformAlias },
         test: {
           name: 'platform-unit',
+          fsModuleCache: true,
           pool: 'threads',
           include: ['platform/packages/*/test/**/*.test.ts'],
           exclude: ['platform/packages/api/test/integration/**'],
@@ -437,6 +441,7 @@ export default defineConfig({
         resolve: { alias: platformAlias },
         test: {
           name: 'platform-api-integration',
+          fsModuleCache: true,
           include: apiTimezoneTests,
           globalSetup: ['platform/packages/api/test/integration/global-setup.ts'],
           setupFiles: ['platform/packages/api/test/integration/setup.ts'],
@@ -449,6 +454,7 @@ export default defineConfig({
         resolve: { alias: platformAlias },
         test: {
           name: 'platform-api-integration-threads',
+          fsModuleCache: true,
           pool: 'threads',
           include: ['platform/packages/api/test/integration/**/*.test.ts'],
           exclude: apiTimezoneTests,
@@ -464,6 +470,7 @@ export default defineConfig({
           // Every integration file here owns its fixture directory, so one worker pool can
           // schedule the longest files first and fill idle slots across package boundaries.
           name: 'parallel-integration',
+          fsModuleCache: true,
           globalSetup: ['test/playground-snapshots.ts'],
           // Bound simultaneous database engines and framework compilers locally.
           // Unit tests still fill unused integration workers in the same phase.
