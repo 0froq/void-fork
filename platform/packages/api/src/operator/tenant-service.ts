@@ -70,6 +70,10 @@ import {
 } from '../suspension.ts';
 import { getCurrentBillingPeriodStart, PLAN_LIMITS, type PlanId } from '../tiers.ts';
 import type { DeployManifest, Project, User } from '../types.ts';
+import {
+  resolveProjectZeroTrustRoutingForPublication,
+  rewriteProjectRouteMetadata,
+} from '../zero-trust/routing.ts';
 import { OperatorError, preview } from './common.ts';
 
 type Page = { page: number; limit: number; offset: number };
@@ -671,27 +675,22 @@ async function republishProjectOwnerState(
       manifest = JSON.parse(activeDeployment.manifest) as DeployManifest;
     }
     const dispatchLimits = computeDispatchLimits(PLAN_LIMITS[owner.plan], manifest?.limits);
+    const protection = await resolveProjectZeroTrustRoutingForPublication(tx, project.id);
     for (const key of [project.slug, ...domains.map((domain) => `domain:${domain.hostname}`)]) {
       const raw = await context.env.ROUTING.get(key);
       if (!raw) {
         continue;
       }
-      const entry = JSON.parse(raw) as Record<string, unknown>;
-      entry.userId = owner.id;
-      if ('workerName' in entry) {
-        if (dispatchLimits) {
-          entry.limits = dispatchLimits;
-        } else {
-          delete entry.limits;
-        }
-      }
-      const suspensionReason = routingSuspensionReason(owner.suspended_reason);
-      if (suspensionReason) {
-        entry.suspended = suspensionReason;
-      } else {
-        delete entry.suspended;
-      }
-      await context.env.ROUTING.put(key, JSON.stringify(entry));
+      await context.env.ROUTING.put(
+        key,
+        rewriteProjectRouteMetadata(JSON.parse(raw) as Record<string, unknown>, {
+          projectId: project.id,
+          userId: owner.id,
+          limits: dispatchLimits,
+          suspended: routingSuspensionReason(owner.suspended_reason),
+          zeroTrust: protection,
+        }),
+      );
     }
     await context.env.ROUTING.put(
       projectAccountKey(project.id),

@@ -99,6 +99,7 @@ drizzle/
     `POST /projects/:id/tokens/:credentialId/renew`, and
     `DELETE /projects/:id/tokens/:credentialId`)
   - project members and invitations
+  - project Zero Trust status and owner/admin overrides
   - PostgreSQL and MySQL project database provisioning/update
   - `POST /projects/:id/prerender-token` — mint a five-minute, project-scoped token accepted only by the remote-binding proxy
   - `/projects/:id/github` — connect/inspect/update/disconnect the GitHub repo (POST/GET/PATCH/DELETE; readers may inspect, owners and project administrators may mutate)
@@ -353,6 +354,7 @@ Notable sections:
 - per-project Builds section (ongoing build highlighted) plus a build detail page with a client-side polling live-log tail for container builds (mirrors the deployment live-tail; not a WebSocket), or a GitHub Actions link for `github_actions` builds. The tail polls `GET /admin/builds/:id/logs?since=N`, which fronts the `BuildManager`/`BuildManagerLarge` DO's read-only `GET /logs?since=N` (DO chosen by `instance_type` via `buildManagerNamespace`).
 - per-project email page (linked from the project detail view): usage, caps, inbound/outbound suspension, destinations
 - signup restrictions and allowlists
+- project Zero Trust page (saved state; the "Check with Cloudflare" link adds `?check=1` for a live Access check) with configure, reconcile, and disable, plus a Zero Trust section on the project detail page (saved state only) with protect, make public, and reconcile
 - CLI version deployment history
 
 Admin writes are same-origin guarded: `admin/middleware/auth.ts` rejects any non-`GET` request whose `Origin`/`Referer` host does not match the request host, before the cookie is even read.

@@ -21,10 +21,19 @@ import {
   type CustomHostnameInfo,
 } from '../provisioning/cloudflare-api.ts';
 import type { DomainVerificationData } from '../schema.ts';
+import { ZeroTrustUnavailableError } from '../zero-trust/errors.ts';
+import { lockZeroTrustConfiguration } from '../zero-trust/lock.ts';
+import { reconcileProjectZeroTrustDomains } from '../zero-trust/project.ts';
+import {
+  getProjectZeroTrustState,
+  markProjectCustomDomainsChanged,
+  MAX_ZERO_TRUST_CUSTOM_DOMAINS_PER_PROJECT,
+} from '../zero-trust/state.ts';
 import { requireProjectRouteCapability } from './project-access.ts';
 
 const CNAME_TARGET = `cname.${SITE_DOMAIN}`;
 const ORPHAN_ADOPTION_MIN_AGE_MS = 60_000;
+const DOMAIN_LIMIT_ERROR = `Protected projects support at most ${MAX_ZERO_TRUST_CUSTOM_DOMAINS_PER_PROJECT} custom domains`;
 
 // Whitelist of CF status codes the create-hostname route surfaces to the
 // caller. See the catch block on `createCustomHostname` for the full
@@ -46,6 +55,16 @@ function isAdoptablePostCreateOrphan(cfHostname: CustomHostnameInfo): boolean {
 
   const createdAtMs = Date.parse(cfHostname.created_at);
   return Number.isFinite(createdAtMs) && Date.now() - createdAtMs >= ORPHAN_ADOPTION_MIN_AGE_MS;
+}
+
+async function protectedProjectReachedDomainLimit(db: Db, projectId: string): Promise<boolean> {
+  const zeroTrust = await getProjectZeroTrustState(db, projectId);
+  if (!zeroTrust?.desired_protected) {
+    return false;
+  }
+  return (
+    (await getDomainsByProjectId(db, projectId)).length >= MAX_ZERO_TRUST_CUSTOM_DOMAINS_PER_PROJECT
+  );
 }
 
 const app = new Hono<ApiEnv>()
@@ -80,6 +99,9 @@ const app = new Hono<ApiEnv>()
     const existing = await getDomainByHostname(context.get('db'), hostname);
     if (existing) {
       return context.json({ error: 'hostname already in use' }, 409);
+    }
+    if (await protectedProjectReachedDomainLimit(context.get('db'), projectId)) {
+      return context.json({ error: DOMAIN_LIMIT_ERROR }, 409);
     }
 
     // Create custom hostname via CF API. CF's 4xx responses are not all
@@ -201,6 +223,9 @@ const app = new Hono<ApiEnv>()
         if (lockedExisting) {
           return context.json({ error: 'hostname already in use' }, 409);
         }
+        if (await protectedProjectReachedDomainLimit(txDb, projectId)) {
+          return context.json({ error: DOMAIN_LIMIT_ERROR }, 409);
+        }
 
         // Under HTTP-DCV the certificate is validated at CF's edge once the
         // hostname proxies through it, so CF never emits
@@ -308,8 +333,18 @@ const app = new Hono<ApiEnv>()
     // CF cleanup is best-effort. KV + DB deletion serialize with deploy,
     // rollback, activation, and failed-cutover compensation through the
     // project row so none can resurrect this hostname from a stale snapshot.
+    // The shared Zero Trust lock comes before any cleanup: when it refuses
+    // during uninstall, nothing outside the database has been removed yet.
     const lockedResponse = await context.get('db').transaction(async (tx) => {
       await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
+      try {
+        await lockZeroTrustConfiguration(tx, 'shared');
+      } catch (error) {
+        if (error instanceof ZeroTrustUnavailableError) {
+          return context.json({ error: error.message }, error.status);
+        }
+        throw error;
+      }
       const txDb = tx as unknown as Db;
       const lockedAccess = await requireProjectRouteCapability(
         context,
@@ -334,12 +369,24 @@ const app = new Hono<ApiEnv>()
           `Failed to delete routing entry: ${err instanceof Error ? err.message : String(err)}`,
         );
       });
+      // The project's custom domain application still lists this hostname.
+      // Record that with the deletion, so the hostname is never freed while
+      // no retry would remove it from that application.
+      await markProjectCustomDomainsChanged(txDb, projectId);
       await deleteDomain(txDb, domain.id);
       return null;
     });
     if (lockedResponse) {
       return lockedResponse;
     }
+
+    await reconcileProjectZeroTrustDomains(context.env, context.get('db'), projectId).catch(
+      (err) => {
+        warnings.push(
+          `Failed to reconcile Zero Trust custom-domain protection: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      },
+    );
 
     return context.json({ ok: true, ...(warnings.length > 0 && { warnings }) });
   });

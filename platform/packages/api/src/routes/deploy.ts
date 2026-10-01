@@ -147,6 +147,12 @@ import {
   type SandboxMigrationMeta,
   type WebSocketMigrationMeta,
 } from '../types.ts';
+import { zeroTrustNotReadyMessage } from '../zero-trust/errors.ts';
+import {
+  resolveProjectZeroTrustRouting,
+  resolveProjectZeroTrustRoutingForPublication,
+  withProjectZeroTrustRouting,
+} from '../zero-trust/routing.ts';
 import { requireProjectRouteCapability } from './project-access.ts';
 
 export { MAX_REVALIDATE_QUERY_ALLOWLIST_ENTRIES, MAX_ROUTING_RULES, validateManifestShape };
@@ -311,6 +317,7 @@ async function replayDeploymentCutover(
   deployment: Deployment,
   plan: PlanId,
   committedProjectType?: Project['type'],
+  options: Readonly<{ restoreCommitted?: boolean }> = {},
 ): Promise<void> {
   const planLimits = getPlanLimits(plan);
   if (!deployment.manifest) {
@@ -324,6 +331,12 @@ async function replayDeploymentCutover(
   const existingEntry = existingRouting
     ? (JSON.parse(existingRouting) as { suspended?: string })
     : {};
+  // Restoring committed code must not wait for Zero Trust reconciliation. The
+  // publication resolver fails closed, as deploy compensation does. Promoting
+  // a new deployment keeps the strict readiness gate.
+  const zeroTrust = options.restoreCommitted
+    ? await resolveProjectZeroTrustRoutingForPublication(db, project.id)
+    : await resolveProjectZeroTrustRouting(db, project.id);
   let hasAssets = false;
   if (deployment.asset_hashes) {
     const assetHashes = JSON.parse(deployment.asset_hashes) as Record<string, unknown>;
@@ -341,6 +354,7 @@ async function replayDeploymentCutover(
           } as const),
         manifest,
         suspended: existingEntry.suspended,
+        zeroTrust,
       })
     : buildRoutingJson({
         workerName,
@@ -353,6 +367,7 @@ async function replayDeploymentCutover(
         hasCrons: !!manifest.schedules?.length,
         assetManifestId: hasAssets ? deployment.id : undefined,
         assetConfig: hasAssets ? manifest.assetConfig : undefined,
+        zeroTrust,
       });
 
   // Complete every PostgreSQL read and validation before the first external
@@ -595,6 +610,7 @@ export async function settleDeploymentForSandboxDrain(
             committedActive,
             owner.plan,
             project.type,
+            { restoreCommitted: true },
           );
         } else {
           await clearProjectExternalState(env, txDb, project);
@@ -705,6 +721,7 @@ export async function settleDeploymentForSandboxDrain(
           committedActive,
           owner.plan,
           project.type,
+          { restoreCommitted: true },
         );
       } else {
         await clearProjectExternalState(env, txDb, project);
@@ -2258,6 +2275,18 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
       501,
     );
   }
+  // Reject before any paid or slow work (Sandbox controllers, uploads,
+  // migrations) when routing could not carry this project's protection yet.
+  // The cutover fence repeats this check with the authoritative lock.
+  try {
+    await resolveProjectZeroTrustRouting(context.get('db'), projectId);
+  } catch (error) {
+    const message = zeroTrustNotReadyMessage(error);
+    if (!message) {
+      throw error;
+    }
+    return context.json({ event: 'error', error: 'zero trust not ready', message }, 409);
+  }
   if (incomingManifest.sandbox) {
     try {
       await assertManagedSandboxEntitlement(context.env.CF_ACCOUNT_ID, context.env.CF_API_TOKEN);
@@ -2658,6 +2687,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                   committedActive,
                   lockedAccess.owner.plan,
                   lockedProject.type,
+                  { restoreCommitted: true },
                 );
               } else {
                 await clearProjectExternalState(context.env, txDb, lockedProject);
@@ -2953,7 +2983,9 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     // project lock, require both the original active deployment provenance and
     // the absence of a competing in-flight operation. Teardown's `deleting`
     // state and a missing row likewise make absence authoritative.
-    const withProjectCompensationFence = async (restore: () => Promise<void>): Promise<void> => {
+    const withProjectCompensationFence = async (
+      restore: (txDb: Db) => Promise<void>,
+    ): Promise<void> => {
       await context.get('db').transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
         const txDb = tx as unknown as Db;
@@ -2984,7 +3016,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         if (competingOperation && competingOperation.id !== currentDeploymentId) {
           return;
         }
-        await restore();
+        await restore(txDb);
       });
     };
     const withProjectAssetGcFence = async <T>(
@@ -3102,7 +3134,8 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
       return deleted;
     };
     const restoreTrackedRouting = async (): Promise<void> => {
-      await withProjectCompensationFence(async () => {
+      await withProjectCompensationFence(async (txDb) => {
+        const zeroTrust = await resolveProjectZeroTrustRoutingForPublication(txDb, projectId);
         const errors: Array<unknown> = [];
         for (const [key, previous] of [...routingValuesBeforeWrite].reverse()) {
           try {
@@ -3120,7 +3153,12 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             if (undo.value === null) {
               await context.env.ROUTING.delete(key);
             } else {
-              await context.env.ROUTING.put(key, undo.value);
+              await context.env.ROUTING.put(
+                key,
+                key === project.slug || key.startsWith('domain:')
+                  ? withProjectZeroTrustRouting(undo.value, zeroTrust, projectId)
+                  : undo.value,
+              );
             }
           } catch (error) {
             errors.push(error);
@@ -3649,20 +3687,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             manifest.type ??
             (assetConfig.not_found_handling === 'single-page-application' ? 'spa' : 'static');
 
-          const existingRouting = await context.env.ROUTING.get(project.slug);
-          const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
-          const routingJson = buildStaticRoutingJson({
-            projectId,
-            userId: project.user_id,
-            deploymentId: deployment.id,
-            assetConfig,
-            manifest,
-            suspended:
-              existingEntry?.suspended ??
-              (owner.suspended_reason === REASON_REQUESTS_EXCEEDED
-                ? REASON_REQUESTS_EXCEEDED
-                : undefined),
-          });
           currentStep = 'cutover_intent';
           const cutoverMarker: CutoverMarker = {
             projectId,
@@ -3707,6 +3731,22 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           await assertProjectNotDeleting(context.get('db'), projectId);
           markPhase('routing_switch');
           await withProjectCutoverFence(deployment.id, async (txDb) => {
+            const existingRouting = await context.env.ROUTING.get(project.slug);
+            const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
+            const zeroTrust = await resolveProjectZeroTrustRouting(txDb, projectId);
+            const routingJson = buildStaticRoutingJson({
+              projectId,
+              userId: project.user_id,
+              deploymentId: deployment.id,
+              assetConfig,
+              manifest,
+              suspended:
+                existingEntry?.suspended ??
+                (owner.suspended_reason === REASON_REQUESTS_EXCEEDED
+                  ? REASON_REQUESTS_EXCEEDED
+                  : undefined),
+              zeroTrust,
+            });
             const cutoverDomains = await getDomainsByProjectId(txDb, projectId);
             await putTrackedRouting(project.slug, routingJson);
             await putTrackedRouting(
@@ -4862,30 +4902,32 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         await assertProjectNotDeleting(context.get('db'), projectId);
 
         // Routing switch
-        const existingRouting = await context.env.ROUTING.get(project.slug);
-        const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
         const dispatchLimits = computeDispatchLimits(planLimits, manifest.limits);
-        const routingJson = buildRoutingJson({
-          workerName,
-          projectId,
-          userId: project.user_id,
-          manifest,
-          deploymentId: deployment.id,
-          dispatchLimits,
-          suspended:
-            existingEntry?.suspended ??
-            (owner.suspended_reason === REASON_REQUESTS_EXCEEDED
-              ? REASON_REQUESTS_EXCEEDED
-              : undefined),
-          hasCrons,
-          assetManifestId: assetCount > 0 ? deployment.id : undefined,
-          assetConfig: assetCount > 0 ? assetConfig : undefined,
-        });
         await snapshotCronState();
         await assertDeploymentNotCanceled(context.get('db'), deployment.id);
         await assertProjectNotDeleting(context.get('db'), projectId);
         markPhase('routing_switch');
         await withProjectCutoverFence(deployment.id, async (txDb) => {
+          const existingRouting = await context.env.ROUTING.get(project.slug);
+          const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
+          const zeroTrust = await resolveProjectZeroTrustRouting(txDb, projectId);
+          const routingJson = buildRoutingJson({
+            workerName,
+            projectId,
+            userId: project.user_id,
+            manifest,
+            deploymentId: deployment.id,
+            dispatchLimits,
+            suspended:
+              existingEntry?.suspended ??
+              (owner.suspended_reason === REASON_REQUESTS_EXCEEDED
+                ? REASON_REQUESTS_EXCEEDED
+                : undefined),
+            hasCrons,
+            assetManifestId: assetCount > 0 ? deployment.id : undefined,
+            assetConfig: assetCount > 0 ? assetConfig : undefined,
+            zeroTrust,
+          });
           const cutoverDomains = await getDomainsByProjectId(txDb, projectId);
           await putTrackedRouting(project.slug, routingJson);
           await putTrackedRouting(
@@ -5432,6 +5474,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                     committedActive,
                     owner.plan,
                     lockedProject.type,
+                    { restoreCommitted: true },
                   );
                 } else {
                   await clearProjectExternalState(context.env, txDb, lockedProject);
@@ -5443,7 +5486,15 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                 // restored route; touching cron/queues here would regress
                 // pre-routing failures that never changed those surfaces.
                 const currentDomains = await getDomainsByProjectId(txDb, projectId);
-                const restoredRouting = await context.env.ROUTING.get(lockedProject.slug);
+                const rawRouting = await context.env.ROUTING.get(lockedProject.slug);
+                const restoredRouting =
+                  rawRouting === null
+                    ? null
+                    : withProjectZeroTrustRouting(
+                        rawRouting,
+                        await resolveProjectZeroTrustRoutingForPublication(txDb, projectId),
+                        projectId,
+                      );
                 await reconcileProjectDomainRoutes(context.env, currentDomains, restoredRouting);
               }
             });

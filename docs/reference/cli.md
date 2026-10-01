@@ -38,6 +38,7 @@ Use this page as a command reference. If you are setting up a project for the fi
 | `void project requests`           | Show request-level traffic (status, method, timing)                           |
 | `void project rollback`           | Roll back to a previous deployment                                            |
 | `void project cancel`             | Cancel an active deployment                                                   |
+| `void project zero-trust`         | Inspect or override project Zero Trust protection                             |
 | `void project purge-cache`        | Purge all cached pages                                                        |
 | `void build logs`                 | Stream, tail, or download build logs                                          |
 | `void email status`               | Show email readiness on your own Cloudflare account (`--platform cloudflare`) |
@@ -281,6 +282,27 @@ an unscoped `VOID_TOKEN` selects Void Cloud. These commands display their
 platform, and accepting an invitation leaves directory links intact. To link
 the invited application, run `void project link` in an unlinked checkout of
 that application.
+
+### `void project zero-trust`
+
+Inspect or override protection for a project on a Void platform:
+
+```sh
+void project zero-trust status [--project <slug>]
+void project zero-trust protect [--project <slug>]
+void project zero-trust public [--project <slug>]
+void project zero-trust reconcile [--project <slug>]
+```
+
+Project selection follows `--project`, then `VOID_PROJECT`, then the linked
+project.
+
+Readers can inspect the state. The owner or a project administrator can protect
+the project, make it public, or repair drift. `public` does not change the
+platform default for future projects. Deploys and rollbacks wait until a
+protection change is finished; if one is refused, the owner or a project
+administrator can run `void project zero-trust reconcile` before you retry.
+These commands do not apply to direct Cloudflare deployments.
 
 ### `void project token <create|list|renew|revoke>`
 
@@ -585,6 +607,46 @@ Search matches a project's slug, ID, or owner's login. `show` includes resources
 
 `owner` transfers a project to another registered user. Preview it with `--plan`; apply it interactively or with `--yes`. The preview reports active-work blockers and the account plan that will apply. The former owner becomes a project administrator, existing project-scoped CI deploy credentials are revoked, and usage already incurred remains with the former owner.
 
+#### Project Zero Trust {#operator-zero-trust}
+
+Configure the installation-wide Cloudflare Access policy and project overrides:
+
+```sh
+void platform zero-trust status [--check]
+printf '%s' "$ACCESS_API_TOKEN" | void platform zero-trust configure \
+  --identity-providers <id[,id...]> \
+  --policies <id[,id...]> \
+  [--existing-projects <protected|public>] \
+  [--protect-new-projects] \
+  --token-stdin \
+  --yes
+void platform zero-trust reconcile
+void platform zero-trust disable
+
+void platform zero-trust project-status <project-id>
+void platform zero-trust project-protect <project-id>
+void platform zero-trust project-public <project-id>
+void platform zero-trust project-reconcile <project-id>
+```
+
+Mutations support `--plan`, `--yes`, and `--timeout`; use `--plan` instead of
+`--yes` to inspect this change without applying it. The Access management token
+is accepted only on standard input. Zero Trust uses the Cloudflare account that
+hosts the platform. Omit `--protect-new-projects` to make new projects public
+by default. `--existing-projects` is required when you enable Zero Trust and
+rejected once it is enabled; later configuration changes keep each project's
+protection. `status` reports saved state; `--check` also compares it with
+Cloudflare Access. If status remains `configuring` or `disabling`, run
+`void platform zero-trust reconcile` to resume the saved operation. Protected
+projects support up to 100 custom domains.
+
+The token needs **Access: Apps and Policies Write** plus **Access:
+Organizations, Identity Providers, and Groups Read**, scoped to the platform's
+Cloudflare account. Select at least one Allow policy that matches people by
+identity; Void rejects Bypass and Service Auth policies and rules that allow
+Everyone or any service token. See [Project Zero Trust](../guide/platform/administration/zero-trust.md)
+for requirements and recovery.
+
 #### Deployments {#operator-deployments}
 
 Find a deployment, inspect its manifest, or request cancellation:
@@ -818,7 +880,7 @@ See [Self-host a Void platform](../guide/self-hosted-platform.md) for prerequisi
 void platform domain set <domain> [--installation <id>] [--zone <domain>] [--dedicated-zone] [--plan] [--yes]
 ```
 
-Add an application domain to a workers.dev test platform. Domain-based installations remain the recommended default. The command detects the zone when possible, creates missing DNS and routes after confirmation, and checks HTTPS before making the domain canonical. If DNS or certificates are pending, rerun the same command to resume. `--plan` is read-only; non-interactive mutations require `--yes`.
+Add an application domain to a workers.dev test platform. Domain-based installations remain the recommended default. The command detects the zone when possible, creates missing DNS and routes after confirmation, and checks HTTPS and project Zero Trust protection before making the domain canonical. If DNS, certificates, or protection are pending, rerun the same command to resume. `--plan` is read-only; non-interactive mutations require `--yes`.
 
 Existing workers.dev URLs remain available, and the platform API origin, OAuth callback, projects, and deployments stay unchanged. The command verifies the running runtime token's Cache Purge permission for the new zone. A disabled platform stays disabled. Use the database URL from the original installation when administering from another machine. Replacing an already configured application domain is not supported. See [Adding a Domain](../guide/platform/installation/domains.md#adding-a-domain).
 

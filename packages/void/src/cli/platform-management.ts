@@ -33,6 +33,7 @@ import {
   createPlatformInstallationSecrets,
   installPlatform,
   loadPlatformRuntime,
+  readPlatformProjectZeroTrustState,
   REMOTE_INSTALLATION_MANIFEST_KEY,
   resolveBootstrapGitHubId,
   type PlatformDatabaseLifecycleLock,
@@ -56,6 +57,10 @@ import {
   writeInstallationManifest,
 } from './platform-registry.ts';
 import { trackedPlatformWorkerTraffic } from './platform-traffic.ts';
+import {
+  assertProjectZeroTrustAllowsUninstall,
+  type PlatformProjectZeroTrustState,
+} from './platform-zero-trust-uninstall.ts';
 
 export type PlatformManagementClient = Pick<
   PlatformCloudflareClient,
@@ -144,6 +149,14 @@ export type PlatformManagementDependencies = Readonly<{
   confirm?: (message: string, initialValue: boolean) => Promise<boolean>;
   databaseUrl?: string;
   interactive?: boolean;
+  /** Uninstall refuses to start when this is missing or cannot read the state. */
+  readProjectZeroTrust?: () => Promise<PlatformProjectZeroTrustState>;
+  /** Holds off Zero Trust writers from the final check until traffic is disabled. */
+  lockProjectZeroTrust?: () => Promise<() => Promise<void>>;
+  /** Makes Zero Trust writers that later get the lock refuse; called while it is held. */
+  fenceProjectZeroTrust?: () => Promise<void>;
+  /** Removes that fence when uninstall stops before it disables traffic. */
+  liftProjectZeroTrustFence?: () => Promise<void>;
 }>;
 
 export function selectAuthoritativePlatformManifest(
@@ -228,6 +241,14 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       await uninstallPlatform(client, manifest, args, {
         checkpoint: databaseLock?.checkpoint,
         databaseUrl,
+        // A plan holds no lifecycle lock, so it opens its own read-only connection.
+        readProjectZeroTrust: databaseLock
+          ? databaseLock.readProjectZeroTrust
+          : () =>
+              readPlatformProjectZeroTrustState(databaseUrl, manifest.id, manifest.ownershipNonce),
+        lockProjectZeroTrust: databaseLock?.lockProjectZeroTrust,
+        fenceProjectZeroTrust: databaseLock?.fenceProjectZeroTrust,
+        liftProjectZeroTrustFence: databaseLock?.liftProjectZeroTrustFence,
       });
       return;
     }
@@ -393,6 +414,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       acquireDatabaseLifecycleLock: async () =>
         Object.assign(async () => {}, {
           checkpoint: databaseLock?.checkpoint,
+          liftProjectZeroTrustFence: databaseLock?.liftProjectZeroTrustFence,
           prepareDatabase: databaseLock?.prepareDatabase,
           prepareSandboxDrain: databaseLock?.prepareSandboxDrain,
           readAuthenticationState: databaseLock?.readAuthenticationState,
@@ -792,6 +814,7 @@ export async function uninstallPlatform(
       `platform: Refusing to delete Cloudflare zone ${JSON.stringify(createdZone.name)} automatically. A zone can contain unrelated DNS, settings, and products that the installer cannot exhaustively prove ownership of. Uninstall with --keep-zone, inspect the retained zone in Cloudflare, and delete it manually if appropriate.`,
     );
   }
+  await assertProjectZeroTrustAllowsUninstall(dependencies.readProjectZeroTrust);
   const dataMessage = retainData
     ? 'Retain installer-owned Workers, storage, dispatch, AI logs, and Hyperdrive by default.'
     : args.purgeData
@@ -864,13 +887,48 @@ export async function uninstallPlatform(
     missingResources = new Set();
   }
 
-  let next = transitionInstallation(manifest, 'uninstalling', new Date().toISOString());
-  writeInstallationManifest(next);
+  // Zero Trust writers in the API take this lock and never the lifecycle lock.
+  // Holding it from the final check until traffic is disabled keeps them from
+  // creating Access applications the check did not see. A request admitted
+  // before the disable may already be waiting on the lock, so the fence makes
+  // every later holder refuse. Only enabling the platform again lifts it once
+  // the disable write has started.
+  const { fenceProjectZeroTrust, liftProjectZeroTrustFence, lockProjectZeroTrust } = dependencies;
+  if (!lockProjectZeroTrust || !fenceProjectZeroTrust || !liftProjectZeroTrustFence) {
+    throw new Error(
+      'platform: Refusing to uninstall because no platform database connection is available to hold off project Zero Trust changes.',
+    );
+  }
+  const releaseProjectZeroTrust = await lockProjectZeroTrust();
+  let fenced = false;
+  let disablingTraffic = false;
+  const stopProjectZeroTrustHold = async () => {
+    if (fenced && !disablingTraffic) {
+      await liftProjectZeroTrustFence().catch((error: unknown) => {
+        log.warn(
+          `Could not reopen project Zero Trust changes after the uninstall stopped: ${error instanceof Error ? error.message : String(error)}\nRun \`void platform uninstall\` again, or \`void platform repair\` to keep the platform.`,
+        );
+      });
+    }
+    await releaseProjectZeroTrust();
+  };
+  let next = manifest;
+  try {
+    await assertProjectZeroTrustAllowsUninstall(dependencies.readProjectZeroTrust);
+    fenced = true;
+    await fenceProjectZeroTrust();
+    next = transitionInstallation(manifest, 'uninstalling', new Date().toISOString());
+    writeInstallationManifest(next);
+  } catch (error) {
+    await stopProjectZeroTrustHold();
+    throw error;
+  }
   try {
     await writeRemoteManifestIfPresent(client, next);
     const routing = next.resources.find(
       (resource) => resource.key === 'routing-kv' && resource.state === 'ready',
     );
+    disablingTraffic = true;
     if (routing) {
       await client.putKvValue(
         next.account.id,
@@ -879,6 +937,7 @@ export async function uninstallPlatform(
         PLATFORM_DISABLED_VALUE,
       );
     }
+    await releaseProjectZeroTrust();
     for (const key of missingResources) {
       const resource = requireResource(next, key);
       next = updateResourceState(
@@ -994,6 +1053,7 @@ export async function uninstallPlatform(
         : `${next.deployment.displayName} was uninstalled.`,
     );
   } catch (error) {
+    await stopProjectZeroTrustHold().catch(() => {});
     next = transitionInstallation(next, 'failed', new Date().toISOString());
     writeInstallationManifest(next);
     await writeRemoteManifestIfPresent(client, next).catch(() => {});

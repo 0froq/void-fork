@@ -10,9 +10,13 @@ import {
   resolvePlatformApplicationEnvironment,
   type PlatformInstallationManifest,
 } from '@void/platform';
-import { describe, expect, it, vi } from 'vite-plus/test';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { PlatformCloudflareClient } from '../../src/cli/platform-cloudflare.ts';
-import { applyPlatformDomain, platformDomainTarget } from '../../src/cli/platform-domain.ts';
+import {
+  activatePlatformDomain,
+  applyPlatformDomain,
+  platformDomainTarget,
+} from '../../src/cli/platform-domain.ts';
 import type { PlatformInstallPlan } from '../../src/cli/platform-plan.ts';
 
 function fixture() {
@@ -103,6 +107,10 @@ function fixture() {
     verifyOwnership: vi.fn(async () => {}),
     verifyRuntimeToken: vi.fn(async () => {}),
     probe: vi.fn(async () => {}),
+    activate: vi.fn(async (application: unknown) => {
+      values.set(PLATFORM_APPLICATION_KEY, JSON.stringify(application));
+      return true;
+    }),
   };
   return { client, current: () => current, dependencies, manifest, plan, target, zone, values };
 }
@@ -171,6 +179,7 @@ describe('platform domain activation', () => {
     expect(pending.waitingForDns).toBe(true);
     expect(f.current().deployment).toEqual(f.manifest.deployment);
     expect(f.client.createDnsRecord).not.toHaveBeenCalled();
+    expect(f.dependencies.activate).not.toHaveBeenCalled();
     expect(f.values.has(PLATFORM_APPLICATION_KEY)).toBe(false);
     f.zone.status = 'active';
     const resumedPlan = {
@@ -184,8 +193,14 @@ describe('platform domain activation', () => {
     await expect(
       applyPlatformDomain(client, f.current(), f.target, resumedPlan, f.dependencies),
     ).rejects.toThrow('TLS pending');
+    // Project Zero Trust leaves only the platform health hostname outside Access.
+    expect(f.dependencies.probe).toHaveBeenLastCalledWith(
+      'void-platform-health.example.com',
+      expect.anything(),
+    );
     expect(f.values.has(PLATFORM_APPLICATION_KEY)).toBe(false);
     expect(f.current().deployment).toEqual(f.manifest.deployment);
+    expect(f.dependencies.activate).not.toHaveBeenCalled();
     const finalPlan = {
       ...resumedPlan,
       actions: resumedPlan.actions.map((action) =>
@@ -223,6 +238,28 @@ describe('platform domain activation', () => {
     });
     expect(await fetchApp(originalHostname)).toMatchObject({ deployment: 'original', count: 3 });
     expect(f.values.get(project.slug)).toBe(route);
+    expect(f.client.putKvValue).not.toHaveBeenCalled();
+  });
+  it('retains the pending domain until the platform finishes protection', async () => {
+    const f = fixture();
+    f.zone.status = 'active';
+    f.dependencies.activate.mockResolvedValueOnce(false);
+    const result = await applyPlatformDomain(
+      f.client as unknown as PlatformCloudflareClient,
+      f.manifest,
+      f.target,
+      { ...f.plan, zone: f.zone },
+      f.dependencies,
+    );
+    expect(result).toMatchObject({ waitingForDns: false, waitingForProtection: true });
+    expect(result.manifest.pendingDomain).toEqual(f.target);
+    expect(result.manifest.deployment.application).toEqual(f.manifest.deployment.application);
+    expect(f.values.has(PLATFORM_APPLICATION_KEY)).toBe(false);
+    expect(f.client.putKvValue).not.toHaveBeenCalled();
+    expect(f.dependencies.activate).toHaveBeenCalledWith(
+      { ...f.target, zoneId: f.zone.id },
+      expect.objectContaining({ pendingDomain: f.target }),
+    );
   });
   it('stops on ownership or credential errors before making the domain live', async () => {
     const f = fixture();
@@ -276,5 +313,27 @@ describe('platform domain activation', () => {
         false,
       ),
     ).toThrow('pending setup');
+  });
+});
+
+describe('platform domain activation handoff', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([
+    [
+      'an older runtime without the handoff',
+      new Response('<html>Not Found</html>', { status: 404 }),
+    ],
+    ['a non-JSON response', new Response('upstream unavailable', { status: 502 })],
+  ])('asks for a runtime update after %s', async (_name, response) => {
+    const f = fixture();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    );
+
+    await expect(activatePlatformDomain(f.target, f.manifest)).rejects.toThrow(
+      `void platform upgrade ${f.manifest.id}`,
+    );
   });
 });

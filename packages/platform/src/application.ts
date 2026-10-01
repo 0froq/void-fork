@@ -73,6 +73,12 @@ export async function resolvePlatformApplicationEnvironment<
   };
 }
 
+export function platformProjectIngressPrefix(
+  workersDev: NonNullable<PlatformApplication['workersDev']>,
+): string {
+  return `void-${workersDev.installationId.slice(-12)}-`;
+}
+
 export function platformProjectIngressName(
   project: PlatformApplicationProject,
   workersDev: NonNullable<PlatformApplication['workersDev']>,
@@ -80,7 +86,7 @@ export function platformProjectIngressName(
   if (!/^proj_[a-z0-9]{1,32}$/.test(project.id) || !/^[a-z0-9][a-z0-9-]*$/.test(project.slug)) {
     throw new Error('Invalid platform project identity.');
   }
-  const prefix = `void-${workersDev.installationId.slice(-12)}-`;
+  const prefix = platformProjectIngressPrefix(workersDev);
   const suffix = `-${project.id.slice(5)}`;
   const slug = project.slug.slice(0, 63 - prefix.length - suffix.length).replace(/-+$/, '');
   return `${prefix}${slug}${suffix}`;
@@ -91,6 +97,22 @@ export function platformProjectWorkersDevHostname(
   workersDev: NonNullable<PlatformApplication['workersDev']>,
 ): string {
   return `${platformProjectIngressName(project, workersDev)}.${workersDev.subdomain}.workers.dev`;
+}
+
+/**
+ * Project slug the platform keeps for its own health probe. Project Zero Trust
+ * leaves only `/health` on this hostname outside Cloudflare Access so the
+ * authenticated probe reaches dispatch, which never routes that path to a
+ * project. New projects cannot claim the slug; a project that already owns it
+ * keeps every other path, behind Access like any other project hostname.
+ */
+export const PLATFORM_HEALTH_HOSTNAME_LABEL = 'void-platform-health';
+
+/** The application-domain hostname for dispatch health probes; null without a zone. */
+export function platformHealthHostname(application: PlatformApplication): string | null {
+  return application.zoneName
+    ? `${PLATFORM_HEALTH_HOSTNAME_LABEL}.${application.baseDomain}`
+    : null;
 }
 
 export function platformProjectHostname(

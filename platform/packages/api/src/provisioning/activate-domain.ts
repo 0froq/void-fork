@@ -9,6 +9,12 @@ import {
 import type { ApiEnv } from '../env.ts';
 import type { DomainVerificationData } from '../schema.ts';
 import type { Domain, Project } from '../types.ts';
+import { ZeroTrustUnavailableError } from '../zero-trust/errors.ts';
+import { reconcileProjectZeroTrustDomains } from '../zero-trust/project.ts';
+import {
+  resolveProjectZeroTrustRoutingForPublication,
+  withProjectZeroTrustRouting,
+} from '../zero-trust/routing.ts';
 import {
   type CustomHostnameInfo,
   getCustomHostname,
@@ -93,18 +99,17 @@ export async function tryActivateDomain(
   // the next poll/cron retries and re-writes the same KV entry — the system
   // heals itself. The converse ordering (DB flip first) would strand an
   // `active` row with no route, producing 404s until a manual deploy or fix.
-  // Accepted limitation: a concurrent `void domain delete` can interleave so
-  // that this call writes `domain:<host>` KV after the delete removed the DB
-  // row, leaving a rare orphan routing entry (the entry serves the domain's
-  // own project's content). This is a low-probability, bounded race accepted
-  // as a documented limitation — see design-doc 0073 — rather than something
-  // guarded here; a lock-free reconciler and creation-time quota are deferred.
   // Read slug routing whenever the CF gate is satisfied so we can surface
   // `awaitingDeployment` to the caller regardless of whether activation
   // actually happened (activation also requires `domain.status === 'pending'`).
   let slugRouting: string | null = null;
   let activated = false;
   if (gateOk && wasPending) {
+    // A protected project needs an exact-host Access application and its
+    // audience in dispatch routing before this custom hostname can become
+    // reachable. Reconciliation is idempotent and fails closed: a Cloudflare
+    // API failure leaves the domain pending with no routing entry.
+    await reconcileProjectZeroTrustDomains(env, db, project.id);
     await db.transaction(async (tx) => {
       await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${project.id} FOR UPDATE`);
       const txDb = tx as unknown as Db;
@@ -123,7 +128,22 @@ export async function tryActivateDomain(
       if (!slugRouting) {
         return;
       }
-      await env.ROUTING.put(`domain:${lockedDomain.hostname}`, slugRouting);
+      // Activation is retried while the domain stays pending, so unknown
+      // protection, or a cached slug route that still belongs to a deleted
+      // project, keeps it pending instead of publishing a route.
+      let published;
+      try {
+        const protection = await resolveProjectZeroTrustRoutingForPublication(txDb, project.id, {
+          retryable: true,
+        });
+        published = withProjectZeroTrustRouting(slugRouting, protection, project.id);
+      } catch (error) {
+        if (error instanceof ZeroTrustUnavailableError) {
+          return;
+        }
+        throw error;
+      }
+      await env.ROUTING.put(`domain:${lockedDomain.hostname}`, published);
       await updateDomainStatus(txDb, lockedDomain.id, 'active');
       activated = true;
       domain.status = 'active';

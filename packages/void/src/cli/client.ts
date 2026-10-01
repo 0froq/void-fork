@@ -172,6 +172,36 @@ export type ProjectDeployCredentialResponse = {
   revokedAt: string | null;
 };
 
+export type ProjectZeroTrustState = {
+  project_id: string;
+  desired_protected: boolean;
+  effective_protected: boolean;
+  state: 'public' | 'protected' | 'reconciling' | 'error';
+  last_error: string | null;
+  updated_at: string;
+};
+
+/** `GET /projects/:id/zero-trust`. */
+export type ProjectZeroTrustResponse = {
+  /** Whether a project owner or admin can change protection now. */
+  available: boolean;
+  platformStatus:
+    | 'not_configured'
+    | 'invalid_configuration'
+    | 'configuring'
+    | 'ready'
+    | 'disabling'
+    | 'error';
+  protectNewProjects: boolean;
+  project: ProjectZeroTrustState | null;
+};
+
+/** `PUT /projects/:id/zero-trust` and `POST /projects/:id/zero-trust/reconcile`. */
+export type ProjectZeroTrustUpdateResponse = {
+  ok: true;
+  project: ProjectZeroTrustState;
+};
+
 export type IssuedProjectDeployCredentialResponse = ProjectDeployCredentialResponse & {
   token: string;
 };
@@ -180,6 +210,8 @@ export type CreateProjectResponse = {
   url?: string;
   id: string;
   slug: string;
+  warnings?: Array<string>;
+  zero_trust?: ProjectZeroTrustState;
   /**
    * Present exactly when the platform scheduled the project owner's own
    * address to be registered as an outbound email destination. The
@@ -664,6 +696,42 @@ export class PlatformClient {
     });
     if (!res.ok) {
       await throwPlatformApiError('Failed to list project tokens', res, 'owner');
+    }
+    return res.json();
+  }
+
+  async getProjectZeroTrust(projectId: string): Promise<ProjectZeroTrustResponse> {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/zero-trust`, {
+      headers: { ...this.authHeaders },
+    });
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to inspect project Zero Trust', res, 'read');
+    }
+    return res.json();
+  }
+
+  async setProjectZeroTrust(
+    projectId: string,
+    protectedProject: boolean,
+  ): Promise<ProjectZeroTrustUpdateResponse> {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/zero-trust`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...this.authHeaders },
+      body: JSON.stringify({ protected: protectedProject }),
+    });
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to update project Zero Trust', res, 'settings');
+    }
+    return res.json();
+  }
+
+  async reconcileProjectZeroTrust(projectId: string): Promise<ProjectZeroTrustUpdateResponse> {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/zero-trust/reconcile`, {
+      method: 'POST',
+      headers: { ...this.authHeaders },
+    });
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to reconcile project Zero Trust', res, 'settings');
     }
     return res.json();
   }

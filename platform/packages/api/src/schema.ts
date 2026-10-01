@@ -473,6 +473,51 @@ export const projectAccessEvents = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Project Cloudflare Access state. The desired/effective split is deliberate:
+// publication is a multi-system operation and dispatch must keep enforcing the
+// last completed state until the corresponding Access application mutation has
+// been verified. Application ids are durable recovery handles for retries and
+// project teardown.
+// ---------------------------------------------------------------------------
+export const projectZeroTrust = pgTable(
+  'project_zero_trust',
+  {
+    project_id: text('project_id')
+      .primaryKey()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    desired_protected: boolean('desired_protected').notNull().default(false),
+    effective_protected: boolean('effective_protected').notNull().default(false),
+    // `ready` means routes and Access applications match the desired protection.
+    status: text('status').notNull().default('ready').$type<'ready' | 'reconciling' | 'error'>(),
+    bypass_application_id: text('bypass_application_id'),
+    bypass_application_name: text('bypass_application_name'),
+    protected_application_id: text('protected_application_id'),
+    protected_application_name: text('protected_application_name'),
+    protected_application_audience: text('protected_application_audience'),
+    // Last custom hostname whose routing protection was cleared. Public
+    // projects can have more domains than fit in one reconciliation run.
+    routing_cursor: text('routing_cursor'),
+    // Id of the installation operation this row last completed. Public rows
+    // complete with their bypass; protected rows only after the wildcard phase.
+    reconciled_operation: text('reconciled_operation'),
+    last_error: text('last_error'),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+    updated_at: timestamp('updated_at', { mode: 'string' }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_project_zero_trust_status').on(table.status, table.updated_at),
+    check(
+      'project_zero_trust_status_check',
+      sql`${table.status} IN ('ready', 'reconciling', 'error')`,
+    ),
+    check(
+      'project_zero_trust_ready_check',
+      sql`${table.status} <> 'ready' OR ${table.desired_protected} = ${table.effective_protected}`,
+    ),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // deployments
 // ---------------------------------------------------------------------------
 export const deployments = pgTable(

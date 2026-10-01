@@ -1,3 +1,5 @@
+import type { ProjectZeroTrustRouting } from '@void/edge';
+import { PLATFORM_HEALTH_HOSTNAME_LABEL } from '@void/platform';
 import { sql as drizzleSql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { deployTokenTtlSecondsForBuildMinutes, signPrerenderToken } from '../auth/deploy-token.ts';
@@ -84,6 +86,14 @@ import {
 import { tokenizeSql } from '../sql/tokenize.ts';
 import { getPlanLimits } from '../tiers.ts';
 import type { Build, DeployManifest, Project, ProjectRole, User } from '../types.ts';
+import { zeroTrustNotReadyMessage } from '../zero-trust/errors.ts';
+import { initializeNewProjectZeroTrust } from '../zero-trust/project.ts';
+import {
+  resolveProjectZeroTrustRouting,
+  resolveProjectZeroTrustRoutingForPublication,
+  withProjectZeroTrustRouting,
+} from '../zero-trust/routing.ts';
+import { publicProjectZeroTrustState } from '../zero-trust/state.ts';
 import { rollbackCfDestination } from './email.ts';
 import { requireProjectRouteCapability } from './project-access.ts';
 import { getRequestsDataset, queryProjectRequestOverview } from './usage.ts';
@@ -91,7 +101,8 @@ import { getRequestsDataset, queryProjectRequestOverview } from './usage.ts';
 /**
  * Slugs no project may claim. Two overlapping reasons:
  *
- *  - hostname collisions on `*.void.app` (`www`, `api`, `dash`, `cname`, …);
+ *  - hostname collisions on `*.void.app` (`www`, `api`, `dash`, `cname`, …),
+ *    including the hostname dispatch keeps for platform health probes;
  *  - EMAIL sender identity: `EMAIL_RESERVED_SLUGS` (`../reserved-slugs.ts`).
  *    A project's outbound `from` is `<slug>[+tag]@<EMAIL_SENDER_DOMAIN>`,
  *    so owning a slug owns that mailbox, and a user registering `noreply`
@@ -102,6 +113,7 @@ import { getRequestsDataset, queryProjectRequestOverview } from './usage.ts';
  */
 export const RESERVED_SLUGS = new Set([
   ...EMAIL_RESERVED_SLUGS,
+  PLATFORM_HEALTH_HOSTNAME_LABEL,
   'admin',
   'api',
   'app',
@@ -729,6 +741,18 @@ const app = new Hono<ApiEnv>()
     const userId = context.get('user').id;
     try {
       const project = await createProject(context.get('db'), userId, body.slug);
+      let zeroTrust: Awaited<ReturnType<typeof initializeNewProjectZeroTrust>> = null;
+      let zeroTrustWarning: string | undefined;
+      try {
+        zeroTrust = await initializeNewProjectZeroTrust(context.env, context.get('db'), project.id);
+      } catch (error) {
+        zeroTrustWarning =
+          'Project created, but its Zero Trust protection is not set up yet, so deploys will wait. Void retries within an hour. To retry now, a project owner or admin can run `void project zero-trust reconcile`; if that reports the platform is not ready, ask a platform administrator.';
+        console.error('[zero-trust] new project initialization failed', {
+          projectId: project.id,
+          error,
+        });
+      }
       // Pre-seed the owner's own address as a destination so mail to
       // themselves works from the first deploy. CF sends them a verification
       // link; the row stays `pending` until they click it.
@@ -768,9 +792,24 @@ const app = new Hono<ApiEnv>()
         // which has not run yet. The CLI prints this so the verification
         // email that may follow is explained; `void email destinations`
         // shows the outcome.
-        return context.json({ ...project, owner_email_destination: { address } }, 201);
+        return context.json(
+          {
+            ...project,
+            owner_email_destination: { address },
+            ...(zeroTrust ? { zero_trust: publicProjectZeroTrustState(zeroTrust) } : {}),
+            ...(zeroTrustWarning ? { warnings: [zeroTrustWarning] } : {}),
+          },
+          201,
+        );
       }
-      return context.json(projectWithUrl(project, context.env), 201);
+      return context.json(
+        {
+          ...projectWithUrl(project, context.env),
+          ...(zeroTrust ? { zero_trust: publicProjectZeroTrustState(zeroTrust) } : {}),
+          ...(zeroTrustWarning ? { warnings: [zeroTrustWarning] } : {}),
+        },
+        201,
+      );
     } catch (err) {
       // Unique constraint violation — slug was taken between check and insert
       if (
@@ -1010,7 +1049,7 @@ const app = new Hono<ApiEnv>()
     // we restore KV, cron, and queue state from the callback's undo log.
     let rollbackLeaseId: string | undefined;
     const rollbackOwnerId = crypto.randomUUID();
-    const externalUndo: Array<() => Promise<void>> = [];
+    const externalUndo: Array<(zeroTrust: ProjectZeroTrustRouting | null) => Promise<void>> = [];
     const routingValuesWritten = new Map<string, string | null>();
     let externalCompensated = false;
     let rollbackCommitted = false;
@@ -1313,6 +1352,14 @@ const app = new Hono<ApiEnv>()
           const workerName = getProjectDeploymentWorkerName(lockedProject.slug, target.id);
           const existingRouting = await context.env.ROUTING.get(lockedProject.slug);
           const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
+          const zeroTrust = await resolveProjectZeroTrustRouting(txDb, projectId).catch(
+            (error: unknown) => {
+              const message = zeroTrustNotReadyMessage(error);
+              throw message
+                ? new RollbackError(409, 'zero trust not ready', undefined, message)
+                : error;
+            },
+          );
           const targetType =
             manifest?.type ??
             (manifest?.framework
@@ -1354,6 +1401,7 @@ const app = new Hono<ApiEnv>()
               assetConfig,
               manifest,
               suspended: existingEntry?.suspended,
+              zeroTrust,
             });
           } else {
             routingJson = buildRoutingJson({
@@ -1367,6 +1415,7 @@ const app = new Hono<ApiEnv>()
               hasCrons: !!manifest?.schedules?.length,
               assetManifestId: targetHasAssets ? target.id : undefined,
               assetConfig: targetHasAssets ? manifest?.assetConfig : undefined,
+              zeroTrust,
             });
           }
 
@@ -1382,7 +1431,7 @@ const app = new Hono<ApiEnv>()
             }
             const previous = await context.env.ROUTING.get(key);
             snapshottedRoutingKeys.add(key);
-            externalUndo.push(async () => {
+            externalUndo.push(async (currentZeroTrust) => {
               if (!routingValuesWritten.has(key)) {
                 return;
               }
@@ -1397,7 +1446,12 @@ const app = new Hono<ApiEnv>()
               if (undo.value === null) {
                 await context.env.ROUTING.delete(key);
               } else {
-                await context.env.ROUTING.put(key, undo.value);
+                await context.env.ROUTING.put(
+                  key,
+                  key === lockedProject.slug || key.startsWith('domain:')
+                    ? withProjectZeroTrustRouting(undo.value, currentZeroTrust, lockedProject.id)
+                    : undo.value,
+                );
               }
             });
           };
@@ -1598,7 +1652,7 @@ const app = new Hono<ApiEnv>()
             const compensationErrors: Array<unknown> = [];
             for (const undo of externalUndo.reverse()) {
               try {
-                await undo();
+                await undo(zeroTrust);
               } catch (compensationError) {
                 compensationErrors.push(compensationError);
               }
@@ -1698,9 +1752,10 @@ const app = new Hono<ApiEnv>()
               if (!stillOwnsLease) {
                 return;
               }
+              const zeroTrust = await resolveProjectZeroTrustRoutingForPublication(txDb, projectId);
               for (const undo of [...externalUndo].reverse()) {
                 try {
-                  await undo();
+                  await undo(zeroTrust);
                 } catch (compensationError) {
                   compensationErrors.push(compensationError);
                 }
@@ -1717,7 +1772,11 @@ const app = new Hono<ApiEnv>()
               // database status update was interrupted.
               let restoredProjectRouting: string | null = null;
               try {
-                restoredProjectRouting = await context.env.ROUTING.get(project.slug);
+                const rawRouting = await context.env.ROUTING.get(project.slug);
+                restoredProjectRouting =
+                  rawRouting === null
+                    ? null
+                    : withProjectZeroTrustRouting(rawRouting, zeroTrust, projectId);
               } catch (compensationError) {
                 compensationErrors.push(compensationError);
               }

@@ -120,6 +120,37 @@ describe('parseProjectArgs', () => {
     });
   });
 
+  describe('zero-trust', () => {
+    it('opens the group and parses every project operation', () => {
+      expect(parseProjectArgs(['zero-trust'])).toEqual({
+        subcommand: 'zero-trust',
+        action: '',
+        projectSlug: '',
+      });
+      for (const action of ['status', 'protect', 'public', 'reconcile'] as const) {
+        expect(parseProjectArgs(['zero-trust', action, '--project', 'my-app'])).toEqual({
+          subcommand: 'zero-trust',
+          action,
+          projectSlug: 'my-app',
+        });
+      }
+    });
+
+    it('rejects unknown operations and malformed project selection', () => {
+      for (const action of ['remove', 'enable', 'disable']) {
+        expect(() => parseProjectArgs(['zero-trust', action])).toThrow(
+          'status|protect|public|reconcile',
+        );
+      }
+      expect(() => parseProjectArgs(['zero-trust', 'status', '--project'])).toThrow(
+        '--project requires a value',
+      );
+      expect(() =>
+        parseProjectArgs(['zero-trust', 'status', '--project', 'one', '--project', 'two']),
+      ).toThrow("Duplicate flag '--project'");
+    });
+  });
+
   describe('cancel', () => {
     it('parses cancel without a deployment id', () => {
       expect(parseProjectArgs(['cancel'])).toEqual({

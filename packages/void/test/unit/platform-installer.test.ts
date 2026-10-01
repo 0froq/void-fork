@@ -576,6 +576,85 @@ describe('platform installer', () => {
     },
   );
 
+  it('lifts a left-over uninstall fence before traffic opens', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-uninstall-fence-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const plan = await createPlatformInstallPlan(
+      planningClient(),
+      {
+        accountId: 'account',
+        applicationDomain: '',
+        zoneName: '',
+        workersDev: true,
+        controlPlaneDomain: '',
+        dedicatedZone: false,
+        displayName: 'Fenced',
+        installationSlug: 'fenced',
+      },
+      null,
+    );
+    let index = 0;
+    const create = async (_account: string, name: string) => ({
+      id: `resource-${index++}`,
+      name,
+    });
+    const events: Array<string> = [];
+    const result = await installPlatform(
+      plan,
+      createPlatformInstallationSecrets({
+        bootstrapGitHubId: '583231',
+        bootstrapGitHubLogin: 'octocat',
+        cloudflareApiToken: 'test-token',
+        databaseUrl: 'postgres://user:password@db.example.com/fenced',
+        githubClientId: 'id',
+        githubClientSecret: 'secret',
+        jwtSecret: TEST_PLATFORM_JWT_SECRET,
+        projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
+        r2AccessKeyId: 'id',
+        r2SecretAccessKey: 'secret',
+      }),
+      null,
+      {
+        claimDatabase,
+        acquireDatabaseLifecycleLock: async () =>
+          Object.assign(async () => {}, {
+            prepareSandboxDrain: async () => sandboxDrainPreparation('complete'),
+            liftProjectZeroTrustFence: async () => {
+              events.push('lift fence');
+            },
+          }),
+        client: {
+          createAiGateway: create,
+          createDnsRecord: async () => {
+            throw new Error('no DNS expected');
+          },
+          createZone: async () => {
+            throw new Error('no zone expected');
+          },
+          createKvNamespace: create,
+          createR2Bucket: create,
+          createQueue: create,
+          createDispatchNamespace: create,
+          createHyperdrive: create,
+          putKvValue: async () => {},
+          deleteKvValue: async (_account, _namespace, key) => {
+            if (key === PLATFORM_DISABLED_KEY) {
+              events.push('enable traffic');
+            }
+          },
+          putR2Object: async () => {},
+        },
+        deployWorker: async () => {},
+        migrateDatabase: async () => {},
+        revalidateBeforeWorkerDeploy: async () => {},
+        verifyHealth: async () => {},
+      },
+    );
+    expect(result.manifest.status).toBe('installed');
+    expect(events).toEqual(['lift fence', 'enable traffic']);
+  });
+
   it('keeps traffic disabled and the verified Worker set when shared email bootstrap blocks', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-platform-email-bootstrap-test-'));
     directories.push(directory);
@@ -2139,7 +2218,7 @@ describe('platform installer', () => {
       'https://api.example.com/health',
       'https://api.example.com/.well-known/void-platform',
       'https://proxy.example.com/health',
-      'https://test.apps.example.com/health',
+      'https://void-platform-health.apps.example.com/health',
       'https://email.example.com/health',
     ]);
     expect(
@@ -2961,6 +3040,79 @@ describe('platform installer', () => {
     expect(
       queries.find(({ sql }) => sql.includes('UPDATE "__void_platform_installation"'))?.values,
     ).toEqual([JSON.stringify(next), manifest.id, manifest.ownershipNonce]);
+    await lock();
+  });
+
+  it('reads project Zero Trust state on the held lifecycle connection', async () => {
+    const queries: Array<{ sql: string; values?: ReadonlyArray<unknown> }> = [];
+    const connection = {
+      query: async <Row extends Record<string, unknown>>(
+        sql: string,
+        values?: ReadonlyArray<unknown>,
+      ) => {
+        queries.push({ sql, values });
+        if (sql.includes('FROM "__void_platform_installation"')) {
+          return {
+            rows: [
+              { installation_id: 'install-one', ownership_nonce: 'nonce-one' },
+            ] as unknown as ReadonlyArray<Row>,
+          };
+        }
+        if (sql.includes('pg_try_advisory_lock')) {
+          return { rows: [{ acquired: true }] as unknown as ReadonlyArray<Row> };
+        }
+        if (sql.includes('public.platform_settings')) {
+          return {
+            rows: [
+              { settings: true, projects: true, present: true },
+            ] as unknown as ReadonlyArray<Row>,
+          };
+        }
+        if (sql.includes('FROM "platform_settings"')) {
+          return {
+            rows: [
+              { value: { enabled: false, operation: { kind: 'disable' } } },
+            ] as unknown as ReadonlyArray<Row>,
+          };
+        }
+        return { rows: [] as ReadonlyArray<Row> };
+      },
+    };
+    const lock = await acquirePlatformDatabaseLifecycleLockConnection(
+      connection,
+      'install-one',
+      'nonce-one',
+    );
+    await expect(lock.readProjectZeroTrust!()).resolves.toEqual({
+      active: true,
+      applications: [],
+      destinations: [],
+      unfinishedDeletions: [],
+    });
+    expect(queries.find(({ sql }) => sql.includes('FROM "platform_settings"'))?.values).toEqual([
+      'zeroTrust.configuration',
+    ]);
+    expect(queries.some(({ sql }) => sql.includes('FROM "project_zero_trust"'))).toBe(true);
+
+    // The same key the API's Zero Trust writers lock, held on this session.
+    const unlock = await lock.lockProjectZeroTrust!();
+    await unlock();
+    await unlock();
+    expect(
+      queries.filter(({ sql }) => sql.includes("hashtext('zero-trust:configuration')")),
+    ).toEqual([
+      { sql: "SELECT pg_advisory_lock(hashtext('zero-trust:configuration'))", values: undefined },
+      { sql: "SELECT pg_advisory_unlock(hashtext('zero-trust:configuration'))", values: undefined },
+    ]);
+
+    // Uninstall records itself where the API lock holders read it, and removes it.
+    await lock.fenceProjectZeroTrust!();
+    await lock.liftProjectZeroTrustFence!();
+    const fence = queries.find(({ sql }) => sql.startsWith('INSERT INTO "platform_settings"'));
+    expect(fence?.values?.[0]).toBe('platform.uninstall');
+    expect(
+      queries.find(({ sql }) => sql.startsWith('DELETE FROM "platform_settings"'))?.values,
+    ).toEqual(['platform.uninstall']);
     await lock();
   });
 

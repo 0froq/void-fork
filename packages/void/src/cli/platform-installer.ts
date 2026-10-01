@@ -39,6 +39,7 @@ import {
   parsePlatformResourceOwnershipMarker,
   PLATFORM_DISABLED_KEY,
   PLATFORM_DISABLED_VALUE,
+  PLATFORM_HEALTH_HOSTNAME_LABEL,
   PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
   PLATFORM_SANDBOX_DRAIN_KEY,
@@ -114,6 +115,13 @@ import {
   trackedPlatformWorkerTraffic,
 } from './platform-traffic.ts';
 import { platformWorkerLiveTriggersMatch } from './platform-trigger-proof.ts';
+import {
+  fencePlatformProjectZeroTrustConnection,
+  liftPlatformProjectZeroTrustFenceConnection,
+  lockPlatformProjectZeroTrustConnection,
+  readPlatformProjectZeroTrustStateConnection,
+  type PlatformProjectZeroTrustState,
+} from './platform-zero-trust-uninstall.ts';
 import { resolveWranglerArgv } from './preset.ts';
 import { createDefaultRunWrangler, resolvePinnedApiBaseUrl } from './provision.ts';
 
@@ -197,6 +205,14 @@ export type PlatformDatabaseLifecycleLock = (() => Promise<void>) & {
   prepareSandboxDrain?: (
     requiredAdmissionProtocol?: 0 | 2 | 3,
   ) => Promise<PlatformSandboxDrainPreparation>;
+  /** Project Zero Trust state that decides whether uninstall may start. */
+  readProjectZeroTrust?: () => Promise<PlatformProjectZeroTrustState>;
+  /** Block Zero Trust writers in the API until the returned release runs. */
+  lockProjectZeroTrust?: () => Promise<() => Promise<void>>;
+  /** Make API Zero Trust writers refuse until the fence is lifted. */
+  fenceProjectZeroTrust?: () => Promise<void>;
+  /** Let API Zero Trust writers run again; called before traffic is enabled. */
+  liftProjectZeroTrustFence?: () => Promise<void>;
   requiredSafetyProtocols?: Readonly<{ sandboxDrain: 0 | 1 | 2 | 3 }>;
   verifyDatabase?: (
     runtimeDirectory: string,
@@ -2711,6 +2727,9 @@ export async function installPlatform(
         createPlatformHealthProbeToken(manifest.ownershipNonce),
       );
     }
+    // A failed uninstall, or one whose database is reused, leaves its record
+    // behind. Remove it before traffic opens so Zero Trust writers run again.
+    await releaseDatabaseLock.liftProjectZeroTrustFence?.();
     if (dependencies.client.deleteKvValue) {
       await dependencies.client.deleteKvValue(
         plan.account.id,
@@ -3608,6 +3627,26 @@ export async function readPlatformDatabaseLifecycleManifest(
   }
 }
 
+/** Read project Zero Trust state for a plan, which holds no lifecycle lock. */
+export async function readPlatformProjectZeroTrustState(
+  databaseUrl: string,
+  installationId: string,
+  ownershipNonce: string,
+): Promise<PlatformProjectZeroTrustState> {
+  if (!databaseUrl) {
+    throw new Error('the installation database URL is not recorded on this machine');
+  }
+  const { Pool } = await import('pg');
+  const pool = new Pool({ connectionString: platformDatabaseClientUrl(databaseUrl), max: 1 });
+  try {
+    // Throws unless the database is claimed by this installation.
+    await readPlatformDatabaseLifecycleManifestConnection(pool, installationId, ownershipNonce);
+    return await readPlatformProjectZeroTrustStateConnection(pool);
+  } finally {
+    await pool.end();
+  }
+}
+
 type DatabaseClaimConnection = Readonly<{
   query: <Row extends Record<string, unknown> = Record<string, unknown>>(
     sql: string,
@@ -3897,6 +3936,10 @@ export async function acquirePlatformDatabaseLifecycleLockConnection(
         }
       : null;
   };
+  release.readProjectZeroTrust = () => readPlatformProjectZeroTrustStateConnection(client);
+  release.lockProjectZeroTrust = () => lockPlatformProjectZeroTrustConnection(client);
+  release.fenceProjectZeroTrust = () => fencePlatformProjectZeroTrustConnection(client);
+  release.liftProjectZeroTrustFence = () => liftPlatformProjectZeroTrustFenceConnection(client);
   release.requiredSafetyProtocols = await readRequiredPlatformSafetyProtocols(client);
   release.checkpoint = async (manifest) => {
     if (released) {
@@ -6456,7 +6499,9 @@ export async function verifyPlatformHealth(
       redirect: 'manual',
       signal: AbortSignal.timeout(30_000),
     });
-  const dispatchUrl = dispatchOrigin ?? `https://test.${applicationBaseDomain}`;
+  // Project Zero Trust leaves only this application-domain hostname outside Access.
+  const dispatchUrl =
+    dispatchOrigin ?? `https://${PLATFORM_HEALTH_HOSTNAME_LABEL}.${applicationBaseDomain}`;
   const [health, discovery, proxy, dispatch, emailGateway] = await Promise.all([
     request(`${apiUrl}/health`),
     request(`${apiUrl}/.well-known/void-platform`),

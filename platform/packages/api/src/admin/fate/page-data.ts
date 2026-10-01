@@ -23,6 +23,7 @@ import {
   searchProjects,
   searchUsers,
 } from '../../db.ts';
+import type { Db } from '../../db.ts';
 import type { ApiEnv } from '../../env.ts';
 import { OperatorError } from '../../operator/common.ts';
 import { cliVersionStats } from '../../operator/system-operations.ts';
@@ -148,14 +149,49 @@ export async function loadUserDetailPage(context: AdminContext, path: string) {
   };
 }
 
+/**
+ * Saved Zero Trust state for the project detail page. It reads only the
+ * database, because page navigations load it often; the live Access check
+ * belongs to the Zero Trust page.
+ */
+async function loadProjectZeroTrust(db: Db, projectId: string) {
+  const {
+    ZeroTrustConfigurationError,
+    readZeroTrustConfigurationStrict,
+    zeroTrustConfigurationStatus,
+  } = await import('../../zero-trust/configuration.ts');
+  const { getProjectZeroTrustState, projectZeroTrustAvailable, publicProjectZeroTrustState } =
+    await import('../../zero-trust/state.ts');
+  const [row, configuration] = await Promise.all([
+    getProjectZeroTrustState(db, projectId),
+    readZeroTrustConfigurationStrict(db).catch((error: unknown) => {
+      if (error instanceof ZeroTrustConfigurationError) {
+        return 'invalid' as const;
+      }
+      throw error;
+    }),
+  ]);
+  const saved = configuration === 'invalid' ? null : configuration;
+  return {
+    configured: configuration !== null,
+    invalid: configuration === 'invalid',
+    enabled: saved?.enabled ?? false,
+    status: saved ? zeroTrustConfigurationStatus(saved) : null,
+    operation: saved?.operation?.kind ?? null,
+    available: projectZeroTrustAvailable(saved),
+    state: publicProjectZeroTrustState(row),
+  };
+}
+
 export async function loadProjectDetailPage(context: AdminContext, path: string) {
   const { id } = detailLocation(path, '/admin/projects/');
   const { getOperatorProject } = await import('../../operator/tenant-service.ts');
   const db = context.get('db');
-  const [detail, members, invitations] = await Promise.all([
+  const [detail, members, invitations, zeroTrust] = await Promise.all([
     getOperatorProject(db, id),
     getProjectMembers(db, id),
     getPendingProjectInvitations(db, id),
+    loadProjectZeroTrust(db, id),
   ]);
   return {
     id: path,
@@ -172,6 +208,7 @@ export async function loadProjectDetailPage(context: AdminContext, path: string)
       role: invitation.role,
       expiresAt: invitation.expires_at,
     })),
+    zeroTrust,
     cfAccountId: context.env.CF_ACCOUNT_ID,
     deployUrl: projectUrl(detail.project, context.env),
     tz: (context.req.raw.cf?.timezone as string | undefined) ?? undefined,
@@ -397,4 +434,45 @@ export async function loadEmailProjectPage(context: AdminContext, path: string) 
   requireEmail(context);
   const { loadEmailProjectData } = await import('../routes/email.tsx');
   return { id: path, ...(await loadEmailProjectData(context, id)) };
+}
+
+/**
+ * A fixed, redacted view of the Zero Trust status. It leaves out the stored
+ * credential, the configuration revision, and the managed Access application
+ * identifiers. `?check=1` adds the live Cloudflare Access check.
+ */
+export async function loadZeroTrustPage(context: AdminContext, path: string) {
+  const url = pageLocation(path, '/admin/zero-trust');
+  const { zeroTrustStatus } = await import('../../zero-trust/status.ts');
+  const status = await zeroTrustStatus(context.env, context.get('db'), {
+    check: url.searchParams.get('check') === '1',
+  });
+  const saved = 'accountId' in status ? status : null;
+  return {
+    id: path,
+    configured: status.configured,
+    enabled: status.enabled,
+    status: 'status' in status ? status.status : null,
+    accountId: saved?.accountId ?? null,
+    teamDomain: saved?.teamDomain ?? null,
+    identityProviderIds: [...(saved?.identityProviderIds ?? [])],
+    policyIds: [...(saved?.policyIds ?? [])],
+    protectNewProjects: saved?.protectNewProjects ?? null,
+    operation: saved?.operation
+      ? {
+          kind: saved.operation.kind,
+          phase: saved.operation.phase,
+          existingProjects: saved.operation.existingProjects,
+        }
+      : null,
+    lastError: 'lastError' in status ? status.lastError : null,
+    checked: 'checked' in status ? status.checked : false,
+    live: status.live ? { present: status.live.present, drifted: status.live.drifted } : null,
+    projects: status.projects.map((entry) => ({
+      desiredProtected: entry.desiredProtected,
+      effectiveProtected: entry.effectiveProtected,
+      state: entry.state,
+      count: entry.count,
+    })),
+  };
 }

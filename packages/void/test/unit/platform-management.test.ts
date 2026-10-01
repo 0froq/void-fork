@@ -36,6 +36,10 @@ import {
   writePendingInstallationSecrets,
 } from '../../src/cli/platform-registry.ts';
 import { recordPlatformWorkerTraffic } from '../../src/cli/platform-traffic.ts';
+import {
+  projectZeroTrustUninstallState,
+  readPlatformProjectZeroTrustStateConnection,
+} from '../../src/cli/platform-zero-trust-uninstall.ts';
 
 const directories: Array<string> = [];
 
@@ -301,6 +305,489 @@ const uninstallArgs = {
   yes: true,
 };
 
+const unlockedProjectZeroTrust = {
+  lockProjectZeroTrust: async () => async () => {},
+  fenceProjectZeroTrust: async () => {},
+  liftProjectZeroTrustFence: async () => {},
+};
+
+const uninstallDependencies = {
+  interactive: false,
+  ...unlockedProjectZeroTrust,
+  readProjectZeroTrust: async () => projectZeroTrustUninstallState(undefined, []),
+};
+
+const wildcardName = 'void-example-a1b2c3d4-0123456789abcdef-aaaa-project-zero-trust';
+const healthName = 'void-example-a1b2c3d4-0123456789abcdef-bbbb-platform-health';
+
+function zeroTrustSetting(overrides: Record<string, unknown> = {}) {
+  return {
+    version: 1,
+    revision: 4,
+    enabled: true,
+    protectNewProjects: false,
+    accountId: 'account',
+    teamDomain: 'https://example.cloudflareaccess.com',
+    identityProviderIds: ['idp'],
+    policyIds: ['policy'],
+    credential: { ciphertext: 'c', iv: 'i', keyVersion: 'v1' },
+    wildcardApplicationName: wildcardName,
+    wildcardApplication: {
+      id: 'wildcard-app',
+      name: wildcardName,
+      audience: 'wildcard-aud',
+      destinations: ['*.apps.example.com'],
+    },
+    healthApplicationName: healthName,
+    healthApplication: {
+      id: 'health-app',
+      name: healthName,
+      audience: 'health-aud',
+      destinations: ['void-platform-health.apps.example.com/health'],
+    },
+    operation: null,
+    lastError: null,
+    updatedAt: '2026-09-30T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+const disabledZeroTrust = zeroTrustSetting({
+  enabled: false,
+  wildcardApplication: null,
+  healthApplication: null,
+});
+
+function projectApplications(projectId: string, bypass: string | null, custom: string | null) {
+  return {
+    project_id: projectId,
+    bypass_application_id: bypass ? `${bypass}-id` : null,
+    bypass_application_name: bypass,
+    protected_application_id: custom ? `${custom}-id` : null,
+    protected_application_name: custom,
+  };
+}
+
+describe('uninstall with project Zero Trust', () => {
+  function expectNothingChanged(fake: ReturnType<typeof client>) {
+    expect(fake.disabledWrites).toEqual([]);
+    expect(fake.remoteWrites).toEqual([]);
+    expect(fake.deleted).toEqual([]);
+    expect(fake.removedRoutes).toBe(0);
+    expect(listInstallationManifests()[0]?.status).toBe('installed');
+  }
+
+  it('refuses before any change while Zero Trust is enabled', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    const error = await uninstallPlatform(fake, manifest, uninstallArgs, {
+      interactive: false,
+      readProjectZeroTrust: async () =>
+        projectZeroTrustUninstallState(zeroTrustSetting(), [
+          projectApplications('proj_public', 'void-example-public-proj_public', null),
+        ]),
+    }).catch((reason: unknown) => reason as Error);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error!.message).toContain('Refusing to uninstall while project Zero Trust is enabled');
+    expect(error!.message).toContain('`void platform zero-trust disable`');
+    expect(error!.message).toContain('*.apps.example.com');
+    expect(error!.message).toContain(`shared project application: ${wildcardName} (wildcard-app)`);
+    expect(error!.message).toContain(`health check exception: ${healthName} (health-app)`);
+    expect(error!.message).toContain(
+      'public exception for proj_public: void-example-public-proj_public',
+    );
+    expect(error!.message).toContain('Zero Trust → Access → Applications');
+    expectNothingChanged(fake);
+  });
+
+  it('shows the same refusal in the plan', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    await expect(
+      uninstallPlatform(
+        fake,
+        manifest,
+        { ...uninstallArgs, plan: true },
+        {
+          interactive: false,
+          readProjectZeroTrust: async () => projectZeroTrustUninstallState(zeroTrustSetting(), []),
+        },
+      ),
+    ).rejects.toThrow('Refusing to uninstall while project Zero Trust is enabled');
+    expectNothingChanged(fake);
+  });
+
+  it('refuses while an unfinished operation may still own applications', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    const error = await uninstallPlatform(fake, manifest, uninstallArgs, {
+      interactive: false,
+      readProjectZeroTrust: async () =>
+        projectZeroTrustUninstallState(
+          zeroTrustSetting({
+            enabled: false,
+            wildcardApplication: null,
+            healthApplication: null,
+            operation: { id: 'operation', kind: 'configure', phase: 'wildcard' },
+          }),
+          [],
+        ),
+    }).catch((reason: unknown) => reason as Error);
+    expect(error!.message).toContain('Refusing to uninstall while project Zero Trust is enabled');
+    expect(error!.message).toContain(`shared project application: ${wildcardName}`);
+    expectNothingChanged(fake);
+  });
+
+  it('refuses while a finished disable left project applications behind', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    const error = await uninstallPlatform(fake, manifest, uninstallArgs, {
+      interactive: false,
+      readProjectZeroTrust: async () =>
+        projectZeroTrustUninstallState(disabledZeroTrust, [
+          projectApplications('proj_skipped', 'void-example-public-proj_skipped', null),
+        ]),
+    }).catch((reason: unknown) => reason as Error);
+    expect(error!.message).toContain(
+      'Refusing to uninstall while Void-managed Access applications from project Zero Trust remain',
+    );
+    expect(error!.message).toContain(
+      'public exception for proj_skipped: void-example-public-proj_skipped (void-example-public-proj_skipped-id)',
+    );
+    expect(error!.message).not.toContain(wildcardName);
+    expectNothingChanged(fake);
+  });
+
+  it('points to finishing the deletion of a project that stopped partway', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    const read = (rows: Parameters<typeof projectZeroTrustUninstallState>[1]) => () =>
+      uninstallPlatform(fake, manifest, uninstallArgs, {
+        interactive: false,
+        ...unlockedProjectZeroTrust,
+        readProjectZeroTrust: async () => projectZeroTrustUninstallState(disabledZeroTrust, rows),
+      }).catch((reason: unknown) => reason as Error);
+    const deleting = {
+      ...projectApplications('proj_gone', 'void-example-public-proj_gone', null),
+      project_slug: 'gone-app',
+      project_status: 'deleting',
+    };
+
+    const onlyDeleting = (await read([deleting])())!;
+    expect(onlyDeleting.message).toContain(
+      'public exception for proj_gone: void-example-public-proj_gone',
+    );
+    expect(onlyDeleting.message).toContain('Deletion of project gone-app stopped');
+    expect(onlyDeleting.message).toContain('Rerun `void project delete <name>`');
+    expect(onlyDeleting.message).not.toContain('Hourly maintenance');
+
+    const mixed = (await read([
+      deleting,
+      {
+        ...projectApplications('proj_live', 'void-example-public-proj_live', null),
+        project_slug: 'live-app',
+        project_status: 'active',
+      },
+    ])())!;
+    expect(mixed.message).toContain('Deletion of project gone-app stopped');
+    expect(mixed.message).not.toContain('live-app');
+    expect(mixed.message).toContain('Hourly maintenance retries the other applications');
+    expectNothingChanged(fake);
+  });
+
+  it('refuses when the Zero Trust state cannot be read', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    const error = await uninstallPlatform(fake, manifest, uninstallArgs, {
+      interactive: false,
+      readProjectZeroTrust: async () => {
+        throw new Error('platform: connect ECONNREFUSED');
+      },
+    }).catch((reason: unknown) => reason as Error);
+    expect(error!.message).toContain(
+      'Refusing to uninstall because the project Zero Trust state could not be read from the platform database: connect ECONNREFUSED',
+    );
+    expect(error!.message).toContain('VOID_PLATFORM_DATABASE_URL');
+    expectNothingChanged(fake);
+
+    await expect(
+      uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false }),
+    ).rejects.toThrow('no platform database connection is available');
+    expectNothingChanged(fake);
+  });
+
+  it('refuses when the saved configuration is malformed', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    await expect(
+      uninstallPlatform(fake, manifest, uninstallArgs, {
+        interactive: false,
+        readProjectZeroTrust: async () =>
+          projectZeroTrustUninstallState(zeroTrustSetting({ enabled: 'yes' }), []),
+      }),
+    ).rejects.toThrow('the saved Zero Trust configuration is malformed');
+    expectNothingChanged(fake);
+  });
+
+  it.each([
+    ['was never configured', undefined],
+    ['is fully disabled', disabledZeroTrust],
+  ])('proceeds when Zero Trust %s', async (_label, setting) => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    await uninstallPlatform(fake, manifest, uninstallArgs, {
+      interactive: false,
+      ...unlockedProjectZeroTrust,
+      readProjectZeroTrust: async () =>
+        projectZeroTrustUninstallState(setting, [projectApplications('proj_settled', null, null)]),
+    });
+    expect(fake.disabledWrites).toEqual([PLATFORM_DISABLED_VALUE]);
+    expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
+  });
+
+  // Models the PostgreSQL advisory lock and the uninstall fence: an API Zero
+  // Trust writer that asks for the lock while uninstall holds it gets it only
+  // after the release, then refuses if the fence is still in place.
+  function zeroTrustLock(events: Array<string>) {
+    let release: (() => void) | undefined;
+    let free = Promise.resolve();
+    let fence = false;
+    return {
+      get fenced() {
+        return fence;
+      },
+      dependencies: {
+        lockProjectZeroTrust: async () => {
+          await free;
+          free = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          events.push('lock');
+          return async () => {
+            events.push('unlock');
+            release!();
+          };
+        },
+        fenceProjectZeroTrust: async () => {
+          fence = true;
+          events.push('fence');
+        },
+        liftProjectZeroTrustFence: async () => {
+          fence = false;
+          events.push('lift fence');
+        },
+      },
+      writer: async () => {
+        await free;
+        events.push(fence ? 'zero-trust write refused' : 'zero-trust write');
+      },
+    };
+  }
+
+  it('refuses Zero Trust writers that were waiting on the lock once traffic is disabled', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    const events: Array<string> = [];
+    const putKvValue = fake.putKvValue;
+    fake.putKvValue = async (account, namespace, key, value) => {
+      if (key === PLATFORM_DISABLED_KEY) {
+        events.push('disable traffic');
+      }
+      await putKvValue(account, namespace, key, value);
+    };
+    const gate = zeroTrustLock(events);
+    let writer: Promise<void> | undefined;
+    await uninstallPlatform(fake, manifest, uninstallArgs, {
+      interactive: false,
+      ...gate.dependencies,
+      readProjectZeroTrust: async () => {
+        events.push('check');
+        if (events.includes('lock')) {
+          // A configure request admitted before traffic was disabled arrives
+          // right after the final check and waits on the lock.
+          writer = gate.writer();
+        }
+        return projectZeroTrustUninstallState(disabledZeroTrust, []);
+      },
+    });
+    await writer;
+    expect(events).toEqual([
+      'check',
+      'lock',
+      'check',
+      'fence',
+      'disable traffic',
+      'unlock',
+      'zero-trust write refused',
+    ]);
+    expect(gate.fenced).toBe(true);
+    expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
+  });
+
+  it('lifts the fence when uninstall stops before it disables traffic', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    const events: Array<string> = [];
+    fake.putKvValue = async () => {
+      throw new Error('KV write failed');
+    };
+    const gate = zeroTrustLock(events);
+    let writer: Promise<void> | undefined;
+    await expect(
+      uninstallPlatform(fake, manifest, uninstallArgs, {
+        interactive: false,
+        ...gate.dependencies,
+        readProjectZeroTrust: async () => {
+          if (events.includes('lock')) {
+            writer = gate.writer();
+          }
+          return projectZeroTrustUninstallState(disabledZeroTrust, []);
+        },
+      }),
+    ).rejects.toThrow('KV write failed');
+    await writer;
+    // The platform still serves traffic, so the waiting writer proceeds.
+    expect(events).toEqual(['lock', 'fence', 'lift fence', 'unlock', 'zero-trust write']);
+    expect(gate.fenced).toBe(false);
+    expect(fake.disabledWrites).toEqual([]);
+    expect(listInstallationManifests()[0]?.status).toBe('failed');
+  });
+
+  it('keeps the fence when uninstall fails after it started disabling traffic', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    const events: Array<string> = [];
+    const putKvValue = fake.putKvValue;
+    fake.putKvValue = async (account, namespace, key, value) => {
+      if (key === PLATFORM_DISABLED_KEY) {
+        events.push('disable traffic');
+        throw new Error('KV write failed after it was applied');
+      }
+      await putKvValue(account, namespace, key, value);
+    };
+    const gate = zeroTrustLock(events);
+    await expect(
+      uninstallPlatform(fake, manifest, uninstallArgs, {
+        interactive: false,
+        ...gate.dependencies,
+        readProjectZeroTrust: async () => projectZeroTrustUninstallState(disabledZeroTrust, []),
+      }),
+    ).rejects.toThrow('KV write failed after it was applied');
+    // Only enabling the platform again lifts the fence.
+    expect(events).toEqual(['lock', 'fence', 'disable traffic', 'unlock']);
+    expect(gate.fenced).toBe(true);
+    expect(listInstallationManifests()[0]?.status).toBe('failed');
+  });
+
+  it('checks again under the lock and refuses when Zero Trust changed after the first check', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    const events: Array<string> = [];
+    const gate = zeroTrustLock(events);
+    const states = [
+      projectZeroTrustUninstallState(disabledZeroTrust, []),
+      projectZeroTrustUninstallState(
+        zeroTrustSetting({
+          enabled: false,
+          wildcardApplication: null,
+          healthApplication: null,
+          operation: { id: 'operation', kind: 'configure', phase: 'seed' },
+        }),
+        [],
+      ),
+    ];
+    await expect(
+      uninstallPlatform(fake, manifest, uninstallArgs, {
+        interactive: false,
+        ...gate.dependencies,
+        readProjectZeroTrust: async () => states.shift()!,
+      }),
+    ).rejects.toThrow('Refusing to uninstall while project Zero Trust is enabled');
+    expect(events).toEqual(['lock', 'unlock']);
+    expect(gate.fenced).toBe(false);
+    expectNothingChanged(fake);
+  });
+
+  it('refuses without a database session that can hold off Zero Trust changes', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    await expect(
+      uninstallPlatform(fake, manifest, uninstallArgs, {
+        interactive: false,
+        readProjectZeroTrust: async () => projectZeroTrustUninstallState(undefined, []),
+      }),
+    ).rejects.toThrow('no platform database connection is available');
+    const { fenceProjectZeroTrust: _fence, ...withoutFence } = unlockedProjectZeroTrust;
+    await expect(
+      uninstallPlatform(fake, manifest, uninstallArgs, {
+        interactive: false,
+        ...withoutFence,
+        readProjectZeroTrust: async () => projectZeroTrustUninstallState(undefined, []),
+      }),
+    ).rejects.toThrow('no platform database connection is available');
+    expectNothingChanged(fake);
+  });
+});
+
+describe('project Zero Trust database read', () => {
+  function connection(tables: { settings: boolean; projects: boolean }, setting: unknown) {
+    const queries: Array<string> = [];
+    return {
+      queries,
+      query: async (sql: string, values?: ReadonlyArray<unknown>) => {
+        queries.push(sql);
+        if (sql.includes('to_regclass')) {
+          return { rows: [tables] };
+        }
+        if (sql.includes('"platform_settings"')) {
+          expect(values).toEqual(['zeroTrust.configuration']);
+          return { rows: setting === undefined ? [] : [{ value: setting }] };
+        }
+        return {
+          rows: [projectApplications('proj_public', 'void-example-public-proj_public', null)],
+        };
+      },
+    };
+  }
+
+  it('treats a database without Zero Trust tables as never configured', async () => {
+    const db = connection({ settings: false, projects: false }, undefined);
+    await expect(readPlatformProjectZeroTrustStateConnection(db as never)).resolves.toEqual({
+      active: false,
+      applications: [],
+      destinations: [],
+      unfinishedDeletions: [],
+    });
+    expect(db.queries).toHaveLength(1);
+  });
+
+  it('reads the saved configuration and project applications', async () => {
+    const db = connection({ settings: true, projects: true }, zeroTrustSetting());
+    const state = await readPlatformProjectZeroTrustStateConnection(db as never);
+    expect(state.active).toBe(true);
+    expect(state.destinations).toEqual(['*.apps.example.com']);
+    expect(state.applications.map((application) => application.role)).toEqual([
+      'shared project application',
+      'health check exception',
+      'public exception for proj_public',
+    ]);
+  });
+});
+
 describe('platform lifecycle management', () => {
   it('preflights only a runtime token that will be applied', () => {
     const updatePlan = {
@@ -344,7 +831,7 @@ describe('platform lifecycle management', () => {
     const fake = client(manifest);
 
     await expect(
-      uninstallPlatform(fake, manifest, { ...uninstallArgs, yes: false }, { interactive: false }),
+      uninstallPlatform(fake, manifest, { ...uninstallArgs, yes: false }, uninstallDependencies),
     ).rejects.toThrow('requires --yes');
     expect(fake.deleted).toEqual([]);
     expect(fake.removedRoutes).toBe(0);
@@ -791,9 +1278,7 @@ describe('platform lifecycle management', () => {
     const manifest = installedManifest();
     persist(manifest);
     const fake = client(manifest);
-    await uninstallPlatform(fake, manifest, uninstallArgs, {
-      interactive: false,
-    });
+    await uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies);
     expect(fake.deleted).toEqual([]);
     expect(fake.deleted.some(([kind]) => kind === 'zone')).toBe(false);
     const result = listInstallationManifests()[0]!;
@@ -861,7 +1346,7 @@ describe('platform lifecycle management', () => {
       { hostname: 'manual.example.com', id: 'manual-domain', service: 'proxy-worker' },
     ];
 
-    await uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false });
+    await uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies);
 
     expect(fake.deleted.some(([kind]) => kind === 'worker')).toBe(false);
     expect(fake.removedRoutes).toBe(4);
@@ -882,7 +1367,7 @@ describe('platform lifecycle management', () => {
           type: 'CNAME',
         }));
 
-    await uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false });
+    await uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies);
 
     expect(fake.deleted).toEqual([]);
     expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
@@ -897,9 +1382,7 @@ describe('platform lifecycle management', () => {
     const manifest = installedManifest();
     persist(manifest);
     const fake = client(manifest);
-    await uninstallPlatform(fake, manifest, uninstallArgs, {
-      interactive: false,
-    });
+    await uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies);
     expect(fake.deleted).toEqual([]);
     expect(fake.remoteWrites.map((value) => JSON.parse(value).status)).toContain('uninstalled');
     const retained = listInstallationManifests()[0]!.resources.filter(
@@ -918,7 +1401,7 @@ describe('platform lifecycle management', () => {
         fake,
         manifest,
         { ...uninstallArgs, deleteZone: true },
-        { interactive: false },
+        uninstallDependencies,
       ),
     ).rejects.toThrow('Refusing to delete Cloudflare zone');
     expect(fake.deleted).toEqual([]);
@@ -934,9 +1417,7 @@ describe('platform lifecycle management', () => {
       fake,
       manifest,
       { ...uninstallArgs, purgeData: true, deleteZone: true },
-      {
-        interactive: false,
-      },
+      uninstallDependencies,
     );
     expect(fake.deleted).toHaveLength(5);
     expect(fake.deleted.some(([kind]) => kind === 'queue')).toBe(false);
@@ -957,7 +1438,7 @@ describe('platform lifecycle management', () => {
       fake,
       manifest,
       { ...uninstallArgs, purgeData: true },
-      { interactive: false },
+      uninstallDependencies,
     );
     expect(fake.emptiedBuckets).toEqual([]);
     expect(fake.deletedBucketMarkers).toEqual([]);
@@ -976,7 +1457,7 @@ describe('platform lifecycle management', () => {
       JSON.stringify({ ...manifest, ownershipNonce: 'different-ownership-nonce-000000' });
 
     await expect(
-      uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false }),
+      uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies),
     ).rejects.toThrow('remote installation identity does not match');
     expect(fake.removedRoutes).toBe(0);
     expect(fake.deleted).toEqual([]);
@@ -999,7 +1480,7 @@ describe('platform lifecycle management', () => {
     };
 
     await expect(
-      uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false }),
+      uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies),
     ).rejects.toThrow('belongs to another installation');
     expect(fake.removedRoutes).toBe(0);
     expect(fake.deleted).toEqual([]);
@@ -1016,7 +1497,7 @@ describe('platform lifecycle management', () => {
       fake,
       manifest,
       { ...uninstallArgs, purgeData: true },
-      { interactive: false },
+      uninstallDependencies,
     );
     expect(fake.emptiedBuckets).toEqual([]);
     expect(fake.deleted).not.toContainEqual(['r2-bucket', 'assets-bucket-id']);
@@ -1039,7 +1520,7 @@ describe('platform lifecycle management', () => {
         first,
         manifest,
         { ...uninstallArgs, purgeData: true },
-        { interactive: false },
+        uninstallDependencies,
       ),
     ).rejects.toThrow('temporary deletion failure');
     const checkpoint = listInstallationManifests()[0]!;
@@ -1051,7 +1532,7 @@ describe('platform lifecycle management', () => {
       second,
       checkpoint,
       { ...uninstallArgs, purgeData: true },
-      { interactive: false },
+      uninstallDependencies,
     );
     expect(second.deleted.filter(([kind]) => kind === 'worker')).toEqual([]);
     expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
@@ -1066,7 +1547,7 @@ describe('platform lifecycle management', () => {
       fake,
       manifest,
       { ...uninstallArgs, purgeData: true },
-      { interactive: false },
+      uninstallDependencies,
     );
 
     expect(fake.deleted.some(([kind]) => kind === 'queue')).toBe(false);
@@ -1103,7 +1584,7 @@ describe('platform lifecycle management', () => {
       fake,
       manifest,
       { ...uninstallArgs, purgeData: true },
-      { interactive: false },
+      uninstallDependencies,
     );
 
     expect(fake.deleted.some(([kind]) => kind === 'queue')).toBe(false);
@@ -1125,7 +1606,7 @@ describe('platform lifecycle management', () => {
     persist(manifest);
     const fake = client(manifest);
 
-    await uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false });
+    await uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies);
 
     expect(fake.deleted).toEqual([
       ['queue', 'cron-queue-id'],
@@ -1150,7 +1631,7 @@ describe('platform lifecycle management', () => {
         first,
         manifest,
         { ...uninstallArgs, purgeData: true },
-        { interactive: false },
+        uninstallDependencies,
       ),
     ).rejects.toThrow('connection closed after routing deletion');
     const checkpoint = listInstallationManifests()[0]!;
@@ -1174,7 +1655,7 @@ describe('platform lifecycle management', () => {
       second,
       checkpoint,
       { ...uninstallArgs, purgeData: true },
-      { interactive: false },
+      uninstallDependencies,
     );
     expect(second.deleted).toEqual([]);
     expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
@@ -1187,7 +1668,7 @@ describe('platform lifecycle management', () => {
     };
     persist(manifest);
     const fake = client(manifest);
-    await uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false });
+    await uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies);
     expect(fake.removedRoutes).toBe(0);
     expect(fake.deleted.some(([kind]) => kind === 'worker')).toBe(false);
     expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
@@ -1207,7 +1688,7 @@ describe('platform lifecycle management', () => {
     };
     persist(manifest);
     const fake = client(manifest);
-    await uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false });
+    await uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies);
     expect(fake.deleted).toEqual([]);
     expect(listInstallationManifests()[0]).toMatchObject({ status: 'uninstalled' });
     expect(listInstallationManifests()[0]!.resources[0]).toMatchObject({ state: 'retained' });
