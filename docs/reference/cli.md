@@ -988,11 +988,7 @@ Auto-detects your project type and chooses the right pipeline. See [Supported Ap
 
 On an upgraded Void platform, an accepted deployment continues if the CLI disconnects. The CLI automatically reconnects to its progress. Pressing Ctrl+C stops observation; use `void project cancel` to request cancellation and `void project status` to inspect the result. If interrupted execution requires recovery, wait for its result before deploying again.
 
-An unlinked project with a root `wrangler.jsonc`, `wrangler.json`, or a single root `wrangler*.json(c)` file explicitly referenced by a supported framework adapter gets a prompt to link and deploy to Cloudflare using its existing Worker and resources. Accepting verifies the target, saves Cloudflare as the destination, and continues deployment. A failed build retains the link for retry. Declining changes nothing. Explicit platform/project selections and saved destinations take precedence; CI must select a destination explicitly.
-
-The first handoff preserves production bindings, variables, secrets, event handlers, and triggers. The active version must be the latest uploaded version so inherited secrets have an unambiguous source. Apart from an explicitly enabled ISR cache, new resources, migrations, runtime features, auth setup, or local secret overrides must be handled separately. See [Deploy an existing Worker](../integrations/cloudflare.md#deploy-an-existing-worker).
-
-When prerendered or revalidated pages need a cache during migration, Void asks whether to enable ISR and saves `routing.isr` in `void.config.ts`. Yes provisions the KV cache during this handoff; No keeps ISR disabled on every later deploy until you change the setting. CI must set `routing.isr` explicitly if a pending migration has no saved choice. Existing ISR namespaces are reused; application KV bindings are still required.
+For an existing Void Worker, `void deploy` can link the Worker and migrate its root Cloudflare config. Keep the first deployment focused on the existing app. See [Deploy an existing Worker](../integrations/cloudflare.md#deploy-an-existing-worker) for requirements and the ISR cache choice.
 
 For Drizzle projects, deploy performs a read-only schema drift check. If a new migration would be generated, deploy stops and tells you to run `void db generate`, review the migration, commit it yourself, and rerun `void deploy`.
 
@@ -1009,33 +1005,9 @@ For Drizzle projects, deploy performs a read-only schema drift check. If a new m
 
 `--atomic` applies to one deployment. For an existing Durable Object Worker that consistently cannot stage, set `deploy: { cloudflare: { mode: 'atomic' } }` in `void.config.ts` so plain `void deploy` uses atomic publication. The default is `staged`.
 
-Every deploy writes a structured JSONL trace to `~/.void/logs/deploy-<timestamp>.jsonl` regardless of `--debug`. On failure the path is printed at the end of the error message so you can attach it when reporting platform issues. `VOID_DEPLOY_DEBUG=1` is accepted as an alternate trigger for stderr mirroring.
+Every deploy writes a JSONL log to `~/.void/logs/`. Failures print the log path and relevant details. Use `--debug` or `VOID_DEPLOY_DEBUG=1` to mirror it to stderr.
 
-Cloudflare upload failures include a detailed error message and stack locations when available. Use that message to identify the cause; the numeric error code alone may not be sufficient. The details are also available in the deploy log.
-
-When a deploy fails after it starts, the CLI also prints a summary of that trace under the error, so the cause is visible where the file is not — a CI runner, for example, is discarded with the job. The summary has two blocks: every `error` record with its flattened cause chain, then the last 20 records as a timeline.
-
-Pre-flight failures print no summary. A missing project, a rejected flag combination, or an unsupported `--platform cloudflare` feature stops before any trace exists, and each of those prints its own message explaining what to change. A build failure prints no summary either — the build streams its own output straight to the terminal.
-
-Void masks the credentials it emits itself: signed query parameters, bearer tokens, and any field whose key names a credential.
-
-Masking your own values is left to your CI platform, which holds the secrets and masks them before the log is written. GitHub Actions does this for everything under `secrets.*`. Void does not guess at credential-shaped variable names, and it does not parse credentials out of values you supplied — a password inside a `DATABASE_URL` in your build command prints as written. Register such values as CI secrets, or keep them out of the build command.
-
-```
-■  deploy: Deploy failed: deploy in progress
-│  Deployment: dpl_7zgitxdrxxz9
-│  Detailed log: ~/.void/logs/deploy-2026-08-21T03-24-19-764Z.jsonl
-│
-│  Errors
-│     9.0s  deploy_server_error
-│           deploymentId=dpl_7zgitxdrxxz9
-│           message=deploy in progress
-│
-│  Last 20 of 26 entries
-│     8.4s  info   finalize_start        assets=98 workers=0
-│     8.6s  info   stream_deployment_id  deploymentId=dpl_7zgitxdrxxz9
-│     9.0s  error  deploy_server_error   message=deploy in progress
-```
+Keep credentials out of build commands and register them as CI secrets so your CI provider can mask them in logs.
 
 Platform resolution precedence:
 
@@ -1052,12 +1024,6 @@ For the Void platform, project resolution precedence is:
 3. linked project in `.void/project.json`
 
 If no project is linked and no override is provided, CLI prompts to link or create one. In CI (non-TTY), `void deploy` errors out instead — set `VOID_PROJECT` or pass `--project <slug>`.
-
-If a Void platform rejects an older SQLite migration runtime, update `void`, rebuild the app, and deploy again.
-
-A new project's slug is lowercase alphanumeric with interior dashes, at most 56 characters — it is also the project's email sender, `<slug>+noreply@<mail domain>`, and that local part must fit RFC 5321's 64 octets. Slugs of 5 characters or fewer need a paid plan. Creating a project also registers the owner's own email address as a recipient (see `void email allow`); the CLI says so, and `void email destinations` shows whether it is verified yet.
-
-That fallback is mainly for projects that skipped Void project setup during `void init`.
 
 ### `void deploy --platform cloudflare`
 
@@ -1080,30 +1046,15 @@ Void signs you in through your browser when needed and saves the selected accoun
 | `--require-email`              | Fail instead of deploying without email when the email step cannot run, as in CI       |
 | `DATABASE_URL`                 | Required in the deploy environment for PostgreSQL or MySQL provisioning and migrations |
 
-The token needs Workers Scripts: Edit, read access to bound resources, and edit permissions for products Void provisions. First-time Hyperdrive provisioning specifically needs `CLOUDFLARE_API_TOKEN` with Hyperdrive edit permission, or an existing config ID in `cloudflare.hyperdrive` in `void.config.ts`.
+The token needs Workers Scripts: Edit, read access to bound resources, and edit access to products Void provisions. Commit `void.lock.json` after the first deploy before using other machines or CI.
 
-Email setup needs a browser session from `void cloudflare login`, which carries the Email Routing and Email Sending scopes (a session created by older Cloudflare tooling lacks them: `void cloudflare logout`, then sign in again), or a `CLOUDFLARE_API_TOKEN` that also has Email Routing Edit and Email Sending Edit. A Global API Key pair is refused.
+Use `void secret put <NAME>` for production server values. Local `.env` values are never deployed. Run `void db generate` and commit schema changes before deploying.
 
-Sandbox apps need Docker, [Workers Paid](https://dash.cloudflare.com/?to=/:account/workers/plans), and Containers access. API tokens need Account / Containers: Edit and Account / Cloudchamber: Edit. Void checks access before provisioning or building; apps without Sandbox skip that check.
+Sandbox requires [Workers Paid](https://dash.cloudflare.com/?to=/:account/workers/plans), Docker, and Containers access. API tokens need Account / Containers: Edit and Account / Cloudchamber: Edit.
 
-Void provisions inferred resources, builds and validates the app, applies migrations, checks required secrets, and verifies the uploaded Worker before sending it traffic. It then updates routes and triggers. Supported frameworks can deploy static, hybrid, and SSR output. A new Worker may need one initial deployment before versioned deployment is available.
+For email, set `email.from` and run `void email setup --platform cloudflare` locally. Commit the lock file and pass `--require-email` in CI. See [Email setup](../guide/email.md#your-own-cloudflare-account).
 
-During deployment, Void shows the current phase and an animated spinner in an interactive terminal. CI and redirected output receive plain progress lines. Cloudflare CLI setup notices and successful command output are hidden; Void reports deployment errors directly.
-
-If Cloudflare Access protects readiness URLs, supply an allowed `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` pair, or a short-lived local `CF_ACCESS_TOKEN`. These credentials are used only for matching HTTPS readiness requests. Versions without accessible previews can be checked at 0% traffic through the stable hostname.
-
-Secrets and migrations are validated after the build, so a failed check may leave provisioned resources. It doesn't apply remote D1 migrations or upload the application Worker. PostgreSQL migrations are transactional; MySQL schema changes may partially apply on error.
-
-Void records provisioned resource IDs in `void.lock.json`. Commit it for other machines and CI. Run the first deploy from one machine at a time; provisioning locks are local.
-
-`.env` stays local. Store server keys declared in `env.ts` with `void secret put <NAME>`; Void rejects them as plaintext Worker vars. If the first deploy reports missing remote secrets, set them and retry. Custom D1 migration layouts must match the exact files, contents, and order Void validated. Direct deploy and Cloudflare commands use the top-level settings, not named environments or alternate config paths.
-
-Existing remote secrets are preserved. Void also preserves or creates `BETTER_AUTH_SECRET` for auth apps.
-If a failed upload leaves a newer inactive version, later deployments inherit secret bindings from the live version without requiring their plaintext values.
-
-**Email.** If the app uses `sendEmail()` or `email/` handlers, set `email.from` in `void.config.ts`. Void shows the Cloudflare account changes and asks before applying them. Later deploys skip the prompt once setup is ready. Without `email.from`, deploy continues without email. For CI, run `void email setup --platform cloudflare` locally and commit `void.lock.json`; pass `--require-email` to fail when email is unavailable. DNS propagation may delay a deploy after setup. See [Email on your own Cloudflare account](../guide/email.md#your-own-cloudflare-account) for setup and recovery.
-
-See the [Cloudflare guide](../integrations/cloudflare.md#deploy-to-your-own-cloudflare-account) for the complete deployment sequence, first-deploy exceptions, secret precedence, and recovery behavior.
+For Access credentials, Hyperdrive permissions, readiness, and rollback, see [Cloudflare deployment](../integrations/cloudflare.md#deploy-to-your-own-cloudflare-account).
 
 ## Database
 
