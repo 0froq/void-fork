@@ -1,51 +1,61 @@
-import { AdminProviders } from './AdminProviders.tsx';
-import { AdminErrorPage } from './views/AdminErrorPage.tsx';
-import { AdminLoginPage } from './views/AdminLoginPage.tsx';
-import { AuthEditPage } from './views/AuthEditPage.tsx';
-import { AuthErrorPage } from './views/AuthErrorPage.tsx';
-import { AuthNewPage } from './views/AuthNewPage.tsx';
-import { AuthSettingsPage } from './views/AuthSettingsPage.tsx';
-import { BuildDetailPage } from './views/BuildDetailPage.tsx';
-import { CliVersionsPage } from './views/CliVersionsPage.tsx';
-import { DashboardPage } from './views/DashboardPage.tsx';
-import { DeploymentDetailPage } from './views/DeploymentDetailPage.tsx';
-import { DeploymentsListPage } from './views/DeploymentsListPage.tsx';
-import { EmailOperationPage } from './views/EmailOperationPage.tsx';
-import { EmailProjectPage } from './views/EmailProjectPage.tsx';
-import { EmailSettingsPage } from './views/EmailSettingsPage.tsx';
-import { InvitationsPage } from './views/InvitationsPage.tsx';
-import { LoginErrorPage } from './views/LoginErrorPage.tsx';
-import { ProjectDetailPage } from './views/ProjectDetailPage.tsx';
-import { ProjectOwnerPreviewPage } from './views/ProjectOwnerPreviewPage.tsx';
-import { ProjectsListPage } from './views/ProjectsListPage.tsx';
-import { SignupControlPage } from './views/SignupControlPage.tsx';
-import { UserDetailPage } from './views/UserDetailPage.tsx';
-import { UsersListPage } from './views/UsersListPage.tsx';
-
 export const adminComponents = {
-  adminLayout: async () => ({ default: AdminProviders }),
-  dashboard: async () => ({ default: DashboardPage }),
-  adminLogin: async () => ({ default: AdminLoginPage }),
-  loginError: async () => ({ default: LoginErrorPage }),
-  authSettings: async () => ({ default: AuthSettingsPage }),
-  authNew: async () => ({ default: AuthNewPage }),
-  authEdit: async () => ({ default: AuthEditPage }),
-  authError: async () => ({ default: AuthErrorPage }),
-  buildDetail: async () => ({ default: BuildDetailPage }),
-  deploymentDetail: async () => ({ default: DeploymentDetailPage }),
-  users: async () => ({ default: UsersListPage }),
-  userDetail: async () => ({ default: UserDetailPage }),
-  projects: async () => ({ default: ProjectsListPage }),
-  projectDetail: async () => ({ default: ProjectDetailPage }),
-  projectOwnerPreview: async () => ({ default: ProjectOwnerPreviewPage }),
-  deployments: async () => ({ default: DeploymentsListPage }),
-  cliVersions: async () => ({ default: CliVersionsPage }),
-  signupControl: async () => ({ default: SignupControlPage }),
-  email: async () => ({ default: EmailSettingsPage }),
-  emailProject: async () => ({ default: EmailProjectPage }),
-  emailOperation: async () => ({ default: EmailOperationPage }),
-  adminError: async () => ({ default: AdminErrorPage }),
-  invitations: async () => ({ default: InvitationsPage }),
+  adminLayout: async () => ({ default: (await import('./AdminProviders.tsx')).AdminProviders }),
+  dashboard: async () => ({ default: (await import('./views/DashboardPage.tsx')).DashboardPage }),
+  adminLogin: async () => ({
+    default: (await import('./views/AdminLoginPage.tsx')).AdminLoginPage,
+  }),
+  loginError: async () => ({
+    default: (await import('./views/LoginErrorPage.tsx')).LoginErrorPage,
+  }),
+  authSettings: async () => ({
+    default: (await import('./views/AuthSettingsPage.tsx')).AuthSettingsPage,
+  }),
+  authNew: async () => ({ default: (await import('./views/AuthNewPage.tsx')).AuthNewPage }),
+  authEdit: async () => ({ default: (await import('./views/AuthEditPage.tsx')).AuthEditPage }),
+  authError: async () => ({ default: (await import('./views/AuthErrorPage.tsx')).AuthErrorPage }),
+  buildDetail: async () => ({
+    default: (await import('./views/BuildDetailPage.tsx')).BuildDetailPage,
+  }),
+  deploymentDetail: async () => ({
+    default: (await import('./views/DeploymentDetailPage.tsx')).DeploymentDetailPage,
+  }),
+  users: async () => ({ default: (await import('./views/UsersListPage.tsx')).UsersListPage }),
+  userDetail: async () => ({
+    default: (await import('./views/UserDetailPage.tsx')).UserDetailPage,
+  }),
+  projects: async () => ({
+    default: (await import('./views/ProjectsListPage.tsx')).ProjectsListPage,
+  }),
+  projectDetail: async () => ({
+    default: (await import('./views/ProjectDetailPage.tsx')).ProjectDetailPage,
+  }),
+  projectOwnerPreview: async () => ({
+    default: (await import('./views/ProjectOwnerPreviewPage.tsx')).ProjectOwnerPreviewPage,
+  }),
+  deployments: async () => ({
+    default: (await import('./views/DeploymentsListPage.tsx')).DeploymentsListPage,
+  }),
+  cliVersions: async () => ({
+    default: (await import('./views/CliVersionsPage.tsx')).CliVersionsPage,
+  }),
+  signupControl: async () => ({
+    default: (await import('./views/SignupControlPage.tsx')).SignupControlPage,
+  }),
+  email: async () => ({
+    default: (await import('./views/EmailSettingsPage.tsx')).EmailSettingsPage,
+  }),
+  emailProject: async () => ({
+    default: (await import('./views/EmailProjectPage.tsx')).EmailProjectPage,
+  }),
+  emailOperation: async () => ({
+    default: (await import('./views/EmailOperationPage.tsx')).EmailOperationPage,
+  }),
+  adminError: async () => ({
+    default: (await import('./views/AdminErrorPage.tsx')).AdminErrorPage,
+  }),
+  invitations: async () => ({
+    default: (await import('./views/InvitationsPage.tsx')).InvitationsPage,
+  }),
 };
 
 export type AdminPageId = Exclude<keyof typeof adminComponents, 'adminLayout'>;
