@@ -7354,13 +7354,32 @@ describe('createDefaultRunWrangler — ONE signal coordinator: repeated signals 
 
 describe('createDefaultRunWrangler — post-spawn child `error` events confirm/quarantine', () => {
   const POST_SPAWN_TMP = join(import.meta.dirname, '.tmp-post-spawn-error');
+  const spawnedChildren = new Set<import('node:child_process').ChildProcess>();
   beforeEach(() => {
     rmSync(POST_SPAWN_TMP, { recursive: true, force: true });
     mkdirSync(POST_SPAWN_TMP, { recursive: true });
   });
-  afterEach(() => {
+  afterEach(async () => {
+    // A test deadline can interrupt the assertion before the runner's deadline.
+    // Wait for actual close before removing a directory a Windows child uses as cwd.
+    for (const child of spawnedChildren) {
+      const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+      child.kill('SIGKILL');
+      await closed;
+    }
     rmSync(POST_SPAWN_TMP, { recursive: true, force: true });
   });
+
+  function createRunner(options: NonNullable<Parameters<typeof createDefaultRunWrangler>[1]>) {
+    return createDefaultRunWrangler(POST_SPAWN_TMP, {
+      ...options,
+      onSpawnedChild: (child) => {
+        spawnedChildren.add(child);
+        child.once('close', () => spawnedChildren.delete(child));
+        options.onSpawnedChild?.(child);
+      },
+    });
+  }
 
   function writeHangScript(path: string): void {
     // Ignores SIGTERM; only the machine's SIGKILL can end it.
@@ -7406,7 +7425,7 @@ describe('createDefaultRunWrangler — post-spawn child `error` events confirm/q
   }
 
   it('pre-spawn ENOENT still settles directly as a hard failure (the one carve-out: no pid, nothing to confirm)', async () => {
-    const run = createDefaultRunWrangler(POST_SPAWN_TMP, {
+    const run = createRunner({
       launcher: [join(POST_SPAWN_TMP, 'no-such-wrangler-binary')],
     });
     const result = await run(
@@ -7431,10 +7450,14 @@ describe('createDefaultRunWrangler — post-spawn child `error` events confirm/q
       `const fs = require('fs');\n` +
         `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\n` +
         `fs.writeSync(1, JSON.stringify({ operationResult: 1, data: { id: 'provider-id' } }));\n` +
+        // Windows libuv duplicates stdio handles when opening a pipe stream. Close
+        // both the descriptor and the initialized stream's handle to close the peer.
+        `const input = process.stdin;\n` +
         `fs.closeSync(0);\n` +
+        `input.destroy();\n` +
         `setInterval(() => {}, 1 << 30);\n`,
     );
-    const run = createDefaultRunWrangler(POST_SPAWN_TMP, {
+    const run = createRunner({
       launcher: [process.execPath, script],
       timeoutMs: 30_000,
     });
@@ -7460,6 +7483,45 @@ describe('createDefaultRunWrangler — post-spawn child `error` events confirm/q
     }
   }, 15_000);
 
+  it('a stdin Writable error rejects buffered success only after the child is confirmed dead', async () => {
+    const script = join(POST_SPAWN_TMP, 'stdin-error.cjs');
+    const pidFile = join(POST_SPAWN_TMP, 'stdin-error.pid');
+    writeFileSync(
+      script,
+      `const fs = require('fs');\n` +
+        `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\n` +
+        `fs.writeSync(1, JSON.stringify({ operationResult: 1, data: { id: 'provider-id' } }));\n` +
+        `setInterval(() => {}, 1 << 30);\n`,
+    );
+    const run = createRunner({
+      launcher: [process.execPath, script],
+      timeoutMs: 30_000,
+      onSpawnedChild: (child) => {
+        child.stdout!.once('data', () => {
+          // Drive Node's real Writable error event after the runner buffered success.
+          // This separately covers the error path regardless of platform pipe behavior.
+          child.stdin!.destroy(Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+        });
+      },
+    });
+    const result = await run(
+      {
+        type: 'hyperdrive.create',
+        name: 'stdin-error-db',
+        binding: 'HYPERDRIVE',
+        configPath: 'literal config.jsonc',
+      },
+      { accountId: 'acct', input: 'x'.repeat(2 * 1024 * 1024) },
+    );
+    expect(result.status).toBe(1);
+    expect(result.signal).toBe('SIGKILL');
+    expect(result.stderr).toContain('write EPIPE');
+    expect(result.stdout).toContain('"operationResult":1');
+    expect(result.data).toBeUndefined();
+    const pid = Number(readFileSync(pidFile, 'utf-8'));
+    expect(() => process.kill(pid, 0)).toThrow();
+  }, 15_000);
+
   it('an injected POST-spawn `error` routes through the termination machine: the group is DEAD before the promise settles', async () => {
     // Pre-fix the `error` handler ALWAYS called finish() — a post-spawn error (e.g. a
     // kill-delivery failure) settled as an ordinary hard failure and RELEASED the
@@ -7467,7 +7529,7 @@ describe('createDefaultRunWrangler — post-spawn child `error` events confirm/q
     const pidFile = join(POST_SPAWN_TMP, 'child.pid');
     const hang = join(POST_SPAWN_TMP, 'hang.cjs');
     writeHangScript(hang);
-    const run = createDefaultRunWrangler(POST_SPAWN_TMP, {
+    const run = createRunner({
       launcher: [process.execPath, hang, pidFile],
       timeoutMs: 30_000,
       onSpawnedChild: (child) => {
@@ -7496,7 +7558,7 @@ describe('createDefaultRunWrangler — post-spawn child `error` events confirm/q
     const pidFile = join(POST_SPAWN_TMP, 'child2.pid');
     const hang = join(POST_SPAWN_TMP, 'hang2.cjs');
     writeHangScript(hang);
-    const run = createDefaultRunWrangler(POST_SPAWN_TMP, {
+    const run = createRunner({
       launcher: [process.execPath, hang, pidFile],
       timeoutMs: 30_000,
       killProcessGroup: () => {
