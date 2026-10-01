@@ -4,7 +4,7 @@ outline: deep
 
 # Email
 
-Send transactional email from your app via [Cloudflare's `send_email` binding](https://developers.cloudflare.com/email-routing/email-workers/send-email-workers/). Import `sendEmail` from `void/email` and Void handles MIME construction, binding inference, and a local-dev inbox.
+Use `sendEmail` to send transactional email. During development, Void captures messages in a local inbox.
 
 ```ts
 import { sendEmail } from 'void/email';
@@ -43,7 +43,7 @@ Each project on an email-enabled platform has:
 
 The shared sender can send only to verified recipients. Verify your own address or [add another recipient](#adding-recipients) before sending.
 
-Deploying to your own Cloudflare account instead (`void deploy --platform cloudflare`) takes one line of `void.config.ts` and one Enter on the first deploy — see [Your own Cloudflare account](#your-own-cloudflare-account).
+Deploying to your own Cloudflare account instead (`void deploy --platform cloudflare`) requires a sender in `void.config.ts` and email setup — see [Your own Cloudflare account](#your-own-cloudflare-account).
 
 ## Adding recipients
 
@@ -79,7 +79,7 @@ void email domain add acme.com
 
 Platform-managed custom inbound email requires the apex of a Cloudflare zone. Cloudflare’s catch-all only covers that apex, so a subdomain of the selected zone cannot receive arbitrary addresses. Choose an apex without another mail provider, or use the platform’s shared mail address. Void preserves foreign MX records and enabled catch-alls. Each custom apex belongs to one project; a project can register more than one apex.
 
-Setup returns an operation ID. If your connection drops, the platform keeps the recorded operation and the CLI checks that operation's status. An uncertain Cloudflare write stops conflicting changes until its outcome can be established.
+If setup is interrupted, use `void email domain status <domain>` to inspect the saved operation before retrying.
 
 `void email domain status <domain>` reports three independent results:
 
@@ -87,13 +87,7 @@ Setup returns an operation ID. If your connection drops, the platform keeps the 
 - **Outbound**: whether sending is ready, restricted to verified destinations, pending, or blocked.
 - **Management**: whether the stored Cloudflare credential can manage the connection.
 
-Use `void email domain sync <domain>` to reconcile setup and refresh readiness. Sync does not rotate the connection secret. Use `void email domain rotate-secret <domain>` for an explicit rotation; it applies to all domains sharing that zone connection and verifies the deployed secret before completing. Rotation requires inbound readiness; run `sync` first if setup is incomplete. If a dashboard or credential step is required, the status names it. Removing a domain disables its assignment; zone resources used by another domain remain in place, and unfinished cleanup stays recorded for reconciliation.
-
-After the last assignment's ingress is deleted, the platform forgets its stored
-credential. Revoke a token you no longer use in Cloudflare; Void does not revoke
-tokens you created yourself. Re-adding a removed domain requires a scoped token
-again. A domain can move to another project only after its removal completes
-and the zone connection's manager authorizes the new assignment.
+Use `void email domain sync <domain>` to finish setup and refresh readiness. The status lists any dashboard or credential steps still needed. Use `rotate-secret` to rotate the connection secret after inbound is ready, or `remove` to detach the domain. Revoke unused API tokens in Cloudflare. See [Email domain commands](../reference/cli.md#void-email-domain).
 
 Once inbound is ready, mail to any address on that domain reaches your `email/` handlers. Sending to arbitrary recipients also needs outbound readiness; a domain limited to verified destinations still requires recipient verification. Platform quotas and suspension apply to both shared and custom senders.
 
@@ -114,9 +108,9 @@ On an administrator-managed platform, `add` prints the administrator command for
 | `attachments`    | `Attachment[]`               | See [Attachments](#attachments).                                                                                |
 | `idempotencyKey` | `string`                     | Optional on the Void Platform: 1–128 printable, non-space ASCII characters. Reuse for retries of the same send. |
 
-You can send to at most 50 recipients across `to`, `cc`, and `bcc`. Addresses must have an ASCII local part of at most 64 characters and a dotted domain; the whole address can be at most 254 characters. Quoted local parts, `user@localhost`, and malformed dots are rejected. Use punycode for internationalized domains. Void returns `INVALID_TO` for an invalid `to`, `INVALID_FROM` for `from`, and `MIME_ERROR` for `cc`, `bcc`, `replyTo`, or invalid custom header names.
+You can send to at most 50 recipients across `to`, `cc`, and `bcc`. Use standard email addresses with ASCII local parts, and punycode for internationalized domains.
 
-`Address` accepts either a string (`"hello@acme.dev"` or `"Name <hello@acme.dev>"`) or an object (`{ email, name? }`). Display names with non-ASCII characters are RFC 2047 encoded automatically.
+`Address` accepts either a string (`"hello@acme.dev"` or `"Name <hello@acme.dev>"`) or an object (`{ email, name? }`). Unicode display names are supported.
 
 On the platform the sender is pinned to your project. `from` must be your project's own platform address — `<project-slug>@<mail-domain>` or `<project-slug>+<tag>@<mail-domain>`, optionally with a display name — or any address on a domain registered with `void email domain add` (see [Your own domain on the platform](#your-own-domain-on-the-platform)). For example, if your platform's mail domain is `mail.example.com`, you can use `Acme <acme+noreply@mail.example.com>`. Anything else is rejected with `INVALID_FROM`. Omit `from` and Void fills in `<project-slug>+noreply@<mail-domain>` for you.
 
@@ -164,11 +158,9 @@ Void infers `contentType` from the filename if you omit it. An explicit value mu
 
 `sendEmail` returns a result instead of throwing. A successful result means the provider accepted the send; it does not confirm delivery to the recipient's mailbox.
 
-`ok: true` carries `ids`, one per unique recipient. Addresses are compared case-insensitively across `to`, `cc`, and `bcc`. A custom-domain provider batch can report the same provider reference for several recipients.
+`ok: true` includes recipient IDs. A failed result has either a request-level `error` or per-recipient `deliveries`. Platform results include an `operationId` when available.
 
-`ok: false` carries either a top-level `error` or a complete per-recipient `deliveries` list. Platform results include an `operationId` when available, and per-recipient `state` distinguishes rejection, reservation, submission, provider acceptance, failure, cancellation, and an unknown outcome.
-
-Provider submissions have a 30-second wait limit. Platform `sendEmail` requests are bounded to 60 seconds, including admission and recording the result; native and inbound handler submissions share a 60-second batch budget. A submission that times out returns `OUTCOME_UNKNOWN`; the provider may still accept it later.
+A timeout can return `OUTCOME_UNKNOWN`; the provider may still accept the message. Inspect the outcome before retrying.
 
 Use an idempotency key for sends you may retry:
 
@@ -201,7 +193,7 @@ For 30 days, repeating a key with the same payload returns its recorded outcome 
 | `OUTCOME_UNKNOWN`        | The send may have reached the provider; do not blindly resend. |
 | `UPSTREAM_ERROR`         | The provider or platform refused the request.                  |
 
-The default platform allowance is 200 recipient submissions per UTC month and 10 per rolling minute. Reserved and started submissions count toward the limits; a started attempt stays charged even if it fails or its outcome is unknown. Administrators can change these limits.
+The default platform allowance is 200 recipient attempts per UTC month and 10 per rolling minute. Failed or uncertain attempts can count toward these limits. Check `void email usage` for your current allowance.
 
 `void email usage` shows monthly recipient attempts, inbound receipts, and the remaining allowance. `void email logs --limit 50` shows up to 100 recent metadata entries retained for 30 days: operation, recipient, direction, state, provider reference, and error code. It does not store subjects, bodies, or attachments. Receiving a message and sending a reply are separate events.
 
@@ -231,18 +223,7 @@ The inbox keeps the most recent 100 messages through HMR and clears on a full se
 
 The dev inbox works in native Void apps, TanStack Start, and React Router. It is unavailable in SvelteKit, Nuxt, Analog, and Astro; sends from those apps return `BINDING_MISSING`. Use `createEmailTestHarness` from `void/email/testing` to capture sends in tests. If a configured inbox cannot be reached, `sendEmail` returns `UPSTREAM_ERROR` without sending.
 
-`sendInDev: true` skips the inbox for one call. It returns `BINDING_MISSING` in `void dev` because no live send transport is bound. Deploy the app to test real delivery.
-
-```ts
-const result = await sendEmail({
-  from: 'acme+noreply@mail.example.com', // replace with your project sender
-  to: 'verified@acme.dev',
-  subject: 'Skips the dev inbox',
-  text: 'Not captured — and not delivered either.',
-  sendInDev: true,
-});
-// Under `void dev`: result.error.code === 'BINDING_MISSING'
-```
+`sendInDev: true` skips the inbox, but returns `BINDING_MISSING` during `void dev`. Deploy the app to test real delivery.
 
 ## Testing
 
@@ -275,11 +256,7 @@ The harness intercepts every `sendEmail` call until `dispose()` is called. `clea
 
 ## Inbound
 
-Inbound mail is a **Void-app-only** feature. Receive it by dropping handlers in the top-level `email/` directory — alongside `crons/` and `queues/`. Void detects them, generates the worker's `email()` export, and dispatches incoming messages by recipient address.
-
-Under a third-party framework — TanStack Start, React Router, SvelteKit, Nuxt, Analog, Astro — Void wires only crons and queues into the framework's own worker entry, so there is nowhere to attach an `email()` export. An `email/` directory in those projects is a build error, not silently dead code. Outbound is unaffected: `sendEmail` is a binding, and it works in every framework.
-
-The same holds for `target: "node" | "bun" | "deno"`: those builds expose HTTP only and never invoke an `email()` export, so an `email/` directory fails the build with guidance.
+Receive mail with handlers in the top-level `email/` directory. Inbound handlers require a native Void app; framework and Node.js, Bun, or Deno builds do not support them.
 
 ```ts
 // email/_default.ts — fallback for any unmatched recipient
@@ -299,15 +276,16 @@ export default defineEmail(async (message, env, ctx) => {
 
 The handler receives Cloudflare's native `ForwardableEmailMessage` plus an optional fourth `info` arg with `params` populated for dynamic / tagged route segments:
 
-| Method                             | Purpose                                                                                                                                                                                                                                              |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `message.setReject(reason)`        | Reject the message — the sender sees the SMTP error. The reason is cut to 1000 characters and control characters become spaces; an empty one reads `rejected by handler`.                                                                            |
-| `message.forward(to, hdrs?)`       | Forward to a verified destination address. `to` is a bare address; one `sendEmail` would refuse throws `INVALID_TO` at the call. `hdrs` holds at most 32 headers, each name and value at most 1024 characters; more throws `MIME_ERROR` at the call. |
-| `replyEmail(message, opts)`        | Reply with a threaded `In-Reply-To` / `References`.                                                                                                                                                                                                  |
-| `message.reply({ from, to, raw })` | Bring your own MIME bytes (`Uint8Array` or stream). `from` and `to` are bare addresses, checked at the call like `forward`. A native `EmailMessage` cannot be replayed — its body has no public accessor.                                            |
-| Returning without action           | Accept the message silently.                                                                                                                                                                                                                         |
+| Method                             | Purpose                                    |
+| ---------------------------------- | ------------------------------------------ |
+| `message.setReject(reason)`        | Reject the message with an SMTP error.     |
+| `message.forward(to, headers?)`    | Forward to a verified destination.         |
+| `replyEmail(message, options)`     | Send a threaded reply.                     |
+| `message.reply({ from, to, raw })` | Reply using your own MIME bytes or stream. |
 
-`parseEmail(message)` wraps [`postal-mime`](https://www.npmjs.com/package/postal-mime) and returns a structured object with `from`, `to`, `subject`, `text`, `html`, `attachments`, and full `headers`. Call it at most once per message — the underlying stream can only be read once.
+Returning without an action accepts the message. Use bare email addresses for `forward` and `message.reply`.
+
+`parseEmail(message)` returns `from`, `to`, `subject`, `text`, `html`, `attachments`, and `headers`. Call it at most once per message — the underlying stream can only be read once.
 
 ### Per-recipient routing
 
@@ -352,45 +330,13 @@ export default defineEmail(async (message, env, ctx, info) => {
 });
 ```
 
-`replyEmail` builds the reply MIME with `Subject: Re: <original>` (no double-prefix), `In-Reply-To: <Message-ID>`, and a continued `References` chain, then dispatches through the message's `reply()`. Defaults: `to = message.from`, `subject = "Re: <original>"`.
+`replyEmail()` replies to the original sender with a threaded subject. You can override `subject`.
 
-Void uses the inbound message's `Message-ID` and `References` when they fit in reply headers. It drops unusable values and falls back to a bare `Re:` for a subject it cannot safely reuse. Pass `subject` to set it explicitly.
+On a Void platform, the default sender is your project's shared address, or the address that received mail on your registered domain. Use that default for shared mail; `message.to` has the project prefix removed. Sender overrides must belong to your project.
 
-On the platform, shared-domain replies default to
-`<slug>+noreply@<mail domain>`. For mail received at a registered custom domain,
-replies default to the address that received the message. `replyEmail` throws
-when it cannot determine a sender. Native Cloudflare replies default to `message.to`.
+Replies follow your project's recipient policy. Verify shared-sender recipients with `void email allow <address>`. Check `void email logs` for the provider outcome after the handler finishes.
 
-::: warning The platform pins the reply sender
-You may override `from` with your project's shared address or an address on
-a registered custom domain your project owns. An unauthorized sender is rejected
-and recorded in `void email logs`.
-
-For shared addressing, `message.to` has the project prefix removed. Use the
-default sender instead of copying that stripped address into `from`.
-:::
-
-::: warning The platform gates the reply recipient
-A reply's `to` goes through the platform's recipient policy and the transport's
-capability checks. Shared sending defaults to your project's verified
-destinations: run `void email allow <address>` and have the recipient complete
-verification. A blocked reply is recorded in `void email logs`; the inbound
-message remains accepted.
-
-Custom-domain sends may reach external recipients when Cloudflare Sending is
-enabled. Addresses on the platform's own mail domain always require per-project
-consent. Native forwarding and reply operations can have additional Cloudflare
-restrictions; check the recorded outcome before assuming a reply was accepted.
-:::
-
-In a platform handler, awaiting `replyEmail` or `message.forward` records an
-action for execution after the handler finishes. Use `void email logs` to see
-its provider outcome. `sendEmail` returns its send result directly.
-
-`message.forward` requires a native Cloudflare email event. A message relayed
-from a customer zone cannot use native forwarding; its forward action is
-recorded as `UNSUPPORTED_ACTION` without sending or consuming quota. Replies
-remain available through that domain's sending capability.
+Forwarding requires a native Cloudflare email event. For custom domains relayed through the platform, use replies instead.
 
 ### Configuring inbound delivery
 
@@ -406,27 +352,7 @@ There is no local inbound trigger yet — `void dev` serves the outbound dev inb
 
 ### Testing inbound handlers
 
-Use `createInboundTestHarness` to run handlers through the real dispatcher with a synthesized message and capture replies / forwards / rejects.
-
-`deliver({ to })` takes the address **as it arrives on the wire**, which is
-`<slug>+<tag>@<domain>` — the same form the platform delivers to your worker.
-The harness strips the `<slug>+` prefix before matching, exactly as the
-generated dispatcher does on the platform, so `acme+support+abc-123@acme.dev`
-is what matches `email/support+[ticket].ts`. Pass the user-facing
-`support+abc-123@acme.dev` and the harness reads `support` as the slug, leaving
-`abc-123` to match — which falls through to `_default`. A worker on your own
-Cloudflare account receives no slug and matches the full local part; pass
-`slug: null` to test that lane, and `support@mail.acme.com` reaches
-`email/support.ts` while `support+abc-123@mail.acme.com` reaches
-`email/support+[ticket].ts` with `abc-123`:
-
-```ts
-const harness = createInboundTestHarness({
-  slug: null,
-  routes: { support, 'support+[ticket]': ticket },
-});
-await harness.deliver({ from: 'a@x.dev', to: 'support+abc-123@mail.acme.com' });
-```
+Use `createInboundTestHarness` to capture replies, forwards, and rejections. For shared platform mail, pass the full address including the project prefix, such as `acme+support+abc-123@acme.dev`. For direct Cloudflare mail, set `slug: null` and use `support+abc-123@mail.acme.com`.
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -462,7 +388,7 @@ describe('email handlers', () => {
 });
 ```
 
-The harness uses the same precedence rules as the production dispatcher. Reserved key `_default` mirrors `email/_default.ts`. It also applies the platform's inbound admission limits before your handler runs: a message over 10 MiB, or carrying more than 1024 headers or 128 KiB of header data, is recorded in `rejects` and the handler is not called — exactly what the platform does before dispatch. With `slug: null` there is no platform router in front of the worker, so neither limit applies.
+The harness matches handlers in the same order as deployed email routes.
 
 ## Your own Cloudflare account
 
