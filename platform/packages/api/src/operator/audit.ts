@@ -127,7 +127,7 @@ function auditTarget(
     if (segments[2] === 'owner') {
       return JSON.stringify({ projectId: id, userId: boundedString(body.userId, 512) });
     }
-    if (segments[2] === 'delete') {
+    if (segments[2] === 'delete' || segments[2] === 'normalize') {
       return JSON.stringify({ projectId: id });
     }
   }

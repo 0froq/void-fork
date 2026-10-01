@@ -113,6 +113,14 @@ export const operatorCommands: Array<OperatorCommand> = [
   },
   {
     group: 'project',
+    action: 'normalize',
+    description: 'Verify and normalize legacy project deployment and queue identities',
+    path: '/projects/:id/normalize',
+    positional: ['id'],
+    method: 'POST',
+  },
+  {
+    group: 'project',
     action: 'owner',
     description: 'Transfer project ownership to another registered user',
     path: '/projects/:id/owner',

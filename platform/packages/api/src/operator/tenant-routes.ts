@@ -10,6 +10,7 @@ import {
   setOperatorSignup,
 } from './access-service.ts';
 import { dryRun, OperatorError, pagination, readBody, stringField } from './common.ts';
+import { normalizeOperatorProject } from './project-normalization.ts';
 import {
   changeOperatorUserPlan,
   deleteOperatorProject,
@@ -93,6 +94,12 @@ tenantRoutes.get('/projects', async (context) =>
 tenantRoutes.get('/projects/:id', async (context) =>
   context.json(await getOperatorProject(context.get('db'), context.req.param('id'))),
 );
+tenantRoutes.post('/projects/:id/normalize', async (context) => {
+  const body = await readBody(context);
+  return context.json(
+    await normalizeOperatorProject(context, context.req.param('id'), dryRun(body), body.expected),
+  );
+});
 tenantRoutes.post('/projects/:id/owner', async (context) => {
   const body = await readBody(context);
   return context.json(

@@ -63,7 +63,6 @@ import {
   getDomainsByProjectId,
   countUserDeploymentsToday,
   getActiveDeployment,
-  getLatestLiveDeployment,
   getInFlightDeploymentsExcluding,
   getLastLiveAssetManifest,
   setActiveDeployment,
@@ -90,8 +89,6 @@ import { getProjectQueueName } from '../naming.ts';
 import { createDeployLogger, type DeployLogger } from '../observability/logger.ts';
 import {
   ProjectAccessDeniedError,
-  ProjectOwnerSuspendedError,
-  PROJECT_PERMISSION_MESSAGES,
   projectAccessErrorBody,
   requireProjectCapability,
 } from '../project-access.ts';
@@ -102,6 +99,7 @@ import {
   generateManagedAuthSecret,
   encryptProjectSecret,
 } from '../project-secrets.ts';
+import { ProjectRequiresNormalizationError, requireNormalizedProject } from '../project-state.ts';
 import {
   addQueueConsumer,
   removeQueueConsumer,
@@ -219,52 +217,10 @@ function resolvePersistedDeploymentType(
   if (deployment.bundle_stored || manifest.workerMain) {
     return 'void';
   }
-  // Retained platform deployments can predate both `manifest.type` and the
-  // `bundle_stored` column. When replaying the committed active deployment,
-  // projects.mode is the only durable discriminator that survives from that
-  // era. Treat the legacy database value `worker` as `void`; it was the old
-  // default before the current project-type vocabulary was introduced.
   if (committedProjectType) {
-    if (
-      committedProjectType === 'static' ||
-      committedProjectType === 'spa' ||
-      committedProjectType === 'framework'
-    ) {
-      return committedProjectType;
-    }
-    return 'void';
+    return committedProjectType;
   }
   return manifest.assetConfig?.not_found_handling === 'single-page-application' ? 'spa' : 'static';
-}
-
-/** Resolve the deployment serving a legacy project whose active pointer is null. */
-async function resolveLegacyActiveDeployment(
-  env: ApiEnv['Bindings'],
-  db: Db,
-  project: Project,
-): Promise<Deployment | null> {
-  const routingRaw = await env.ROUTING.get(project.slug);
-  if (routingRaw) {
-    try {
-      const entry = JSON.parse(routingRaw) as {
-        staticDeploymentId?: unknown;
-        deploymentId?: unknown;
-        version?: unknown;
-      };
-      const candidate = [entry.staticDeploymentId, entry.deploymentId, entry.version].find(
-        (value): value is string => typeof value === 'string',
-      );
-      if (candidate) {
-        const row = await getDeployment(db, candidate);
-        if (row?.project_id === project.id && row.status === 'live') {
-          return row;
-        }
-      }
-    } catch {
-      // Malformed or older routing entries fall back to deployment history.
-    }
-  }
-  return getLatestLiveDeployment(db, project.id);
 }
 
 async function resolveCutoverProxyToken(
@@ -578,6 +534,14 @@ export async function settleDeploymentForSandboxDrain(
         return { state: 'waiting' } as const;
       }
 
+      try {
+        await requireNormalizedProject(txDb, project);
+      } catch (error) {
+        if (error instanceof ProjectRequiresNormalizationError) {
+          return { state: 'recovery_incomplete' } as const;
+        }
+        throw error;
+      }
       const owner = await getUser(txDb, project.user_id);
       if (!owner) {
         return { state: 'recovery_incomplete' } as const;
@@ -596,12 +560,9 @@ export async function settleDeploymentForSandboxDrain(
       }
       const committedActive = project.active_deployment_id
         ? await getDeployment(txDb, project.active_deployment_id)
-        : await resolveLegacyActiveDeployment(env, txDb, project);
+        : null;
       try {
         if (committedActive) {
-          if (!project.active_deployment_id) {
-            await setActiveDeployment(txDb, project.id, committedActive.id);
-          }
           await replayDeploymentCutover(
             env,
             txDb,
@@ -682,14 +643,15 @@ export async function settleDeploymentForSandboxDrain(
       return { state: 'waiting' } as const;
     }
 
-    let committedActiveDeploymentId = project.active_deployment_id;
-    if (!committedActiveDeploymentId) {
-      const legacyActive = await resolveLegacyActiveDeployment(env, txDb, project);
-      if (legacyActive) {
-        committedActiveDeploymentId = legacyActive.id;
-        await setActiveDeployment(txDb, project.id, legacyActive.id);
+    try {
+      await requireNormalizedProject(txDb, project);
+    } catch (error) {
+      if (error instanceof ProjectRequiresNormalizationError) {
+        return { state: 'recovery_incomplete' } as const;
       }
+      throw error;
     }
+    const committedActiveDeploymentId = project.active_deployment_id;
     if (committedActiveDeploymentId === deployment.id) {
       return { state: 'waiting' } as const;
     }
@@ -1813,6 +1775,14 @@ app.post('/:id/deploy/upload-urls', async (context) => {
   if (versionReject) {
     return versionReject;
   }
+  try {
+    await requireNormalizedProject(context.get('db'), project);
+  } catch (error) {
+    if (error instanceof ProjectRequiresNormalizationError) {
+      return context.json({ error: error.code, message: error.message }, 409);
+    }
+    throw error;
+  }
   // TODO(orphan-gc): authenticated users can upload bytes via upload-urls
   // without ever finalizing a deploy, leaving durable orphans. Teardown
   // cleans these up; for active projects, abandoned uploads accumulate
@@ -1923,6 +1893,7 @@ app.post('/:id/deploy/upload-urls', async (context) => {
       // request-local so credentials and derived keys are released with the batch.
       const signingKeyCache = new Map<string, ArrayBuffer>();
       await requireActiveDeployAccess(txDb, projectId, context.get('user').id);
+      await requireNormalizedProject(txDb, lockedProject);
       await uploadPool(assets, PRESIGN_BATCH_CONCURRENCY, async (asset) => {
         const result = await presignAssetPut(
           {
@@ -1952,6 +1923,9 @@ app.post('/:id/deploy/upload-urls', async (context) => {
   } catch (err) {
     if (err instanceof ProjectAccessDeniedError) {
       return context.json(projectAccessErrorBody(err), 403);
+    }
+    if (err instanceof ProjectRequiresNormalizationError) {
+      return context.json({ error: err.code, message: err.message }, 409);
     }
     if (err instanceof Error && err.message === UPLOAD_URLS_PROJECT_DELETING) {
       return context.json({ error: 'project is being deleted' }, 410);
@@ -2056,6 +2030,14 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
   const versionReject = checkCliVersionOrRespond(context);
   if (versionReject) {
     return versionReject;
+  }
+  try {
+    await requireNormalizedProject(context.get('db'), project);
+  } catch (error) {
+    if (error instanceof ProjectRequiresNormalizationError) {
+      return context.json({ error: error.code, message: error.message }, 409);
+    }
+    throw error;
   }
   await ensureProjectIngress(context.env, project);
   const cliVersion = context.req.header('x-void-cli-version') ?? null;
@@ -2440,21 +2422,8 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
       if (requestedCpuMs !== undefined && maxCpuMs > 0 && requestedCpuMs > maxCpuMs) {
         return { cpuLimit: { requested: requestedCpuMs, maximum: maxCpuMs } } as const;
       }
-      let committedActiveDeploymentId = lockedProject.active_deployment_id;
-      if (!committedActiveDeploymentId) {
-        // active_deployment_id was introduced nullable and older projects were
-        // not backfilled. Prefer the deployment named by the actual serving
-        // route (important after a legacy rollback); if a stale protected
-        // cutover already replaced that route, its non-live row is rejected and
-        // we fall back to the newest historical live deployment. Persist the
-        // result under the project lock before recovery can clear or replay any
-        // external state.
-        const legacyActive = await resolveLegacyActiveDeployment(context.env, txDb, lockedProject);
-        if (legacyActive) {
-          committedActiveDeploymentId = legacyActive.id;
-          await setActiveDeployment(txDb, projectId, legacyActive.id);
-        }
-      }
+      await requireNormalizedProject(txDb, lockedProject);
+      const committedActiveDeploymentId = lockedProject.active_deployment_id;
       let activeDeploy = await getActiveDeployment(txDb, projectId);
       let recoveredCutover: Deployment | null = null;
       let recoveryFailedDeploymentId: string | null = null;
@@ -2747,6 +2716,9 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
   } catch (err) {
     if (err instanceof ProjectAccessDeniedError) {
       return context.json(projectAccessErrorBody(err), 403);
+    }
+    if (err instanceof ProjectRequiresNormalizationError) {
+      return context.json({ error: err.code, message: err.message }, 409);
     }
     if (err instanceof ConcurrentDeployError) {
       return context.json({ error: 'deploy in progress', deployment: err.deploymentId }, 409);
@@ -3728,14 +3700,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           ]).catch(() => {
             // Stale markers are harmless once PostgreSQL is live.
           });
-
-          const legacyName = `user-${project.slug}`;
-          await deleteDispatchScript(
-            context.env.CF_ACCOUNT_ID,
-            context.env.CF_API_TOKEN,
-            dispatchNamespace,
-            legacyName,
-          );
 
           const retained = await getRetainedDeploymentsExcluding(
             context.get('db'),
@@ -4919,15 +4883,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           // Stale markers are harmless once PostgreSQL is live.
         });
 
-        // Legacy + retention cleanup (mirror of multipart's WfP path)
-        const legacyWorkerName = `user-${project.slug}`;
-        await deleteDispatchScript(
-          context.env.CF_ACCOUNT_ID,
-          context.env.CF_API_TOKEN,
-          dispatchNamespace,
-          legacyWorkerName,
-        );
-
         markPhase('retention_cleanup');
         const retentionLimit = planLimits.retainedDeployments;
         if (retentionLimit > 0) {
@@ -5723,6 +5678,14 @@ app.post('/:id/deploy/preflight', async (context) => {
   if (versionReject) {
     return versionReject;
   }
+  try {
+    await requireNormalizedProject(context.get('db'), project);
+  } catch (error) {
+    if (error instanceof ProjectRequiresNormalizationError) {
+      return context.json({ error: error.code, message: error.message }, 409);
+    }
+    throw error;
+  }
 
   const body = await context.req.json<{
     assetManifest: Record<string, { hash: string; size: number }>;
@@ -5765,64 +5728,7 @@ app.post('/:id/deploy/preflight', async (context) => {
     return context.json({ needed, total, skipped: total - needed.length });
   }
 
-  // `active_deployment_id` was introduced as a nullable column without a
-  // backfill. Resolve it once under the same project lock used by deploy and
-  // rollback before selecting the previous manifest. The serving route wins
-  // over deployment history so a legacy project that was rolled back to an
-  // older deployment deduplicates against the assets that are actually live.
-  let activeDeploymentId = project.active_deployment_id;
-  if (!activeDeploymentId) {
-    const resolution = await context.get('db').transaction(async (tx) => {
-      await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-      const txDb = tx as unknown as Db;
-      const lockedProject = await getProject(txDb, projectId);
-      if (!lockedProject) {
-        return { kind: 'missing' as const };
-      }
-      try {
-        await requireActiveDeployAccess(txDb, projectId, context.get('user').id);
-      } catch (error) {
-        if (error instanceof ProjectOwnerSuspendedError) {
-          return { kind: 'owner-suspended' as const };
-        }
-        if (error instanceof ProjectAccessDeniedError) {
-          return { kind: 'forbidden' as const };
-        }
-        throw error;
-      }
-      if (lockedProject.status === 'deleting') {
-        return { kind: 'deleting' as const };
-      }
-      if (lockedProject.active_deployment_id) {
-        return { kind: 'active' as const, deploymentId: lockedProject.active_deployment_id };
-      }
-
-      const legacyActive = await resolveLegacyActiveDeployment(context.env, txDb, lockedProject);
-      if (legacyActive) {
-        await setActiveDeployment(txDb, projectId, legacyActive.id);
-      }
-      return { kind: 'active' as const, deploymentId: legacyActive?.id ?? null };
-    });
-    if (resolution.kind === 'missing') {
-      return context.json({ error: 'project not found' }, 404);
-    }
-    if (resolution.kind === 'forbidden') {
-      return context.json({ error: 'forbidden', message: PROJECT_PERMISSION_MESSAGES.deploy }, 403);
-    }
-    if (resolution.kind === 'owner-suspended') {
-      return context.json(
-        {
-          error: 'project owner suspended',
-          message: PROJECT_PERMISSION_MESSAGES['owner-suspended'],
-        },
-        403,
-      );
-    }
-    if (resolution.kind === 'deleting') {
-      return context.json({ error: 'project is being deleted' }, 410);
-    }
-    activeDeploymentId = resolution.deploymentId;
-  }
+  const activeDeploymentId = project.active_deployment_id;
 
   const prevManifest = await getLastLiveAssetManifest(context.get('db'), projectId);
 

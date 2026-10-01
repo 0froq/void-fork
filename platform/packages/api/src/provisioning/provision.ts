@@ -1,9 +1,7 @@
 import { createDeployIntent } from '@void/deploy-core';
-import { eq } from 'drizzle-orm';
 import { hmacSignState } from '../auth/hmac.ts';
 import { getProjectResources, createResource, type Db } from '../db.ts';
 import { getProjectQueueName } from '../naming.ts';
-import { resources as resourcesTable } from '../schema.ts';
 import type { DeployManifest, Resource } from '../types.ts';
 import {
   createD1Database,
@@ -201,8 +199,6 @@ export async function provisionBindings(
   return bindings;
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 async function ensureResource(
   db: Db,
   accountId: string,
@@ -219,15 +215,6 @@ async function ensureResource(
   if (found) {
     if (type === 'd1') {
       await enableD1ReadReplication(accountId, apiToken, found.cf_id);
-    }
-    // Fix legacy queue resources that stored queue_name instead of queue_id (UUID)
-    if (type === 'queue' && !UUID_RE.test(found.cf_id)) {
-      const queueInfo = await getQueueByName(accountId, apiToken, resourceName);
-      await db
-        .update(resourcesTable)
-        .set({ cf_id: queueInfo.queue_id })
-        .where(eq(resourcesTable.id, found.id));
-      found.cf_id = queueInfo.queue_id;
     }
     return found;
   }

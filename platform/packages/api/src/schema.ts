@@ -303,7 +303,7 @@ export const projects = pgTable(
       .notNull()
       .references(() => users.id),
     slug: text('slug').notNull(),
-    type: text('mode').notNull().default('worker').$type<'void' | 'spa' | 'static' | 'framework'>(),
+    type: text('mode').notNull().default('void').$type<'void' | 'spa' | 'static' | 'framework'>(),
     active_deployment_id: text('active_deployment_id'),
     websocket_version: integer('websocket_version').notNull().default(0),
     status: text('status').notNull().default('active').$type<'active' | 'deleting'>(),

@@ -252,6 +252,37 @@ describe('provisionBindings', () => {
     expect(bindings).toHaveLength(5);
   });
 
+  it.each(['a'.repeat(32), 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'])(
+    'reuses queue ID %s without a name lookup or database repair',
+    async (id) => {
+      vi.mocked(getProjectResources).mockResolvedValue([
+        {
+          id: 'res_queue',
+          project_id: PROJECT_ID,
+          type: 'queue',
+          cf_id: id,
+          binding_name: 'emails',
+          created_at: new Date().toISOString(),
+          metadata: {},
+        },
+      ]);
+      const bindings = await provisionBindings(
+        mockDb,
+        ACCOUNT_ID,
+        API_TOKEN,
+        PROJECT_ID,
+        { version: 3, bindings: {}, queues: [{ name: 'emails', bindingName: 'QUEUE_EMAILS' }] },
+        JWT_SECRET,
+        'void-proxy',
+        { projectSlug: PROJECT_SLUG },
+      );
+      expect(bindings[0]).toMatchObject({ type: 'queue', queue_id: id });
+      expect(getQueueByName).not.toHaveBeenCalled();
+      expect(createResource).not.toHaveBeenCalled();
+      expect(createQueue).not.toHaveBeenCalled();
+    },
+  );
+
   it('handles multiple bindings in one deploy', async () => {
     const manifest: DeployManifest = {
       version: 1,

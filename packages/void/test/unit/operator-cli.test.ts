@@ -557,6 +557,22 @@ describe('operator transport and execution', () => {
       versions: { api: 'version-a' },
     });
   });
+  it('pins project normalization to its previewed database changes', async () => {
+    vi.stubEnv('VOID_API_URL', 'https://one.example');
+    vi.stubEnv('VOID_OPERATOR_TOKEN', 'operator');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const changes = { activeDeployment: { from: null, to: 'dpl_older' }, queues: [] };
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () =>
+        Response.json({ dryRun: true, action: 'project.normalize', target: 'proj_1', changes }),
+      );
+    vi.stubGlobal('fetch', fetcher);
+    await runOperatorCommand(parseOperatorArgs(['project', 'normalize', 'proj_1', '--yes']));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetcher.mock.calls[1]![1]!.body))).toEqual({ expected: changes });
+  });
   it.each(['--plan', '--yes'])(
     'reads a cleanup token once for %s without printing it',
     async (mode) => {

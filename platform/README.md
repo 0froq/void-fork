@@ -126,6 +126,17 @@ can compensate it, while an interrupted rollback is adopted through its
 database lease. These retries restore the committed deployment before deleting
 the managed Sandbox container.
 
+Project state upgrades use `0054_project_mode` to normalize the old `worker` mode
+and default to `void`. Before rolling out this runtime, finish any protected
+cutover or rollback recovery whose project has no active deployment pointer on
+the previous compatible runtime. Recovery remains fenced when that identity is
+missing. After rollout, `void platform project normalize <id> --plan` verifies
+the serving route and recorded queue names; `--yes` applies only the previewed
+PostgreSQL repairs. It does not choose the newest historical deployment or write
+routing/provider state. Existing active pointers are preserved. A verified queue
+name that differs from the expected delivery routing name blocks normalization
+until its queue routing is reconciled.
+
 ## Local Development
 
 With a local PostgreSQL server running, build the shared packages and set up the API:

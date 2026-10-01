@@ -330,6 +330,13 @@
       "when": 1790838220205,
       "tag": "0053_project_zero_trust",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1790841384175,
+      "tag": "0054_project_mode",
+      "breakpoints": true
     }
   ]
 }

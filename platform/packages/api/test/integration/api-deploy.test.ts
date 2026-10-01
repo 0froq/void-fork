@@ -1290,6 +1290,11 @@ describe('POST /projects/:id/deploy', () => {
       });
     }
 
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: 'dpl_limit_99' })
+      .where(eq(projects.id, project.id));
+
     const res = await app.fetch(await buildDeployRequest(env, project.id, user.jwt), env);
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
@@ -1312,6 +1317,11 @@ describe('POST /projects/:id/deploy', () => {
         created_at: sql`now()`,
       });
     }
+
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: 'dpl_under_98' })
+      .where(eq(projects.id, project.id));
 
     const res = await app.fetch(await buildDeployRequest(env, project.id, user.jwt), env);
     expect(res.status).toBe(200);
@@ -2900,8 +2910,8 @@ describe('POST /projects/:id/deploy', () => {
     });
     for (const args of deleteCalls) {
       const url = args[0] as string;
-      // Legacy cleanup (user-{slug}) is OK; versioned cleanup (user-{slug}-dpl_*) for OLD
-      // deployments is OK. But the new deployment's worker must not be deleted.
+      // Retention may delete older versioned Workers. The new deployment's
+      // Worker must not be deleted.
       // New deployment IDs start with "dpl_test" from createTestDeployment,
       // but deploy route creates its own ID. Just verify no delete targets a
       // versioned worker for this project (no previous deploys exist).
@@ -3349,6 +3359,11 @@ describe('Deploy serialization (concurrent deploy guard)', () => {
       created_at: sql`now()`,
     });
 
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: 'dpl_done' })
+      .where(eq(projects.id, project.id));
+
     const res = await app.fetch(await buildDeployRequest(env, project.id, user.jwt), env);
     expect(res.status).toBe(200);
     // Drain the NDJSON stream so the deploy IIFE (which holds deployments-table
@@ -3691,16 +3706,18 @@ describe('POST /projects/:id/deploy (static)', () => {
     }) as Db;
     setTestDb(wrappedDb);
 
-    mockCfApi({
-      deleteWorker: async (url) => {
-        if (url.endsWith(`/scripts/user-${project.slug}`)) {
-          await realDb
-            .update(deployments)
-            .set({ status: 'pending' })
-            .where(eq(deployments.id, protectedDeployment.id));
-        }
-        return cfSuccess(null);
-      },
+    mockCfApi();
+    const originalDelete = env.ROUTING.delete.bind(env.ROUTING);
+    let insertedPending = false;
+    vi.spyOn(env.ROUTING, 'delete').mockImplementation(async (key) => {
+      await originalDelete(key);
+      if (!insertedPending && key.startsWith('cutover-ready:')) {
+        insertedPending = true;
+        await realDb
+          .update(deployments)
+          .set({ status: 'pending' })
+          .where(eq(deployments.id, protectedDeployment.id));
+      }
     });
 
     try {
@@ -3710,6 +3727,7 @@ describe('POST /projects/:id/deploy (static)', () => {
       );
       expect(response.status).toBe(200);
       expect(parseDeployStream(await response.text()).at(-1)).toMatchObject({ event: 'done' });
+      expect(insertedPending).toBe(true);
       expect(await env.STATIC_ASSETS_R2.head(protectedKey)).not.toBeNull();
     } finally {
       setTestDb(realDb);
@@ -3791,19 +3809,19 @@ describe('POST /projects/:id/deploy (static)', () => {
       .set({ active_deployment_id: rollbackTarget.id, type: 'void' })
       .where(eq(projects.id, project.id));
 
-    // A static deploy deletes the obsolete unversioned legacy Worker just
-    // before it computes retention. Use that boundary to model a rollback
-    // committing after the static cutover but before the eviction pass.
-    const fetchMock = mockCfApi({
-      deleteWorker: async (url) => {
-        if (url.endsWith(`/scripts/user-${project.slug}`)) {
-          await env.db
-            .update(projects)
-            .set({ active_deployment_id: rollbackTarget.id, type: 'void' })
-            .where(eq(projects.id, project.id));
-        }
-        return cfSuccess(null);
-      },
+    // Model rollback after cutover commits, before the retention inventory.
+    const fetchMock = mockCfApi();
+    const originalDelete = env.ROUTING.delete.bind(env.ROUTING);
+    let rolledBack = false;
+    vi.spyOn(env.ROUTING, 'delete').mockImplementation(async (key) => {
+      await originalDelete(key);
+      if (!rolledBack && key.startsWith('cutover-ready:')) {
+        rolledBack = true;
+        await env.db
+          .update(projects)
+          .set({ active_deployment_id: rollbackTarget.id, type: 'void' })
+          .where(eq(projects.id, project.id));
+      }
     });
 
     const res = await app.fetch(
@@ -3813,6 +3831,7 @@ describe('POST /projects/:id/deploy (static)', () => {
     expect(res.status).toBe(200);
     expect(parseDeployStream(await res.text()).at(-1)).toMatchObject({ event: 'done' });
 
+    expect(rolledBack).toBe(true);
     const targetWorkerUrl = `/scripts/user-${project.slug}-${rollbackTarget.id}`;
     const targetDeletes = fetchMock.mock.calls.filter((call: Array<unknown>) => {
       const url = typeof call[0] === 'string' ? call[0] : '';
@@ -4006,7 +4025,7 @@ describe('ambiguous go-live commit outcomes', () => {
     expect(await getDeployment(env.db, abandoned.id)).toMatchObject({ status: 'failed' });
   });
 
-  it('preserves and backfills a legacy live deployment during protected recovery', async () => {
+  it('blocks a missing active pointer before protected recovery changes the fence', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'legacy-cutover-compensation');
     const source = await createTestDeployment(env.db, project.id, 'live');
@@ -4065,10 +4084,13 @@ describe('ambiguous go-live commit outcomes', () => {
       }),
       env,
     );
-    expect(response.status).toBe(200);
-    expect(parseDeployStream(await response.text()).at(-1)).toMatchObject({ event: 'error' });
-    expect(await getDeployment(env.db, abandoned.id)).toMatchObject({ status: 'failed' });
-    expect((await getProject(env.db, project.id))?.active_deployment_id).toBe(source.id);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: 'project_requires_normalization' });
+    expect(await getDeployment(env.db, abandoned.id)).toMatchObject({ status: 'compensating' });
+    expect((await getProject(env.db, project.id))?.active_deployment_id).toBeNull();
+    expect(JSON.parse((await env.ROUTING.get(`cutover-intent:${abandoned.id}`))!)).toMatchObject({
+      ownerId: 'dead-owner',
+    });
     expect(JSON.parse((await env.ROUTING.get(project.slug))!)).toMatchObject({
       workerName: `user-${project.slug}-${source.id}`,
       projectId: project.id,
@@ -5620,7 +5642,7 @@ describe('POST /projects/:id/deploy/preflight', () => {
     });
   });
 
-  it('backfills a legacy rollback target before preflight deduplication', async () => {
+  it('requires explicit pointer normalization before preflight deduplication', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'legacy-preflight-rollback');
     const rollbackTarget = await createTestDeployment(env.db, project.id, 'live');
@@ -5675,13 +5697,9 @@ describe('POST /projects/:id/deploy/preflight', () => {
       }),
       env,
     );
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      needed: ['/index.html'],
-      total: 1,
-      skipped: 0,
-    });
-    expect((await getProject(env.db, project.id))?.active_deployment_id).toBe(rollbackTarget.id);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: 'project_requires_normalization' });
+    expect((await getProject(env.db, project.id))?.active_deployment_id).toBeNull();
   });
 
   // Removed: "merges previous asset manifest when preflight flag is set on

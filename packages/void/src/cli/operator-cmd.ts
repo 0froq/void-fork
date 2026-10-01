@@ -548,6 +548,9 @@ export async function runOperatorCommand(args: OperatorArgs): Promise<void> {
       ...(args.group === 'worker' && args.action === 'rollback-all'
         ? { versions: preview.versions }
         : {}),
+      ...(args.group === 'project' && args.action === 'normalize'
+        ? { expected: preview.changes }
+        : {}),
       ...recoveryFence,
     };
     output(

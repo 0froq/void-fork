@@ -5,6 +5,55 @@ import { PGlite } from '@electric-sql/pglite';
 import { platformDatabaseSchemaDigest } from '@void/platform/installer';
 import { expect, it } from 'vite-plus/test';
 
+it('normalizes worker project modes without changing deployment pointers and retains rollback to 0.22.0', async () => {
+  const root = resolve(import.meta.dirname, '../../drizzle');
+  const journal = JSON.parse(readFileSync(resolve(root, 'meta/_journal.json'), 'utf8')) as {
+    entries: Array<{ tag: string; idx: number; when: number }>;
+  };
+  const compatibility = JSON.parse(readFileSync(resolve(root, 'compatibility.json'), 'utf8')) as {
+    lineage: string;
+    rollbackSafeFrom: Array<{ platformVersion: string; schemaDigest: string }>;
+  };
+  const previous = journal.entries.filter((entry) => entry.idx < 54);
+  expect(compatibility.rollbackSafeFrom).toContainEqual({
+    platformVersion: '0.22.0',
+    schemaDigest: platformDatabaseSchemaDigest(
+      compatibility.lineage,
+      previous.map((entry) => ({
+        index: entry.idx,
+        tag: entry.tag,
+        timestampMillis: entry.when,
+        sha256: createHash('sha256')
+          .update(readFileSync(resolve(root, `${entry.tag}.sql`)))
+          .digest('hex'),
+      })),
+    ),
+  });
+  const db = new PGlite();
+  try {
+    for (const entry of previous) {
+      await db.exec(readFileSync(resolve(root, `${entry.tag}.sql`), 'utf8'));
+    }
+    await db.exec("INSERT INTO users (id, login) VALUES ('migration-user', 'migration-user')");
+    await db.exec(
+      "INSERT INTO projects (id, user_id, slug, mode, active_deployment_id) VALUES ('worker-project', 'migration-user', 'worker-project', 'worker', 'serving-older'), ('static-project', 'migration-user', 'static-project', 'static', NULL)",
+    );
+    await db.exec(readFileSync(resolve(root, '0054_project_mode.sql'), 'utf8'));
+    await db.exec(
+      "INSERT INTO projects (id, user_id, slug) VALUES ('new-project', 'migration-user', 'new-project')",
+    );
+    expect(
+      (await db.query('SELECT id, mode, active_deployment_id FROM projects ORDER BY id')).rows,
+    ).toEqual([
+      { id: 'new-project', mode: 'void', active_deployment_id: null },
+      { id: 'static-project', mode: 'static', active_deployment_id: null },
+      { id: 'worker-project', mode: 'void', active_deployment_id: 'serving-older' },
+    ]);
+  } finally {
+    await db.close();
+  }
+}, 30_000);
+
 it('preserves the 0038 database schema used by the running 0.10.14 platform', async () => {
   const root = resolve(import.meta.dirname, '../../drizzle');
   const journal = JSON.parse(readFileSync(resolve(root, 'meta/_journal.json'), 'utf8')) as {
@@ -56,7 +105,11 @@ it('preserves the 0038 database schema used by the running 0.10.14 platform', as
     }
     const after = await columns();
     for (const column of before) {
-      expect(after).toContainEqual(column);
+      expect(after).toContainEqual(
+        column.table_name === 'projects' && column.column_name === 'mode'
+          ? { ...column, column_default: "'void'::text" }
+          : column,
+      );
     }
   } finally {
     await db.close();

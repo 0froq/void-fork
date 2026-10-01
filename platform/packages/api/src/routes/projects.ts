@@ -59,6 +59,7 @@ import { ensureTrackingTable, queryD1, runRemoteMigrations } from '../migrations
 import { getProjectDeploymentWorkerName, getProjectQueueName } from '../naming.ts';
 import { PROJECT_PERMISSION_MESSAGES } from '../project-access.ts';
 import { encryptProjectSecret, decryptProjectSecret } from '../project-secrets.ts';
+import { ProjectRequiresNormalizationError, requireNormalizedProject } from '../project-state.ts';
 import {
   CloudflareApiError,
   InvalidHyperdriveConnectionStringError,
@@ -1101,6 +1102,14 @@ const app = new Hono<ApiEnv>()
         const lockedProject = lockedAccess.project;
         if (lockedProject.status === 'deleting') {
           throw new RollbackError(409, 'project is being deleted');
+        }
+        try {
+          await requireNormalizedProject(txDb, lockedProject);
+        } catch (error) {
+          if (error instanceof ProjectRequiresNormalizationError) {
+            throw new RollbackError(409, error.code, undefined, error.message);
+          }
+          throw error;
         }
         const activeDeploy = await getActiveDeployment(txDb, projectId);
         if (activeDeploy) {
