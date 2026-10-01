@@ -8,11 +8,9 @@ import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { readBuildOutput } from '@cloudflare/build-output-utils';
 import { parse } from 'jsonc-parser';
 import { dirname, join, resolve } from 'pathslash';
 import { EnvHttpProxyAgent, fetch as httpFetch } from 'undici';
-import { prepareCfBuildOutput } from './cf-build-output.ts';
 import { persistCfKeyringPreference, readCfSessionCredential } from './cf-session.ts';
 import { cloudflareDeviceCode, printCloudflareLoginPrompt } from './cloudflare-login-output.ts';
 
@@ -155,6 +153,7 @@ async function withBuildOutput(
     if (typeof accountId !== 'string' || !accountId) {
       throw new Error('Cloudflare account is not pinned for Worker deployment.');
     }
+    const { prepareCfBuildOutput } = await import('./cf-build-output.ts');
     const output = await prepareCfBuildOutput(scratch, accountId);
     if (!output) {
       throw new Error('Could not prepare the Cloudflare Worker build output.');
@@ -385,6 +384,7 @@ async function assertExistingProvisionableResources(
   // cf 1.0.0-beta.5 turns on Wrangler's automatic provisioning for every
   // prebuilt upload, with no exposed flag to turn it off. A named R2 bucket,
   // Queue, or dispatch namespace may otherwise be created during an upload.
+  const { readBuildOutput } = await import('@cloudflare/build-output-utils');
   const built = await readBuildOutput(directory);
   const bindings = built.workers.default.config.env ?? {};
   const queueNames = new Set<string>();

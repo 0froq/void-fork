@@ -10,7 +10,7 @@ import { expect, it } from 'vite-plus/test';
 import { resolveWranglerArgv } from '../../src/cli/preset.ts';
 
 it.each([200, 503])(
-  'reports HTTP %i when domain cleanup returns a non-JSON response',
+  'reports HTTP %i without loading the build toolchain when domain cleanup returns non-JSON',
   async (status) => {
     const directory = mkdtempSync(join(tmpdir(), 'void-cf-domain-error-'));
     const server = createServer((request, response) => {
@@ -21,6 +21,20 @@ it.each([200, 503])(
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     try {
       const configPath = join(directory, 'wrangler.json');
+      const preload = join(directory, 'reject-build-imports.mjs');
+      writeFileSync(
+        preload,
+        `import { registerHooks } from 'node:module';
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (['vite', '@cloudflare/build-output-utils'].includes(specifier) || specifier.endsWith('/cf-build-output.ts')) {
+      throw new Error('Ancillary operations must not load the build toolchain');
+    }
+    return nextResolve(specifier, context);
+  },
+});
+`,
+      );
       writeFileSync(
         configPath,
         JSON.stringify({ name: 'test-worker', account_id: 'test-account' }),
@@ -29,7 +43,17 @@ it.each([200, 503])(
       const output = await new Promise<{ status: number; stderr: string }>((resolve) => {
         execFile(
           command!,
-          [...prefix, 'triggers', 'clear-domains', '-c', configPath, '--name', 'test-worker'],
+          [
+            '--import',
+            pathToFileURL(preload).href,
+            ...prefix,
+            'triggers',
+            'clear-domains',
+            '-c',
+            configPath,
+            '--name',
+            'test-worker',
+          ],
           {
             cwd: directory,
             encoding: 'utf8',

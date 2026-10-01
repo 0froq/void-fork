@@ -23,7 +23,6 @@ import {
 import { type ModuleType, OutputContainerSchema } from '@cloudflare/config';
 import ignore from 'ignore';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'pathslash';
-import { build } from 'vite';
 import { migrateBuiltWranglerConfig } from './cf-config-migrate.ts';
 import { buildContainerImage } from './container-image.ts';
 
@@ -245,6 +244,7 @@ export async function prepareCfStaticBuildOutput(options: {
   }
   const scratch = mkdtempSync(join(tmpdir(), 'void-cf-static-'));
   try {
+    const { build } = await import('vite');
     await build({
       configFile: false,
       root: options.projectRoot,
@@ -325,6 +325,7 @@ export async function prepareCfFrameworkBuildOutput(options: {
         copyFileSync(absolute, destination);
       }
     }
+    const { build } = await import('vite');
     await build({
       configFile: false,
       root: options.projectRoot,
