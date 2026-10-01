@@ -37,10 +37,6 @@ describe('resolveDeploymentPlatform', () => {
     expect(resolveDeploymentPlatform(root, { platform: 'void' })).toBe('void');
   });
 
-  it('supports the legacy Cloudflare backend alias', () => {
-    expect(resolveDeploymentPlatform(makeRoot(), { backend: 'cloudflare' })).toBe('cloudflare');
-  });
-
   it('infers Void for legacy linked projects', () => {
     const root = makeRoot({ projectId: 'proj_123', slug: 'demo' });
     expect(resolveDeploymentPlatform(root)).toBe('void');

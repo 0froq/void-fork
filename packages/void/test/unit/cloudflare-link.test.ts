@@ -69,7 +69,6 @@ describe('Cloudflare deployment onboarding', () => {
   it.each([
     { platform: 'void' as const },
     { platform: 'cloudflare' as const },
-    { backend: 'cloudflare' as const },
     { projectSlug: 'chosen' },
   ])('honors an explicit destination %j', async (options) => {
     const confirm = vi.fn();

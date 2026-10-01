@@ -141,7 +141,6 @@ if (helpPath) {
       skipBuild: deployArgs.skipBuild,
       debug: deployArgs.debug,
       platform: deployArgs.platform,
-      backend: deployArgs.backend,
       provision: deployArgs.provision,
       requireEmail: deployArgs.requireEmail,
       atomic: deployArgs.atomic,

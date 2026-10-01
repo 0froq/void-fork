@@ -788,8 +788,8 @@ describe('existing Cloudflare site handoff', () => {
       runBuild: () => build(root),
       activateVersion,
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(readWranglerPublishedTrafficSnapshot(join(root, 'wrangler.jsonc'))).toEqual(
       trafficConfig,
     );
@@ -1894,7 +1894,7 @@ describe('runCloudflareDeploy — PostgreSQL checked-in migrations', () => {
     });
     const { deps, trace, wranglerArgs, exitCalls } = harness();
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(wranglerArgs).toEqual([]);
@@ -1914,7 +1914,7 @@ describe('runCloudflareDeploy — PostgreSQL checked-in migrations', () => {
         return ['0000_init.sql'];
       },
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(applied).toEqual([
       { dir: toSlash(join(root, 'db', 'migrations')), url: 'postgresql://prod.example/app' },
@@ -1927,7 +1927,7 @@ describe('runCloudflareDeploy — PostgreSQL checked-in migrations', () => {
   it('still deploys a pg app WITHOUT checked-in migrations (external schema — no false-reject)', async () => {
     const root = pgProject();
     const { deps, wranglerArgs, exitCalls } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     // Reached the upload, and no D1 migrate ran (a pg app has no desired.d1).
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(true);
@@ -1946,7 +1946,7 @@ describe('runCloudflareDeploy — PostgreSQL checked-in migrations', () => {
         );
       },
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(trace).toContain('postgres-migrate');
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(true);
@@ -1957,7 +1957,7 @@ describe('runCloudflareDeploy — PostgreSQL checked-in migrations', () => {
     // The guard keys on the postgresql dialect, so a SQLite app with migrations is untouched.
     const root = d1Project(PROVISIONED_D1, INIT_MIGRATION);
     const { deps, wranglerArgs, exitCalls } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(wranglerArgs.some((a) => a[0] === 'd1' && a[2] === 'apply')).toBe(true);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(true);
@@ -2277,7 +2277,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
       parentVersionId: 'original',
       versionIds: ['new'],
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(readCloudflareLink(root)).toBeNull();
     expect(activateVersion).toHaveBeenCalledTimes(2);
     expect(readExistingWorker).toHaveBeenCalledTimes(4);
@@ -2295,7 +2295,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     const { deps, trace, exitCalls } = harness();
 
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
 
     expect(exitCalls).toEqual([1]);
@@ -2310,7 +2310,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
       'dist/index.html': '<!doctype html><div id="app"></div>',
     });
     const { deps, wranglerArgs, exitCalls } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
     expect(exitCalls).toEqual([]);
     expect(wranglerArgs.map((args) => args[0])).toEqual(['whoami', 'deploy']);
@@ -2357,7 +2357,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     const { deps, exitCalls } = harness();
 
     const successMessages = await captureSuccessMessages(() =>
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     );
 
     expect(exitCalls).toEqual([]);
@@ -2396,7 +2396,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     });
 
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
       expect(exitCalls).toEqual([]);
       expect(readinessHeaders).toEqual({
         'CF-Access-Client-Id': 'service-id',
@@ -2447,7 +2447,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     });
 
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
       expect(exitCalls).toEqual([]);
       expect(readinessHeaders).toEqual({ 'cf-access-token': 'short-lived-user-jwt' });
       expect(readinessHeadersWorkersDevSubdomain).toBe('developer-platform-experience');
@@ -2489,7 +2489,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
         writeFileSync(join(root, 'dist/index.html'), '<!doctype html><div id="app"></div>');
       },
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
     expect(exitCalls).toEqual([]);
     expect(trace).toEqual(['wrangler:whoami', 'static-build', 'wrangler:deploy']);
@@ -2517,7 +2517,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
         },
       });
 
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
       expect(buildEnvSeen.VOID_DEPLOY_PROJECT_ID).toBeUndefined();
       expect(buildEnvSeen.VOID_DEPLOY_BUILD).toBeUndefined();
@@ -2584,7 +2584,12 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     });
     const { deps, wranglerArgs, exitCalls } = harness();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare', dir: 'public' }, silentCliLog, deps);
+      await runCloudflareDeploy(
+        root,
+        { platform: 'cloudflare', dir: 'public' },
+        silentCliLog,
+        deps,
+      );
     } finally {
       if (saved === undefined) {
         delete process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -2623,7 +2628,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     });
 
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
 
     expect(exitCalls).toEqual([1]);
@@ -2639,7 +2644,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     });
     const { deps, trace, exitCalls } = harness();
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare', spa: true }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare', spa: true }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).toEqual([]);
@@ -2656,7 +2661,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
       'routes/index.ts': `export const GET = () => new Response('ok');`,
     });
     const { deps, trace, wranglerArgs, exitCalls } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare', dir: 'public' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare', dir: 'public' }, silentCliLog, deps);
 
     expect(exitCalls).toEqual([]);
     expect(trace).toEqual(['wrangler:whoami', 'wrangler:deploy']);
@@ -2680,7 +2685,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     });
     const { deps, trace, exitCalls } = harness();
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).toEqual([]);
@@ -2700,7 +2705,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
       }),
     });
     const { deps, trace, exitCalls } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(trace.indexOf('auth-secret')).toBeLessThan(trace.indexOf('postgres-migrate'));
     expect(trace.indexOf('postgres-migrate')).toBeLessThan(trace.indexOf('wrangler:deploy'));
@@ -2725,7 +2730,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
       },
     });
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
     expect(exitCalls).toEqual([]);
     expect(trace).toEqual(['wrangler:whoami', 'static-build', 'wrangler:deploy']);
@@ -2748,7 +2753,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     });
     const { deps, trace, exitCalls } = harness();
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
     expect(exitCalls).toEqual([]);
     expect(trace).toEqual(['wrangler:whoami', 'build', 'gate', 'wrangler:deploy']);
@@ -2774,7 +2779,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     });
     const { deps, trace, exitCalls } = harness();
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
     expect(exitCalls).toEqual([]);
     expect(trace).toEqual(['wrangler:whoami', 'build', 'gate', 'wrangler:deploy']);
@@ -2794,7 +2799,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
       ],
     });
     const { deps, trace, exitCalls } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(trace).toContain('wrangler:deploy');
   });
@@ -2818,7 +2823,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     });
     const { deps, trace, wranglerArgs, exitCalls } = harness();
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // Reached NO whoami / provision / migration / build seam — rejected pre-account.
@@ -2840,7 +2845,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     });
     const { deps, trace, wranglerArgs, exitCalls } = harness();
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).toEqual([]);
@@ -2860,7 +2865,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
       'routes/chat/[room].ws.ts': `import { defineRoom } from 'void/ws';\nexport default defineRoom({});`,
     });
     const first = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, first.deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, first.deps);
 
     expect(first.exitCalls).toEqual([]);
     expect(first.trace).toEqual(['wrangler:whoami', 'build', 'gate', 'wrangler:deploy']);
@@ -2873,7 +2878,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
       `import { defineWebSocket } from 'void/ws';\nexport default defineWebSocket({});`,
     );
     const second = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, second.deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, second.deps);
 
     expect(second.exitCalls).toEqual([]);
     expect(second.trace).toEqual(['wrangler:whoami', 'build', 'gate', 'wrangler:deploy']);
@@ -2908,7 +2913,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     });
     try {
       const { deps } = harness();
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps).catch(
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps).catch(
         () => undefined,
       );
     } finally {
@@ -2933,7 +2938,7 @@ describe('runCloudflareDeploy — preflight', () => {
       },
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).toEqual(['wrangler:whoami']); // stopped right after the auth probe
@@ -2946,7 +2951,7 @@ describe('runCloudflareDeploy — preflight', () => {
       const root = d1Project({ ...PROVISIONED_D1, account_id: undefined });
       const { deps, exitCalls } = harness();
       await expect(
-        runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+        runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
       ).rejects.toBeInstanceOf(ExitError);
       expect(exitCalls).toEqual([1]);
     } finally {
@@ -2968,7 +2973,7 @@ describe('runCloudflareDeploy — preflight', () => {
     });
     const { deps, wranglerArgs, exitCalls } = harness();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       if (saved === undefined) {
         delete process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -2990,7 +2995,7 @@ describe('runCloudflareDeploy — preflight', () => {
     const root = sandboxProject();
     const { deps, trace, wranglerArgs } = harness();
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
     expect(wranglerArgs).toContainEqual([
       'containers',
@@ -3025,7 +3030,7 @@ describe('runCloudflareDeploy — preflight', () => {
 
     try {
       await expect(
-        runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+        runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
       ).rejects.toBeInstanceOf(ExitError);
     } finally {
       errorSpy.mockRestore();
@@ -3043,7 +3048,7 @@ describe('runCloudflareDeploy — preflight', () => {
     const root = d1Project(PROVISIONED_D1);
     const { deps, wranglerArgs } = harness();
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
     expect(wranglerArgs.some((args) => args[0] === 'containers')).toBe(false);
   });
@@ -3065,7 +3070,7 @@ describe('runCloudflareDeploy — preflight', () => {
 
     try {
       await expect(
-        runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+        runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
       ).rejects.toBeInstanceOf(ExitError);
     } finally {
       errorSpy.mockRestore();
@@ -3097,7 +3102,7 @@ describe('runCloudflareDeploy — preflight', () => {
         },
       });
 
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
       expect(exitCalls).toEqual([]);
       expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc'))).toMatchObject({
@@ -3141,7 +3146,7 @@ describe('runCloudflareDeploy — resource provisioning', () => {
     });
 
     const successMessages = await captureSuccessMessages(() =>
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     );
 
     expect(capturedDesired?.d1).toMatchObject({ binding: 'DB', name: 'myapp-db' });
@@ -3162,7 +3167,12 @@ describe('runCloudflareDeploy — resource provisioning', () => {
       'wrangler.jsonc': JSON.stringify(PROVISIONED_D1, null, 2),
     });
     const { deps, trace, wranglerArgs } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare', provision: true }, silentCliLog, deps);
+    await runCloudflareDeploy(
+      root,
+      { platform: 'cloudflare', provision: true },
+      silentCliLog,
+      deps,
+    );
     // The BUILD runs BEFORE the secret gate (ground-truth validation reads the real emitted
     // artifact); the LOCAL migration gate runs AFTER the build (against the post-build files),
     // and the REMOTE D1 apply runs after that (a failed gate never mutates D1).
@@ -3223,7 +3233,12 @@ describe('runCloudflareDeploy — provision path', () => {
         return { resources: [], configPath, accountIdWritten: false };
       }) as CloudflareDeployDeps['provision'],
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare', provision: true }, silentCliLog, deps);
+    await runCloudflareDeploy(
+      root,
+      { platform: 'cloudflare', provision: true },
+      silentCliLog,
+      deps,
+    );
     expect(captured).toMatchObject({
       d1: { binding: 'DB', name: 'myapp-db' },
       kvNamespaces: [],
@@ -3267,7 +3282,12 @@ describe('runCloudflareDeploy — backwards-compatible provision flag', () => {
         };
       }) as CloudflareDeployDeps['provision'],
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare', provision: true }, silentCliLog, deps);
+    await runCloudflareDeploy(
+      root,
+      { platform: 'cloudflare', provision: true },
+      silentCliLog,
+      deps,
+    );
     expect(provisionTrace).toEqual(['provision']);
     expect(trace).toContain('wrangler:deploy');
   });
@@ -3290,7 +3310,7 @@ describe('runCloudflareDeploy — secrets gate', () => {
         })) as CloudflareDeployDeps['readEmittedWorkerVars'],
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).not.toContain('wrangler:deploy');
@@ -3310,7 +3330,7 @@ describe('runCloudflareDeploy — secrets gate', () => {
           VITE_API_ORIGIN: 'https://example.com',
         })) as CloudflareDeployDeps['readEmittedWorkerVars'],
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(trace).toContain('wrangler:deploy');
   });
 
@@ -3329,7 +3349,7 @@ describe('runCloudflareDeploy — secrets gate', () => {
       }) as CloudflareDeployDeps['dischargeSelfHostEnv'],
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // The build ran BEFORE the gate (ground truth), but the gate failing blocks the REMOTE D1
@@ -3348,7 +3368,7 @@ describe('runCloudflareDeploy — secrets gate', () => {
       }) as CloudflareDeployDeps['dischargeSelfHostEnv'],
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
   });
@@ -3439,7 +3459,7 @@ describe('runCloudflareDeploy — secrets gate', () => {
       },
     });
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
     expect(explicitBootstrapProof).not.toBe(true);
     expect(commands.some((args) => args[0] === 'versions' && args[1] === 'upload')).toBe(true);
@@ -3464,7 +3484,7 @@ describe('runCloudflareDeploy — pg/Hyperdrive app skips D1 migrations', () => 
       ),
     });
     const { deps, wranglerArgs, trace } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(wranglerArgs.some((a) => a[0] === 'd1')).toBe(false);
     expect(trace).toContain('wrangler:deploy');
   });
@@ -3475,7 +3495,7 @@ describe('runCloudflareDeploy — D1 migrations_dir gate', () => {
     const root = d1Project(PROVISIONED_D1);
     const { deps, trace } = harness();
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
     expect(trace).not.toContain('provision');
     expect(trace).toContain('wrangler:deploy');
@@ -3485,7 +3505,12 @@ describe('runCloudflareDeploy — D1 migrations_dir gate', () => {
     const root = d1Project(PROVISIONED_D1);
     const { deps, trace } = harness();
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare', provision: true }, silentCliLog, deps);
+    await runCloudflareDeploy(
+      root,
+      { platform: 'cloudflare', provision: true },
+      silentCliLog,
+      deps,
+    );
 
     expect(trace).toContain('provision');
     expect(trace).toContain('wrangler:deploy');
@@ -3520,7 +3545,7 @@ describe('runCloudflareDeploy — D1 migrations_dir gate', () => {
         };
       }) as CloudflareDeployDeps['provision'],
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(provisionTrace).toEqual(['provision']);
     expect(wranglerArgs.some((a) => a[0] === 'd1' && a[2] === 'apply')).toBe(true);
@@ -3546,7 +3571,7 @@ describe('runCloudflareDeploy — full Void app queues', () => {
     try {
       const { deps, trace, wranglerArgs } = harness();
       await expect(
-        runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+        runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
       ).rejects.toBeInstanceOf(ExitError);
       expect(trace).toEqual([]);
       expect(wranglerArgs).toEqual([]);
@@ -3567,7 +3592,12 @@ describe('runCloudflareDeploy — full Void app queues', () => {
       'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'fwapp' }, null, 2),
     });
     const { deps, trace, exitCalls } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare', provision: true }, silentCliLog, deps);
+    await runCloudflareDeploy(
+      root,
+      { platform: 'cloudflare', provision: true },
+      silentCliLog,
+      deps,
+    );
     expect(exitCalls).toEqual([]);
     expect(trace).toContain('provision');
     expect(trace).toContain('wrangler:deploy');
@@ -3582,7 +3612,7 @@ describe('runCloudflareDeploy — full Void app queues', () => {
       'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'qapp' }, null, 2),
     });
     const { deps, trace } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(trace).toContain('build');
     expect(trace).toContain('wrangler:deploy');
   });
@@ -3624,7 +3654,7 @@ describe('runCloudflareDeploy — pre-build queue existence probe', () => {
       ...cleanExit,
       stdout: `Queue Name: ${name}\n`,
     }));
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     const probeArgs = wranglerArgs.find((a) => a[0] === 'queues');
     expect(probeArgs).toEqual([
       'queues',
@@ -3646,7 +3676,7 @@ describe('runCloudflareDeploy — pre-build queue existence probe', () => {
       status: 1,
       stderr: `✘ [ERROR] Queue "${name}" does not exist.\n`,
     }));
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(trace).toContain('wrangler:queues');
     expect(trace).toContain('provision');
@@ -3663,7 +3693,7 @@ describe('runCloudflareDeploy — pre-build queue existence probe', () => {
       status: 1,
       stderr: '✘ [ERROR] A request to the Cloudflare API failed [code: 10000]\n',
     }));
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(trace).toContain('build');
     expect(trace).toContain('wrangler:deploy');
   });
@@ -3677,7 +3707,7 @@ describe('runCloudflareDeploy — pre-build queue existence probe', () => {
       signal: 'SIGKILL',
       stderr: `✘ [ERROR] Queue "${name}" does not exist.\n`,
     }));
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(trace).toContain('build');
     expect(trace).toContain('wrangler:deploy');
   });
@@ -3685,7 +3715,7 @@ describe('runCloudflareDeploy — pre-build queue existence probe', () => {
   it('never probes when the app desires no queues', async () => {
     const root = d1Project(PROVISIONED_D1, INIT_MIGRATION);
     const { deps, wranglerArgs } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(wranglerArgs.some((a) => a[0] === 'queues')).toBe(false);
   });
 
@@ -3696,7 +3726,12 @@ describe('runCloudflareDeploy — pre-build queue existence probe', () => {
       status: 1,
       stderr: '✘ [ERROR] Queue "jobs" does not exist.\n',
     }));
-    await runCloudflareDeploy(root, { backend: 'cloudflare', provision: true }, silentCliLog, deps);
+    await runCloudflareDeploy(
+      root,
+      { platform: 'cloudflare', provision: true },
+      silentCliLog,
+      deps,
+    );
     expect(trace).toContain('provision');
     expect(wranglerArgs.some((a) => a[0] === 'queues')).toBe(false);
     expect(trace).toContain('wrangler:deploy');
@@ -3731,7 +3766,7 @@ describe('runCloudflareDeploy — pre-build queue name validation', () => {
     };
     try {
       await expect(
-        runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+        runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
       ).rejects.toBeInstanceOf(ExitError);
     } finally {
       log.error = restore;
@@ -3795,7 +3830,7 @@ describe('runCloudflareDeploy — pre-build queue name validation', () => {
   it('lets a valid queue name through to the probe unchanged', async () => {
     const root = queueNameProject('jobs.ts');
     const { deps, wranglerArgs, trace } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     // The gate is transparent to a legal name: the probe still runs, pre-build, for `jobs`.
     expect(wranglerArgs.find((a) => a[0] === 'queues')).toEqual([
       'queues',
@@ -3812,7 +3847,7 @@ describe('runCloudflareDeploy — pre-build queue name validation', () => {
   it('probes a nested queue using its normalized Cloudflare resource name', async () => {
     const root = queueNameProject('order/notifications.ts');
     const { deps, wranglerArgs, trace } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
     expect(wranglerArgs.find((args) => args[0] === 'queues')).toEqual([
       'queues',
@@ -3854,7 +3889,7 @@ describe('runCloudflareDeploy — skipped desired resource is fatal', () => {
       }) as CloudflareDeployDeps['provision'],
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare', provision: true }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare', provision: true }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).toContain('provision');
@@ -3870,7 +3905,7 @@ describe('runCloudflareDeploy — generated config verification', () => {
       verifyDeployConfig: () => ({ ok: false, reason: 'account mismatch' }),
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).toContain('build'); // build ran
@@ -3889,7 +3924,7 @@ describe('runCloudflareDeploy — non-Cloudflare target guard', () => {
       });
       const { deps, trace, exitCalls } = harness();
       await expect(
-        runCloudflareDeploy(root, { backend: 'cloudflare', provision: true }, silentCliLog, deps),
+        runCloudflareDeploy(root, { platform: 'cloudflare', provision: true }, silentCliLog, deps),
       ).rejects.toBeInstanceOf(ExitError);
       expect(exitCalls).toEqual([1]);
       // Rejected before the desired set + any wrangler/provision call.
@@ -3909,7 +3944,7 @@ describe('runCloudflareDeploy — worker-name override (WRANGLER_CI_OVERRIDE_NAM
     });
     const { deps, trace, exitCalls } = harness();
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // Fenced during preflight (before whoami) — nothing ran.
@@ -3952,7 +3987,7 @@ describe('runCloudflareDeploy — worker-name override (WRANGLER_CI_OVERRIDE_NAM
         },
       };
       const { deps, trace } = harness();
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, cliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, cliLog, deps);
       expect(trace).toContain('wrangler:deploy');
       expect(deployedWorker).toBe('myapp');
       // The pinned root config name is the derived name, never the override.
@@ -3981,7 +4016,7 @@ describe('runCloudflareDeploy — build-config override fences', () => {
     });
     const { deps, trace, exitCalls } = harness();
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).toEqual([]);
@@ -3997,7 +4032,7 @@ describe('runCloudflareDeploy — build-config override fences', () => {
     });
     const { deps, trace, exitCalls } = harness();
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).toEqual([]);
@@ -4013,7 +4048,7 @@ describe('runCloudflareDeploy — build-config override fences', () => {
     });
     const { deps, trace, exitCalls } = harness();
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).toEqual([]);
@@ -4026,7 +4061,7 @@ describe('runCloudflareDeploy — build-config override fences', () => {
       const root = d1Project(PROVISIONED_D1);
       const { deps, trace, exitCalls } = harness();
       await expect(
-        runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+        runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
       ).rejects.toBeInstanceOf(ExitError);
       expect(exitCalls).toEqual([1]);
       expect(trace).toEqual([]);
@@ -4092,7 +4127,7 @@ describe('runCloudflareDeploy — D1 migrate targets the unique validated entry'
     );
     const { deps, wranglerArgs, trace, exitCalls } = harness();
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // The migrate-target gate runs POST-build now, so the build ran — but it fails closed
@@ -4125,7 +4160,7 @@ describe('runCloudflareDeploy — D1 migrate targets the unique validated entry'
       INIT_MIGRATION,
     );
     const { deps, wranglerArgs, trace } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     // Targets the validated entry's own unique database_name (resolves to DB, not OLD).
     // `.find` returns the first d1 call — the apply (the list verify follows it).
     expect(wranglerArgs.find((a) => a[0] === 'd1')).toEqual([
@@ -4161,7 +4196,7 @@ describe('runCloudflareDeploy — wrangler implicit provisioning disabled on dep
       ),
     });
     const { deps, wranglerArgs } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(wranglerArgs.find((a) => a[0] === 'deploy')).toEqual([
       'deploy',
       '-c',
@@ -5973,7 +6008,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       runBuild: () => writeEmittedDeployArtifact(root, EMITTED_D1),
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     // The remote migrate ran (identity pin matched) and the deploy proceeded.
     expect(wranglerArgs.some((a) => a[0] === 'd1' && a[2] === 'apply')).toBe(true);
@@ -5997,7 +6032,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // The migrate seam was NOT invoked — no `d1 migrations apply`, no `d1 migrations list` — and
@@ -6025,7 +6060,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(false);
@@ -6071,7 +6106,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(false);
@@ -6086,7 +6121,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(false);
@@ -6122,7 +6157,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
         }),
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(wranglerArgs.some((a) => a[0] === 'd1' && a[2] === 'apply')).toBe(true);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(true);
@@ -6143,7 +6178,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
         }),
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(true);
   });
@@ -6163,7 +6198,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // The deploy seam was NOT invoked — the injected binding never reached `wrangler deploy`.
@@ -6198,7 +6233,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(false);
@@ -6219,7 +6254,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // The deploy seam was NOT invoked — the injected binding never reached `wrangler deploy`.
@@ -6239,7 +6274,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(false);
@@ -6260,7 +6295,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
         }),
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(true);
   });
@@ -6278,7 +6313,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(false);
@@ -6295,7 +6330,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(false);
@@ -6316,7 +6351,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(false);
@@ -6350,7 +6385,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
         }),
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(true);
   });
@@ -6370,7 +6405,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       hashWranglerUploader: () => (built ? 'after-build-tampered' : 'before-build-clean'),
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(false);
@@ -6386,7 +6421,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       hashWranglerUploader: () => undefined,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(false);
@@ -6409,7 +6444,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       },
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // Neither the credentialed remote migrate nor the deploy ran.
@@ -6430,7 +6465,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       },
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(false);
@@ -6445,7 +6480,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       runBuild: () => writeEmittedDeployArtifact(root, EMITTED_D1),
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(wranglerArgs.some((a) => a[0] === 'd1' && a[2] === 'apply')).toBe(true);
     expect(wranglerArgs.some((a) => a[0] === 'd1' && a[2] === 'list')).toBe(true);
@@ -6469,7 +6504,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       hashWranglerUploader: () => (probed ? 'tampered-by-probe' : 'clean-at-start'),
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // whoami never ran — the deploy refused before the first credentialed call.
@@ -6498,7 +6533,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       },
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare', provision: true }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare', provision: true }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // Reached whoami, but refused before provisioning ran.
@@ -6542,7 +6577,7 @@ describe('runCloudflareDeploy — config laundering by a build-adjacent probe', 
       }) as CloudflareDeployDeps['resolveSchemaFacts'],
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).not.toContain('wrangler:whoami');
@@ -6564,7 +6599,7 @@ describe('runCloudflareDeploy — config laundering by a build-adjacent probe', 
       }) as CloudflareDeployDeps['resolveSchemaFacts'],
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).not.toContain('build');
@@ -6584,7 +6619,7 @@ describe('runCloudflareDeploy — config laundering by a build-adjacent probe', 
       }) as CloudflareDeployDeps['resolveSchemaFacts'],
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).not.toContain('build');
@@ -6594,7 +6629,7 @@ describe('runCloudflareDeploy — config laundering by a build-adjacent probe', 
   it('passes when the pre-build probe leaves the root config untouched', async () => {
     const root = d1Project(PROVISIONED_D1, INIT_MIGRATION);
     const { deps, wranglerArgs, exitCalls } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(true);
   });
@@ -6624,7 +6659,7 @@ describe('runCloudflareDeploy — config laundering by a build-adjacent probe', 
         }) as CloudflareDeployDeps['resolveSchemaFacts'],
       });
       await expect(
-        runCloudflareDeploy(root, { backend: 'cloudflare', provision: true }, silentCliLog, deps),
+        runCloudflareDeploy(root, { platform: 'cloudflare', provision: true }, silentCliLog, deps),
       ).rejects.toBeInstanceOf(ExitError);
       expect(exitCalls).toEqual([1]);
       expect(trace).not.toContain('wrangler:whoami');
@@ -6644,7 +6679,7 @@ describe('runCloudflareDeploy — config laundering by a build-adjacent probe', 
       }) as CloudflareDeployDeps['resolveSchemaFacts'],
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).not.toContain('wrangler:whoami');
@@ -6697,7 +6732,7 @@ describe('runCloudflareDeploy — config laundering by a build-adjacent probe', 
       dischargeSelfHostEnv: dischargeWithSecretPresent,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // The build ran (the rewrite is post-build) but nothing deployed.
@@ -6714,7 +6749,7 @@ describe('runCloudflareDeploy — config laundering by a build-adjacent probe', 
         requiredSecretFacts()) as CloudflareDeployDeps['resolveSchemaFacts'],
       dischargeSelfHostEnv: dischargeWithSecretPresent,
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(true);
   });
@@ -6816,7 +6851,7 @@ describe('runCloudflareDeploy — framework artifact guard', () => {
         requiredSecretNames = args[7];
       }) as CloudflareDeployDeps['prepareFrameworkArtifact'],
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(trace).toContain('build');
     expect(trace).toContain('prepare-framework');
@@ -6835,7 +6870,7 @@ describe('runCloudflareDeploy — framework artifact guard', () => {
       'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'tsapp' }, null, 2),
     });
     const { deps, trace, exitCalls } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(trace).toContain('build');
     expect(trace).toContain('wrangler:deploy');
@@ -6858,7 +6893,7 @@ describe('runCloudflareDeploy — framework artifact guard', () => {
       'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'skapp' }, null, 2),
     });
     const { deps } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
     expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc'))).toMatchObject({
       queues: {
@@ -6907,15 +6942,15 @@ describe('runCloudflareDeploy — framework artifact guard', () => {
       },
     });
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     rmSync(join(root, 'queues/email.ts'));
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(readWranglerManagedQueueCleanupCandidates(join(root, 'wrangler.jsonc'))).toEqual([
       'email',
     ]);
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
     expect(cleanupSnapshots).toEqual([['email'], ['email'], ['email']]);
     expect(readWranglerManagedQueueCleanupCandidates(join(root, 'wrangler.jsonc'))).toEqual([]);
@@ -7163,7 +7198,7 @@ describe('runCloudflareDeploy — stale deploy pointer', () => {
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).not.toContain('wrangler:deploy');
@@ -7203,7 +7238,7 @@ describe('runCloudflareDeploy — env-only account pin', () => {
         ),
       });
       const { deps, trace } = harness();
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
       // Reaches deploy (does not false-stop on a missing generated account_id)...
       expect(trace).toContain('wrangler:deploy');
       // ...because the env pin was persisted into the root config the build reads.
@@ -7244,7 +7279,7 @@ describe('runCloudflareDeploy — migrations dir / count / auth', () => {
   it('runs the drift/journal gate but skips the wrangler apply when a D1 app has no migrations', async () => {
     const root = d1Project(PROVISIONED_D1); // migrations_dir set, but NO .sql files
     const { deps, wranglerArgs, trace } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     // B2: the managed drift/journal gate runs for EVERY D1 app (a schema.ts with no
     // generated migration is drift), but wrangler 4.131 hard-fails on an empty/absent
     // folder — so the apply/list is skipped.
@@ -7283,7 +7318,7 @@ describe('runCloudflareDeploy — migrations dir / count / auth', () => {
       validateAuthMigrations: validateAuthMigrationSchema,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // The auth check runs POST-build (against ground truth); it blocks the remote migrate + deploy.
@@ -7318,7 +7353,7 @@ describe('runCloudflareDeploy — migrations dir / count / auth', () => {
     // The schema validator is stubbed (harness default) — dedicated tests exercise the real
     // schema check; here we assert the guard lets a satisfied auth app proceed to deploy.
     const { deps, trace } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(trace).toContain('auth-secret');
     expect(trace.indexOf('auth-secret')).toBeLessThan(trace.indexOf('wrangler:d1'));
     expect(trace).toContain('wrangler:deploy');
@@ -7351,7 +7386,7 @@ describe('runCloudflareDeploy — migrations dir / count / auth', () => {
     const output = vi.spyOn(log, 'error').mockImplementation(() => {});
     try {
       await expect(
-        runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+        runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
       ).rejects.toBeInstanceOf(ExitError);
       expect(output).toHaveBeenCalledWith(expect.stringContaining('0001_auth.sql'));
       expect(output).toHaveBeenCalledWith(
@@ -7400,7 +7435,7 @@ describe('runCloudflareDeploy — migrations dir / count / auth', () => {
       },
     });
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(allowed).toBe(true);
   });
 });
@@ -8406,7 +8441,7 @@ describe('runCloudflareDeploy — remote migration gates', () => {
       },
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // The gate runs POST-build now (against the live files), so the build ran — but it fires
@@ -8424,7 +8459,7 @@ describe('runCloudflareDeploy — remote migration gates', () => {
     // destructive-op validation runs and rejects the un-pragma'd DROP.
     const { deps, wranglerArgs, exitCalls } = harness({ assertMigrationsDeployable: undefined });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(wranglerArgs.some((a) => a[0] === 'd1')).toBe(false);
@@ -8450,7 +8485,7 @@ describe('runCloudflareDeploy — remote migration gates', () => {
       },
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // The remote apply/list runs AFTER the build now; reached the list-verify, then failed
@@ -8478,7 +8513,7 @@ describe('runCloudflareDeploy — remote migration gates', () => {
       },
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // Never trusts an absent marker — fails closed before DEPLOY (the build already ran).
@@ -8498,7 +8533,7 @@ describe('runCloudflareDeploy — remote migration gates', () => {
       checkMigrationApplySet: checkWranglerMigrationApplySet,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // The apply-set gate runs POST-build now (it enumerates the live dir), so the build ran —
@@ -8768,7 +8803,7 @@ describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
     });
 
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(trace).toContain('build');
     expect(trace).toContain('do-lifecycle');
@@ -8792,7 +8827,7 @@ describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
     });
 
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).toContain('build');
@@ -8814,7 +8849,7 @@ describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
         })) as CloudflareDeployDeps['readEmittedWorkerVars'],
     });
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(trace).toContain('wrangler:deploy');
   });
 
@@ -8834,7 +8869,7 @@ describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
       }) as CloudflareDeployDeps['verifyDeployConfig'],
     });
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(requiredSecretNames).toEqual(['API_TOKEN']);
   });
 
@@ -8850,7 +8885,7 @@ describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
     });
 
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).toContain('build');
@@ -8880,7 +8915,7 @@ describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
       }) as CloudflareDeployDeps['dischargeSelfHostEnv'],
     });
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(captured?.absentRequired).toEqual([]);
     expect(captured?.invalidKeys).toEqual([]);
     expect(trace).toContain('auth-secret');
@@ -8905,7 +8940,7 @@ describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
         return { hasSchema: true, remoteSecretNames: ['STRIPE_KEY'] };
       }) as CloudflareDeployDeps['dischargeSelfHostEnv'],
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     // STRIPE_KEY is absent from the emitted vars → the gate sees it as absentRequired (the
     // remote secret discharges it); nothing is present-empty/invalid.
     expect(captured).toEqual({
@@ -8933,7 +8968,7 @@ describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
       dischargeSelfHostEnv: undefined,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // The gate runs POST-build (ground truth), so the build already ran; a shipped-empty
@@ -8960,7 +8995,7 @@ describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
       dischargeSelfHostEnv: undefined,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).toContain('build');
@@ -8978,7 +9013,7 @@ describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
       })) as CloudflareDeployDeps['readEmittedWorkerVars'],
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).not.toContain('wrangler:deploy');
@@ -8992,7 +9027,7 @@ describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
       }) as CloudflareDeployDeps['resolveSchemaFacts'],
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // Derived pre-build — before whoami / provision / build.
@@ -9008,7 +9043,7 @@ describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
       })) as CloudflareDeployDeps['resolveSchemaFacts'],
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).toEqual([]);
@@ -9031,7 +9066,7 @@ describe('runCloudflareDeploy — schema probe runs under the build NODE_ENV', (
         return okSchemaFacts();
       }) as CloudflareDeployDeps['resolveSchemaFacts'],
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     // The build sets NODE_ENV=production; the probe env is pinned to match so a schema
     // conditioned on NODE_ENV derives the SAME required set the build would.
     expect(capturedNodeEnv).toBe('production');
@@ -9050,7 +9085,7 @@ describe('runCloudflareDeploy — schema probe runs under the build NODE_ENV', (
           buildNodeEnv = env.NODE_ENV;
         },
       });
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
       expect(buildNodeEnv).toBe('production');
     } finally {
       if (savedNodeEnv === undefined) {
@@ -9075,7 +9110,7 @@ describe('runCloudflareDeploy — schema probe runs under the build NODE_ENV', (
       },
     });
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
     expect(probeMarker).toBe('1');
     expect(buildMarker).toBe('1');
@@ -9100,7 +9135,7 @@ describe('runCloudflareDeploy — schema probe runs under the build NODE_ENV', (
         },
       });
 
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
       for (const env of [probeEnvSeen, buildEnvSeen]) {
         expect(env.VOID_DEPLOY_PROJECT_ID).toBeUndefined();
@@ -9143,7 +9178,7 @@ describe('runCloudflareDeploy — wrangler credentials reach only the wrangler r
             buildEnvSeen = { ...env };
           },
         });
-        await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+        await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
       });
       for (const name of WRANGLER_AUTH_VARS) {
         expect(buildEnvSeen[name]).toBeUndefined();
@@ -9170,7 +9205,7 @@ describe('runCloudflareDeploy — wrangler credentials reach only the wrangler r
       // `deployChildEnv` reads it, exactly as `createDeployWranglerRunner` does.
       const root = d1Project(PROVISIONED_D1);
       const { deps } = harness();
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
 
       const runnerEnv = deployChildEnv('acc123', 'https://api.cloudflare.com/client/v4');
       for (const name of WRANGLER_AUTH_VARS) {
@@ -9218,7 +9253,7 @@ describe('runCloudflareDeploy — invalid emitted value fails closed pre-remote'
       })) as CloudflareDeployDeps['validateEmittedVars'],
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // Caught POST-build (ground truth) but BEFORE any remote D1 apply, secret list, or deploy.
@@ -9239,7 +9274,7 @@ describe('runCloudflareDeploy — invalid emitted value fails closed pre-remote'
         invalidKeys: [],
       })) as CloudflareDeployDeps['validateEmittedVars'],
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(trace).toContain('wrangler:deploy');
   });
 
@@ -9252,7 +9287,7 @@ describe('runCloudflareDeploy — invalid emitted value fails closed pre-remote'
       })) as CloudflareDeployDeps['validateEmittedVars'],
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).not.toContain('wrangler:deploy');
@@ -9283,7 +9318,7 @@ describe('runCloudflareDeploy — migration gates re-checked post-build', () => 
       },
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // The build ran, but the post-build gate rejected the destructive migration before the
@@ -9308,7 +9343,7 @@ describe('runCloudflareDeploy — migration gates re-checked post-build', () => 
       },
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(trace).toContain('build');
@@ -9320,7 +9355,7 @@ describe('runCloudflareDeploy — migration gates re-checked post-build', () => 
     const root = d1Project(PROVISIONED_D1, INIT_MIGRATION);
     // REAL migration gate; the untouched migration passes post-build and is applied.
     const { deps, wranglerArgs, trace } = harness({ assertMigrationsDeployable: undefined });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(trace).toContain('build');
     const d1Calls = wranglerArgs.filter((a) => a[0] === 'd1');
     expect(d1Calls[0]?.slice(0, 3)).toEqual(['d1', 'migrations', 'apply']);
@@ -9446,7 +9481,7 @@ describe('env-schema probe (real subprocess)', () => {
       });
       await runCloudflareDeploy(
         root,
-        { backend: 'cloudflare' },
+        { platform: 'cloudflare' },
         silentCliLog,
         harness({ resolveSchemaFacts: undefined }).deps,
       );
@@ -9619,7 +9654,7 @@ describe('env-schema probe (real subprocess)', () => {
       });
       await runCloudflareDeploy(
         root,
-        { backend: 'cloudflare' },
+        { platform: 'cloudflare' },
         silentCliLog,
         harness({ resolveSchemaFacts: undefined }).deps,
       );
@@ -9678,7 +9713,7 @@ describe('runCloudflareDeploy — --skip-build is rejected', () => {
     const root = d1Project(PROVISIONED_D1, INIT_MIGRATION);
     const { deps, trace, wranglerArgs, exitCalls } = harness();
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare', skipBuild: true }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare', skipBuild: true }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     // Pre-account: no seam ran at all.
@@ -9692,7 +9727,7 @@ describe('runCloudflareDeploy — --skip-build is rejected', () => {
     await expect(
       runCloudflareDeploy(
         root,
-        { backend: 'cloudflare', skipBuild: true, provision: true },
+        { platform: 'cloudflare', skipBuild: true, provision: true },
         silentCliLog,
         deps,
       ),
@@ -9712,7 +9747,7 @@ describe('runCloudflareDeploy — --skip-build is rejected', () => {
     try {
       const { deps } = harness();
       await expect(
-        runCloudflareDeploy(root, { backend: 'cloudflare', skipBuild: true }, silentCliLog, deps),
+        runCloudflareDeploy(root, { platform: 'cloudflare', skipBuild: true }, silentCliLog, deps),
       ).rejects.toBeInstanceOf(ExitError);
     } finally {
       log.error = restore;
@@ -9726,7 +9761,7 @@ describe('runCloudflareDeploy — --skip-build is rejected', () => {
   it('leaves the build running when --skip-build is absent', async () => {
     const root = d1Project(PROVISIONED_D1, INIT_MIGRATION);
     const { deps, trace } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(trace).toContain('build');
   });
 });
@@ -9743,7 +9778,7 @@ describe('runCloudflareDeploy — wrangler autoconfig disabled', () => {
       'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'onext' }, null, 2),
     });
     const { deps, wranglerArgs } = harness();
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     const deployArgs = wranglerArgs.find((a) => a[0] === 'deploy');
     expect(deployArgs).toContain('--autoconfig=false');
   });
@@ -10135,7 +10170,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     const { deps, spawns, fetchCalls, confirms, trace, exitCalls } = emailHarness();
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -10201,7 +10236,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     const { deps, trace } = emailHarness();
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -10220,7 +10255,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     const { deps, spawns, fetchCalls } = emailHarness();
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -10259,7 +10294,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     });
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -10293,7 +10328,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
       await expect(
         runCloudflareDeploy(
           root,
-          { backend: 'cloudflare', requireEmail: true },
+          { platform: 'cloudflare', requireEmail: true },
           silentCliLog,
           deps,
         ),
@@ -10325,7 +10360,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     });
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -10358,7 +10393,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
       await expect(
         runCloudflareDeploy(
           root,
-          { backend: 'cloudflare', requireEmail: true },
+          { platform: 'cloudflare', requireEmail: true },
           silentCliLog,
           deps,
         ),
@@ -10381,7 +10416,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
       await expect(
         runCloudflareDeploy(
           root,
-          { backend: 'cloudflare', requireEmail: true },
+          { platform: 'cloudflare', requireEmail: true },
           silentCliLog,
           deps,
         ),
@@ -10406,7 +10441,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     });
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -10431,7 +10466,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     const { deps, spawns, exitCalls } = emailHarness();
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -10464,7 +10499,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     });
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -10488,7 +10523,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     const { deps, spawns, confirms, exitCalls } = emailHarness();
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -10574,7 +10609,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
       const output = captureOutput();
       try {
         await expect(
-          runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+          runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
         ).rejects.toBeInstanceOf(ExitError);
       } finally {
         output.restore();
@@ -10628,7 +10663,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     try {
       await runCloudflareDeploy(
         root,
-        { backend: 'cloudflare', requireEmail: true },
+        { platform: 'cloudflare', requireEmail: true },
         silentCliLog,
         deps,
       );
@@ -10652,7 +10687,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     try {
       await runCloudflareDeploy(
         root,
-        { backend: 'cloudflare', requireEmail: true },
+        { platform: 'cloudflare', requireEmail: true },
         silentCliLog,
         deps,
       );
@@ -10695,7 +10730,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     try {
       await runCloudflareDeploy(
         root,
-        { backend: 'cloudflare', requireEmail: true },
+        { platform: 'cloudflare', requireEmail: true },
         silentCliLog,
         deps,
       );
@@ -10753,7 +10788,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
       try {
         await runCloudflareDeploy(
           root,
-          { backend: 'cloudflare', requireEmail: true },
+          { platform: 'cloudflare', requireEmail: true },
           silentCliLog,
           deps,
         );
@@ -10797,7 +10832,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     try {
       await runCloudflareDeploy(
         root,
-        { backend: 'cloudflare', requireEmail: true },
+        { platform: 'cloudflare', requireEmail: true },
         silentCliLog,
         deps,
       );
@@ -10847,7 +10882,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     };
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -10874,7 +10909,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     });
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -10896,7 +10931,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     });
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -10936,7 +10971,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     });
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -10966,7 +11001,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     const { deps, spawns, confirms, exitCalls } = emailHarness({ isCI: true });
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -10983,7 +11018,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     const { deps, spawns, fetchCalls, confirms, exitCalls } = emailHarness();
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -11009,7 +11044,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     });
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -11077,7 +11112,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     };
     const output = captureOutput();
     try {
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     } finally {
       output.restore();
     }
@@ -11108,7 +11143,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
         throw new Error('confirm must not be called without email use');
       },
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(spawns.some((s) => s.args[0] === 'auth' || s.args[0] === 'email')).toBe(false);
     // The ONLY whoami is 3e's, which comes after the probe.
     expect(trace.filter((t) => t === 'wrangler:whoami --json')).toHaveLength(1);
@@ -11211,7 +11246,7 @@ describe('runCloudflareDeploy — `addresses` is whole-object pinned across the 
     });
     try {
       await expect(
-        runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+        runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
       ).rejects.toBeInstanceOf(ExitError);
     } finally {
       errorSpy.mockRestore();
@@ -11229,7 +11264,7 @@ describe('runCloudflareDeploy — `addresses` is whole-object pinned across the 
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
     await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(false);
@@ -11242,7 +11277,7 @@ describe('runCloudflareDeploy — `addresses` is whole-object pinned across the 
         writeEmittedDeployArtifact(root, { ...EMITTED_D1, addresses: ['support@acme.com'] }),
       verifyDeployConfig: verifyGeneratedDeployConfig,
     });
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(exitCalls).toEqual([]);
     expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(true);
   });

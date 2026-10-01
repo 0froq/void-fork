@@ -612,7 +612,6 @@ describe('generateDeployWrapperIfNeeded', () => {
     writeFileSync(join(root, 'db', 'migrations', '001_init.sql'), 'CREATE TABLE users (id INT);');
 
     const wrapped = await generateDeployWrapperIfNeeded(root, workerDir, 'index.js', {
-      auth: null,
       crons: [],
       queues: [],
       hasMigrations: true,

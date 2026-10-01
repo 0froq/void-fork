@@ -188,7 +188,6 @@ export async function maybeLinkCloudflareDeploy(
 ): Promise<'existing' | 'cancelled' | null> {
   if (
     options.platform ||
-    options.backend ||
     options.projectSlug ||
     process.env.VOID_PROJECT ||
     readDeploymentPlatform(root) !== null

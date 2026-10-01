@@ -23,7 +23,7 @@ import { _resetUnmaskCacheForTests } from '../../src/shared/env-mask.ts';
 import type { StandardSchemaV1 } from '../../src/standard-schema.ts';
 
 /**
- * Unit coverage for the redesigned self-host (`void deploy --backend cloudflare`)
+ * Unit coverage for the redesigned self-host (`void deploy --platform cloudflare`)
  * secret gate. The gate now reads GROUND TRUTH — the REAL worker `vars` the build
  * emitted into `dist/ssr/wrangler.json` — plus the env-insensitive schema facts,
  * instead of a pre-build `loadEnv` facsimile. No real wrangler and no network

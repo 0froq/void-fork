@@ -173,7 +173,7 @@ export async function fetchRemoteSecretNames(
 }
 
 // ---------------------------------------------------------------------------
-// Self-host (`void deploy --backend cloudflare`) secrets preflight units.
+// Self-host (`void deploy --platform cloudflare`) secrets preflight units.
 //
 // The managed platform path gates secrets via `assertEnvSchemaValid` (deploy.ts)
 // against the platform's secret store. The self-host path bypasses the platform
@@ -499,7 +499,7 @@ function emptyEnvContext(): SelfHostEnvContext {
 // ---------------------------------------------------------------------------
 // Post-build ground-truth self-host units.
 //
-// The redesigned `void deploy --backend cloudflare` gate validates the REAL
+// The redesigned `void deploy --platform cloudflare` gate validates the REAL
 // build artifact the build emits — `dist/ssr/wrangler.json` `vars` (the plaintext
 // worker vars) — instead of a pre-build `loadEnv` facsimile. It needs only ONE
 // piece of project-derived data: the env-INSENSITIVE server and required key

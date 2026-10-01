@@ -7,7 +7,6 @@ export type DeployArgs = {
   skipBuild?: boolean;
   debug?: boolean;
   platform?: 'cloudflare' | 'void';
-  backend?: 'cloudflare';
   provision?: boolean;
   requireEmail?: boolean;
   atomic?: boolean;
@@ -25,7 +24,6 @@ export function parseDeployArgs(args: Array<string>): DeployArgs {
         'skip-build': { type: 'boolean' },
         debug: { type: 'boolean' },
         platform: { type: 'string' },
-        backend: { type: 'string' },
         provision: { type: 'boolean' },
         'require-email': { type: 'boolean' },
         atomic: { type: 'boolean' },
@@ -41,9 +39,6 @@ export function parseDeployArgs(args: Array<string>): DeployArgs {
       const optionMatch = message.match(/Option '(--[a-z-]+)/);
       if (optionMatch?.[1] === '--platform') {
         throw new Error("deploy: --platform requires a value ('cloudflare' or 'void').");
-      }
-      if (optionMatch?.[1] === '--backend') {
-        throw new Error("deploy: --backend requires a value ('cloudflare').");
       }
       throw new Error('deploy: --project requires a slug.');
     }
@@ -64,21 +59,11 @@ export function parseDeployArgs(args: Array<string>): DeployArgs {
     throw new Error('deploy: --project can only be specified once.');
   }
 
-  const backendTokens = tokens.filter(
-    (token) => token.kind === 'option' && token.name === 'backend',
-  );
-  if (backendTokens.length > 1) {
-    throw new Error('deploy: --backend can only be specified once.');
-  }
-
   const platformTokens = tokens.filter(
     (token) => token.kind === 'option' && token.name === 'platform',
   );
   if (platformTokens.length > 1) {
     throw new Error('deploy: --platform can only be specified once.');
-  }
-  if (platformTokens.length > 0 && backendTokens.length > 0) {
-    throw new Error('deploy: --platform and --backend cannot be used together.');
   }
 
   if (parsed.positionals.length > 0) {
@@ -103,15 +88,8 @@ export function parseDeployArgs(args: Array<string>): DeployArgs {
   }
   const platform = platformValue;
 
-  const backendValue =
-    typeof parsed.values.backend === 'string' ? parsed.values.backend : undefined;
-  if (backendValue !== undefined && backendValue !== 'cloudflare') {
-    throw new Error("deploy: --backend must be 'cloudflare'.");
-  }
-  const backend = backendValue;
-
   const provision = parsed.values.provision === true ? true : undefined;
-  if (provision && backend !== 'cloudflare' && platform !== 'cloudflare') {
+  if (provision && platform !== 'cloudflare') {
     throw new Error('deploy: --provision requires --platform cloudflare.');
   }
 
@@ -120,14 +98,14 @@ export function parseDeployArgs(args: Array<string>): DeployArgs {
   // (CI / non-TTY). Only the Cloudflare backend runs the email step.
   const requireEmail = parsed.values['require-email'] === true ? true : undefined;
   const atomic = parsed.values.atomic === true ? true : undefined;
-  if (requireEmail && backend !== 'cloudflare' && platform !== 'cloudflare') {
+  if (requireEmail && platform !== 'cloudflare') {
     throw new Error('deploy: --require-email requires --platform cloudflare.');
   }
 
   // The Cloudflare backend deploys to the user's OWN account and therefore never
   // resolves a Void project. Static flags are target-neutral: both backends honor
   // `--dir` and `--spa` through their respective static deployment adapters.
-  if (backend === 'cloudflare' || platform === 'cloudflare') {
+  if (platform === 'cloudflare') {
     if (projectSlug !== undefined) {
       throw new Error(
         'deploy: --project is not supported with --platform cloudflare — this platform deploys ' +
@@ -143,7 +121,6 @@ export function parseDeployArgs(args: Array<string>): DeployArgs {
     skipBuild,
     debug,
     platform,
-    backend,
     provision,
     requireEmail,
     atomic,

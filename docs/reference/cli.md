@@ -967,8 +967,6 @@ For Drizzle projects, deploy performs a read-only schema drift check. If a new m
 
 `--atomic` applies to one deployment. For an existing Durable Object Worker that consistently cannot stage, set `deploy: { cloudflare: { mode: 'atomic' } }` in `void.config.ts` so plain `void deploy` uses atomic publication. The default is `staged`.
 
-The older `--backend cloudflare` spelling remains available as a compatibility alias for `--platform cloudflare`.
-
 Every deploy writes a structured JSONL trace to `~/.void/logs/deploy-<timestamp>.jsonl` regardless of `--debug`. On failure the path is printed at the end of the error message so you can attach it when reporting platform issues. `VOID_DEPLOY_DEBUG=1` is accepted as an alternate trigger for stderr mirroring.
 
 Cloudflare upload failures include a detailed error message and stack locations when available. Use that message to identify the cause; the numeric error code alone may not be sufficient. The details are also available in the deploy log.
@@ -999,7 +997,7 @@ Masking your own values is left to your CI platform, which holds the secrets and
 
 Platform resolution precedence:
 
-1. `--platform <cloudflare|void>` (or the legacy `--backend cloudflare` alias)
+1. `--platform <cloudflare|void>`
 2. `platform` in `.void/project.json`
 3. Void for projects initialized by an older SDK without a saved platform
 
@@ -1722,7 +1720,7 @@ void email status --platform cloudflare
 
 Read-only. Checks the email setup on your own Cloudflare account for the domain of `email.from` in `void.config.ts` — session scopes, zone, MX records, Email Routing (and its subaddressing setting), Email Sending, the routing rule for every `email/` handler, and the `send_email` binding — then prints the status rows and the address map (`inbound <address> → email/<handler>`, `outbound sendEmail() from <email.from>`). Exits 1 when anything is not ready. A domain still not onboarded for Email Sending reads as set up once the `send_email` binding is committed — the binding is written only after an onboarding attempt, so that pair is how a Workers Free refusal is remembered — and the sending row says so (`not onboarded — verified destinations only; after upgrading to Workers Paid run void email setup --platform cloudflare`). Takes no `--project`: it reads the local project and your Cloudflare session, never a Void project.
 
-Without `--platform cloudflare` (or with `--platform void`) the command is not available yet; on the Void platform use `void email usage` and `void email destinations`. The older `--backend cloudflare` spelling remains available as a compatibility alias on `void email status` and `void email setup`, with the same rules as `void deploy`: at most once, and never together with `--platform`.
+Without `--platform cloudflare` (or with `--platform void`) the command is not available yet; on the Void platform use `void email usage` and `void email destinations`.
 
 ### `void email setup`
 

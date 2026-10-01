@@ -356,8 +356,6 @@ export type RunDeployOptions = {
   skipBuild?: boolean;
   debug?: boolean;
   platform?: Exclude<DeploymentPlatform, 'none'>;
-  /** @deprecated Use platform instead. */
-  backend?: 'cloudflare';
   provision?: boolean;
   /**
    * Mode B email (0078): fail the deploy — before any upload — instead of continuing
@@ -373,7 +371,7 @@ export function resolveDeploymentPlatform(
   root: string,
   options?: RunDeployOptions,
 ): DeploymentPlatform {
-  return options?.platform ?? options?.backend ?? readDeploymentPlatform(root) ?? 'void';
+  return options?.platform ?? readDeploymentPlatform(root) ?? 'void';
 }
 
 type DeployDoneEvent = Extract<DeployEvent, { event: 'done' }>;
@@ -660,7 +658,7 @@ export { buildEnv } from '../shared/untrusted-env.ts';
  * `VOID_DEPLOY_PROJECT_ID` is, so it cannot leak into an unrelated child process or a
  * later `void dev` in the same shell.
  *
- * Deliberately NOT set by `runCloudflareDeploy` (`--backend cloudflare`): that flow
+ * Deliberately NOT set by `runCloudflareDeploy` (`--platform cloudflare`): that flow
  * hands the built output to `wrangler deploy` against the user's own account and IS the
  * self-host path the warning is about. (It rejects framework SSR outright today, so no
  * Class A build reaches it either way.)
@@ -6472,7 +6470,6 @@ export async function prepareCloudflareFrameworkArtifact(
   const queues = scanQueuesSync(root, paths.queuesDir);
   const revalidate = collectRevalidate(voidConfig, null);
   await generateDeployWrapperIfNeeded(root, join(root, preset.workerDir), preset.workerMain, {
-    auth: null,
     crons,
     queues,
     // Direct deployment applies migrations before upload; it does not need the
@@ -8302,7 +8299,6 @@ async function runFrameworkDeploy(
   const originalEntry = join(workerDir, fwPreset.workerMain);
 
   const wrapperFeatures: WrapperFeatures = {
-    auth: null,
     crons: rawJobs,
     queues: rawQueues,
     hasMigrations: validatedMigrations != null && validatedMigrations.length > 0,
@@ -8970,7 +8966,6 @@ async function runFullDeploy(
   const workerDir = join(distDir, workerDirName);
   if (isFrameworkMode) {
     const wrapperFeatures: WrapperFeatures = {
-      auth: null,
       crons: rawJobs,
       queues: rawQueues,
       hasMigrations: validatedMigrations != null && validatedMigrations.length > 0,

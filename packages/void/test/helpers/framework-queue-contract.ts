@@ -24,7 +24,6 @@ export async function assertFrameworkQueueDelivery(dispatch: {
     }`,
     );
     await generateWrapper(root, 'index.mjs', root, {
-      auth: null,
       crons: [],
       queues: [{ name: 'emails', filePath: 'emails.ts', bindingName: 'QUEUE_EMAILS' }],
     });

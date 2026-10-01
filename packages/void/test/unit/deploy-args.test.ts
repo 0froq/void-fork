@@ -96,130 +96,90 @@ describe('parseDeployArgs', () => {
     expect(() => parseDeployArgs(['my-app'])).toThrow("deploy: Unexpected argument 'my-app'.");
   });
 
-  it('parses --backend cloudflare', () => {
-    const result = parseDeployArgs(['--backend', 'cloudflare']);
-    expect(result.backend).toBe('cloudflare');
-    expect(result.provision).toBeUndefined();
-  });
-
-  it('parses --platform cloudflare', () => {
-    expect(parseDeployArgs(['--platform', 'cloudflare']).platform).toBe('cloudflare');
-  });
+  it.each([['--platform', 'cloudflare'], ['--platform=cloudflare']])(
+    'parses Cloudflare selection %j',
+    (...args) => {
+      expect(parseDeployArgs(args).platform).toBe('cloudflare');
+    },
+  );
 
   it('parses --platform void', () => {
     expect(parseDeployArgs(['--platform', 'void']).platform).toBe('void');
   });
 
-  it('rejects an unsupported platform', () => {
+  it('rejects an unsupported or missing platform', () => {
     expect(() => parseDeployArgs(['--platform', 'other'])).toThrow(
       "deploy: --platform must be 'cloudflare' or 'void'.",
     );
-  });
-
-  it('rejects --platform together with the legacy --backend alias', () => {
-    expect(() => parseDeployArgs(['--platform', 'cloudflare', '--backend', 'cloudflare'])).toThrow(
-      'deploy: --platform and --backend cannot be used together.',
+    expect(() => parseDeployArgs(['--platform'])).toThrow(
+      "deploy: --platform requires a value ('cloudflare' or 'void').",
     );
   });
 
-  it('accepts the legacy --provision flag for backwards compatibility', () => {
-    const result = parseDeployArgs(['--backend', 'cloudflare', '--provision']);
-    expect(result.backend).toBe('cloudflare');
-    expect(result.provision).toBe(true);
+  it('rejects duplicate platforms even if the final value is valid', () => {
+    expect(() => parseDeployArgs(['--platform', 'other', '--platform=cloudflare'])).toThrow(
+      'deploy: --platform can only be specified once.',
+    );
   });
 
-  it('throws when --provision is used without --backend cloudflare', () => {
+  it.each([['--backend'], ['--backend', 'cloudflare'], ['--backend=cloudflare']])(
+    'rejects the removed alias %j',
+    (...args) => {
+      expect(() => parseDeployArgs(args)).toThrow("deploy: Unknown option '--backend'.");
+    },
+  );
+
+  it('accepts the existing provisioning flag on Cloudflare', () => {
+    expect(parseDeployArgs(['--platform', 'cloudflare', '--provision']).provision).toBe(true);
     expect(() => parseDeployArgs(['--provision'])).toThrow(
+      'deploy: --provision requires --platform cloudflare.',
+    );
+    expect(() => parseDeployArgs(['--platform', 'void', '--provision'])).toThrow(
       'deploy: --provision requires --platform cloudflare.',
     );
   });
 
-  it('parses --backend cloudflare --require-email', () => {
-    const result = parseDeployArgs(['--backend', 'cloudflare', '--require-email']);
-    expect(result.backend).toBe('cloudflare');
-    expect(result.requireEmail).toBe(true);
-  });
-
-  it('leaves requireEmail undefined when --require-email is not given', () => {
-    const result = parseDeployArgs(['--backend', 'cloudflare']);
-    expect(result.requireEmail).toBeUndefined();
-  });
-
-  it('parses --platform cloudflare --require-email', () => {
-    const result = parseDeployArgs(['--platform', 'cloudflare', '--require-email']);
-    expect(result.platform).toBe('cloudflare');
-    expect(result.requireEmail).toBe(true);
-  });
-
-  it('throws when --require-email is used without --platform cloudflare', () => {
+  it('parses --require-email only on Cloudflare', () => {
+    expect(parseDeployArgs(['--platform', 'cloudflare', '--require-email']).requireEmail).toBe(
+      true,
+    );
+    expect(parseDeployArgs(['--platform', 'cloudflare']).requireEmail).toBeUndefined();
     expect(() => parseDeployArgs(['--require-email'])).toThrow(
+      'deploy: --require-email requires --platform cloudflare.',
+    );
+    expect(() => parseDeployArgs(['--platform', 'void', '--require-email'])).toThrow(
       'deploy: --require-email requires --platform cloudflare.',
     );
   });
 
-  it('throws for an invalid --backend value', () => {
-    expect(() => parseDeployArgs(['--backend', 'node'])).toThrow(
-      "deploy: --backend must be 'cloudflare'.",
+  it('passes --skip-build through for target-specific validation', () => {
+    expect(parseDeployArgs(['--platform', 'cloudflare', '--skip-build'])).toMatchObject({
+      platform: 'cloudflare',
+      skipBuild: true,
+    });
+  });
+
+  it('explains that Cloudflare resolves no Void project', () => {
+    expect(() => parseDeployArgs(['--platform', 'cloudflare', '--project', 'foo'])).toThrow(
+      /--project is not supported with --platform cloudflare.*no Void project is involved/,
     );
   });
 
-  it('throws when --backend is repeated even if the final value is cloudflare', () => {
-    expect(() => parseDeployArgs(['--backend', 'node', '--backend', 'cloudflare'])).toThrow(
-      'deploy: --backend can only be specified once.',
-    );
-  });
-
-  it('throws for duplicate --backend cloudflare flags', () => {
-    expect(() => parseDeployArgs(['--backend', 'cloudflare', '--backend', 'cloudflare'])).toThrow(
-      'deploy: --backend can only be specified once.',
-    );
-  });
-
-  it('throws a backend-specific message when --backend has no value', () => {
-    expect(() => parseDeployArgs(['--backend'])).toThrow(
-      "deploy: --backend requires a value ('cloudflare').",
-    );
-  });
-
-  it('parses --backend cloudflare together with --skip-build (rejected later, in deploy)', () => {
-    const result = parseDeployArgs(['--backend', 'cloudflare', '--skip-build']);
-    expect(result.backend).toBe('cloudflare');
-    expect(result.skipBuild).toBe(true);
-  });
-
-  // The Cloudflare backend resolves no Void project. Static flags are shared by
-  // both targets and are interpreted by the selected target adapter.
-  it('throws when --project is used with --backend cloudflare', () => {
-    expect(() => parseDeployArgs(['--backend', 'cloudflare', '--project', 'foo'])).toThrow(
-      /--project is not supported with --platform cloudflare/,
-    );
-  });
-
-  it('explains that no Void project is involved when rejecting --project', () => {
-    expect(() => parseDeployArgs(['--backend', 'cloudflare', '--project', 'foo'])).toThrow(
-      /no Void project is involved/,
-    );
-  });
-
-  it('parses --dir and --spa with --backend cloudflare', () => {
-    expect(parseDeployArgs(['--backend', 'cloudflare', '--dir', 'dist', '--spa'])).toMatchObject({
-      backend: 'cloudflare',
+  it('parses static-directory and SPA flags on Cloudflare', () => {
+    expect(parseDeployArgs(['--platform', 'cloudflare', '--dir', 'dist', '--spa'])).toMatchObject({
+      platform: 'cloudflare',
       dir: 'dist',
       spa: true,
     });
   });
 
-  it('still parses --project, --dir and --spa without --backend (managed path unaffected)', () => {
-    const result = parseDeployArgs(['--project', 'foo', '--dir', 'dist', '--spa']);
-    expect(result.backend).toBeUndefined();
-    expect(result.projectSlug).toBe('foo');
-    expect(result.dir).toBe('dist');
-    expect(result.spa).toBe(true);
-  });
-
-  it('leaves backend undefined when no --backend is given (managed path)', () => {
-    const result = parseDeployArgs([]);
-    expect(result.backend).toBeUndefined();
-    expect(result.provision).toBeUndefined();
+  it('keeps the managed static-directory path available', () => {
+    expect(parseDeployArgs(['--project', 'foo', '--dir', 'dist', '--spa'])).toMatchObject({
+      projectSlug: 'foo',
+      dir: 'dist',
+      spa: true,
+    });
+    expect(parseDeployArgs([]).platform).toBeUndefined();
+    expect(parseDeployArgs([]).provision).toBeUndefined();
   });
 });

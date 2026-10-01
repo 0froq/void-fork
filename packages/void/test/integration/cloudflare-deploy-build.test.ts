@@ -26,7 +26,7 @@ import {
 } from '../../src/sandbox/config.ts';
 import { CLOUDFLARE_DEPLOY_BUILD_ENV } from '../../src/shared/env.ts';
 
-// Real-build FP-safety lock for `void deploy --backend cloudflare`. The 600+ unit tests drive
+// Real-build FP-safety lock for `void deploy --platform cloudflare`. The 600+ unit tests drive
 // `runCloudflareDeploy` with a STUBBED `vite build` and HAND-WRITTEN emitted configs, so nothing
 // there proves the guard's core premise: that a REAL `@cloudflare/vite-plugin` + wrangler build
 // emits exactly the shape `verifyGeneratedDeployConfig` reconstructs, adding nothing that would
@@ -118,7 +118,7 @@ function guardOnTamper(mutate: (config: Record<string, unknown>) => void): {
   }
 }
 
-describe('playground/kitchen-sink --backend cloudflare real-build deploy guard', () => {
+describe('playground/kitchen-sink --platform cloudflare real-build deploy guard', () => {
   beforeAll(async () => {
     playground = createIsolatedPlayground(ROOT, SOURCE_PLAYGROUND);
     pg = playground.root;

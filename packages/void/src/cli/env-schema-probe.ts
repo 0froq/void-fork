@@ -5,7 +5,7 @@ import { findEnvFile } from '../codegen/env-types.ts';
 import type { SelfHostSchemaFacts, SelfHostSchemaFailureReason } from './env-validation.ts';
 
 /**
- * The self-host `void deploy --backend cloudflare` orchestrator validates the REAL
+ * The self-host `void deploy --platform cloudflare` orchestrator validates the REAL
  * build artifact (`dist/ssr/wrangler.json` `vars`) instead of predicting it. Two
  * pieces still need project code, and BOTH run here — in an ISOLATED SUBPROCESS —
  * because the orchestrator runs in a credential-bearing PARENT (CF Access service

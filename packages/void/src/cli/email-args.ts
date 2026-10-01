@@ -71,7 +71,7 @@ export interface EmailArgs {
   /**
    * `--platform cloudflare`: the developer's own account (design doc 0078, Mode B).
    * `--platform void` names the Void platform explicitly; leaving the flag off means the
-   * same. The legacy `--backend cloudflare` alias normalizes to `'cloudflare'` here.
+   * same.
    */
   platform?: 'cloudflare' | 'void';
 }
@@ -114,7 +114,6 @@ export function parseEmailArgs(args: Array<string>): EmailArgs {
   // mutate whichever project came last.
   const projectValues: Array<string> = [];
   const platformValues: Array<string> = [];
-  const backendValues: Array<string> = [];
   const subdomainValues: Array<string> = [];
   const positional: Array<string> = [];
 
@@ -153,12 +152,7 @@ export function parseEmailArgs(args: Array<string>): EmailArgs {
       platformValues.push(value);
       i = next;
     } else if (rest[i] === '--backend' || rest[i]?.startsWith('--backend=')) {
-      const { value, next } = readFlagValue(rest, i, '--backend');
-      if (value === undefined) {
-        throw new Error("email: --backend requires a value ('cloudflare').");
-      }
-      backendValues.push(value);
-      i = next;
+      throw new Error("email: Unknown option '--backend'.");
     } else if (rest[i] === '--subdomain' || rest[i]?.startsWith('--subdomain=')) {
       const { value, next } = readFlagValue(rest, i, '--subdomain');
       // Same missing-value rule as --project: a bare flag or an empty shell
@@ -179,16 +173,8 @@ export function parseEmailArgs(args: Array<string>): EmailArgs {
   }
   const projectSlug = projectValues[0];
 
-  // `--platform <cloudflare|void>` is canonical; `--backend cloudflare` is the legacy
-  // alias `void deploy` also keeps. Same rules as deploy: each at most once, never both.
-  if (backendValues.length > 1) {
-    throw new Error('email: --backend can only be specified once.');
-  }
   if (platformValues.length > 1) {
     throw new Error('email: --platform can only be specified once.');
-  }
-  if (platformValues.length > 0 && backendValues.length > 0) {
-    throw new Error('email: --platform and --backend cannot be used together.');
   }
 
   let platform: EmailArgs['platform'];
@@ -199,14 +185,6 @@ export function parseEmailArgs(args: Array<string>): EmailArgs {
     }
     platform = platformValue;
   }
-  const backendValue = backendValues[0];
-  if (backendValue !== undefined) {
-    if (backendValue !== 'cloudflare') {
-      throw new Error("email: --backend must be 'cloudflare'.");
-    }
-    platform = 'cloudflare';
-  }
-
   if (subdomainValues.length > 1) {
     throw new Error('email: --subdomain can only be specified once.');
   }

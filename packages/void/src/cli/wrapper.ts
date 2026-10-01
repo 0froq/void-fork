@@ -18,8 +18,6 @@ import { generateQueueResolverSource } from '../queues/dispatch.ts';
 import { transformPgWorkerBundle } from './pg-bundle-transform.ts';
 
 export type WrapperFeatures = {
-  /** Auth providers (kept for type compatibility, no longer used by wrapper). */
-  auth: Array<string> | null;
   /** Cron job definitions (from scanJobsSync). */
   crons: Array<{ name: string; filePath: string; crons: Array<string> }>;
   /** Queue consumer definitions (from scanQueuesSync). */

@@ -20,7 +20,6 @@ import {
 import type { WrapperFeatures } from '../../src/cli/wrapper.ts';
 
 const base: WrapperFeatures = {
-  auth: null,
   crons: [],
   queues: [],
 };
