@@ -73,8 +73,7 @@ describe('hasPrerenderSources', () => {
 describe('__voidCollectPrerenderPaths — sources that can push a path', () => {
   const testOptions = {
     honoPath: '/resolved/hono/index.mjs',
-    responsePath: '/resolved/void/runtime/response.mjs',
-    handlerPath: '/resolved/void/runtime/handler.mjs',
+
     runtimeEnvPath: '/resolved/void/runtime/env.mjs',
     projectRoot: '/project',
     homeDir: '/Users/test',
@@ -86,8 +85,7 @@ describe('__voidCollectPrerenderPaths — sources that can push a path', () => {
   const pagesOptions = {
     pagesDir: '/pages',
     pagesDirRelative: 'pages',
-    protocolPath: '/resolved/void/pages-protocol.mjs',
-    headPath: '/resolved/void/pages-head.mjs',
+
     clientEntryId: 'virtual:void-pages-client',
   };
 

@@ -354,8 +354,7 @@ describe('compileRouteTable (email)', () => {
   // positional list — see the note on the field in router/compile.ts.
   const baseOptions = {
     honoPath: 'hono',
-    responsePath: 'void/response',
-    handlerPath: 'void/handler',
+
     runtimeEnvPath: 'void/_env',
     projectRoot: '/project',
     homeDir: '/home/test',
@@ -508,8 +507,7 @@ describe('generated __emailHandler dispatch (behavioural)', () => {
 
   const baseOptions = {
     honoPath: 'hono',
-    responsePath: 'void/response',
-    handlerPath: 'void/handler',
+
     runtimeEnvPath: 'void/_env',
     projectRoot: '/project',
     homeDir: '/home/test',
@@ -914,7 +912,7 @@ describe('compileWorkerEntry (email)', () => {
       'this.env.__VOID_EMAIL_DEPLOYMENT_ID || !__isForwardableEmailMessage(message)',
     );
     expect(code).not.toContain('async email(envelope)');
-    expect(code).toContain('return __handleEmailReceipt(request, env, ctx)');
+    expect(code).toContain('emailReceipt: __handleEmailReceipt');
     expect(code).toContain('await __verifyEmailReceiptThroughProxy(');
     expect(code).toContain('await __readEmailEnvelope(request.body)');
     expect(code).toContain('async function handleEmail');

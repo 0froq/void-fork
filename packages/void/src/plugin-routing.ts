@@ -226,8 +226,6 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   }
   const compileOptions: CompileOptions = {
     honoPath: resolveFile('hono'),
-    responsePath: resolveFile('#self/response'),
-    handlerPath: resolveFile('#self/handler'),
     runtimeEnvPath: resolveFile('#self/_env'),
     runtimeEmailPath: resolveFile('#self/email'),
     emailDir,
@@ -389,8 +387,6 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     return {
       pagesDir,
       pagesDirRelative: relative(root, pagesDir).replaceAll('\\', '/'),
-      protocolPath: resolveFile('#self/pages-protocol'),
-      headPath: resolveFile('#self/pages-head'),
       clientEntryId: 'virtual:void-pages-client',
       islandClientEntryId: hasIslandPages ? 'virtual:void-islands-client' : undefined,
       mdClientEntryId,

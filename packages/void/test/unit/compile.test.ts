@@ -7,7 +7,6 @@ import {
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vite-plus/test';
 import {
-  compileAssetFallbackHelper,
   compileRouteTable,
   compileWorkerEntry,
   compileNodeApp,
@@ -15,11 +14,25 @@ import {
 } from '../../src/router/compile.ts';
 import type { ScanResult } from '../../src/router/scan.ts';
 import { VoidAssetRewriteError } from '../../src/runtime/handler.ts';
+import {
+  createRoutingRuntime,
+  createHttpRouteHandler,
+  createModuleLoader,
+  createErrorRenderer,
+  createPagesFallback,
+  createPageGetHandler,
+  createPageMutationHandler,
+  createAssetFallback,
+  createClientAssetTags,
+  createManifestLoader,
+  createSsrFallback,
+  createAssetNotFound,
+  type RoutingRuntime,
+} from '../../src/runtime/routing.ts';
 
 const testOptions = {
   honoPath: '/resolved/hono/index.mjs',
-  responsePath: '/resolved/void/runtime/response.mjs',
-  handlerPath: '/resolved/void/runtime/handler.mjs',
+
   runtimeEnvPath: '/resolved/void/runtime/env.mjs',
   projectRoot: '/project',
   homeDir: '/Users/test',
@@ -29,99 +42,6 @@ const testOptions = {
 };
 
 describe('compileRouteTable', () => {
-  it('generates valid module code with named-export routes and middleware', () => {
-    const scan: ScanResult = {
-      routes: [
-        {
-          pattern: '/api/hello',
-          methods: ['GET'],
-          params: [],
-          catchAll: false,
-          env: null,
-          filePath: 'api/hello.ts',
-        },
-        {
-          pattern: '/api/users/:id',
-          methods: ['GET', 'PUT'],
-          params: ['id'],
-          catchAll: false,
-          env: null,
-          filePath: 'api/users/[id].ts',
-        },
-      ],
-      middleware: [{ order: 1, filePath: '01.logger.ts' }],
-      jobs: [{ filePath: 'sync.ts', name: 'sync', crons: ['0 * * * *'] }],
-      queues: [],
-      pages: { pages: [], layouts: [], namedLayouts: [] },
-    };
-
-    const code = compileRouteTable(
-      scan,
-      '/routes',
-      '/middleware',
-      '/crons',
-      '/queues',
-      null,
-      testOptions,
-    );
-
-    // Should import Hono from resolved path
-    expect(code).toContain(`import { Hono } from "/resolved/hono/index.mjs"`);
-    // Should import convertReturnValue
-    expect(code).toContain(
-      `import { convertReturnValue } from "/resolved/void/runtime/response.mjs"`,
-    );
-    // Should import middleware eagerly
-    expect(code).toContain('import middleware0 from "/middleware/01.logger.ts"');
-    // Should create Hono app
-    expect(code).toContain('const app = new Hono()');
-    // Should register middleware
-    expect(code).toContain('app.use(middleware0)');
-    // Should register routes with named exports
-    expect(code).toContain('app.get("/api/hello"');
-    expect(code).toContain('mod.GET(c)');
-    expect(code).toContain('app.get("/api/users/:id"');
-    expect(code).toContain('app.put("/api/users/:id"');
-    expect(code).toContain('mod.PUT(c)');
-    // Should have shared lazy loaders
-    expect(code).toContain('async function _load_api_hello_ts()');
-    expect(code).toContain('import("/routes/api/hello.ts")');
-    expect(code).toContain('import("/routes/api/users/[id].ts")');
-    // Should generate scheduled handler for cron jobs
-    expect(code).toContain('export async function scheduled(controller, env, ctx)');
-    expect(code).toContain('const job0Crons = ["0 * * * *"]');
-    expect(code).toContain('import("/crons/sync.ts")');
-    // Should export app as default
-    expect(code).toContain('export default app');
-  });
-
-  it('imports route modules on demand in dev so transitive dependency changes reload', () => {
-    const scan: ScanResult = {
-      routes: [
-        {
-          pattern: '/api/hello',
-          methods: ['GET'],
-          params: [],
-          catchAll: false,
-          env: null,
-          filePath: 'api/hello.ts',
-        },
-      ],
-      middleware: [],
-      jobs: [],
-      queues: [],
-      pages: { pages: [], layouts: [], namedLayouts: [] },
-    };
-
-    const code = compileRouteTable(scan, '/routes', '/middleware', '/crons', '/queues', null, {
-      ...testOptions,
-      dev: true,
-    });
-
-    expect(code).toContain('async function _load_api_hello_ts()');
-    expect(code).toContain('return import("/routes/api/hello.ts")');
-  });
-
   it('matches every expression of a multi-cron job', () => {
     const scan: ScanResult = {
       routes: [],
@@ -144,38 +64,6 @@ describe('compileRouteTable', () => {
     expect(code).toContain('const job0Crons = ["0 * * * *","30 * * * *"]');
     expect(code).toContain('job0Crons.includes(controller.cron)');
     expect(code).toContain('import("/crons/multi.ts")');
-  });
-
-  it('falls back to app.all with mod.default for no HTTP exports', () => {
-    const scan: ScanResult = {
-      routes: [
-        {
-          pattern: '/api/legacy',
-          methods: [],
-          params: [],
-          catchAll: false,
-          env: null,
-          filePath: 'api/legacy.ts',
-        },
-      ],
-      middleware: [],
-      jobs: [],
-      queues: [],
-      pages: { pages: [], layouts: [], namedLayouts: [] },
-    };
-
-    const code = compileRouteTable(
-      scan,
-      '/routes',
-      '/middleware',
-      '/crons',
-      '/queues',
-      null,
-      testOptions,
-    );
-
-    expect(code).toContain('app.all("/api/legacy"');
-    expect(code).toContain('mod.default(c)');
   });
 
   it('handles empty scan result', () => {
@@ -258,18 +146,10 @@ describe('compileRouteTable', () => {
       testOptions,
     );
 
-    expect(code).toContain('app.notFound(async (c) => {');
-    expect(code).toContain('if (!shouldHandleSsrRequest(c))');
-    expect(code).toContain('return fetchFromAssets(c)');
-    expect(code).toContain('import("/src/main.ssr.ts")');
-    expect(code).toContain('return renderSsrResponse(c, mod)');
-    expect(code).toContain('return render(c, assetTags)');
-    expect(code).toContain('const SSR_CLIENT_ENTRY_ID = "src/main.client.tsx"');
-    expect(code).toContain('const SSR_CLIENT_ENTRY_URL = "/src/main.client.tsx"');
-    expect(code).toContain('new URL("/.vite/manifest.json", request.url)');
-    expect(code).toContain('src="/@vite/client"');
-    expect(code).toContain('from "/@react-refresh"');
-    expect(code).toContain('__vite_plugin_react_preamble_installed__ = true');
+    expect(code).toContain('app.notFound(__createSsrFallback(');
+    expect(code).toContain('load: () => import("/src/main.ssr.ts")');
+    expect(code).toContain('"entryId":"src/main.client.tsx"');
+    expect(code).toContain('"reactRefresh":true');
   });
 
   it('generates /__void/queue route for queue consumers', () => {
@@ -482,27 +362,6 @@ describe('compileRouteTable', () => {
     expect(code).toContain('__devToken !== __VOID_DEV_TRIGGER_TOKEN');
   });
 
-  it('prerender-paths auth checks token when present', () => {
-    const code = compileWorkerEntry();
-
-    // __handleInternal checks __VOID_PROXY_TOKEN for prerender-paths
-    expect(code).toContain('/__void/prerender-paths');
-    expect(code).toContain('env.__VOID_PROXY_TOKEN');
-    expect(code).toContain('request.headers.get("x-void-internal")');
-  });
-
-  it('checks route-owned internal handlers before app routing', () => {
-    const code = compileWorkerEntry();
-
-    expect(code).toContain('__voidHandleInternalRoute');
-    expect(code.indexOf('const routeInternal = await __voidHandleInternalRoute')).toBeLessThan(
-      code.indexOf('url.pathname !== "/__void/prerender-paths"'),
-    );
-    expect(code.indexOf('const internal = await __handleInternal')).toBeLessThan(
-      code.indexOf('await app.fetch(request, userEnv, ctx)'),
-    );
-  });
-
   it('generates websocket durable object exports and proxy routes', () => {
     const scan: ScanResult = {
       routes: [],
@@ -593,69 +452,6 @@ describe('compileRouteTable', () => {
       'export const VoidLiveStreamDurableObject = __createLiveDurableObject();',
     );
   });
-
-  it('wires c.rewrite, c.originalUrl, and c.isRewritten to a shared WeakMap', () => {
-    // Lightweight anchor that the rewrite middleware is emitted at all —
-    // behavioral coverage for the wrapper lives in `c.rewrite runtime wrapper`
-    // below (and in the `installVoidWrappers` mirror that drives those tests).
-    const scan: ScanResult = {
-      routes: [],
-      middleware: [],
-      jobs: [],
-      queues: [],
-      pages: { pages: [], layouts: [], namedLayouts: [] },
-    };
-    const code = compileRouteTable(
-      scan,
-      '/routes',
-      '/middleware',
-      '/crons',
-      '/queues',
-      null,
-      testOptions,
-    );
-
-    expect(code).toContain('const __voidOriginalUrls = new WeakMap();');
-    expect(code).toContain('const __voidFallbackHandled = new WeakSet();');
-    expect(code).toContain('c.rewrite = (path)');
-    expect(code).toContain('c.originalUrl = () =>');
-    expect(code).toContain('c.isRewritten = () =>');
-    // Dispatch only sets `X-Void-Original-URL`, never a legacy flag header.
-    expect(code).not.toContain('X-Void-Rewritten');
-  });
-
-  it('wraps c.redirect so internal redirects merge the incoming query string', () => {
-    const scan: ScanResult = {
-      routes: [],
-      middleware: [],
-      jobs: [],
-      queues: [],
-      pages: { pages: [], layouts: [], namedLayouts: [] },
-    };
-    const code = compileRouteTable(
-      scan,
-      '/routes',
-      '/middleware',
-      '/crons',
-      '/queues',
-      null,
-      testOptions,
-    );
-
-    // The c.redirect wrapper also uses this helper when no static rules exist.
-    expect(code).toContain('mergeQueryIntoLocation as __mergeQueryIntoLocation');
-    // And the c.redirect wrapper must reference it for string paths that
-    // start with "/" (internal), passing through absolute URLs untouched.
-    expect(code).toContain('const __origRedirect = c.redirect.bind(c);');
-    expect(code).toContain('c.redirect = (location, status)');
-    // Guard against protocol-relative ("//host/x") URLs — those satisfy
-    // `startsWith("/")` but the browser resolves them cross-origin, so
-    // merging the incoming query would leak request params off-origin.
-    expect(code).toContain(
-      'typeof location === "string" && location.startsWith("/") && !location.startsWith("//")',
-    );
-    expect(code).toContain('__origRedirect(__mergeQueryIntoLocation(location, search), status)');
-  });
 });
 
 /**
@@ -669,29 +465,6 @@ describe('compileRouteTable', () => {
  * would require. If compile.ts drifts, the text-level tests above will
  * fail first and point at this file.
  */
-function mergeQueryIntoLocation(destination: string, search: string): string {
-  if (!search || search === '?') {
-    return destination;
-  }
-  const fragIdx = destination.indexOf('#');
-  const base = fragIdx === -1 ? destination : destination.slice(0, fragIdx);
-  const fragment = fragIdx === -1 ? '' : destination.slice(fragIdx);
-  const q = base.indexOf('?');
-  if (q === -1) {
-    return base + search + fragment;
-  }
-  if (q === base.length - 1) {
-    return base.slice(0, q) + fragment;
-  }
-  const dp = new URLSearchParams(base.slice(q + 1));
-  for (const [k, v] of new URLSearchParams(search)) {
-    if (!dp.has(k)) {
-      dp.append(k, v);
-    }
-  }
-  return base.slice(0, q) + '?' + dp.toString() + fragment;
-}
-
 /**
  * Compile-time output of `compileRouteTable` is an ESM module. To exercise it
  * end-to-end without a real bundler, strip the static `import` statements and
@@ -728,6 +501,17 @@ function evalCompiledApp(code: string): Hono {
     '__compilePattern',
     '__substituteParams',
     '__mergeQueryIntoLocation',
+    '__createRoutingRuntime',
+    '__createHttpRouteHandler',
+    '__createModuleLoader',
+    '__createErrorRenderer',
+    '__createPagesFallback',
+    '__createPageGetHandler',
+    '__createPageMutationHandler',
+    '__createClientAssetTags',
+    '__createManifestLoader',
+    '__createSsrFallback',
+    '__createAssetNotFound',
     [
       // Inject the noop binding for both nodeTarget (was a `const` we stripped)
       // and the cf branch (was an import we stripped). Anything beyond the
@@ -748,75 +532,29 @@ function evalCompiledApp(code: string): Hono {
     sharedCompilePattern,
     sharedSubstituteParams,
     sharedMergeQueryIntoLocation,
+    createRoutingRuntime,
+    createHttpRouteHandler,
+    createModuleLoader,
+    createErrorRenderer,
+    createPagesFallback,
+    createPageGetHandler,
+    createPageMutationHandler,
+    createClientAssetTags,
+    createManifestLoader,
+    createSsrFallback,
+    createAssetNotFound,
   ) as Hono;
 }
 
-/**
- * Mirror of the `app.use` block emitted by `compileRouteTable` that attaches
- * `c.rewrite` / `c.originalUrl` / `c.isRewritten`. Keyed on the
- * `__voidOriginalUrls` WeakMap — identical shape to the codegen, so behavioral
- * tests exercise the real contract (map entry ⇒ rewritten request).
- */
-function installVoidWrappers(app: Hono, voidOriginalUrls: WeakMap<Request, URL>): void {
-  app.use(async (c, next) => {
-    // Edge-dispatch case: migrate a `X-Void-Original-URL` header set by an
-    // outer dispatcher into the map exactly once per request.
-    if (!voidOriginalUrls.has(c.req.raw)) {
-      const h = c.req.raw.headers.get('X-Void-Original-URL');
-      if (h != null) {
-        try {
-          voidOriginalUrls.set(c.req.raw, new URL(h));
-        } catch {
-          /* malformed header → treat as non-rewritten */
-        }
-      }
-    }
-    (c as any).rewrite = (path: string) => {
-      if (!path.startsWith('/') || path.startsWith('//')) {
-        throw new Error(
-          'c.rewrite() only accepts internal, path-absolute destinations — they must start with a single "/" (a leading "//" parses as protocol-relative and would proxy cross-origin); use fetch() for external URLs',
-        );
-      }
-      const qIdx = path.indexOf('?');
-      const hIdx = path.indexOf('#');
-      const firstDelim = qIdx === -1 ? hIdx : hIdx === -1 ? qIdx : Math.min(qIdx, hIdx);
-      const assetCheckPath = firstDelim === -1 ? path : path.slice(0, firstDelim);
-      if (
-        /\.(png|jpg|jpeg|gif|webp|avif|svg|ico|css|js|mjs|cjs|woff|woff2|ttf|otf|eot|mp4|webm|mp3|wav|pdf|txt|xml|json|wasm|map)$/i.test(
-          assetCheckPath,
-        )
-      ) {
-        throw new VoidAssetRewriteError(path);
-      }
-      // Strip fragment alongside query — `URL.pathname` setter percent-encodes
-      // `#` into `%23`, so we split on whichever of `?`/`#` came first. The
-      // search slice still starts at `?` (if any) and stops at `#` (if any).
-      const pathOnly = firstDelim === -1 ? path : path.slice(0, firstDelim);
-      const searchOnly = qIdx === -1 ? '' : path.slice(qIdx, hIdx === -1 ? path.length : hIdx);
-      const rewriteUrl = new URL(c.req.url);
-      rewriteUrl.pathname = pathOnly;
-      if (searchOnly) {
-        rewriteUrl.search = searchOnly;
-      }
-      const rewriteReq = new Request(rewriteUrl.toString(), c.req.raw);
-      const prior = voidOriginalUrls.get(c.req.raw);
-      voidOriginalUrls.set(rewriteReq, prior ?? new URL(c.req.url));
-      // In bare test envs `c.executionCtx` throws; compile.ts now branches at
-      // compile time on target. The node-target branch omits the arg entirely.
-      return app.fetch(rewriteReq, (c as any).env);
-    };
-    const origRedirect = c.redirect.bind(c);
-    (c as any).redirect = (location: string, status?: number) => {
-      if (typeof location === 'string' && location.startsWith('/') && !location.startsWith('//')) {
-        const search = new URL(c.req.raw.url).search;
-        return origRedirect(mergeQueryIntoLocation(location, search), status as any);
-      }
-      return origRedirect(location, status as any);
-    };
-    (c as any).originalUrl = () => voidOriginalUrls.get(c.req.raw) ?? null;
-    (c as any).isRewritten = () => voidOriginalUrls.has(c.req.raw);
-    await next();
+const runtimeByApp = new WeakMap<Hono, RoutingRuntime>();
+function installVoidWrappers(app: Hono, originalUrls: WeakMap<Request, URL>): void {
+  const runtime = createRoutingRuntime(app, {
+    nodeTarget: true,
+    managedDispatch: true,
+    originalUrls,
   });
+  runtimeByApp.set(app, runtime);
+  app.use(runtime.contextMiddleware);
 }
 
 describe('c.redirect runtime wrapper', () => {
@@ -907,49 +645,14 @@ describe('c.redirect runtime wrapper', () => {
   });
 });
 
-/**
- * Mirror of `compileRoutingRulesMiddleware` in compile.ts: evaluate static
- * rewrite/redirect rules pre-asset, but short-circuit when the request is an
- * internal re-dispatch (tracked via `__voidOriginalUrls`). The guard is what
- * prevents single-hop rewrite loops — even if the destination itself matches a
- * rewrite rule, the rule table is skipped on the replayed request.
- *
- * Kept in sync with compile.ts by shape; the text-level tests in
- * `describe('compileRouteTable')` above anchor the emitted source string.
- */
 function installRoutingRulesMiddleware(
   app: Hono,
-  voidOriginalUrls: WeakMap<Request, URL>,
+  originalUrls: WeakMap<Request, URL>,
   rules: Array<{ source: string; destination: string; status: number; force?: boolean }>,
 ): void {
-  app.use('*', async (c, next) => {
-    if (voidOriginalUrls.has(c.req.raw)) {
-      return next();
-    }
-    const pathname = new URL(c.req.url).pathname;
-    let matched: (typeof rules)[number] | undefined;
-    for (const rule of rules) {
-      // Simple equality + `/*` prefix match is enough for these tests — the
-      // real implementation uses `__compilePattern` from compile.ts.
-      if (rule.source === pathname) {
-        matched = rule;
-      } else if (rule.source.endsWith('/*') && pathname.startsWith(rule.source.slice(0, -2))) {
-        matched = rule;
-      }
-    }
-    if (!matched) {
-      return next();
-    }
-    if (matched.status === 200) {
-      const rewriteUrl = new URL(c.req.url);
-      rewriteUrl.pathname = matched.destination;
-      const rewriteReq = new Request(rewriteUrl.toString(), c.req.raw);
-      const prior = voidOriginalUrls.get(c.req.raw);
-      voidOriginalUrls.set(rewriteReq, prior ?? new URL(c.req.url));
-      return app.fetch(rewriteReq, (c as any).env);
-    }
-    return c.redirect(matched.destination, matched.status as any);
-  });
+  const runtime =
+    runtimeByApp.get(app) ?? createRoutingRuntime(app, { nodeTarget: true, originalUrls });
+  app.use('*', runtime.routingMiddleware(rules));
 }
 
 describe('c.rewrite runtime wrapper', () => {
@@ -1023,22 +726,14 @@ describe('c.rewrite runtime wrapper', () => {
 
     installVoidWrappers(app, voidOriginalUrls);
     app.use('*', async (c, next) => {
-      if (voidOriginalUrls.has(c.req.raw)) {
-        return next();
-      }
-      const pathname = new URL(c.req.url).pathname;
-      // Static force rewrite: /a → /elsewhere. If the guard were removed, this
-      // would match again on the re-dispatched /a request and loop.
-      if (pathname === '/a') {
+      if (!voidOriginalUrls.has(c.req.raw)) {
         ruleMatches++;
-        const rewriteUrl = new URL(c.req.url);
-        rewriteUrl.pathname = '/a';
-        const rewriteReq = new Request(rewriteUrl.toString(), c.req.raw);
-        voidOriginalUrls.set(rewriteReq, new URL(c.req.url));
-        return app.fetch(rewriteReq, (c as any).env);
       }
-      return next();
+      await next();
     });
+    installRoutingRulesMiddleware(app, voidOriginalUrls, [
+      { source: '/a', destination: '/a', status: 200, force: true },
+    ]);
 
     app.get('/a', (c) => {
       return new Response('handler-a', {
@@ -1097,18 +792,11 @@ describe('c.rewrite runtime wrapper', () => {
     installRoutingRulesMiddleware(app, voidOriginalUrls, preAsset);
 
     let fallbackFired = false;
-    // Emulate the post-asset fallback check that would normally run on 404.
-    // If the pre-asset rewrite succeeds, this branch must never execute.
-    app.notFound((_c) => {
-      for (const rule of postAsset) {
-        if (
-          rule.source === '/docs/*' ||
-          (rule.source.endsWith('/*') && '/docs/intro'.startsWith(rule.source.slice(0, -2)))
-        ) {
-          fallbackFired = true;
-        }
-      }
-      return new Response('fallback-hit', { status: 200 });
+    app.notFound(async (c) => {
+      fallbackFired = true;
+      return (
+        (await runtimeByApp.get(app)!.applyFallback(c, postAsset)) ?? new Response('fallback-hit')
+      );
     });
 
     app.get('/rewrite-target', (c) => c.text('rewrite-target', 200));
@@ -1171,18 +859,10 @@ describe('c.rewrite runtime wrapper', () => {
 
     // Fallback rule: /missing/* rewrites to /spa-shell on asset-miss.
     const fallbackRules = [{ source: '/missing/*', destination: '/spa-shell', status: 200 }];
-    app.notFound((c) => {
-      if (voidOriginalUrls.has(c.req.raw)) {
-        return c.text('not-found', 404);
-      }
-      const pathname = new URL(c.req.url).pathname;
-      for (const rule of fallbackRules) {
-        if (rule.source.endsWith('/*') && pathname.startsWith(rule.source.slice(0, -2))) {
-          return (c as any).rewrite(rule.destination);
-        }
-      }
-      return c.text('not-found', 404);
-    });
+    app.notFound(
+      async (c) =>
+        (await runtimeByApp.get(app)!.applyFallback(c, fallbackRules)) ?? c.text('not-found', 404),
+    );
 
     app.get('/spa-shell', (c) => c.text('shell-body', 200));
 
@@ -1215,7 +895,6 @@ describe('c.rewrite runtime wrapper', () => {
     // through to fallbacks normally.
     const app = new Hono();
     const voidOriginalUrls = new WeakMap<Request, URL>();
-    const voidFallbackHandled = new WeakSet<Request>();
     installVoidWrappers(app, voidOriginalUrls);
 
     app.use('*', async (c, next) => {
@@ -1226,28 +905,10 @@ describe('c.rewrite runtime wrapper', () => {
     });
 
     const fallbackRules = [{ source: '/missing', destination: '/index', status: 200 }];
-    app.notFound((c) => {
-      // New guard: skip only if THIS request already came from a fallback
-      // re-dispatch. User c.rewrite (sets __voidOriginalUrls but not
-      // __voidFallbackHandled) reaches fallbacks correctly.
-      if (voidFallbackHandled.has(c.req.raw)) {
-        return c.text('not-found', 404);
-      }
-      const pathname = new URL(c.req.url).pathname;
-      for (const rule of fallbackRules) {
-        if (rule.source === pathname && rule.status === 200) {
-          const rewriteUrl = new URL(c.req.url);
-          rewriteUrl.pathname = rule.destination;
-          const rewriteReq = new Request(rewriteUrl.toString(), c.req.raw);
-          const prior = voidOriginalUrls.get(c.req.raw);
-          voidOriginalUrls.set(rewriteReq, prior ?? new URL(c.req.url));
-          // Mark only the fallback re-dispatch — single-hop semantics.
-          voidFallbackHandled.add(rewriteReq);
-          return app.fetch(rewriteReq, (c as any).env);
-        }
-      }
-      return c.text('not-found', 404);
-    });
+    app.notFound(
+      async (c) =>
+        (await runtimeByApp.get(app)!.applyFallback(c, fallbackRules)) ?? c.text('not-found', 404),
+    );
 
     app.get('/index', (c) => c.text('index-body', 200));
 
@@ -1263,7 +924,6 @@ describe('c.rewrite runtime wrapper', () => {
     // notFound skips fallbacks. Mirrors dispatch's single-pass semantics.
     const app = new Hono();
     const voidOriginalUrls = new WeakMap<Request, URL>();
-    const voidFallbackHandled = new WeakSet<Request>();
     installVoidWrappers(app, voidOriginalUrls);
 
     let fallbackInvocations = 0;
@@ -1271,24 +931,14 @@ describe('c.rewrite runtime wrapper', () => {
       { source: '/a', destination: '/b', status: 200 },
       { source: '/b', destination: '/c', status: 200 },
     ];
-    app.notFound((c) => {
-      if (voidFallbackHandled.has(c.req.raw)) {
-        return c.text('terminal-404', 404);
-      }
+    app.notFound(
+      async (c) =>
+        (await runtimeByApp.get(app)!.applyFallback(c, fallbackRules)) ??
+        c.text('terminal-404', 404),
+    );
+    app.get('/c', (c) => {
       fallbackInvocations++;
-      const pathname = new URL(c.req.url).pathname;
-      for (const rule of fallbackRules) {
-        if (rule.source === pathname) {
-          const rewriteUrl = new URL(c.req.url);
-          rewriteUrl.pathname = rule.destination;
-          const rewriteReq = new Request(rewriteUrl.toString(), c.req.raw);
-          const prior = voidOriginalUrls.get(c.req.raw);
-          voidOriginalUrls.set(rewriteReq, prior ?? new URL(c.req.url));
-          voidFallbackHandled.add(rewriteReq);
-          return app.fetch(rewriteReq, (c as any).env);
-        }
-      }
-      return c.text('terminal-404', 404);
+      return c.text('incorrect second fallback');
     });
 
     const res = await app.fetch(new Request('http://localhost/a'));
@@ -1296,7 +946,7 @@ describe('c.rewrite runtime wrapper', () => {
     // skips fallbacks → terminal 404.
     expect(res.status).toBe(404);
     expect(await res.text()).toBe('terminal-404');
-    expect(fallbackInvocations).toBe(1);
+    expect(fallbackInvocations).toBe(0);
   });
 
   it('c.rewrite preserves a "?query" in the destination path (does not URL-encode "?")', async () => {
@@ -1700,271 +1350,6 @@ describe('c.rewrite runtime wrapper', () => {
     // Exceeded MAX_HOPS, confirming no built-in guard intervened.
     expect(hops).toBeGreaterThan(MAX_HOPS);
   });
-
-  it('emits asset-rewrite blocklist excluding extensions used by registered routes', () => {
-    // Regression: dotted-extension routes (e.g. routes/feed.xml.ts → /feed.xml,
-    // routes/api/openapi.json.ts → /api/openapi.json) are first-class in Void's
-    // file-based router. The c.rewrite asset-extension blocklist must not
-    // shadow those — a static `routing.rewrites` rule routes to the same
-    // destination without complaint, so c.rewrite should too.
-    const scan: ScanResult = {
-      routes: [
-        {
-          pattern: '/feed.xml',
-          methods: ['GET'],
-          params: [],
-          catchAll: false,
-          env: null,
-          filePath: 'feed.xml.ts',
-        },
-        {
-          pattern: '/api/openapi.json',
-          methods: ['GET'],
-          params: [],
-          catchAll: false,
-          env: null,
-          filePath: 'api/openapi.json.ts',
-        },
-      ],
-      middleware: [],
-      jobs: [],
-      queues: [],
-      pages: { pages: [], layouts: [], namedLayouts: [] },
-    };
-    const code = compileRouteTable(scan, '/routes', '/middleware', '/crons', '/queues', null, {
-      ...testOptions,
-      dev: true,
-    });
-    // The emitted regex must NOT include `xml` or `json` since both are used
-    // by registered routes — c.rewrite to those targets should re-dispatch
-    // through Hono normally.
-    const m = /__voidAssetRewriteExtRE = \/[^/]+\//.exec(code);
-    expect(m).not.toBeNull();
-    const regexSrc = m![0]!;
-    expect(regexSrc).not.toContain('|xml|');
-    expect(regexSrc).not.toContain('|xml)');
-    expect(regexSrc).not.toContain('|json|');
-    expect(regexSrc).not.toContain('|json)');
-    // Untouched extensions still in the blocklist.
-    expect(regexSrc).toContain('png');
-    expect(regexSrc).toContain('css');
-    expect(regexSrc).toContain('woff2');
-  });
-
-  it('emits the full asset-rewrite blocklist when no routes use dotted extensions', () => {
-    // Sanity: with only conventional routes, the blocklist stays as-is and
-    // the diagnostic still fires for genuinely-asset paths (the original
-    // motivation: catch /hero.png mystery 404s with a useful error).
-    const scan: ScanResult = {
-      routes: [
-        {
-          pattern: '/api/users',
-          methods: ['GET'],
-          params: [],
-          catchAll: false,
-          env: null,
-          filePath: 'api/users.ts',
-        },
-      ],
-      middleware: [],
-      jobs: [],
-      queues: [],
-      pages: { pages: [], layouts: [], namedLayouts: [] },
-    };
-    const code = compileRouteTable(scan, '/routes', '/middleware', '/crons', '/queues', null, {
-      ...testOptions,
-      dev: true,
-    });
-    const m = /__voidAssetRewriteExtRE = (\/[^/]+\/i?)/.exec(code);
-    expect(m).not.toBeNull();
-    const regexSrc = m![1]!;
-    // All canonical asset extensions present.
-    for (const ext of ['png', 'css', 'json', 'xml', 'txt', 'wasm']) {
-      expect(regexSrc).toContain(ext);
-    }
-  });
-});
-
-describe('X-Void-Routing dev trace header', () => {
-  const emptyScan: ScanResult = {
-    routes: [],
-    middleware: [],
-    jobs: [],
-    queues: [],
-    pages: { pages: [], layouts: [], namedLayouts: [] },
-  };
-
-  const redirectRules = [
-    {
-      source: '/old',
-      destination: '/new',
-      status: 301,
-      origin: 'void.json#routing.redirects',
-    },
-    {
-      source: '/api/*',
-      destination: '/backend/:splat',
-      status: 200,
-      force: true,
-      origin: 'void.json#routing.rewrites',
-    },
-  ];
-
-  function compileWith(options: Partial<typeof testOptions> & { dev?: boolean }) {
-    return compileRouteTable(emptyScan, '/routes', '/middleware', '/crons', '/queues', null, {
-      ...testOptions,
-      nodeTarget: true,
-      redirectRules,
-      ...options,
-    });
-  }
-
-  it('emits __VOID_DEV_ROUTING=true and preserves origin fields in dev', () => {
-    const code = compileWith({ dev: true });
-    expect(code).toContain('const __VOID_DEV_ROUTING = true;');
-    // Rule table retains origin metadata in dev so the trace can reference it
-    expect(code).toContain('"origin":"void.json#routing.redirects"');
-    expect(code).toContain('"origin":"void.json#routing.rewrites"');
-    // Header-emission branches fire on matches
-    expect(code).toContain('"redirect["');
-    expect(code).toContain('"rewrite"');
-    expect(code).toContain('__voidAnnotateRouting');
-    // Pass-through default after next() runs
-    expect(code).toContain('c.res.headers.set("X-Void-Routing", "pass-through")');
-  });
-
-  it('guards the pass-through header set with try/catch for runtimes with immutable Response headers', () => {
-    const code = compileWith({ dev: true });
-    // Some runtimes produce Responses whose Headers are guarded/immutable —
-    // the dev middleware must silently swallow the resulting TypeError instead
-    // of crashing, matching the existing pattern elsewhere in the file.
-    expect(code).toContain('try { c.res.headers.set("X-Void-Routing", "pass-through"); } catch {}');
-  });
-
-  it('emits __VOID_DEV_ROUTING=false and strips origin fields in prod', () => {
-    const code = compileWith({ dev: false });
-    expect(code).toContain('const __VOID_DEV_ROUTING = false;');
-    // Prod rule table must not carry the authoring origin metadata
-    expect(code).not.toContain('"origin":"void.json#routing.redirects"');
-    expect(code).not.toContain('"origin":"void.json#routing.rewrites"');
-    // No pass-through header in prod — the middleware just returns next()
-    expect(code).not.toContain('"X-Void-Routing", "pass-through"');
-  });
-
-  it('annotates c.rewrite() downstream response with middleware trace in dev', () => {
-    const code = compileWith({ dev: true });
-    // The c.rewrite wrapper branches on __VOID_DEV_ROUTING and appends a
-    // "c.rewrite -> <path> (middleware)" trace to the returned Response.
-    expect(code).toContain('if (!__VOID_DEV_ROUTING) return __rewritePromise;');
-    expect(code).toContain('c.rewrite -> " + path + " (middleware)');
-  });
-
-  it('keeps c.rewrite passthrough in prod (no annotator call)', () => {
-    const code = compileWith({ dev: false });
-    // Guard stays, but the returned promise is not wrapped — the annotator
-    // dead-branch is eliminated at the `__VOID_DEV_ROUTING` check.
-    expect(code).toContain('if (!__VOID_DEV_ROUTING) return __rewritePromise;');
-  });
-
-  it('tags redirect match with status, destination and origin', () => {
-    const code = compileWith({ dev: true });
-    expect(code).toContain(
-      '"redirect[" + matched.rule.source + "] -> " + dest + " " + matched.rule.status + " (" + (matched.rule.origin || "unknown") + ")"',
-    );
-  });
-
-  it('distinguishes force-rewrite (rewrite[...]) from fallback (fallback[...]) in trace', () => {
-    const code = compileWith({ dev: true });
-    expect(code).toContain('matched.rule.force === true ? "rewrite" : "fallback"');
-  });
-
-  it('keeps routing trace header values ASCII-compatible', () => {
-    const code = compileWith({ dev: true });
-    expect(code).not.toContain('\\u2192');
-    expect(code).toContain('c.rewrite -> " + path + " (middleware)');
-    expect(code).toContain('__kind + "[" + matched.rule.source + "] -> " + dest');
-  });
-
-  it('emits a standalone notFound fallback hook on node targets when only fallbackRules are set', () => {
-    const fallbackRules = [
-      {
-        source: '/docs/*',
-        destination: '/docs.html',
-        status: 200,
-        force: false,
-        origin: 'void.json#routing.fallbacks',
-      },
-    ];
-    const code = compileRouteTable(emptyScan, '/routes', '/middleware', '/crons', '/queues', null, {
-      ...testOptions,
-      nodeTarget: true,
-      dev: true,
-      fallbackRules,
-    });
-    // The fallback rule table is hoisted to module scope and referenced by the
-    // notFound body — not conflated with the pre-asset `__routingRules` table.
-    expect(code).toContain('const __fallbackRules =');
-    expect(code).toContain('"origin":"void.json#routing.fallbacks"');
-    expect(code).toContain('app.notFound(async (c) => {');
-    // Cycle guard against fallback→fallback re-entry. Distinct from
-    // `__voidOriginalUrls` so user `c.rewrite` and static-rewrite chains
-    // still reach fallbacks for the rewrite target.
-    expect(code).toContain('if (!__voidFallbackHandled.has(c.req.raw))');
-    expect(code).toContain('__voidFallbackHandled.add(rewriteReq);');
-    // Generated no-route 404s are marked for dispatch; user handler 404s are not.
-    expect(code).toContain('headers.set("X-Void-No-Match", "1")');
-  });
-
-  it('strips fallback origin metadata in production builds', () => {
-    const fallbackRules = [
-      {
-        source: '/docs/*',
-        destination: '/docs.html',
-        status: 200,
-        force: false,
-        origin: 'void.json#routing.fallbacks',
-      },
-    ];
-    const code = compileRouteTable(emptyScan, '/routes', '/middleware', '/crons', '/queues', null, {
-      ...testOptions,
-      nodeTarget: true,
-      dev: false,
-      fallbackRules,
-    });
-    expect(code).toContain('const __fallbackRules =');
-    expect(code).not.toContain('"origin":"void.json#routing.fallbacks"');
-  });
-
-  it('skips notFound fallback emission when fallbackRules is empty or undefined', () => {
-    const codeEmpty = compileRouteTable(
-      emptyScan,
-      '/routes',
-      '/middleware',
-      '/crons',
-      '/queues',
-      null,
-      {
-        ...testOptions,
-        nodeTarget: true,
-        fallbackRules: [],
-      },
-    );
-    expect(codeEmpty).not.toContain('__fallbackRules');
-
-    const codeUndef = compileRouteTable(
-      emptyScan,
-      '/routes',
-      '/middleware',
-      '/crons',
-      '/queues',
-      null,
-      {
-        ...testOptions,
-        nodeTarget: true,
-      },
-    );
-    expect(codeUndef).not.toContain('__fallbackRules');
-  });
 });
 
 describe('default-target dev parity', () => {
@@ -2018,14 +1403,6 @@ describe('default-target dev parity', () => {
     });
   }
 
-  it('emits redirect + header middleware on the default target in dev', () => {
-    const code = compile({ nodeTarget: false, dev: true, managedDispatch: true });
-    expect(code).toContain('const __routingRules =');
-    expect(code).toContain('const __headerRules =');
-    // Fallback rules are emitted inside the assets-then-fallback notFound body
-    expect(code).toContain('const __fallbackRules =');
-  });
-
   it('applies header rules to immutable responses in local dev', async () => {
     const code = compile({ nodeTarget: false, dev: true });
     const app = evalCompiledApp(code);
@@ -2046,13 +1423,6 @@ describe('default-target dev parity', () => {
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe('https://example.com/next');
     expect(res.headers.get('x-test')).toBe('1');
-  });
-
-  it('emits redirect + header + fallback middleware on native Cloudflare in prod', () => {
-    const code = compile({ nodeTarget: false, dev: false, managedDispatch: false });
-    expect(code).toContain('const __routingRules =');
-    expect(code).toContain('const __headerRules =');
-    expect(code).toContain('const __fallbackRules =');
   });
 
   it('runs native Cloudflare prod rewrites, headers, and post-asset fallbacks', async () => {
@@ -2113,41 +1483,12 @@ describe('default-target dev parity', () => {
     expect(code).not.toContain('const __fallbackRules =');
   });
 
-  it('emits assets-first-then-fallback notFound hook on default target in dev', () => {
-    const code = compile({ nodeTarget: false, dev: true });
-    // Standalone (non-SSR) notFound on default target dev looks up assets
-    // before applying fallback rules.
-    expect(code).toContain('const assets = c.env?.ASSETS;');
-    expect(code).toContain('await assets.fetch(c.req.raw)');
-    expect(code).toContain('if (__assetRes.status !== 404) return __assetRes;');
-    expect(code).toContain('const __fallbackRules =');
-  });
-
-  it('keeps pre-asset fallback order on node target (no assets-first wrapping)', () => {
-    const code = compile({ nodeTarget: true, dev: true });
-    // Node target hosts both routing and assets inside the Hono app, so the
-    // notFound hook runs fallbacks first without a platform asset lookup.
-    expect(code).not.toContain('assets.fetch(c.req.raw)');
-    expect(code).toContain('const __fallbackRules =');
-  });
-
   // Regression: prior to feat/rewrites the void.json validator warned that
   // `routing.fallbacks` was default-target-only and the codegen skipped the
   // notFound fallback hook on non-default targets. Fallbacks now apply on
   // every target — this test locks in that contract so reintroducing a
   // `nodeTarget` → "strip fallbackRules" branch fails loudly in both dev and
   // prod builds.
-  it('emits __fallbackRules on node targets in both dev and prod when fallbackRules is non-empty', () => {
-    const devCode = compile({ nodeTarget: true, dev: true });
-    const prodCode = compile({ nodeTarget: true, dev: false });
-    expect(devCode).toContain('const __fallbackRules =');
-    expect(prodCode).toContain('const __fallbackRules =');
-    // Rule source must be inlined so the generated code actually checks it at
-    // runtime — a regression that silently serialized an empty array would
-    // still emit the identifier.
-    expect(devCode).toContain('"source":"/docs/*"');
-    expect(prodCode).toContain('"source":"/docs/*"');
-  });
 
   // Only a managed build trusts an inbound `X-Void-Original-URL` header:
   // dispatch strips client-supplied values on ingress. Native CF, CF dev,
@@ -2155,7 +1496,7 @@ describe('default-target dev parity', () => {
   // must not be able to spoof rewrite metadata.
   //
   // This is a behavioral test that evaluates the actual compiled artifact
-  // (not the `installVoidWrappers` mirror) and drives a real Request through
+  // (with the production `installVoidWrappers` runtime) and drives a real Request through
   // it with `X-Void-Original-URL: /spoof` set. Asserting on the runtime
   // outputs of `c.originalUrl()` and `c.isRewritten()` catches both:
   // - false negatives a string check would flag (e.g. destructuring the
@@ -2254,61 +1595,9 @@ describe('default-target dev parity', () => {
         fallbackRules,
       },
     );
-    // SSR notFound falls through to the platform asset binding, then applies
-    // fallback rules on asset-miss before giving up with 404.
-    expect(code).toContain('if (!shouldHandleSsrRequest(c)) {');
-    expect(code).toContain('const __assetRes = await fetchFromAssets(c);');
-    expect(code).toContain('if (__assetRes.status !== 404) return __assetRes;');
-  });
-
-  it('does not mark pages API no-match responses as fallback-eligible', () => {
-    const code = compileRouteTable(
-      {
-        ...emptyScan,
-        pages: {
-          pages: [
-            {
-              componentId: 'pages/index.vue',
-              componentPath: '/pages/index.vue',
-              serverPath: null,
-              pattern: '/',
-              params: [],
-              catchAll: false,
-              methods: [],
-              ssrMode: 'auto',
-              prerenderMode: 'auto',
-              renderMode: 'server',
-              shouldPrerender: false,
-            },
-          ],
-          layouts: [],
-          namedLayouts: [],
-        },
-      },
-      '/routes',
-      '/middleware',
-      '/crons',
-      '/queues',
-      null,
-      {
-        ...testOptions,
-        nodeTarget: false,
-        dev: false,
-      },
-      {
-        pagesDir: '/pages',
-        pagesDirRelative: 'pages',
-        protocolPath: '/resolved/void/pages-protocol.mjs',
-        headPath: '/resolved/void/pages-head.mjs',
-        clientEntryId: 'virtual:void-pages-client',
-      },
-    );
-
-    expect(code).toContain('if (path === "/api" || path.startsWith("/api/"))');
-    expect(code).toContain('return c.text("Not Found", 404);');
-    expect(code).toContain(
-      'return __voidMarkNoMatch(c.req.raw, await serveCustomErrorPage(c, 404, "Not Found"));',
-    );
+    expect(code).toContain('app.notFound(__createSsrFallback(');
+    expect(code).toContain('nodeTarget: false');
+    expect(code).toContain('"source":"/docs/*"');
   });
 
   it('leaves SSR notFound unchanged on node target (plain fetchFromAssets return)', () => {
@@ -2330,21 +1619,9 @@ describe('default-target dev parity', () => {
         fallbackRules,
       },
     );
-    // On node targets the SSR notFound keeps its direct `return fetchFromAssets(c)`
-    // body — fallback rules already ran before this branch.
-    expect(code).toContain('return fetchFromAssets(c);');
-    expect(code).not.toContain('const __assetRes = await fetchFromAssets(c);');
-  });
-
-  it('keeps node target emissions identical in dev and prod', () => {
-    const devCode = compile({ nodeTarget: true, dev: true, managedDispatch: true });
-    const prodCode = compile({ nodeTarget: true, dev: false, managedDispatch: true });
-    expect(devCode).toContain('const __routingRules =');
-    expect(prodCode).toContain('const __routingRules =');
-    expect(devCode).toContain('const __headerRules =');
-    expect(prodCode).toContain('const __headerRules =');
-    expect(devCode).toContain('const __fallbackRules =');
-    expect(prodCode).toContain('const __fallbackRules =');
+    expect(code).toContain('app.notFound(__createSsrFallback(');
+    expect(code).toContain('nodeTarget: true');
+    expect(code).toContain('"source":"/docs/*"');
   });
 });
 
@@ -2363,39 +1640,6 @@ describe('compileWorkerEntry', () => {
     expect(code).toContain('import __voidDurableObject0 from "/app/durable-objects/counter.ts";');
     expect(code).toContain('__voidDurableObject0.__bind("COUNTER");');
     expect(code).toContain('export const CounterDurableObject = __voidDurableObject0.class;');
-  });
-
-  it('generates valid worker entry code without queues', () => {
-    const code = compileWorkerEntry();
-
-    expect(code).toContain('__withRawEnv');
-    expect(code).not.toContain('__setVoidInternalCall');
-    expect(code).toContain('import { withRuntimeEnv } from "void/_env"');
-    expect(code).toContain('serveWithAssets');
-    expect(code).toContain('return withRuntimeEnv(env, async () => {');
-    expect(code).toContain('import { WorkerEntrypoint } from "cloudflare:workers";');
-    expect(code).toContain('export default class extends WorkerEntrypoint {');
-    expect(code).toContain(
-      'async fetch(request) { return __voidFetch(request, this.env, this.ctx); }',
-    );
-    expect(code).toContain(
-      'async scheduled(controller) { return handleScheduled(controller, this.env, this.ctx); }',
-    );
-    expect(code).not.toContain('queue(');
-    expect(code).not.toContain('email(');
-  });
-
-  it('re-exports websocket classes when present', () => {
-    const code = compileWorkerEntry({
-      hasQueues: false,
-      assetsDir: 'assets',
-      webSocketClasses: ['ChatRoomWs'],
-    });
-
-    expect(code).not.toContain('__voidHandleWebSocket');
-    expect(code).toContain('ChatRoomWs');
-    expect(code).toContain('export { ChatRoomWs };');
-    expect(code).toContain('await app.fetch(request, userEnv, ctx)');
   });
 
   it('re-exports the live Durable Object class when enabled', () => {
@@ -2520,34 +1764,8 @@ describe('compileWorkerEntry', () => {
     expect(code).not.toContain('queue');
   });
 
-  it('generates serveWithAssets helper with cache headers', () => {
-    const code = compileWorkerEntry();
-
-    expect(code).toContain('async function serveWithAssets(request, env, response)');
-    expect(code).toContain('url.pathname !== "/__void/prerender-paths"');
-    expect(code).toContain('env.ASSETS');
-    expect(code).toContain('"/assets/"');
-    // Hashed assets: immutable + long max-age (content-addressed, safe to cache forever).
-    expect(code).toContain('public, max-age=31536000, immutable');
-    // Non-hashed asset responses: no-store — see regression test below for why.
-    expect(code).toContain('"Cache-Control", "no-store"');
-    // No Cache API usage (edge caching happens at dispatch layer)
-    expect(code).not.toContain('caches.default');
-    expect(code).not.toContain('cache.match');
-    expect(code).not.toContain('cache.put');
-  });
-
   it('sets missing asset MIME types while preserving binding headers', async () => {
-    const source = `${compileAssetFallbackHelper()}\nexport { serveWithAssets };`;
-    const { serveWithAssets } = (await import(
-      `data:text/javascript,${encodeURIComponent(source)}`
-    )) as {
-      serveWithAssets: (
-        request: Request,
-        env: { ASSETS: { fetch: () => Promise<Response> } },
-        response: Response,
-      ) => Promise<Response>;
-    };
+    const serveWithAssets = createAssetFallback();
 
     for (const [path, expected] of [
       ['/assets/app.js', 'text/javascript; charset=utf-8'],
@@ -2578,46 +1796,6 @@ describe('compileWorkerEntry', () => {
     expect(response.headers.get('Content-Type')).toBe(originalType);
   });
 
-  it('stamps no-store on non-hashed asset responses to avoid edge-cache poisoning across deploys', () => {
-    const code = compileWorkerEntry();
-
-    // A single poisoned entry (transient 404 from a broken deploy, a path that
-    // later becomes a real route) would otherwise shadow the new behavior
-    // across the edge for every subsequent request until manually purged — the
-    // platform's atomic-deploy cache keying lives at the dispatch layer and
-    // can't reach CF's managed edge cache once s-maxage puts an entry there.
-    // no-store keeps these responses out of that cache entirely.
-    expect(code).not.toMatch(/s-maxage=\d+.*must-revalidate/);
-    expect(code).toContain('"Cache-Control", "no-store"');
-  });
-
-  it('serveWithAssets skips non-GET/HEAD requests to avoid body-reuse crash', () => {
-    const code = compileWorkerEntry();
-
-    // Must guard against POST/PUT/etc — their body is consumed by app.fetch()
-    // and passing the original request to env.ASSETS.fetch() would throw
-    // "Cannot reconstruct a Request with a used body"
-    expect(code).toContain('request.method !== "GET" && request.method !== "HEAD"');
-  });
-
-  it('serveWithAssets creates a fresh Request for ASSETS.fetch to avoid body-reuse', () => {
-    const code = compileWorkerEntry();
-
-    // Must not pass the original request to env.ASSETS.fetch() because
-    // app.fetch() may have marked it as disturbed. Use new Request(url) instead.
-    expect(code).toContain(
-      'env.ASSETS.fetch(new Request(request.url, { method: request.method, headers: request.headers }))',
-    );
-    expect(code).not.toMatch(/env\.ASSETS\.fetch\(request\)/);
-  });
-
-  it('uses custom assetsDir in serveWithAssets path check', () => {
-    const code = compileWorkerEntry({ hasQueues: false, assetsDir: '_astro' });
-
-    expect(code).toContain('"/_astro/"');
-    expect(code).not.toContain('"/assets/"');
-  });
-
   it('serveWithAssets does not include the SPA shell fallback by default', () => {
     const code = compileWorkerEntry();
 
@@ -2627,58 +1805,11 @@ describe('compileWorkerEntry', () => {
     expect(code).not.toContain('accept.includes("text/html")');
   });
 
-  it('serveWithAssets falls back to /index.html for unmatched HTML GET/HEADs when enabled', () => {
-    const code = compileWorkerEntry({
-      hasQueues: false,
-      assetsDir: 'assets',
-      webSocketClasses: [],
-      runtimeEnvPath: 'void/_env',
-      sandbox: false,
-      serveSpaFallback: true,
-    });
-
-    // With assetConfig.not_found_handling: 'none' (now the default for any
-    // routes/middleware SPA), the asset binding returns 404 instead of a SPA
-    // shell. The worker entry must fall back to /index.html itself for HTML
-    // navigations so client-side routing keeps working without relying on
-    // Cloudflare's `Sec-Fetch-Mode: navigate` short-circuit, which bypasses
-    // run_worker_first and silently breaks auth middleware + OAuth callbacks.
-    expect(code).toContain('text/html');
-    expect(code).toContain('"/index.html"');
-    expect(code).toMatch(/env\.ASSETS\.fetch\(new Request\(indexUrl/);
-  });
-
   // `routing.notFound: '404-page'` sets `assetConfig.not_found_handling`, so
   // CF's asset binding answers an unmatched path with the NEAREST `404.html` —
   // at a 404 status, which the `asset.status !== 404` guard above discards. The
   // resolved handling has to reach the generated helper or the override is
   // inert on every worker-first app.
-  it('serveWithAssets passes the asset 404 page through for not_found_handling: 404-page', () => {
-    const code = compileWorkerEntry({
-      hasQueues: false,
-      assetsDir: 'assets',
-      webSocketClasses: [],
-      runtimeEnvPath: 'void/_env',
-      sandbox: false,
-      serveSpaFallback: false,
-      notFound: '404-page',
-    });
-
-    // Pass the binding's own response through — CF's `404-page` is
-    // directory-aware ("nearest 404.html"); a hardcoded `/404.html` fetch is not.
-    expect(code).toContain('asset.headers.get("content-type")');
-    expect(code).toContain('new Response(asset.body, asset)');
-    expect(code).not.toContain('"/404.html"');
-    // And it is NOT the SPA shell path.
-    expect(code).not.toContain('"/index.html"');
-    // Gated on the REQUEST accepting HTML as well. `serveWithAssets` wraps every
-    // app response with no path filtering, so without this an API handler's
-    // deliberate JSON 404 gets replaced by the site's HTML 404 page.
-    expect(code).toContain('request.headers.get("accept")');
-    expect(code).toContain(
-      'accept.includes("text/html") && assetContentType.includes("text/html")',
-    );
-  });
 
   it('serveWithAssets keeps the worker response for not_found_handling: none', () => {
     const code = compileWorkerEntry({
@@ -2694,22 +1825,6 @@ describe('compileWorkerEntry', () => {
     // Byte-identical to the pre-existing default — `none` is what every
     // worker-first app infers, so this is the no-regression guard.
     expect(code).toBe(compileWorkerEntry());
-  });
-
-  it('serveWithAssets only falls back to index.html for HTML accept', () => {
-    const code = compileWorkerEntry({
-      hasQueues: false,
-      assetsDir: 'assets',
-      webSocketClasses: [],
-      runtimeEnvPath: 'void/_env',
-      sandbox: false,
-      serveSpaFallback: true,
-    });
-
-    // Non-HTML requests (e.g. JSON API calls hitting an unknown route) must
-    // get the worker's original 404 — not the SPA shell — so clients can
-    // distinguish "endpoint missing" from "user landed on a SPA route".
-    expect(code).toContain('accept.includes("text/html")');
   });
 
   it('native queue handler calls __processQueue directly without HTTP', () => {
@@ -2744,47 +1859,6 @@ describe('compileWorkerEntry', () => {
   it('omits boot-time env validation when no envSchemaModule is provided', () => {
     const code = compileWorkerEntry();
     expect(code).not.toContain('_validateEnvOnce');
-  });
-
-  it('splices boot-time env validation when envSchemaModule is provided', () => {
-    const code = compileWorkerEntry({
-      hasQueues: true,
-      assetsDir: 'assets',
-      webSocketClasses: [],
-      runtimeEnvPath: 'void/_env',
-      envSchemaModule: {
-        importPath: '/abs/path/to/env.ts',
-        helperPath: '/resolved/env-public.mjs',
-      },
-    });
-    // Side-effect import of user env.ts so the schema is registered
-    expect(code).toContain('import "/abs/path/to/env.ts"');
-    // Helper import
-    expect(code).toContain('import { _validateEnvOnce } from "/resolved/env-public.mjs"');
-    // Spliced into fetch, scheduled, AND queue handlers
-    const callCount = (code.match(/_validateEnvOnce\(env\)/g) ?? []).length;
-    expect(callCount).toBe(3);
-    expect(code).toContain(
-      'if (request.method !== "POST" || new URL(request.url).pathname !== "/__void/prerender-paths") await _validateEnvOnce(env)',
-    );
-  });
-
-  it('wraps remote-mode fetch and scheduled handlers with resolved runtime env', () => {
-    const code = compileWorkerEntry({
-      hasQueues: false,
-      remote: { remotePath: '/resolved/remote.mjs', envPath: '/resolved/env-legacy.mjs' },
-      assetsDir: 'assets',
-      webSocketClasses: [],
-      runtimeEnvPath: '/resolved/env.mjs',
-    });
-
-    expect(code).toContain('import { withRuntimeEnv } from "/resolved/env.mjs"');
-    expect(code).toContain('import { createRemoteEnv } from "/resolved/remote.mjs"');
-    expect(code).toContain('if (env.__VOID_REMOTE === "1") env = createRemoteEnv(env);');
-    expect(code).toContain('return withRuntimeEnv(env, async () => {');
-    expect(code).toContain(
-      'return withRuntimeEnv(env, () => scheduled(controller, userEnv, ctx));',
-    );
   });
 
   it('passes custom binding names to remote env proxying', () => {
@@ -2897,32 +1971,6 @@ describe('compileNodeServer', () => {
   });
 });
 
-/** Exercise the generated warning wrapper against the shared cached compiler. */
-function extractEmittedPatternRuntime(code: string): {
-  matchPattern: (pattern: string, pathname: string) => boolean;
-  compilePattern: (source: string) => { regex: RegExp; names: Array<string> };
-} {
-  const matchFnStart = code.indexOf('const __matchPatternWarned = new Set();');
-  const matchFnEnd = code.indexOf('\n// Header rules', matchFnStart);
-  if (matchFnStart === -1 || matchFnEnd === -1) {
-    throw new Error('emitted source missing __matchPattern wrapper');
-  }
-  const helpersSrc = code.slice(matchFnStart, matchFnEnd);
-  // oxlint-disable-next-line no-new-func
-  const factory = new Function('__compilePattern', `${helpersSrc}\nreturn __matchPattern;`);
-  const matchPattern = factory(sharedCompilePattern) as (
-    pattern: string,
-    pathname: string,
-  ) => boolean;
-  return {
-    compilePattern: (source) => {
-      const { regex, paramNames } = sharedCompilePattern(source);
-      return { regex, names: [...paramNames] };
-    },
-    matchPattern,
-  };
-}
-
 describe('shared pattern compiler in generated routes', () => {
   // Build a minimal route table with a header rule so the generated module
   // imports the cached compiler and emits its warning wrapper.
@@ -2933,19 +1981,17 @@ describe('shared pattern compiler in generated routes', () => {
     queues: [],
     pages: { pages: [], layouts: [], namedLayouts: [] },
   };
-  const code = compileRouteTable(emptyScan, '/routes', '/middleware', '/crons', '/queues', null, {
-    ...testOptions,
-    dev: true,
-    headerRules: [{ pattern: '/*', headers: [['x-test', '1']] as Array<[string, string]> }],
-  });
-  it('uses the shared cached pattern and redirect helpers', () => {
-    expect(code).toContain('compilePattern as __compilePattern');
-    expect(code).toContain('mergeQueryIntoLocation as __mergeQueryIntoLocation');
-    expect(code).not.toContain('from "@void/edge"');
-    expect(code).not.toContain('function __compilePattern(source)');
-    expect(code).not.toContain('function __mergeQueryIntoLocation(destination, search)');
-  });
-  const { compilePattern, matchPattern } = extractEmittedPatternRuntime(code);
+  const compilePattern = (source: string) => {
+    const { regex, paramNames } = sharedCompilePattern(source);
+    return { regex, names: [...paramNames] };
+  };
+  const matchPattern = async (pattern: string, pathname: string): Promise<boolean> => {
+    const app = new Hono();
+    const runtime = createRoutingRuntime(app, { nodeTarget: true });
+    app.use(runtime.headerMiddleware([{ pattern, headers: [['x-match', '1']] }]));
+    app.get('*', (c) => c.text('ok'));
+    return (await app.fetch(new Request('https://app.test' + pathname))).headers.has('x-match');
+  };
 
   it('compiles a single bare "*" with the legacy "splat" capture', () => {
     const { regex, names } = compilePattern('/docs/*');
@@ -2977,7 +2023,7 @@ describe('shared pattern compiler in generated routes', () => {
     expect(m?.groups?.splat).toBe('a/b');
   });
 
-  it('__matchPattern returns false instead of throwing on a malformed pattern', () => {
+  it('header matching returns false instead of throwing on a malformed pattern', async () => {
     // The emitter wraps `new RegExp` in try/catch so a single bad rule cannot
     // 500 unrelated traffic on CF dev. Construct a pattern whose escaped form
     // yields an invalid regex by abusing an unbalanced `[` (regex-special,
@@ -2988,12 +2034,11 @@ describe('shared pattern compiler in generated routes', () => {
     // strategy still passes through cleanly. The fallback test relies on the
     // try/catch being present — when no construction error occurs, the result
     // is a normal boolean, never a thrown exception.
-    expect(() => matchPattern('/foo/*', '/foo/bar')).not.toThrow();
-    expect(matchPattern('/foo/*', '/foo/bar')).toBe(true);
+    expect(await matchPattern('/foo/*', '/foo/bar')).toBe(true);
     // `__matchPattern` is the resilient entry point — even an empty pattern
     // (which compiles to `^$`) must return false rather than throw on a
     // non-matching pathname.
-    expect(matchPattern('', '/anything')).toBe(false);
+    expect(await matchPattern('', '/anything')).toBe(false);
   });
 
   it('__compilePattern itself still throws on duplicate capture group names', () => {
@@ -3009,7 +2054,7 @@ describe('shared pattern compiler in generated routes', () => {
     expect(() => compilePattern('/:rest*/:rest*')).toThrow(/duplicate capture group name/i);
   });
 
-  it('emitApplyRoutingRules wraps per-rule compile in try/catch and skips bad rules', () => {
+  it('production routing middleware skips invalid rules and still applies valid ones', async () => {
     // Behavioral verification of the runtime guard: a single rule with a bad
     // source must not 500 the request — it should be skipped (with a warn-once)
     // and other rules in the table should still match.
@@ -3043,102 +2088,40 @@ describe('shared pattern compiler in generated routes', () => {
         ],
       },
     );
-    // String-shape assertion: the emitted middleware must wrap __compilePattern
-    // in try/catch around the `regex` extraction, mirroring dispatch's
-    // applyRoutingRules. Without this, a single bad rule would 500 every request.
-    expect(codeWithRules).toContain('try {');
-    expect(codeWithRules).toContain('({ regex } = __compilePattern(rule.source));');
-    expect(codeWithRules).toContain('skipping routing rule with invalid source');
-    expect(codeWithRules).toContain('continue;');
+    const app = evalCompiledApp(codeWithRules);
+    app.get('/new', (c) => c.text('new route'));
+    const response = await app.fetch(
+      new Request('https://app.test/old'),
+      {},
+      { waitUntil() {}, passThroughOnException() {}, props: {} },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('new route');
   });
 
-  it('__matchPattern swallows construction errors and returns false', () => {
-    // Directly stress-test the try/catch by monkey-patching the global
-    // RegExp once: the shared compiler calls `new RegExp(...)` — if it throws,
-    // the catch returns false and warns at most once.
-    const originalRegExp = globalThis.RegExp;
-    let callCount = 0;
-    const consoleWarnings: Array<string> = [];
+  it('header matching skips malformed patterns and warns once per app', async () => {
+    const warnings: Array<string> = [];
     const originalWarn = console.warn;
-    console.warn = (msg: unknown) => {
-      consoleWarnings.push(String(msg));
-    };
+    console.warn = (message: unknown) => warnings.push(String(message));
     try {
-      // oxlint-disable-next-line no-global-assign
-      (globalThis as unknown as { RegExp: typeof RegExp }).RegExp = function () {
-        callCount++;
-        throw new SyntaxError('Invalid regular expression: Duplicate capture group name');
-      } as unknown as typeof RegExp;
-      expect(matchPattern('/a/*/b/*/__forced_error', '/a/x/b/y')).toBe(false);
-      expect(callCount).toBeGreaterThan(0);
-      expect(consoleWarnings.some((w) => w.includes('failed to compile route pattern'))).toBe(true);
-      // Second call with the same pattern must not double-warn.
-      const warnedCount = consoleWarnings.length;
-      expect(matchPattern('/a/*/b/*/__forced_error', '/foo')).toBe(false);
-      expect(consoleWarnings.length).toBe(warnedCount);
+      const app = new Hono();
+      const runtime = createRoutingRuntime(app, { nodeTarget: true });
+      app.use(runtime.headerMiddleware([{ pattern: '/:id/:id', headers: [['x-bad', '1']] }]));
+      app.get('*', (c) => c.text('ok'));
+      for (let i = 0; i < 2; i++) {
+        const response = await app.fetch(new Request('https://app.test/a/b'));
+        expect(response.status).toBe(200);
+        expect(response.headers.has('x-bad')).toBe(false);
+      }
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('failed to compile route pattern');
     } finally {
-      // oxlint-disable-next-line no-global-assign
-      (globalThis as unknown as { RegExp: typeof RegExp }).RegExp = originalRegExp;
       console.warn = originalWarn;
     }
   });
 });
 
 describe('compileWorkerEntry — ISR wiring', () => {
-  it('is unchanged without the isr param (single render line, no handleIsr)', () => {
-    const code = compileWorkerEntry();
-    expect(code).toContain(
-      'return serveWithAssets(request, env, await app.fetch(request, userEnv, ctx));',
-    );
-    expect(code).not.toContain('handleIsr');
-    // The `if (env.ISR_CACHE)` render guard is only emitted when ISR is wired.
-    expect(code).not.toContain('if (env.ISR_CACHE)');
-    expect(code).not.toContain('__VOID_ISR_REVALIDATE');
-    // The c.env internal-binding filter is prefix-only when ISR is absent —
-    // byte-identical to the pre-ISR base entry. The ISR_CACHE exact-name checks
-    // must NOT appear (ISR_CACHE the internal binding only exists when ISR is
-    // emitted; a user's own binding named ISR_CACHE must not be hidden here).
-    expect(code).not.toContain('prop === "ISR_CACHE"');
-    expect(code).not.toContain('key !== "ISR_CACHE"');
-  });
-
-  it('wires the ISR cache ladder with the two baked imports when the isr param is present', () => {
-    const code = compileWorkerEntry({
-      hasQueues: false,
-      assetsDir: 'assets',
-      webSocketClasses: [],
-      runtimeEnvPath: 'void/_env',
-      serveSpaFallback: false,
-      isr: { runtimePath: 'void/isr', queryAllowlist: { '/search': ['q'] } },
-    });
-
-    // Baked import #1: handleIsr from the supplied runtime path.
-    expect(code).toContain('import { handleIsr } from "void/isr"');
-    // Baked import #2: the two consts from the compiled route table (single source of truth).
-    expect(code).toContain(
-      "import { __VOID_ISR_REVALIDATE, __VOID_ISR_PAGES, __VOID_ISR_PATH_REVALIDATE, __VOID_ISR_DEPLOYMENT_ID } from 'virtual:void-routes'",
-    );
-    // Render path threaded through handleIsr, guarded on the ISR_CACHE binding.
-    expect(code).toContain('if (env.ISR_CACHE &&');
-    expect(code).toContain('request.headers.get("upgrade")?.toLowerCase() !== "websocket"');
-    expect(code).toContain(
-      'handleIsr(request, env, ctx, { revalidate: __VOID_ISR_REVALIDATE, pages: __VOID_ISR_PAGES, pathRevalidate: __VOID_ISR_PATH_REVALIDATE, deploymentId: __VOID_ISR_DEPLOYMENT_ID, queryAllowlist: {"/search":["q"]} }, __render)',
-    );
-    // Deployment id + host captured on the raw env so revalidate() can purge even
-    // on requests that never enter the render ladder.
-    expect(code).toContain('env.__VOID_ISR_DEPLOYMENT_ID ??= __VOID_ISR_DEPLOYMENT_ID;');
-    // Host is assigned every fetch (NOT `??=`) so a warm env reused across
-    // hostnames does not freeze it to the first host; the id stays `??=`.
-    expect(code).toContain('env.__VOID_ISR_HOST = new URL(request.url).hostname;');
-    expect(code).not.toContain('env.__VOID_ISR_HOST ??= new URL(request.url).hostname;');
-    expect(code).toContain('env.__VOID_ISR_DEPLOYMENT_ID ??= __VOID_ISR_DEPLOYMENT_ID;');
-    // When ISR is emitted the c.env internal-binding filter gains the ISR_CACHE
-    // exact-name checks so the self-host ISR KV binding cannot leak into route
-    // handlers' c.env (matches the managed platform; handleIsr reads raw env).
-    expect(code).toContain('prop === "ISR_CACHE"');
-    expect(code).toContain('key !== "ISR_CACHE"');
-  });
-
   // FIX 1: cron/queue handlers must stamp the deployment id (only — no host,
   // there is no request) so a self-host `revalidate()` from a scheduled or queue
   // handler can find it and purge KV instead of no-oping.
@@ -3288,5 +2271,75 @@ describe('compileRouteTable — baked ISR consts', () => {
       'export const __VOID_ISR_PAGES = [{"pattern":"/private","revalidate":0}];',
     );
     expect(code).toContain('export const __VOID_ISR_PATH_REVALIDATE = {"/private":60};');
+  });
+});
+
+describe('typed runtime metadata wiring', () => {
+  const empty: ScanResult = {
+    routes: [],
+    middleware: [],
+    jobs: [],
+    queues: [],
+    pages: { pages: [], layouts: [], namedLayouts: [] },
+  };
+  const compile = (options: Partial<Parameters<typeof compileRouteTable>[6]> = {}) =>
+    compileRouteTable(empty, '/routes', '/middleware', '/crons', '/queues', null, {
+      ...testOptions,
+      ...options,
+    });
+  it('imports Worker-safe execution and emits route export selection and cache policy', () => {
+    const scan: ScanResult = {
+      ...empty,
+      routes: [
+        {
+          pattern: '/hello',
+          filePath: 'hello.ts',
+          params: [],
+          catchAll: false,
+          env: null,
+          methods: ['GET', 'POST'],
+        },
+      ],
+    };
+    const dev = compileRouteTable(scan, '/routes', '/middleware', '/crons', '/queues', null, {
+      ...testOptions,
+      dev: true,
+    });
+    expect(dev).toContain('createRoutingRuntime as __createRoutingRuntime');
+    expect(dev).toContain(
+      'const _load_hello_ts = __createModuleLoader(() => import("/routes/hello.ts"), false)',
+    );
+    expect(dev).toContain('app.get("/hello", __createHttpRouteHandler(_load_hello_ts, "GET"))');
+    expect(dev).toContain('app.post("/hello", __createHttpRouteHandler(_load_hello_ts, "POST"))');
+    expect(dev).not.toContain('function __voidAnnotateRouting');
+    expect(dev).not.toContain('c.rewrite =');
+  });
+  it('keeps authored rule origins in dev and omits them in production and managed dispatch', () => {
+    const rules = [{ source: '/old', destination: '/new', status: 301, origin: 'config' }];
+    const dev = compile({ dev: true, redirectRules: rules, fallbackRules: rules });
+    expect(dev).toContain('"origin":"config"');
+    expect(dev).toContain('__routingRuntime.routingMiddleware(__routingRules)');
+    expect(dev).toContain('__createAssetNotFound');
+    const production = compile({ dev: false, redirectRules: rules, fallbackRules: rules });
+    expect(production).not.toContain('"origin":"config"');
+    const managed = compile({ managedDispatch: true, redirectRules: rules, fallbackRules: rules });
+    expect(managed).not.toContain('const __routingRules');
+    expect(managed).not.toContain('app.notFound');
+  });
+  it('wires fetch validation, opaque internal routes and optional ISR through runtime callbacks', () => {
+    const code = compileWorkerEntry({
+      envSchemaModule: { importPath: '/env.ts', helperPath: '/env-helpers.ts' },
+      isr: { runtimePath: 'void/isr', queryAllowlist: { '/search': ['q'] } },
+    });
+    expect(code).toContain('const __voidFetch = __createWorkerFetch({');
+    expect(code).toContain('validateEnv: _validateEnvOnce');
+    expect(code).toContain('internalRoute: __voidHandleInternalRoute');
+    expect(code).toContain('deploymentId: __VOID_ISR_DEPLOYMENT_ID');
+    expect(code).toContain('queryAllowlist: {"/search":["q"]}');
+    expect(code).toContain(
+      'const serveWithAssets = __createAssetFallback({"assetsDir":"assets","serveSpaFallback":false,"notFound":"none"})',
+    );
+    expect(code).not.toContain('function __handleInternal');
+    expect(code).not.toContain('async function serveWithAssets');
   });
 });

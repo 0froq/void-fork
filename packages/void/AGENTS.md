@@ -56,6 +56,12 @@ code. `src/runtime` contains Worker-safe public helpers; `src/cli` owns
 commands, packaging and deployment. Database authoring and migration helpers
 live in `src/drizzle` and `src/migrations`.
 
+The routing compiler emits imports, metadata and runtime factory calls. Ordinary
+request execution lives in `runtime/routing.ts` and its asset, Pages, error and
+Worker modules, resolved through private `#self/runtime/routing`. Test these
+production functions directly and retain actual generated-Worker coverage;
+do not restore mirrored middleware implementations or execution strings.
+
 Use the current source tree and package exports for file and API inventories;
 generated entries must preserve the module-boundary rules below.
 

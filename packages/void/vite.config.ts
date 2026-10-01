@@ -79,6 +79,7 @@ export default defineConfig({
       'src/edge.ts',
       'src/runtime/handler.ts',
       'src/runtime/response.ts',
+      'src/runtime/routing.ts',
       'src/runtime/validator.ts',
       'src/routes-stub.ts',
       'src/runtime/client.ts',

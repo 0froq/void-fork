@@ -88,8 +88,7 @@ it.each(['native', 'framework'])(
         null,
         {
           honoPath: '/hono',
-          responsePath: '/response',
-          handlerPath: '/handler',
+
           runtimeEnvPath: '/env',
           projectRoot: '/project',
           homeDir: '/home',

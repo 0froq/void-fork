@@ -151,8 +151,7 @@ export default defineRoom({
           null,
           {
             honoPath: import.meta.resolve('hono'),
-            responsePath: runtimePath('response.ts'),
-            handlerPath: runtimePath('handler.ts'),
+
             runtimeEnvPath: runtimePath('env.ts'),
             webSocketRuntimePath: runtimePath('ws-server.ts'),
             projectRoot: directory,

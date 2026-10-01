@@ -12,8 +12,7 @@ const emptyScan: ScanResult = {
 
 const baseOptions = {
   honoPath: '/resolved/hono/index.mjs',
-  responsePath: '/resolved/void/runtime/response.mjs',
-  handlerPath: '/resolved/void/runtime/handler.mjs',
+
   runtimeEnvPath: '/resolved/void/runtime/env.mjs',
   projectRoot: '/project',
   homeDir: '/Users/test',

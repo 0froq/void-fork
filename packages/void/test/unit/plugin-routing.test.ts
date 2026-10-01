@@ -61,8 +61,10 @@ describe('routingPlugin', () => {
     await buildStart.call({} as never);
 
     const entry = readFileSync(join(root, '.void', 'entry.ts'), 'utf-8');
-    expect(entry).toContain('"/index.html"');
-    expect(entry).toContain('accept.includes("text/html")');
+    expect(entry).toContain('app, assets: serveWithAssets');
+    expect(entry).toContain(
+      'const serveWithAssets = __createAssetFallback({"assetsDir":"assets","serveSpaFallback":true,"notFound":"none"});',
+    );
   });
 
   it('does not enable the worker SPA fallback for auth-only apps', async () => {
@@ -85,8 +87,9 @@ describe('routingPlugin', () => {
     await buildStart.call({} as never);
 
     const entry = readFileSync(join(root, '.void', 'entry.ts'), 'utf-8');
-    expect(entry).not.toContain('"/index.html"');
-    expect(entry).not.toContain('accept.includes("text/html")');
+    expect(entry).toContain(
+      'const serveWithAssets = __createAssetFallback({"assetsDir":"assets","serveSpaFallback":false,"notFound":"single-page-application"});',
+    );
   });
 
   it('bakes explicit page opt-outs into the native ISR policy', async () => {

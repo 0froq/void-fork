@@ -58,19 +58,12 @@ describe('generated queue dispatch', () => {
     const queuesDir = join(temporary, 'queues');
     const routeTablePath = join(temporary, 'virtual-void-routes.ts');
     const workerPath = join(temporary, 'worker.ts');
-    const handlerPath = join(temporary, 'handler.ts');
-    const responsePath = join(temporary, 'response.ts');
     const runtimeEnvPath = join(temporary, 'runtime-env.ts');
     mkdirSync(join(queuesDir, 'nested'), { recursive: true });
 
     writeFileSync(join(queuesDir, 'emails.ts'), queueHandlerSource('emails'));
     writeFileSync(join(queuesDir, 'order-emails.ts'), queueHandlerSource('order-emails'));
     writeFileSync(join(queuesDir, 'nested/daily.ts'), queueHandlerSource('nested/daily'));
-    writeFileSync(handlerPath, 'export class VoidAssetRewriteError extends Error {}\n');
-    writeFileSync(
-      responsePath,
-      'export function convertReturnValue(value) { return value instanceof Response ? value : Response.json(value); }\n',
-    );
     writeFileSync(runtimeEnvPath, 'export function withRuntimeEnv(_env, fn) { return fn(); }\n');
 
     const scan: ScanResult = {
@@ -97,8 +90,6 @@ describe('generated queue dispatch', () => {
       routeTablePath,
       compileRouteTable(scan, temporary, temporary, temporary, queuesDir, null, {
         honoPath: import.meta.resolve('hono'),
-        responsePath,
-        handlerPath,
         runtimeEnvPath,
         projectRoot: temporary,
         homeDir: temporary,

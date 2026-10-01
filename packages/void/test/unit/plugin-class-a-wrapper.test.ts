@@ -74,14 +74,10 @@ describe('Class A framework build wrapper', () => {
 
     const code = readFileSync(join(root, '.void', 'tanstack-start-trigger-wrapper.ts'), 'utf-8');
     expect(code).toContain('return serveWithAssets(request, env, await original.fetch');
-    expect(code).toContain('async function serveWithAssets(request, env, response)');
-    expect(code).toContain('env.ASSETS.fetch(new Request(request.url');
-    expect(code).toContain('request.method !== "GET" && request.method !== "HEAD"');
-    expect(code).toContain('"public, max-age=31536000, immutable"');
-    expect(code).toContain('"/static/"');
-    // No `routing.notFound` → the pre-existing "hand the framework's own 404
-    // back" behavior.
-    expect(code).not.toContain('asset.headers.get("content-type")');
+    expect(code).toContain('import { createAssetFallback as __createAssetFallback }');
+    expect(code).toContain(
+      'const serveWithAssets = __createAssetFallback({"assetsDir":"static","serveSpaFallback":false,"notFound":"none"});',
+    );
   });
 
   // A Class A app deploys through `runFullDeploy`, which DOES honor
@@ -105,8 +101,10 @@ describe('Class A framework build wrapper', () => {
     } as Partial<ResolvedConfig>);
 
     const code = readFileSync(join(root, '.void', 'tanstack-start-trigger-wrapper.ts'), 'utf-8');
-    expect(code).toContain('asset.headers.get("content-type")');
-    expect(code).toContain('new Response(asset.body, asset)');
+    expect(code).toContain('return serveWithAssets(request, env, await original.fetch');
+    expect(code).toContain(
+      'const serveWithAssets = __createAssetFallback({"assetsDir":"static","serveSpaFallback":false,"notFound":"404-page"});',
+    );
   });
 });
 

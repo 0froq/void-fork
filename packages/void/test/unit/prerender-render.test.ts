@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { renderPrerenderPaths } from '../../src/prerender-render.ts';
-import { compileAssetFallbackHelper } from '../../src/router/compile.ts';
+import { createAssetFallback } from '../../src/runtime/routing-worker.ts';
 
 const roots: Array<string> = [];
 const fixture = () => {
@@ -82,16 +82,7 @@ describe('prerender pool', () => {
     'preserves generated-asset fallthrough semantics between %s and %s',
     async (generatedPath, fallbackPath) => {
       const root = fixture();
-      const source = `${compileAssetFallbackHelper()}\nexport { serveWithAssets };`;
-      const { serveWithAssets } = (await import(
-        `data:text/javascript,${encodeURIComponent(source)}`
-      )) as {
-        serveWithAssets: (
-          request: Request,
-          env: { ASSETS: { fetch(request: Request): Promise<Response> } },
-          response: Response,
-        ) => Promise<Response>;
-      };
+      const serveWithAssets = createAssetFallback();
       const assets = {
         async fetch(request: Request): Promise<Response> {
           let file = join(root, decodeURIComponent(new URL(request.url).pathname));

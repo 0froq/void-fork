@@ -1,0 +1,195 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
+import { build } from 'vite';
+import { afterEach, describe, expect, it } from 'vite-plus/test';
+import { compileRouteTable, compileWorkerEntry } from '../../src/router/compile.ts';
+import { scanRoutes } from '../../src/router/scan.ts';
+
+const repository = join(import.meta.dirname, '..', '..', '..', '..');
+const source = (file: string) => join(repository, 'packages/void/src/runtime', file);
+let directory: string;
+let runtime: Miniflare | undefined;
+afterEach(async () => {
+  await runtime?.dispose();
+  runtime = undefined;
+  if (directory) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+describe('typed routing in generated Workers', () => {
+  it.each([false, true])(
+    'preserves middleware, rewrites, fallbacks and real page protocol in dev=%s',
+    async (dev) => {
+      directory = mkdtempSync(join(tmpdir(), 'void-typed-routing-'));
+      const routes = join(directory, 'routes');
+      const middleware = join(directory, 'middleware');
+      const pages = join(directory, 'pages');
+      const output = join(directory, 'output');
+      for (const path of [routes, middleware, pages]) {
+        mkdirSync(path);
+      }
+      writeFileSync(
+        join(routes, 'hello.ts'),
+        `export function GET(c) { return { path: c.req.path, original: c.originalUrl()?.pathname, rewritten: c.isRewritten(), public: c.env.PUBLIC, hidden: c.env.__VOID_PROXY_TOKEN }; }\n`,
+      );
+      writeFileSync(
+        join(routes, 'move.ts'),
+        `export function GET(c) { return c.rewrite('/hello'); }\n`,
+      );
+      writeFileSync(
+        join(middleware, '01.headers.ts'),
+        `export default async (c, next) => { await next(); c.header('x-user-middleware', 'ran'); };\n`,
+      );
+      writeFileSync(
+        join(pages, 'index.server.ts'),
+        `export function loader() { return { title: 'real page loader' }; }\nexport const actions = { save: () => new Response('saved') };\n`,
+      );
+      const scan = await scanRoutes(directory);
+      scan.pages.pages = [
+        {
+          pattern: '/',
+          params: [],
+          catchAll: false,
+          componentPath: 'index.tsx',
+          componentId: 'index',
+          serverPath: 'index.server.ts',
+          methods: ['loader', 'actions'],
+          ssrMode: 'server',
+          prerenderMode: 'disabled',
+          renderMode: 'server',
+          shouldPrerender: false,
+        },
+      ];
+      const routeTable = join(directory, 'generated-routes.ts');
+      const entry = join(directory, 'generated-worker.ts');
+      writeFileSync(
+        routeTable,
+        compileRouteTable(
+          scan,
+          routes,
+          middleware,
+          join(directory, 'crons'),
+          join(directory, 'queues'),
+          null,
+          {
+            honoPath: fileURLToPath(import.meta.resolve('hono')),
+
+            runtimeEnvPath: source('env.ts'),
+            projectRoot: directory,
+            homeDir: tmpdir(),
+            reactRefresh: false,
+            auth: null,
+            dev,
+            redirectRules: [
+              { source: '/rewrite', destination: '/hello', status: 200, force: true },
+            ],
+            fallbackRules: [{ source: '/missing', destination: '/hello', status: 200 }],
+            headerRules: [{ pattern: '/*', headers: [['x-edge-rule', 'ran']] }],
+          },
+          {
+            pagesDir: pages,
+            pagesDirRelative: 'pages',
+
+            clientEntryId: 'virtual:fixture-client',
+          },
+        ),
+      );
+      writeFileSync(entry, compileWorkerEntry({ runtimeEnvPath: source('env.ts') }));
+      await build({
+        configFile: false,
+        logLevel: 'silent',
+        plugins: [
+          {
+            name: 'typed-routing-fixture',
+            resolveId(id) {
+              if (id === 'virtual:void-routes') {
+                return routeTable;
+              }
+              if (id === 'virtual:void-pages-renderer' || id === 'virtual:void-pages-dev-assets') {
+                return '\0' + id;
+              }
+              return null;
+            },
+            load(id) {
+              if (id === '\0virtual:void-pages-renderer') {
+                return `export async function renderPage(page) { return '<html><body>' + page.props.title + '</body></html>'; }`;
+              }
+              if (id === '\0virtual:void-pages-dev-assets') {
+                return 'export async function getVoidPagesDevCss() { return []; }';
+              }
+              return null;
+            },
+          },
+        ],
+        ssr: { noExternal: true },
+        build: {
+          outDir: output,
+          emptyOutDir: true,
+          ssr: entry,
+          target: 'esnext',
+          rollupOptions: {
+            external: [/^cloudflare:/, /^node:/],
+            output: { entryFileNames: 'worker.mjs', codeSplitting: false },
+          },
+        },
+      });
+      runtime = new Miniflare(
+        convertV4MiniflareOptions({
+          compatibilityDate: '2026-07-01',
+          compatibilityFlags: ['nodejs_compat'],
+          modules: true,
+          modulesRoot: output,
+          scriptPath: join(output, 'worker.mjs'),
+          bindings: { PUBLIC: 'public', __VOID_PROXY_TOKEN: 'secret' },
+        }),
+      );
+      const hello = await runtime.dispatchFetch('https://app.test/hello');
+      expect(await hello.json()).toEqual({ path: '/hello', rewritten: false, public: 'public' });
+      expect(hello.headers.get('x-user-middleware')).toBe('ran');
+      expect(hello.headers.get('x-edge-rule')).toBe('ran');
+      for (const [path, trace] of [
+        ['/rewrite', 'rewrite[/rewrite]'],
+        ['/move', 'c.rewrite'],
+        ['/missing', 'fallback[/missing]'],
+      ] as const) {
+        const response = await runtime.dispatchFetch('https://app.test' + path);
+        expect(await response.json()).toEqual({
+          path: '/hello',
+          original: path,
+          rewritten: true,
+          public: 'public',
+        });
+        if (dev) {
+          expect(response.headers.get('X-Void-Routing')).toContain(trace);
+        } else {
+          expect(response.headers.has('X-Void-Routing')).toBe(false);
+        }
+      }
+      const page = await runtime.dispatchFetch('https://app.test/');
+      expect(await page.text()).toContain('real page loader');
+      const protocol = await runtime.dispatchFetch('https://app.test/', {
+        headers: { 'x-voidpages': 'true' },
+      });
+      expect(((await protocol.json()) as { props: unknown }).props).toEqual({
+        title: 'real page loader',
+      });
+      expect(
+        await (await runtime.dispatchFetch('https://app.test/?save', { method: 'POST' })).text(),
+      ).toBe('saved');
+      const missing = await runtime.dispatchFetch('https://app.test/unknown');
+      expect(missing.status).toBe(404);
+      expect(missing.headers.get('X-Void-No-Match')).toBe('1');
+      expect(await (await runtime.dispatchFetch('https://app.test/__void/ready')).json()).toEqual({
+        ready: true,
+      });
+      const unauthorized = await runtime.dispatchFetch('https://app.test/__void/prerender-paths', {
+        method: 'POST',
+      });
+      expect(unauthorized.status).toBe(401);
+    },
+  );
+});

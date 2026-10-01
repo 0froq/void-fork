@@ -28,8 +28,6 @@ describe('generated worker WebSocket middleware', () => {
     const websocketPath = join(routesDir, 'chat.ws.ts');
     const httpRoutePath = join(routesDir, 'chat.ts');
     const middlewarePath = join(middlewareDir, '01.auth.ts');
-    const handlerPath = join(temporary, 'handler.ts');
-    const responsePath = join(temporary, 'response.ts');
     const runtimeEnvPath = join(temporary, 'runtime-env.ts');
     mkdirSync(routesDir, { recursive: true });
     mkdirSync(middlewareDir, { recursive: true });
@@ -57,11 +55,6 @@ export default {
   }
   return next();
 }\n`,
-    );
-    writeFileSync(handlerPath, 'export class VoidAssetRewriteError extends Error {}\n');
-    writeFileSync(
-      responsePath,
-      'export function convertReturnValue(value) { return value instanceof Response ? value : Response.json(value); }\n',
     );
     writeFileSync(runtimeEnvPath, 'export function withRuntimeEnv(_env, fn) { return fn(); }\n');
 
@@ -100,8 +93,6 @@ export default {
       routeTablePath,
       compileRouteTable(scan, routesDir, middlewareDir, temporary, temporary, null, {
         honoPath: import.meta.resolve('hono'),
-        responsePath,
-        handlerPath,
         runtimeEnvPath,
         webSocketRuntimePath: join(root, 'packages/void/src/runtime/ws-server.ts'),
         projectRoot: temporary,

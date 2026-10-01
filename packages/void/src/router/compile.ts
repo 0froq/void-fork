@@ -9,630 +9,14 @@ import { INTERNAL_BINDING_EXACT_NAMES, INTERNAL_BINDING_PREFIXES } from '../runt
 import { DEFAULT_SANDBOX_CLASS_NAME } from '../sandbox/config.ts';
 import type { ScanResult } from './scan.ts';
 
-/**
- * Script tag injected into dev HTML to load the binding-hint virtual module.
- * The virtual module (served by restartPlugin) listens for `void:new-binding`
- * HMR events and shows a toast with a click-to-restart action.
- */
-const BINDING_HINT_SCRIPT = `<script type="module" src="/@id/virtual:void/binding-hint"></script>`;
-const DEFAULT_ERROR_PAGE_FONT_STACK =
-  'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
-const EDGE_MODULE_PATH = fileURLToPath(import.meta.resolve('@void/edge'));
+const ROUTING_RUNTIME_PATH = fileURLToPath(import.meta.resolve('#self/runtime/routing'));
 
 function pushDefaultErrorPageHelpers(lines: Array<string>, options: CompileOptions): void {
-  const dev = options.dev === true;
   lines.push(
-    `const __VOID_ERROR_PAGE_FONT_STACK = ${JSON.stringify(DEFAULT_ERROR_PAGE_FONT_STACK)};`,
+    `const __errorRenderer = __createErrorRenderer(${JSON.stringify({ dev: options.dev === true, projectRoot: options.projectRoot, homeDir: options.homeDir })});`,
   );
-  lines.push(`const __VOID_DEV = ${JSON.stringify(dev)};`);
-  lines.push(`const __VOID_PROJECT_ROOT = ${JSON.stringify(options.projectRoot)};`);
-  lines.push(`const __VOID_HOME_DIR = ${JSON.stringify(options.homeDir)};`);
-  lines.push(`function __voidEscapeHtml(value) {`);
-  lines.push(
-    `  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");`,
-  );
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidShouldServeHtmlErrorPage(request) {`);
-  lines.push(`  if (request.method !== "GET" && request.method !== "HEAD") return false;`);
-  lines.push(`  const url = new URL(request.url);`);
-  lines.push(`  if (url.pathname === "/api" || url.pathname.startsWith("/api/")) return false;`);
-  lines.push(`  if (/\\/[^/]+\\.[^/]+$/.test(url.pathname)) return false;`);
-  lines.push(`  const destination = request.headers.get("sec-fetch-dest");`);
-  lines.push(
-    `  if (destination && destination !== "document" && destination !== "empty") return false;`,
-  );
-  lines.push(`  const accept = request.headers.get("accept");`);
-  lines.push(`  return !accept || accept.includes("text/html") || accept.includes("*/*");`);
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidNormalizeFsPath(value) {`);
-  lines.push(`  return typeof value === "string" ? value.replaceAll("\\\\", "/") : "";`);
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidIsAbsolutePath(value) {`);
-  lines.push(`  return value.startsWith("/") || /^[A-Za-z]:\\//.test(value);`);
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidDisplayPath(value) {`);
-  lines.push(`  const path = __voidNormalizeFsPath(value);`);
-  lines.push(`  const homeDir = __voidNormalizeFsPath(__VOID_HOME_DIR);`);
-  lines.push(`  const projectRoot = __voidNormalizeFsPath(__VOID_PROJECT_ROOT);`);
-  lines.push(`  if (!path) return "";`);
-  lines.push(
-    `  if (projectRoot && (path === projectRoot || path.startsWith(projectRoot + "/"))) {`,
-  );
-  lines.push(`    const suffix = path.slice(projectRoot.length).replace(/^\\/?/, "");`);
-  lines.push(`    return suffix ? "./" + suffix : "./";`);
-  lines.push(`  }`);
-  lines.push(`  if (homeDir && (path === homeDir || path.startsWith(homeDir + "/"))) {`);
-  lines.push(`    const suffix = path.slice(homeDir.length).replace(/^\\/?/, "");`);
-  lines.push(`    return suffix ? "~/" + suffix : "~/";`);
-  lines.push(`  }`);
-  lines.push(`  return path;`);
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidEditorHref(value, line, column) {`);
-  lines.push(`  const path = __voidNormalizeFsPath(value);`);
-  lines.push(`  if (!__voidIsAbsolutePath(path)) return "";`);
-  lines.push(
-    `  return "vscode://file/" + encodeURI(path).replaceAll("#", "%23").replaceAll("?", "%3F") + ":" + String(line) + ":" + String(column);`,
-  );
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidCreateStackFrame(functionName, file, line, column, raw) {`);
-  lines.push(`  const normalizedFile = __voidNormalizeFsPath(file);`);
-  lines.push(`  const lineNumber = Number(line);`);
-  lines.push(`  const columnNumber = Number(column);`);
-  lines.push(
-    `  if (!normalizedFile || !Number.isFinite(lineNumber) || lineNumber <= 0) return null;`,
-  );
-  lines.push(
-    `  const safeColumn = Number.isFinite(columnNumber) && columnNumber > 0 ? columnNumber : 1;`,
-  );
-  lines.push(`  return {`);
-  lines.push(`    functionName: functionName || "",`);
-  lines.push(`    file: normalizedFile,`);
-  lines.push(`    line: lineNumber,`);
-  lines.push(`    column: safeColumn,`);
-  lines.push(`    displayPath: __voidDisplayPath(normalizedFile),`);
-  lines.push(`    href: __voidEditorHref(normalizedFile, lineNumber, safeColumn),`);
-  lines.push(`    raw: raw || "",`);
-  lines.push(`  };`);
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidParseFrameLocation(value) {`);
-  lines.push(`  const match = value.match(/^(.*):(\\d+):(\\d+)$/);`);
-  lines.push(`  if (!match) return null;`);
-  lines.push(
-    `  return __voidCreateStackFrame("", match[1], Number(match[2]), Number(match[3]), value);`,
-  );
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidParseStackFrames(stack) {`);
-  lines.push(`  if (!stack) return [];`);
-  lines.push(`  const frames = [];`);
-  lines.push(`  for (const rawLine of stack.split(/\\n+/)) {`);
-  lines.push(`    const line = rawLine.trim();`);
-  lines.push(`    if (!line) continue;`);
-  lines.push(`    let frame = null;`);
-  lines.push(`    let match = line.match(/^at\\s+(?:async\\s+)?(.+?)\\s+\\((.+)\\)$/);`);
-  lines.push(`    if (match) {`);
-  lines.push(`      const location = __voidParseFrameLocation(match[2]);`);
-  lines.push(`      frame = location ? { ...location, functionName: match[1] } : null;`);
-  lines.push(`    } else {`);
-  lines.push(`      match = line.match(/^at\\s+(.+)$/);`);
-  lines.push(`      if (match) {`);
-  lines.push(`        frame = __voidParseFrameLocation(match[1]);`);
-  lines.push(`      } else {`);
-  lines.push(`        match = line.match(/^(.*?)@(.+)$/);`);
-  lines.push(`        if (match) {`);
-  lines.push(`          const location = __voidParseFrameLocation(match[2]);`);
-  lines.push(`          frame = location ? { ...location, functionName: match[1] } : null;`);
-  lines.push(`        }`);
-  lines.push(`      }`);
-  lines.push(`    }`);
-  lines.push(`    if (frame) frames.push({ ...frame, raw: line });`);
-  lines.push(`  }`);
-  lines.push(`  return frames;`);
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidGetStackFrames(error) {`);
-  lines.push(`  if (!(error instanceof Error)) return [];`);
-  lines.push(`  if (!error.stack && typeof Error.captureStackTrace === "function") {`);
-  lines.push(`    try {`);
-  lines.push(`      Error.captureStackTrace(error, __voidGetStackFrames);`);
-  lines.push(`    } catch {`);
-  lines.push(`      // Ignore runtimes that reject captureStackTrace on thrown errors.`);
-  lines.push(`    }`);
-  lines.push(`  }`);
-  lines.push(`  const originalPrepareStackTrace = Error.prepareStackTrace;`);
-  lines.push(`  try {`);
-  lines.push(`    Error.prepareStackTrace = (_, callSites) => callSites;`);
-  lines.push(`    const structured = error.stack;`);
-  lines.push(`    if (Array.isArray(structured)) {`);
-  lines.push(`      const frames = [];`);
-  lines.push(`      for (const callSite of structured) {`);
-  lines.push(`        try {`);
-  lines.push(
-    `          const fileName = callSite.getFileName?.() || callSite.getScriptNameOrSourceURL?.();`,
-  );
-  lines.push(`          const line = callSite.getLineNumber?.();`);
-  lines.push(`          const column = callSite.getColumnNumber?.();`);
-  lines.push(
-    `          const functionName = callSite.getFunctionName?.() || callSite.getMethodName?.() || "";`,
-  );
-  lines.push(
-    `          const frame = __voidCreateStackFrame(functionName, fileName || "", line, column, String(callSite));`,
-  );
-  lines.push(`          if (frame) frames.push(frame);`);
-  lines.push(`        } catch {`);
-  lines.push(`          // Ignore malformed CallSite entries and continue rendering.`);
-  lines.push(`        }`);
-  lines.push(`      }`);
-  lines.push(`      if (frames.length > 0) return frames;`);
-  lines.push(`    }`);
-  lines.push(`  } catch {`);
-  lines.push(`    // Fall through to string parsing.`);
-  lines.push(`  } finally {`);
-  lines.push(`    Error.prepareStackTrace = originalPrepareStackTrace;`);
-  lines.push(`  }`);
-  lines.push(
-    `  return __voidParseStackFrames(typeof error.stack === "string" ? error.stack : "");`,
-  );
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidDescribeThrownValue(value) {`);
-  lines.push(`  if (value instanceof Error) {`);
-  lines.push(`    return {`);
-  lines.push(`      name: value.name || "Error",`);
-  lines.push(`      message: value.message || "",`);
-  lines.push(`      stack: typeof value.stack === "string" ? value.stack : "",`);
-  lines.push(`      frames: __voidGetStackFrames(value),`);
-  lines.push(`    };`);
-  lines.push(`  }`);
-  lines.push(`  if (typeof value === "string") {`);
-  lines.push(`    return { name: "Thrown value", message: value, stack: "", frames: [] };`);
-  lines.push(`  }`);
-  lines.push(`  let message = "";`);
-  lines.push(`  try {`);
-  lines.push(`    if (typeof value === "object" && value !== null) {`);
-  lines.push(`      message = JSON.stringify(value, null, 2) ?? String(value);`);
-  lines.push(`    } else {`);
-  lines.push(`      message = String(value);`);
-  lines.push(`    }`);
-  lines.push(`  } catch {`);
-  lines.push(`    message = String(value);`);
-  lines.push(`  }`);
-  lines.push(`  return { name: "Thrown value", message, stack: "", frames: [] };`);
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidRenderStack(entry) {`);
-  lines.push(`  if (Array.isArray(entry.frames) && entry.frames.length > 0) {`);
-  lines.push(`    const items = entry.frames.map((frame) => {`);
-  lines.push(`      const name = frame.functionName || "(anonymous)";`);
-  lines.push(`      const location = frame.displayPath + ":" + frame.line + ":" + frame.column;`);
-  lines.push(
-    `      const body = \`<span class="__void-error-frame-function">\${__voidEscapeHtml(name)}</span><span class="__void-error-frame-location">\${__voidEscapeHtml(location)}</span>\`;`,
-  );
-  lines.push(`      if (frame.href) {`);
-  lines.push(
-    `        return \`<a class="__void-error-frame" href="\${__voidEscapeHtml(frame.href)}">\${body}</a>\`;`,
-  );
-  lines.push(`      }`);
-  lines.push(`      return \`<div class="__void-error-frame is-static">\${body}</div>\`;`);
-  lines.push(`    }).join("");`);
-  lines.push(
-    `    return \`<div class="__void-error-stack"><div class="__void-error-stack-label">Stack trace</div><div class="__void-error-frames">\${items}</div></div>\`;`,
-  );
-  lines.push(`  }`);
-  lines.push(`  if (!entry.stack) return "";`);
-  lines.push(
-    `  return \`<div class="__void-error-stack"><div class="__void-error-stack-label">Stack trace</div><pre>\${__voidEscapeHtml(entry.stack)}</pre></div>\`;`,
-  );
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidCollectErrorChain(error) {`);
-  lines.push(`  const chain = [];`);
-  lines.push(`  const seen = new Set();`);
-  lines.push(`  let current = error;`);
-  lines.push(`  let depth = 0;`);
-  lines.push(`  while (current != null && depth < 8 && !seen.has(current)) {`);
-  lines.push(`    seen.add(current);`);
-  lines.push(`    const entry = __voidDescribeThrownValue(current);`);
-  lines.push(`    chain.push({`);
-  lines.push(`      label: depth === 0 ? "Error" : "Cause " + depth,`);
-  lines.push(`      ...entry,`);
-  lines.push(`    });`);
-  lines.push(`    current = current instanceof Error ? current.cause : undefined;`);
-  lines.push(`    depth += 1;`);
-  lines.push(`  }`);
-  lines.push(`  if (current != null) {`);
-  lines.push(`    chain.push({`);
-  lines.push(`      label: "Cause " + depth,`);
-  lines.push(`      name: "Truncated",`);
-  lines.push(`      message: "Additional nested causes were omitted.",`);
-  lines.push(`      stack: "",`);
-  lines.push(`      frames: [],`);
-  lines.push(`    });`);
-  lines.push(`  }`);
-  lines.push(`  if (chain.length === 0) {`);
-  lines.push(`    chain.push({`);
-  lines.push(`      label: "Error",`);
-  lines.push(`      name: "Unknown error",`);
-  lines.push(`      message: "No error details were available.",`);
-  lines.push(`      stack: "",`);
-  lines.push(`      frames: [],`);
-  lines.push(`    });`);
-  lines.push(`  }`);
-  lines.push(`  return chain;`);
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidRenderDevErrorOverlay(request, status, title, error) {`);
-  lines.push(`  const chain = __voidCollectErrorChain(error);`);
-  lines.push(
-    `  const errorCountLabel = chain.length + (chain.length === 1 ? " Error" : " Errors");`,
-  );
-  lines.push(`  const sections = chain.map((entry, index) => {`);
-  lines.push(`    const heading = entry.name || (index === 0 ? title : "Cause");`);
-  lines.push(`    const message = entry.message || title;`);
-  lines.push(`    const stack = __voidRenderStack(entry);`);
-  lines.push(`    if (index === 0) {`);
-  lines.push(
-    `      return \`<section class="__void-error-section is-root"><p class="__void-error-message">\${__voidEscapeHtml(message)}</p>\${stack}</section>\`;`,
-  );
-  lines.push(`    }`);
-  lines.push(
-    `    return \`<section class="__void-error-section"><div class="__void-error-kicker">\${__voidEscapeHtml(entry.label)}</div><h2>\${__voidEscapeHtml(heading)}</h2><p>\${__voidEscapeHtml(message)}</p>\${stack}</section>\`;`,
-  );
-  lines.push(`  }).join("");`);
-  lines.push(`  return \`<style>`);
-  lines.push(`    .__void-error-overlay {`);
-  lines.push(`      position: fixed;`);
-  lines.push(`      inset: 0;`);
-  lines.push(`      z-index: 2147483647;`);
-  lines.push(`      pointer-events: none;`);
-  lines.push(`      font-family: \${__VOID_ERROR_PAGE_FONT_STACK};`);
-  lines.push(`      color: #f5f5f5;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-backdrop {`);
-  lines.push(`      position: absolute;`);
-  lines.push(`      inset: 0;`);
-  lines.push(`      background: rgba(10, 10, 10, 0.52);`);
-  lines.push(`      backdrop-filter: blur(4px);`);
-  lines.push(`      transition: opacity 180ms ease;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-panel {`);
-  lines.push(`      position: absolute;`);
-  lines.push(`      inset: auto auto 24px 24px;`);
-  lines.push(`      inline-size: min(760px, calc(100vw - 48px));`);
-  lines.push(`      max-block-size: min(80dvh, 920px);`);
-  lines.push(`      overflow: auto;`);
-  lines.push(`      pointer-events: auto;`);
-  lines.push(`      border-radius: 32px;`);
-  lines.push(`      corner-shape: squircle;`);
-  lines.push(`      border: 1px solid rgba(255, 255, 255, 0.14);`);
-  lines.push(
-    `      background: linear-gradient(180deg, rgba(24, 24, 27, 0.98), rgba(9, 9, 11, 0.98));`,
-  );
-  lines.push(`      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);`);
-  lines.push(`      padding: 12px 16px;`);
-  lines.push(`      transition: transform 180ms ease, opacity 180ms ease;`);
-  lines.push(`      transform-origin: bottom left;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-close {`);
-  lines.push(`      position: absolute;`);
-  lines.push(`      inset: 12px 12px auto auto;`);
-  lines.push(`      inline-size: 36px;`);
-  lines.push(`      block-size: 36px;`);
-  lines.push(`      border: 0;`);
-  lines.push(`      border-radius: 999px;`);
-  lines.push(`      background: rgba(255, 255, 255, 0.08);`);
-  lines.push(`      color: #fafafa;`);
-  lines.push(`      cursor: pointer;`);
-  lines.push(`      display: grid;`);
-  lines.push(`      place-items: center;`);
-  lines.push(`      padding: 0;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-close:hover {`);
-  lines.push(`      background: rgba(255, 255, 255, 0.14);`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-close svg {`);
-  lines.push(`      inline-size: 16px;`);
-  lines.push(`      block-size: 16px;`);
-  lines.push(`      display: block;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-minimized {`);
-  lines.push(`      position: absolute;`);
-  lines.push(`      inset: auto auto 24px 24px;`);
-  lines.push(`      pointer-events: none;`);
-  lines.push(`      opacity: 0;`);
-  lines.push(`      transform: scale(0.92);`);
-  lines.push(`      transform-origin: bottom left;`);
-  lines.push(`      border: 1px solid rgba(248, 113, 113, 0.35);`);
-  lines.push(`      border-radius: 32px;`);
-  lines.push(`      corner-shape: squircle;`);
-  lines.push(`      background: rgba(24, 24, 27, 0.96);`);
-  lines.push(`      color: #fca5a5;`);
-  lines.push(`      padding: 12px 8px;`);
-  lines.push(`      box-shadow: 0 18px 36px rgba(0, 0, 0, 0.28);`);
-  lines.push(`      cursor: pointer;`);
-  lines.push(`      font: 700 13px/1 \${__VOID_ERROR_PAGE_FONT_STACK};`);
-  lines.push(`      letter-spacing: 0.04em;`);
-  lines.push(`      text-transform: uppercase;`);
-  lines.push(`      transition: transform 180ms ease, opacity 180ms ease;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-header {`);
-  lines.push(`      display: flex;`);
-  lines.push(`      flex-direction: column;`);
-  lines.push(`      gap: 6px;`);
-  lines.push(`      margin-block-end: 0;`);
-  lines.push(`      padding-right: 52px;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-status {`);
-  lines.push(`      margin: 0;`);
-  lines.push(`      color: #fca5a5;`);
-  lines.push(`      font-size: 12px;`);
-  lines.push(`      font-weight: 700;`);
-  lines.push(`      letter-spacing: 0.12em;`);
-  lines.push(`      text-transform: uppercase;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-section {`);
-  lines.push(`      border-top: 1px solid rgba(255, 255, 255, 0.08);`);
-  lines.push(`      padding-top: 16px;`);
-  lines.push(`      margin-top: 16px;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-section.is-root {`);
-  lines.push(`      border-top: 0;`);
-  lines.push(`      padding-top: 0;`);
-  lines.push(`      margin-top: 0;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-message {`);
-  lines.push(`      margin: 0;`);
-  lines.push(`      color: #fff;`);
-  lines.push(`      font-size: 1.7rem;`);
-  lines.push(`      line-height: 1.15;`);
-  lines.push(`      letter-spacing: -0.03em;`);
-  lines.push(`      white-space: pre-wrap;`);
-  lines.push(`      word-break: break-word;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-kicker {`);
-  lines.push(`      margin-bottom: 6px;`);
-  lines.push(`      color: #fda4af;`);
-  lines.push(`      font-size: 12px;`);
-  lines.push(`      font-weight: 700;`);
-  lines.push(`      letter-spacing: 0.08em;`);
-  lines.push(`      text-transform: uppercase;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-section h2 {`);
-  lines.push(`      margin: 0 0 8px;`);
-  lines.push(`      font-size: 1.05rem;`);
-  lines.push(`      color: #fff;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-section p {`);
-  lines.push(`      margin: 0;`);
-  lines.push(`      color: #e4e4e7;`);
-  lines.push(`      white-space: pre-wrap;`);
-  lines.push(`      word-break: break-word;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-stack {`);
-  lines.push(`      margin-top: 18px;`);
-  lines.push(`      border: 1px solid rgba(255, 255, 255, 0.08);`);
-  lines.push(`      border-radius: 32px;`);
-  lines.push(`      background: rgba(255, 255, 255, 0.03);`);
-  lines.push(`      corner-shape: squircle;`);
-  lines.push(`      overflow: hidden;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-stack-label {`);
-  lines.push(`      padding: 12px 14px 10px;`);
-  lines.push(`      color: #f4f4f5;`);
-  lines.push(`      font-size: 12px;`);
-  lines.push(`      font-weight: 700;`);
-  lines.push(`      letter-spacing: 0.08em;`);
-  lines.push(`      text-transform: uppercase;`);
-  lines.push(`      border-bottom: 1px solid rgba(255, 255, 255, 0.08);`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-frames {`);
-  lines.push(`      display: flex;`);
-  lines.push(`      flex-direction: column;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-frame {`);
-  lines.push(`      display: flex;`);
-  lines.push(`      align-items: baseline;`);
-  lines.push(`      justify-content: space-between;`);
-  lines.push(`      gap: 16px;`);
-  lines.push(`      padding: 12px 14px;`);
-  lines.push(`      color: inherit;`);
-  lines.push(`      text-decoration: none;`);
-  lines.push(`      border-top: 1px solid rgba(255, 255, 255, 0.06);`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-frame:first-child {`);
-  lines.push(`      border-top: 0;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-frame:hover {`);
-  lines.push(`      background: rgba(255, 255, 255, 0.05);`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-frame.is-static {`);
-  lines.push(`      cursor: default;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-frame-function {`);
-  lines.push(`      flex: 1 1 auto;`);
-  lines.push(`      min-width: 0;`);
-  lines.push(`      color: #fafafa;`);
-  lines.push(`      font: 600 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;`);
-  lines.push(`      white-space: nowrap;`);
-  lines.push(`      overflow: hidden;`);
-  lines.push(`      text-overflow: ellipsis;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-frame-location {`);
-  lines.push(`      flex: 0 1 52%;`);
-  lines.push(`      min-width: 0;`);
-  lines.push(`      color: #fda4af;`);
-  lines.push(`      font: 500 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;`);
-  lines.push(`      text-align: right;`);
-  lines.push(`      white-space: nowrap;`);
-  lines.push(`      overflow: hidden;`);
-  lines.push(`      text-overflow: ellipsis;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-section pre {`);
-  lines.push(`      margin: 0;`);
-  lines.push(`      padding: 12px 14px;`);
-  lines.push(`      overflow: auto;`);
-  lines.push(`      color: #e4e4e7;`);
-  lines.push(`      font: 500 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;`);
-  lines.push(`      white-space: pre-wrap;`);
-  lines.push(`      word-break: break-word;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-overlay.is-minimized .__void-error-backdrop {`);
-  lines.push(`      opacity: 0;`);
-  lines.push(`      pointer-events: none;`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-overlay.is-minimized .__void-error-panel {`);
-  lines.push(`      opacity: 0;`);
-  lines.push(`      pointer-events: none;`);
-  lines.push(`      transform: scale(0.92);`);
-  lines.push(`    }`);
-  lines.push(`    .__void-error-overlay.is-minimized .__void-error-minimized {`);
-  lines.push(`      opacity: 1;`);
-  lines.push(`      pointer-events: auto;`);
-  lines.push(`      transform: scale(1);`);
-  lines.push(`    }`);
-  lines.push(`    @media (max-width: 720px) {`);
-  lines.push(`      .__void-error-panel {`);
-  lines.push(`        inset: auto 12px 12px 12px;`);
-  lines.push(`        inline-size: auto;`);
-  lines.push(`        max-block-size: min(70dvh, 920px);`);
-  lines.push(`        padding: 16px;`);
-  lines.push(`      }`);
-  lines.push(`      .__void-error-minimized {`);
-  lines.push(`        inset: auto auto 12px 12px;`);
-  lines.push(`      }`);
-  lines.push(`      .__void-error-frame {`);
-  lines.push(`        flex-direction: column;`);
-  lines.push(`        align-items: flex-start;`);
-  lines.push(`      }`);
-  lines.push(`      .__void-error-frame-location {`);
-  lines.push(`        text-align: left;`);
-  lines.push(`      }`);
-  lines.push(`    }`);
-  lines.push(`  </style>`);
-  lines.push(
-    `<aside class="__void-error-overlay" data-void-error-overlay role="dialog" aria-label="Void dev error overlay"><div class="__void-error-backdrop" data-void-error-backdrop></div><section class="__void-error-panel"><button type="button" class="__void-error-close" data-void-error-close aria-label="Minimize error overlay"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3.757 3.757 12.243 12.243M12.243 3.757 3.757 12.243" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg></button><header class="__void-error-header"><p class="__void-error-status">\${__voidEscapeHtml(String(status) + ": " + title)}</p></header>\${sections}</section><button type="button" class="__void-error-minimized" data-void-error-toggle aria-label="Show dev error overlay" aria-expanded="true">\${__voidEscapeHtml(errorCountLabel)}</button><script>(function(){const script=document.currentScript;if(!(script instanceof HTMLScriptElement))return;const root=script.closest("[data-void-error-overlay]");if(!(root instanceof HTMLElement))return;const backdrop=root.querySelector("[data-void-error-backdrop]");const closeButton=root.querySelector("[data-void-error-close]");const toggle=root.querySelector("[data-void-error-toggle]");const setMinimized=(minimized)=>{root.classList.toggle("is-minimized", minimized);if(toggle instanceof HTMLElement)toggle.setAttribute("aria-expanded", minimized ? "false" : "true");};if(backdrop instanceof HTMLElement)backdrop.addEventListener("click",()=>setMinimized(true));if(closeButton instanceof HTMLElement)closeButton.addEventListener("click",()=>setMinimized(true));if(toggle instanceof HTMLElement)toggle.addEventListener("click",()=>setMinimized(false));})();</script></aside>\`;`,
-  );
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidInjectDevErrorOverlay(html, overlay) {`);
-  lines.push(
-    `  return /<\\/body\\s*>/i.test(html) ? html.replace(/<\\/body\\s*>/i, overlay + "</body>") : html + overlay;`,
-  );
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidGetErrorAssetCss(error) {`);
-  lines.push(
-    `  const tags = error && (typeof error === "object" || typeof error === "function") ? error.__voidPageAssetTags : null;`,
-  );
-  lines.push(`  return tags && typeof tags.css === "string" ? tags.css : "";`);
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidInjectErrorAssetCss(html, css) {`);
-  lines.push(`  if (!css) return html;`);
-  lines.push(
-    `  return /<\\/head\\s*>/i.test(html) ? html.replace(/<\\/head\\s*>/i, css + "</head>") : css + html;`,
-  );
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidRenderErrorPage(request, status, title, error) {`);
-  lines.push(`  const heading = status + ": " + title;`);
-  lines.push(`  const prefix = status + ": ";`);
-  lines.push(
-    `  const overlay = __VOID_DEV && status === 500 && error ? __voidRenderDevErrorOverlay(request, status, title, error) : "";`,
-  );
-  lines.push(`  return \`<!doctype html>`);
-  lines.push(`<html lang="en">`);
-  lines.push(`  <head>`);
-  lines.push(`    <meta charset="utf-8">`);
-  lines.push(`    <meta name="viewport" content="width=device-width, initial-scale=1">`);
-  lines.push(`    <title>\${__voidEscapeHtml(heading)}</title>`);
-  lines.push(`    \${__voidGetErrorAssetCss(error)}`);
-  lines.push(`    <style>`);
-  lines.push(`      :root {`);
-  lines.push(`        color-scheme: light dark;`);
-  lines.push(`        font-family: \${__VOID_ERROR_PAGE_FONT_STACK};`);
-  lines.push(`        background: #f5f5f5;`);
-  lines.push(`        color: #171717;`);
-  lines.push(`      }`);
-  lines.push(`      * { box-sizing: border-box; }`);
-  lines.push(`      body {`);
-  lines.push(`        margin: 0;`);
-  lines.push(`        min-block-size: 100dvh;`);
-  lines.push(`        display: grid;`);
-  lines.push(`        place-items: center;`);
-  lines.push(`        padding: 24px;`);
-  lines.push(
-    `        background: radial-gradient(circle at top, rgba(255, 255, 255, 0.96), rgba(245, 245, 245, 0.96) 52%), linear-gradient(180deg, #fafafa 0%, #f1f1f1 100%);`,
-  );
-  lines.push(`        font: 500 16px/1.5 \${__VOID_ERROR_PAGE_FONT_STACK};`);
-  lines.push(`      }`);
-  lines.push(`      main {`);
-  lines.push(`        inline-size: min(100%, 560px);`);
-  lines.push(`        padding: 32px 36px;`);
-  lines.push(`        border: 1px solid #d4d4d8;`);
-  lines.push(`        border-radius: 32px;`);
-  lines.push(`        corner-shape: squircle;`);
-  lines.push(`        background: rgba(255, 255, 255, 0.88);`);
-  lines.push(`        text-align: center;`);
-  lines.push(`        backdrop-filter: blur(12px);`);
-  lines.push(`      }`);
-  lines.push(`      h1 {`);
-  lines.push(`        margin: 0;`);
-  lines.push(
-    `        font: 400 clamp(1.5rem, 1.2rem + 1vw, 2rem) / 1.1 \${__VOID_ERROR_PAGE_FONT_STACK};`,
-  );
-  lines.push(`        letter-spacing: -0.03em;`);
-  lines.push(`      }`);
-  lines.push(`      strong {`);
-  lines.push(`        font-weight: 600;`);
-  lines.push(`      }`);
-  lines.push(`      @media (prefers-color-scheme: dark) {`);
-  lines.push(`        :root {`);
-  lines.push(`          background: #0a0a0a;`);
-  lines.push(`          color: #f5f5f5;`);
-  lines.push(`        }`);
-  lines.push(`        body {`);
-  lines.push(
-    `          background: radial-gradient(circle at top, rgba(38, 38, 38, 0.96), rgba(10, 10, 10, 0.96) 52%), linear-gradient(180deg, #171717 0%, #0a0a0a 100%);`,
-  );
-  lines.push(`        }`);
-  lines.push(`        main {`);
-  lines.push(`          border-color: #27272a;`);
-  lines.push(`          background: rgba(23, 23, 23, 0.88);`);
-  lines.push(`        }`);
-  lines.push(`      }`);
-  lines.push(`    </style>`);
-  lines.push(`  </head>`);
-  lines.push(`  <body>`);
-  lines.push(`    <main>`);
-  lines.push(
-    `      <h1><strong>\${__voidEscapeHtml(prefix)}</strong>\${__voidEscapeHtml(title)}</h1>`,
-  );
-  lines.push(`    </main>`);
-  lines.push(`    \${overlay}`);
-  lines.push(`  </body>`);
-  lines.push(`</html>\`;`);
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function __voidCreateErrorResponse(request, status, title, error) {`);
-  lines.push(`  if (!__voidShouldServeHtmlErrorPage(request)) {`);
-  lines.push(`    return new Response(title, { status });`);
-  lines.push(`  }`);
-  lines.push(
-    `  return new Response(request.method === "HEAD" ? null : __voidRenderErrorPage(request, status, title, error), {`,
-  );
-  lines.push(`    status,`);
-  lines.push(`    headers: { "content-type": "text/html; charset=utf-8" },`);
-  lines.push(`  });`);
-  lines.push(`}`);
-  lines.push('');
+  lines.push('const serveCustomErrorPage = __errorRenderer.serveCustomPage;');
+  lines.push('app.onError(__errorRenderer.onError);');
 }
 
 export type AuthCompileOptions = {
@@ -647,10 +31,6 @@ export type AuthCompileOptions = {
 export type CompileOptions = {
   /** Absolute path to the hono module entry */
   honoPath: string;
-  /** Absolute path to the void/response module */
-  responsePath: string;
-  /** Absolute path to the void/handler module (for runtime error classes) */
-  handlerPath: string;
   /** Absolute path to the void/_env module */
   runtimeEnvPath: string;
   /** Absolute path to the void/email module (inbound `createMessageProxy`) */
@@ -729,10 +109,6 @@ export type PagesCompileOptions = {
   pagesDir: string;
   /** Pages directory relative to Vite root, e.g. "pages" — used for manifest key lookup */
   pagesDirRelative: string;
-  /** Absolute path to void/pages-protocol module */
-  protocolPath: string;
-  /** Absolute path to void/pages-head module */
-  headPath: string;
   /** Virtual module ID for the client entry (used for asset tags) */
   clientEntryId: string;
   /** Virtual module ID for the islands client entry (used for island asset tags) */
@@ -778,9 +154,8 @@ export function compileRouteTable(
 
   lines.push(`import { AsyncLocalStorage } from "node:async_hooks";`);
   lines.push(`import { Hono } from ${JSON.stringify(options.honoPath)};`);
-  lines.push(`import { convertReturnValue } from ${JSON.stringify(options.responsePath)};`);
   lines.push(
-    `import { VoidAssetRewriteError as __VoidAssetRewriteError } from ${JSON.stringify(options.handlerPath)};`,
+    `import { createRoutingRuntime as __createRoutingRuntime, createHttpRouteHandler as __createHttpRouteHandler, createErrorRenderer as __createErrorRenderer, createPageGetHandler as __createPageGetHandler, createPageMutationHandler as __createPageMutationHandler, createPagesFallback as __createPagesFallback, createModuleLoader as __createModuleLoader, createClientAssetTags as __createClientAssetTags, createManifestLoader as __createManifestLoader, createSsrFallback as __createSsrFallback, createAssetNotFound as __createAssetNotFound } from ${JSON.stringify(ROUTING_RUNTIME_PATH)};`,
   );
   if (options.nodeTarget) {
     lines.push(`const withRuntimeEnv = (_env, fn) => fn();`);
@@ -847,22 +222,6 @@ export function compileRouteTable(
   }
 
   lines.push(`const app = new Hono();`);
-  lines.push(`export const requestContext = new AsyncLocalStorage();`);
-  // WeakMap<Request, URL> — keyed on the Request the user handler sees
-  // (`c.req.raw`), value is the pre-rewrite URL. Single source of truth for
-  // `c.originalUrl` / `c.isRewritten` and the "already re-dispatched, skip
-  // routing rules" short-circuit. Populated by (a) in-worker `c.rewrite` on
-  // the new `rewriteReq`, (b) the static-rewrite middleware on re-dispatch,
-  // and (c) the entry middleware below, which migrates `X-Void-Original-URL`
-  // set by an outer edge dispatcher into the map once per request. WeakMap
-  // so entries collect when the Request is GC'd.
-  lines.push('const __voidOriginalUrls = new WeakMap();');
-  // WeakSet<Request> — marks re-dispatches that have already been through
-  // the fallback-rules phase, so the `notFound` fallback check skips them
-  // (prevents fallback→fallback cycles). Populated only by fallback rule
-  // re-dispatches, NOT by `c.rewrite` or the static-rewrite middleware —
-  // those should still get a chance at fallbacks for their target URL.
-  lines.push('const __voidFallbackHandled = new WeakSet();');
   // Known static-asset extensions — `c.rewrite()` into one of these re-enters
   // the Hono router and 404s (static asset handlers run in front of the
   // worker, not inside it). `.html` is deliberately excluded: it's ambiguous
@@ -920,166 +279,12 @@ export function compileRouteTable(
     }
   }
   const blockedExts = ASSET_EXTENSIONS.filter((e) => !usedExts.has(e));
-  if (blockedExts.length > 0) {
-    lines.push(`const __voidAssetRewriteExtRE = /\\.(${blockedExts.join('|')})$/i;`);
-  } else {
-    // Every asset extension is shadowed by a route — no blocklist needed.
-    // Match-nothing regex keeps the throw site shape unchanged.
-    lines.push('const __voidAssetRewriteExtRE = /(?!)/;');
-  }
-  // Dev-only compile-time flag gating the `X-Void-Routing` trace header.
-  // Stays `false` in production builds so the header never ships to users.
-  lines.push(`const __VOID_DEV_ROUTING = ${JSON.stringify(options.dev === true)};`);
-  // Re-wrap a terminal Response with an added `X-Void-Routing` trace header.
-  // Becomes an identity function in production because `__VOID_DEV_ROUTING`
-  // is `false`, so the header never ships — and because the constant is a
-  // literal `false`, minifiers can eliminate the whole branch.
-  lines.push('function __voidAnnotateRouting(response, trace) {');
-  lines.push('  if (!__VOID_DEV_ROUTING || !response) return response;');
-  lines.push('  const headers = new Headers(response.headers);');
-  lines.push('  headers.set("X-Void-Routing", trace);');
   lines.push(
-    '  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });',
+    `const __routingRuntime = __createRoutingRuntime(app, ${JSON.stringify({ dev: options.dev === true, nodeTarget: options.nodeTarget === true, managedDispatch, blockedAssetExtensions: blockedExts })});`,
   );
-  lines.push('}');
-  lines.push('');
-  // Internal signal consumed by managed platform dispatch: a 404 came from generated
-  // no-route handling, not from a user route intentionally returning 404.
-  // Dispatch strips the header before responding to the client.
-  lines.push('function __voidShouldMarkNoMatch(request) {');
-  lines.push('  const url = new URL(request.url);');
-  lines.push('  if (request.method !== "GET" && request.method !== "HEAD") return false;');
-  lines.push('  if (url.pathname === "/api" || url.pathname.startsWith("/api/")) return false;');
-  lines.push('  if (/\\/[^/]+\\.[^/]+$/.test(url.pathname)) return false;');
-  lines.push('  return true;');
-  lines.push('}');
-  lines.push('function __voidMarkNoMatch(request, response) {');
-  lines.push(
-    '  if (!response || response.status !== 404 || !__voidShouldMarkNoMatch(request)) return response;',
-  );
-  lines.push('  const headers = new Headers(response.headers);');
-  lines.push('  headers.set("X-Void-No-Match", "1");');
-  lines.push(
-    '  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });',
-  );
-  lines.push('}');
-  lines.push('');
-
-  // `__mergeQueryIntoLocation` is used by both the routing-rules middleware
-  // (static redirects) and the `c.redirect` wrapper below — import it up-front
-  // so it's available regardless of whether routing rules are compiled in.
-  ensureMergeQueryHelperEmitted(lines);
-
-  // Inject rewrite utility onto context — closure over `app` for re-dispatch.
-  // Also wrap `c.redirect` so dynamic redirects preserve the incoming query
-  // string the same way static `_redirects` entries do.
-  lines.push('app.use(async (c, next) => {');
-  // Migrate `X-Void-Original-URL` set by managed dispatch into the WeakMap
-  // exactly once per request. Managed dispatch strips any client-supplied
-  // value on ingress, making the header a trusted handoff. Native Cloudflare,
-  // dev, and node/bun/deno targets have no trusted dispatcher in front, so the
-  // read is skipped. In-worker rewrites populate the WeakMap directly.
-  if (managedDispatch) {
-    lines.push('  if (!__voidOriginalUrls.has(c.req.raw)) {');
-    lines.push('    const __h = c.req.raw.headers.get("X-Void-Original-URL");');
-    lines.push('    if (__h != null) {');
-    lines.push('      try { __voidOriginalUrls.set(c.req.raw, new URL(__h)); } catch {}');
-    lines.push('    }');
-    lines.push('  }');
-  }
-  lines.push('  c.rewrite = (path) => {');
-  // `path: RewriteDestination` is typed to path-absolute strings, but a
-  // leading `//` parses as a protocol-relative URL (`//host/path` →
-  // `https://host/path`) and would silently turn the re-dispatch into a
-  // cross-origin proxy. Combine both checks in one condition.
-  lines.push('    if (!path.startsWith("/") || path.startsWith("//")) {');
-  lines.push(
-    '      throw new Error("c.rewrite() only accepts internal, path-absolute destinations — they must start with a single \\"/\\" (a leading \\"//\\" parses as protocol-relative and would proxy cross-origin); use fetch() for external URLs");',
-  );
-  lines.push('    }');
-  // `URL.pathname` setter percent-encodes `?`, so split path into pathname +
-  // search to keep query strings intact when callers pass `"/page?x=1"`.
-  lines.push('    const __qIdx = path.indexOf("?");');
-  // Reject re-dispatches into static asset paths — those handlers live in
-  // front of the worker, so `app.fetch(rewriteReq)` would match nothing and
-  // return a confusing 404. Strip query/fragment before matching so callers
-  // passing cache-busters (e.g. `/hero.png?v=2`) still trip the guard.
-  lines.push('    const __hIdx = path.indexOf("#");');
-  lines.push(
-    '    const __firstDelim = __qIdx === -1 ? __hIdx : __hIdx === -1 ? __qIdx : Math.min(__qIdx, __hIdx);',
-  );
-  lines.push(
-    '    const __assetCheckPath = __firstDelim === -1 ? path : path.slice(0, __firstDelim);',
-  );
-  lines.push('    if (__voidAssetRewriteExtRE.test(__assetCheckPath)) {');
-  lines.push('      throw new __VoidAssetRewriteError(path);');
-  lines.push('    }');
-  // Strip the fragment too: `URL.pathname` setter percent-encodes `#` into
-  // `%23`, so `/foo#frag` would become `/foo%23frag` and the re-dispatched
-  // request would land at the wrong route. Fragments don't reach servers
-  // anyway, so we drop them rather than try to preserve them. The search
-  // portion still starts at `?` (if present), trimmed at `#` (if present).
-  lines.push('    const __pathOnly = __firstDelim === -1 ? path : path.slice(0, __firstDelim);');
-  lines.push(
-    '    const __searchOnly = __qIdx === -1 ? "" : path.slice(__qIdx, __hIdx === -1 ? path.length : __hIdx);',
-  );
-  lines.push('    const rewriteUrl = new URL(c.req.url);');
-  lines.push('    rewriteUrl.pathname = __pathOnly;');
-  // Only override the search when the destination carries its own query.
-  // A queryless destination (`c.rewrite("/en" + c.req.path)`) preserves the
-  // incoming query — mirrors the static-rewrite codegen below and keeps
-  // callers from having to re-append `?page=2`, OAuth callbacks, etc.
-  lines.push('    if (__searchOnly) rewriteUrl.search = __searchOnly;');
-  lines.push('    const rewriteReq = new Request(rewriteUrl.toString(), c.req.raw);');
-  // Preserve the earliest original URL across multi-hop rewrites: inherit
-  // whatever the current hop was rewritten from (or record this hop's URL
-  // if it's the first rewrite).
-  lines.push('    const __prior = __voidOriginalUrls.get(c.req.raw);');
-  lines.push('    __voidOriginalUrls.set(rewriteReq, __prior ?? new URL(c.req.url));');
-  // `c.executionCtx` is only populated on the default Cloudflare target;
-  // Hono's getter throws on node/bun/deno. Branch at compile time so we
-  // don't need a runtime try/catch that could swallow unrelated errors.
-  if (options.nodeTarget) {
-    lines.push('    const __rewritePromise = app.fetch(rewriteReq, c.env);');
-  } else {
-    lines.push('    const __rewritePromise = app.fetch(rewriteReq, c.env, c.executionCtx);');
-  }
-  lines.push('    if (!__VOID_DEV_ROUTING) return __rewritePromise;');
-  lines.push(
-    '    return __rewritePromise.then((res) => __voidAnnotateRouting(res, "c.rewrite -> " + path + " (middleware)"));',
-  );
-  lines.push('  };');
-  lines.push('  const __origRedirect = c.redirect.bind(c);');
-  lines.push('  c.redirect = (location, status) => {');
-  // `startsWith("/")` alone matches protocol-relative URLs ("//host/x"),
-  // which the browser resolves cross-origin — merging the request query
-  // there would leak params (incl. session tokens) off-origin. External
-  // and protocol-relative locations pass through to the original redirect.
-  lines.push(
-    '    if (typeof location === "string" && location.startsWith("/") && !location.startsWith("//")) {',
-  );
-  lines.push('      const search = new URL(c.req.raw.url).search;');
-  lines.push('      return __origRedirect(__mergeQueryIntoLocation(location, search), status);');
-  lines.push('    }');
-  lines.push('    return __origRedirect(location, status);');
-  lines.push('  };');
-  // Read helpers for rewrite metadata — single source is the WeakMap.
-  lines.push('  c.originalUrl = () => __voidOriginalUrls.get(c.req.raw) ?? null;');
-  lines.push('  c.isRewritten = () => __voidOriginalUrls.has(c.req.raw);');
-  lines.push('  await next();');
-  lines.push('});');
-  lines.push('');
-
-  // Request context middleware — threads outer request into ALS for isomorphic fetch
-  lines.push('app.use(async (c, next) => {');
-  if (options.nodeTarget) {
-    lines.push('  await requestContext.run({ request: c.req.raw }, next);');
-  } else {
-    lines.push(
-      '  await requestContext.run({ request: c.req.raw, executionCtx: c.executionCtx }, next);',
-    );
-  }
-  lines.push('});');
+  lines.push('export const requestContext = __routingRuntime.requestContext;');
+  lines.push('app.use(__routingRuntime.contextMiddleware);');
+  lines.push('app.use(__routingRuntime.requestMiddleware);');
   lines.push('');
 
   // Edge routing middleware. Every target without managed platform dispatch
@@ -1153,37 +358,26 @@ export function compileRouteTable(
   const seenFiles = new Set<string>();
   for (const route of scan.routes) {
     const filePath = `${routesDir}/${route.filePath}`;
-    const varName = `_mod_${route.filePath.replace(/[^a-zA-Z0-9]/g, '_')}`;
     const loaderName = `_load_${route.filePath.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
     if (!seenFiles.has(route.filePath)) {
       seenFiles.add(route.filePath);
-      if (options.dev !== true) {
-        lines.push(`let ${varName};`);
-      }
-      lines.push(`async function ${loaderName}() {`);
-      if (options.dev === true) {
-        lines.push(`  return import(${JSON.stringify(filePath)});`);
-      } else {
-        lines.push(`  if (!${varName}) ${varName} = await import(${JSON.stringify(filePath)});`);
-        lines.push(`  return ${varName};`);
-      }
-      lines.push(`}`);
+      lines.push(
+        `const ${loaderName} = __createModuleLoader(() => import(${JSON.stringify(filePath)}), ${JSON.stringify(options.dev !== true)});`,
+      );
     }
 
     if (route.methods.length === 0) {
       // No recognized HTTP exports — register as all()
-      lines.push(`app.all(${JSON.stringify(route.pattern)}, async (c) => {`);
-      lines.push(`  const mod = await ${loaderName}();`);
-      lines.push(`  return convertReturnValue(await mod.default(c));`);
-      lines.push(`});`);
+      lines.push(
+        `app.all(${JSON.stringify(route.pattern)}, __createHttpRouteHandler(${loaderName}, "default"));`,
+      );
     } else {
       for (const method of route.methods) {
         const honoMethod = method.toLowerCase();
-        lines.push(`app.${honoMethod}(${JSON.stringify(route.pattern)}, async (c) => {`);
-        lines.push(`  const mod = await ${loaderName}();`);
-        lines.push(`  return convertReturnValue(await mod.${method}(c));`);
-        lines.push(`});`);
+        lines.push(
+          `app.${honoMethod}(${JSON.stringify(route.pattern)}, __createHttpRouteHandler(${loaderName}, ${JSON.stringify(method)}));`,
+        );
       }
     }
   }
@@ -1243,211 +437,20 @@ export function compileRouteTable(
   compilePrerenderCollector(lines, scan, ssr, options);
 
   if (ssr) {
-    const clientEntryUrl = `/${ssr.clientEntryRelativePath}`;
-    lines.push(`const SSR_CLIENT_ENTRY_ID = ${JSON.stringify(ssr.clientEntryRelativePath)};`);
-    lines.push(`const SSR_CLIENT_ENTRY_URL = ${JSON.stringify(clientEntryUrl)};`);
-    lines.push(`let cachedSsrManifest = null;`);
-    lines.push('');
-    lines.push(`function escapeHtml(value) {`);
-    lines.push(`  return String(value).replace(/"/g, "&quot;");`);
-    lines.push(`}`);
-    lines.push('');
-    lines.push(`function getDevClientTags() {`);
-    lines.push(`  const preloadTags = [\`<script type="module" src="/@vite/client"></script>\`];`);
-    lines.push(`  preloadTags.push(\`${BINDING_HINT_SCRIPT}\`);`);
-    if (options.reactRefresh) {
-      lines.push(`  preloadTags.push(\`<script type="module">
-import RefreshRuntime from "/@react-refresh";
-RefreshRuntime.injectIntoGlobalHook(window);
-window.$RefreshReg$ = () => {};
-window.$RefreshSig$ = () => (type) => type;
-window.__vite_plugin_react_preamble_installed__ = true;
-</script>\`);`);
-    }
     lines.push(
-      `  const bodyTag = \`<script type="module" src="\${escapeHtml(SSR_CLIENT_ENTRY_URL)}"></script>\`;`,
-    );
-    lines.push(`  return { css: "", preloads: preloadTags.join("\\n"), body: bodyTag };`);
-    lines.push(`}`);
-    lines.push('');
-    lines.push(`function collectManifestFiles(manifest, entryId) {`);
-    lines.push(`  const seen = new Set();`);
-    lines.push(`  const toVisit = [entryId];`);
-    lines.push(`  while (toVisit.length > 0) {`);
-    lines.push(`    const currentId = toVisit.pop();`);
-    lines.push(`    if (seen.has(currentId)) continue;`);
-    lines.push(`    seen.add(currentId);`);
-    lines.push(`    const chunk = manifest[currentId];`);
-    lines.push(`    if (!chunk || !Array.isArray(chunk.imports)) continue;`);
-    lines.push(`    for (const importedId of chunk.imports) toVisit.push(importedId);`);
-    lines.push(`  }`);
-    lines.push(`  return Array.from(seen);`);
-    lines.push(`}`);
-    lines.push('');
-    lines.push(`async function loadSsrManifest(request, env) {`);
-    lines.push(`  if (cachedSsrManifest) return cachedSsrManifest;`);
-    lines.push(
-      `  if (typeof globalThis.__VITE_MANIFEST__ === "object" && globalThis.__VITE_MANIFEST__) {`,
-    );
-    lines.push(`    cachedSsrManifest = globalThis.__VITE_MANIFEST__;`);
-    lines.push(`    return cachedSsrManifest;`);
-    lines.push(`  }`);
-    lines.push(`  const assets = env?.ASSETS;`);
-    lines.push(`  if (!assets || typeof assets.fetch !== "function") return null;`);
-    lines.push(`  const manifestUrl = new URL("/.vite/manifest.json", request.url);`);
-    lines.push(`  const response = await assets.fetch(new Request(manifestUrl.toString()));`);
-    lines.push(`  if (!response.ok) return null;`);
-    lines.push(`  cachedSsrManifest = await response.json();`);
-    lines.push(`  return cachedSsrManifest;`);
-    lines.push(`}`);
-    lines.push('');
-    lines.push(`async function getClientAssetTags(request, env) {`);
-    lines.push(`  const manifest = await loadSsrManifest(request, env);`);
-    lines.push(`  if (!manifest || typeof manifest !== "object") {`);
-    lines.push(`    if (!import.meta.env.DEV) return { css: "", preloads: "", body: "" };`);
-    lines.push(`    return getDevClientTags();`);
-    lines.push(`  }`);
-    lines.push(`  const entry = manifest[SSR_CLIENT_ENTRY_ID];`);
-    lines.push(`  if (!entry || typeof entry !== "object" || typeof entry.file !== "string") {`);
-    lines.push(`    return { css: "", preloads: "", body: "" };`);
-    lines.push(`  }`);
-    lines.push(`  const ids = collectManifestFiles(manifest, SSR_CLIENT_ENTRY_ID);`);
-    lines.push(`  const cssFiles = new Set();`);
-    lines.push(`  const preloadFiles = new Set();`);
-    lines.push(`  for (const id of ids) {`);
-    lines.push(`    const chunk = manifest[id];`);
-    lines.push(`    if (!chunk || typeof chunk !== "object") continue;`);
-    lines.push(`    if (Array.isArray(chunk.css)) {`);
-    lines.push(`      for (const cssFile of chunk.css) cssFiles.add(cssFile);`);
-    lines.push(`    }`);
-    lines.push(`    if (id !== SSR_CLIENT_ENTRY_ID && typeof chunk.file === "string") {`);
-    lines.push(`      preloadFiles.add(chunk.file);`);
-    lines.push(`    }`);
-    lines.push(`  }`);
-    lines.push(`  const cssTags = [];`);
-    lines.push(`  for (const cssFile of cssFiles) {`);
-    lines.push(`    cssTags.push(\`<link rel="stylesheet" href="/\${escapeHtml(cssFile)}">\`);`);
-    lines.push(`  }`);
-    lines.push(`  const preloadTags = [];`);
-    lines.push(`  for (const preloadFile of preloadFiles) {`);
-    lines.push(
-      `    preloadTags.push(\`<link rel="modulepreload" href="/\${escapeHtml(preloadFile)}">\`);`,
-    );
-    lines.push(`  }`);
-    lines.push(
-      `  const bodyTag = \`<script type="module" src="/\${escapeHtml(entry.file)}"></script>\`;`,
+      `const getClientAssetTags = __createClientAssetTags(${JSON.stringify({ entryId: ssr.clientEntryRelativePath, entryUrl: '/' + ssr.clientEntryRelativePath, kind: 'ssr', dev: options.dev === true, reactRefresh: options.reactRefresh })});`,
     );
     lines.push(
-      `  return { css: cssTags.join("\\n"), preloads: preloadTags.join("\\n"), body: bodyTag };`,
+      `app.notFound(__createSsrFallback({ routing: __routingRuntime, nodeTarget: ${JSON.stringify(options.nodeTarget === true)}, fallbackRules: ${JSON.stringify(emitEdgeRules && options.fallbackRules?.length ? (options.dev ? options.fallbackRules : stripOriginForProd(options.fallbackRules)) : undefined)}, load: () => import(${JSON.stringify(ssr.serverEntryPath)}), assets: getClientAssetTags }));`,
     );
-    lines.push(`}`);
-    lines.push('');
-    lines.push(`function shouldHandleSsrRequest(c) {`);
-    lines.push(`  const path = c.req.path;`);
-    lines.push(`  if (path === "/api" || path.startsWith("/api/")) return false;`);
-    lines.push(`  if (/\\/[^/]+\\.[^/]+$/.test(path)) return false;`);
-    lines.push(`  const destination = c.req.header("sec-fetch-dest");`);
-    lines.push(
-      `  if (destination && destination !== "document" && destination !== "empty") return false;`,
-    );
-    lines.push(`  return true;`);
-    lines.push(`}`);
-    lines.push('');
-    lines.push(`async function fetchFromAssets(c) {`);
-    lines.push(`  const assets = c.env?.ASSETS;`);
-    lines.push(`  if (!assets || typeof assets.fetch !== "function") {`);
-    lines.push(
-      `    return __voidMarkNoMatch(c.req.raw, new Response("Not Found", { status: 404 }));`,
-    );
-    lines.push(`  }`);
-    lines.push(`  const response = await assets.fetch(c.req.raw);`);
-    lines.push(
-      `  return response.status === 404 ? __voidMarkNoMatch(c.req.raw, new Response("Not Found", { status: 404 })) : response;`,
-    );
-    lines.push(`}`);
-    lines.push('');
-    lines.push(`async function renderSsrResponse(c, mod) {`);
-    lines.push(`  const render = typeof mod.render === "function" ? mod.render : mod.default;`);
-    lines.push(`  if (typeof render !== "function") {`);
-    lines.push(`    throw new Error("ssr: Invalid entry. Export render(c, assetTags).");`);
-    lines.push(`  }`);
-    lines.push(`  const assetTags = await getClientAssetTags(c.req.raw, c.env);`);
-    lines.push(`  return render(c, assetTags);`);
-    lines.push(`}`);
-    lines.push('');
-    lines.push(`app.notFound(async (c) => {`);
-    if (options.nodeTarget && options.fallbackRules?.length) {
-      // On `node`/`bun`/`deno` the Hono app owns both routing and asset
-      // serving, so "no route matched" is already the asset-miss phase —
-      // run fallbacks before touching assets. (On the default target in dev
-      // the flow below tries assets first, see the non-SSR branch for the
-      // standalone hook and the `else` arm of this `shouldHandleSsrRequest`
-      // for the SSR-path assets-then-fallback check.)
-      emitFallbackRulesCheck(
-        lines,
-        options.fallbackRules,
-        options.dev === true,
-        '  ',
-        options.nodeTarget === true,
-      );
-    }
-    lines.push(`  if (!shouldHandleSsrRequest(c)) {`);
-    if (!options.nodeTarget && emitEdgeRules && options.fallbackRules?.length) {
-      // Cloudflare without managed dispatch (dev or native production) looks
-      // up assets first, then applies fallback rules on a 404. Managed builds
-      // let dispatch own this phase.
-      lines.push(`    const __assetRes = await fetchFromAssets(c);`);
-      lines.push(`    if (__assetRes.status !== 404) return __assetRes;`);
-      // This branch is gated on `!options.nodeTarget`, so pass `false`.
-      emitFallbackRulesCheck(lines, options.fallbackRules, options.dev === true, '    ', false);
-      lines.push(`    return __assetRes;`);
-    } else {
-      lines.push(`    return fetchFromAssets(c);`);
-    }
-    lines.push(`  }`);
-    lines.push(`  const mod = await import(${JSON.stringify(ssr.serverEntryPath)});`);
-    lines.push(`  return renderSsrResponse(c, mod);`);
-    lines.push(`});`);
-    lines.push('');
   } else if (
     emitEdgeRules &&
     (options.fallbackRules?.length || (!options.nodeTarget && options.headerRules?.length)) &&
     !(pages && scan.pages.pages.length > 0)
   ) {
-    // No SSR entry and no pages mode — emit a standalone notFound hook so
-    // Cloudflare asset responses pass through header middleware, then run
-    // `_redirects` / `routing.fallbacks` rules on asset-miss when configured.
-    // Pages mode owns its own notFound (with its own assets-first + SPA
-    // fallback logic) and injects the fallback check inline at the correct
-    // point; see `compilePageRoutes`.
-    //
-    // On `node`/`bun`/`deno` the Hono app owns asset serving, so "no route"
-    // already means "no asset" — fallbacks run straight away.
-    //
-    // On Cloudflare without managed dispatch we first ask the asset binding.
-    // Fallbacks only fire when the asset lookup also 404s.
-    lines.push(`app.notFound(async (c) => {`);
-    if (!options.nodeTarget) {
-      lines.push(`  const assets = c.env?.ASSETS;`);
-      lines.push(`  if (assets && typeof assets.fetch === "function") {`);
-      lines.push(`    const __assetRes = await assets.fetch(c.req.raw);`);
-      lines.push(`    if (__assetRes.status !== 404) return __assetRes;`);
-      lines.push(`  }`);
-    }
-    if (options.fallbackRules?.length) {
-      emitFallbackRulesCheck(
-        lines,
-        options.fallbackRules,
-        options.dev === true,
-        '  ',
-        options.nodeTarget === true,
-      );
-    }
     lines.push(
-      `  return __voidMarkNoMatch(c.req.raw, new Response("Not Found", { status: 404 }));`,
+      `app.notFound(__createAssetNotFound({ routing: __routingRuntime, nodeTarget: ${JSON.stringify(options.nodeTarget === true)}, fallbackRules: ${JSON.stringify(options.fallbackRules?.length ? (options.dev ? options.fallbackRules : stripOriginForProd(options.fallbackRules)) : undefined)} }));`,
     );
-    lines.push(`});`);
-    lines.push('');
   }
 
   if (scan.jobs.length > 0) {
@@ -1974,12 +977,6 @@ function compilePageRoutes(
   options: CompileOptions,
 ): void {
   // Import protocol helpers and renderer
-  lines.push(
-    `import { handlePageGet, handlePageMutation } from ${JSON.stringify(pages.protocolPath)};`,
-  );
-  lines.push(
-    `import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from ${JSON.stringify(pages.headPath)};`,
-  );
   lines.push(`import * as __voidPagesRenderer from "virtual:void-pages-renderer";`);
   if (options.dev) {
     lines.push(`import { getVoidPagesDevCss } from "virtual:void-pages-dev-assets";`);
@@ -2002,49 +999,6 @@ function compilePageRoutes(
   lines.push('');
   pushDefaultErrorPageHelpers(lines, options);
 
-  // Asset tags — reuse the SSR asset tags pattern with the pages client entry
-  const clientEntryId = pages.clientEntryId;
-  lines.push(`const PAGES_CLIENT_ENTRY_ID = ${JSON.stringify(clientEntryId)};`);
-  lines.push(`const PAGES_CLIENT_ENTRY_URL = ${JSON.stringify('/@id/__x00__' + clientEntryId)};`);
-  lines.push(`let cachedPagesManifest = null;`);
-  lines.push('');
-  lines.push(`function escapeHtmlAttr(value) {`);
-  lines.push(`  return String(value).replace(/"/g, "&quot;");`);
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`function getPagesDevClientTags() {`);
-  lines.push(
-    `  const preloads = \`<script type="module" src="/@vite/client"></script>\\n${BINDING_HINT_SCRIPT}\`;`,
-  );
-  lines.push(
-    `  const bodyTag = \`<script type="module" src="\${escapeHtmlAttr(PAGES_CLIENT_ENTRY_URL)}"></script>\`;`,
-  );
-  lines.push(`  return { css: "", preloads, body: bodyTag };`);
-  lines.push(`}`);
-  lines.push('');
-  if (options.dev) {
-    lines.push(`async function collectVoidDevCss(request, env, kind, componentId, rootPhases) {`);
-    lines.push(
-      `  const devCss = await getVoidPagesDevCss(request, env, { kind, componentId, rootPhases });`,
-    );
-    lines.push(`  return Array.isArray(devCss) ? devCss : [];`);
-    lines.push(`}`);
-    lines.push('');
-  }
-  lines.push(`function collectPagesManifestFiles(manifest, entryId) {`);
-  lines.push(`  const seen = new Set();`);
-  lines.push(`  const toVisit = [entryId];`);
-  lines.push(`  for (let index = 0; index < toVisit.length; index++) {`);
-  lines.push(`    const currentId = toVisit[index];`);
-  lines.push(`    if (seen.has(currentId)) continue;`);
-  lines.push(`    seen.add(currentId);`);
-  lines.push(`    const chunk = manifest[currentId];`);
-  lines.push(`    if (!chunk || !Array.isArray(chunk.imports)) continue;`);
-  lines.push(`    for (const importedId of chunk.imports) toVisit.push(importedId);`);
-  lines.push(`  }`);
-  lines.push(`  return Array.from(seen);`);
-  lines.push(`}`);
-  lines.push('');
   // Build manifest-key mapping for each page and its layout chain
   // so CSS collection can be scoped to the active route only
   const relPagesDir = pages.pagesDirRelative;
@@ -2093,203 +1047,20 @@ function compilePageRoutes(
     pageCssKeys[page.componentId] = keys;
     pageDevRootPhases[page.componentId] = routeRootPhases.filter((phase) => phase.length > 0);
   }
-  lines.push(`const PAGE_CSS_KEYS = ${JSON.stringify(pageCssKeys)};`);
-  if (options.dev) {
-    lines.push(`const PAGE_DEV_ROOT_PHASES = ${JSON.stringify(pageDevRootPhases)};`);
-  }
-  lines.push('');
-
-  lines.push(`function collectRouteCss(manifest, entryId, pageKeys) {`);
-  lines.push(`  const cssFiles = new Set();`);
-  lines.push(`  const visited = new Set();`);
-  lines.push(`  function visit(id) {`);
-  lines.push(`    if (visited.has(id)) return;`);
-  lines.push(`    visited.add(id);`);
-  lines.push(`    const chunk = manifest[id];`);
-  lines.push(`    if (!chunk) return;`);
-  lines.push(`    if (Array.isArray(chunk.css)) {`);
-  lines.push(`      for (const f of chunk.css) cssFiles.add(f);`);
-  lines.push(`    }`);
-  lines.push(`    if (Array.isArray(chunk.imports)) {`);
-  lines.push(`      for (const i of chunk.imports) visit(i);`);
-  lines.push(`    }`);
-  lines.push(`  }`);
-  lines.push(`  visit(entryId);`);
-  lines.push(`  for (const key of pageKeys) {`);
-  lines.push(`    visit(key);`);
-  lines.push(`  }`);
-  lines.push(`  return cssFiles;`);
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`async function loadPagesManifest(request, env) {`);
-  lines.push(`  if (cachedPagesManifest) return cachedPagesManifest;`);
+  lines.push('const __loadPagesManifest = __createManifestLoader();');
+  const assetMetadata = {
+    pageCssKeys,
+    devRootPhases: options.dev ? pageDevRootPhases : undefined,
+    dev: options.dev === true,
+  };
+  const devCssOption = options.dev ? ', devCss: getVoidPagesDevCss' : '';
   lines.push(
-    `  if (typeof globalThis.__VITE_MANIFEST__ === "object" && globalThis.__VITE_MANIFEST__) {`,
+    `const getPagesAssetTags = __createClientAssetTags({ ...${JSON.stringify({ ...assetMetadata, entryId: pages.clientEntryId, entryUrl: '/@id/__x00__' + pages.clientEntryId, kind: 'pages' })}${devCssOption} }, __loadPagesManifest);`,
   );
-  lines.push(`    cachedPagesManifest = globalThis.__VITE_MANIFEST__;`);
-  lines.push(`    return cachedPagesManifest;`);
-  lines.push(`  }`);
-  lines.push(`  const assets = env?.ASSETS;`);
-  lines.push(`  if (!assets || typeof assets.fetch !== "function") return null;`);
-  lines.push(`  const manifestUrl = new URL("/.vite/manifest.json", request.url);`);
-  lines.push(`  const response = await assets.fetch(new Request(manifestUrl.toString()));`);
-  lines.push(`  if (!response.ok) return null;`);
-  lines.push(`  cachedPagesManifest = await response.json();`);
-  lines.push(`  return cachedPagesManifest;`);
-  lines.push(`}`);
-  lines.push('');
-  lines.push(`async function getPagesAssetTags(request, env, componentId) {`);
-  lines.push(`  const manifest = await loadPagesManifest(request, env);`);
-  lines.push(`  if (!manifest || typeof manifest !== "object") {`);
-  lines.push(`    if (!import.meta.env.DEV) return { css: "", preloads: "", body: "" };`);
-  if (options.dev) {
-    lines.push(`    const tags = getPagesDevClientTags();`);
-    lines.push(
-      `    return { ...tags, devCss: await collectVoidDevCss(request, env, "pages", componentId, PAGE_DEV_ROOT_PHASES[componentId] || [[PAGES_CLIENT_ENTRY_URL]]) };`,
-    );
-  } else {
-    lines.push(`    return getPagesDevClientTags();`);
-  }
-  lines.push(`  }`);
-  lines.push(`  const entry = manifest[PAGES_CLIENT_ENTRY_ID];`);
-  lines.push(`  if (!entry || typeof entry !== "object" || typeof entry.file !== "string") {`);
-  lines.push(`    return { css: "", preloads: "", body: "" };`);
-  lines.push(`  }`);
-  lines.push(`  const ids = collectPagesManifestFiles(manifest, PAGES_CLIENT_ENTRY_ID);`);
-  lines.push(`  const pageKeys = componentId ? (PAGE_CSS_KEYS[componentId] || []) : [];`);
-  lines.push(`  const cssFiles = collectRouteCss(manifest, PAGES_CLIENT_ENTRY_ID, pageKeys);`);
-  lines.push(`  const preloadFiles = new Set();`);
-  lines.push(`  for (const id of ids) {`);
-  lines.push(`    const chunk = manifest[id];`);
-  lines.push(`    if (!chunk || typeof chunk !== "object") continue;`);
-  lines.push(`    if (id !== PAGES_CLIENT_ENTRY_ID && typeof chunk.file === "string") {`);
-  lines.push(`      preloadFiles.add(chunk.file);`);
-  lines.push(`    }`);
-  lines.push(`  }`);
-  lines.push(`  const cssTags = [];`);
-  lines.push(`  for (const cssFile of cssFiles) {`);
-  lines.push(`    cssTags.push(\`<link rel="stylesheet" href="/\${escapeHtmlAttr(cssFile)}">\`);`);
-  lines.push(`  }`);
-  lines.push(`  const preloadTags = [];`);
-  lines.push(`  for (const preloadFile of preloadFiles) {`);
-  lines.push(
-    `    preloadTags.push(\`<link rel="modulepreload" href="/\${escapeHtmlAttr(preloadFile)}">\`);`,
-  );
-  lines.push(`  }`);
-  lines.push(
-    `  const bodyTag = \`<script type="module" src="/\${escapeHtmlAttr(entry.file)}"></script>\`;`,
-  );
-  lines.push(
-    `  return { css: cssTags.join("\\n"), preloads: preloadTags.join("\\n"), body: bodyTag };`,
-  );
-  lines.push(`}`);
-  lines.push('');
-
-  // Island asset tags — same pattern but using the islands client entry
   if (hasIslandPages && pages.islandClientEntryId) {
-    const islandEntryId = pages.islandClientEntryId;
-    lines.push(`const ISLANDS_CLIENT_ENTRY_ID = ${JSON.stringify(islandEntryId)};`);
     lines.push(
-      `const ISLANDS_CLIENT_ENTRY_URL = ${JSON.stringify('/@id/__x00__' + islandEntryId)};`,
+      `const getIslandsAssetTags = __createClientAssetTags({ ...${JSON.stringify({ ...assetMetadata, entryId: pages.islandClientEntryId, entryUrl: '/@id/__x00__' + pages.islandClientEntryId, extraEntryId: pages.mdClientEntryId, extraEntryUrl: pages.mdClientEntryId ? '/@id/__x00__' + pages.mdClientEntryId : undefined, kind: 'islands' })}${devCssOption} }, __loadPagesManifest);`,
     );
-    if (pages.mdClientEntryId) {
-      lines.push(`const MD_CLIENT_ENTRY_ID = ${JSON.stringify(pages.mdClientEntryId)};`);
-      lines.push(
-        `const MD_CLIENT_ENTRY_URL = ${JSON.stringify('/@id/__x00__' + pages.mdClientEntryId)};`,
-      );
-    }
-    lines.push('');
-    lines.push(`function getIslandsDevClientTags() {`);
-    lines.push(
-      `  const preloads = \`<script type="module" src="/@vite/client"></script>\\n${BINDING_HINT_SCRIPT}\`;`,
-    );
-    lines.push(
-      `  let bodyTag = \`<script type="module" src="\${escapeHtmlAttr(ISLANDS_CLIENT_ENTRY_URL)}"></script>\`;`,
-    );
-    if (pages.mdClientEntryId) {
-      lines.push(
-        `  bodyTag += \`\\n<script type="module" src="\${escapeHtmlAttr(MD_CLIENT_ENTRY_URL)}"></script>\`;`,
-      );
-    }
-    lines.push(`  return { css: "", preloads, body: bodyTag };`);
-    lines.push(`}`);
-    lines.push('');
-    lines.push(`async function getIslandsAssetTags(request, env, componentId) {`);
-    lines.push(`  const manifest = await loadPagesManifest(request, env);`);
-    lines.push(`  if (!manifest || typeof manifest !== "object") {`);
-    lines.push(`    if (!import.meta.env.DEV) return { css: "", preloads: "", body: "" };`);
-    if (options.dev) {
-      lines.push(`    const tags = getIslandsDevClientTags();`);
-      lines.push(
-        `    return { ...tags, devCss: await collectVoidDevCss(request, env, "islands", componentId, PAGE_DEV_ROOT_PHASES[componentId] || [[ISLANDS_CLIENT_ENTRY_URL]]) };`,
-      );
-    } else {
-      lines.push(`    return getIslandsDevClientTags();`);
-    }
-    lines.push(`  }`);
-    lines.push(`  const entry = manifest[ISLANDS_CLIENT_ENTRY_ID];`);
-    lines.push(`  if (!entry || typeof entry !== "object" || typeof entry.file !== "string") {`);
-    lines.push(`    return { css: "", preloads: "", body: "" };`);
-    lines.push(`  }`);
-    lines.push(`  const ids = collectPagesManifestFiles(manifest, ISLANDS_CLIENT_ENTRY_ID);`);
-    // Collect md entry files too
-    if (pages.mdClientEntryId) {
-      lines.push(`  const mdEntry = manifest[MD_CLIENT_ENTRY_ID];`);
-      lines.push(`  if (mdEntry && typeof mdEntry.file === "string") {`);
-      lines.push(`    const mdIds = collectPagesManifestFiles(manifest, MD_CLIENT_ENTRY_ID);`);
-      lines.push(`    for (const mdId of mdIds) ids.push(mdId);`);
-      lines.push(`  }`);
-    }
-    // Collect route-scoped CSS (page + layout chunks) plus static-import CSS
-    lines.push(`  const pageKeys = componentId ? (PAGE_CSS_KEYS[componentId] || []) : [];`);
-    lines.push(`  const cssFiles = collectRouteCss(manifest, ISLANDS_CLIENT_ENTRY_ID, pageKeys);`);
-    if (pages.mdClientEntryId) {
-      // Also collect CSS from the md client entry's static imports
-      lines.push(`  if (mdEntry && typeof mdEntry.file === "string") {`);
-      lines.push(`    const mdKeys = [];`);
-      lines.push(`    const mdCss = collectRouteCss(manifest, MD_CLIENT_ENTRY_ID, mdKeys);`);
-      lines.push(`    for (const f of mdCss) cssFiles.add(f);`);
-      lines.push(`  }`);
-    }
-    lines.push(`  const preloadFiles = new Set();`);
-    lines.push(`  for (const id of ids) {`);
-    lines.push(`    const chunk = manifest[id];`);
-    lines.push(`    if (!chunk || typeof chunk !== "object") continue;`);
-    // Exclude entry points from preloads (they get their own <script> tags)
-    const excludeFromPreload = pages.mdClientEntryId
-      ? `id !== ISLANDS_CLIENT_ENTRY_ID && id !== MD_CLIENT_ENTRY_ID`
-      : `id !== ISLANDS_CLIENT_ENTRY_ID`;
-    lines.push(`    if (${excludeFromPreload} && typeof chunk.file === "string") {`);
-    lines.push(`      preloadFiles.add(chunk.file);`);
-    lines.push(`    }`);
-    lines.push(`  }`);
-    lines.push(`  const cssTags = [];`);
-    lines.push(`  for (const cssFile of cssFiles) {`);
-    lines.push(
-      `    cssTags.push(\`<link rel="stylesheet" href="/\${escapeHtmlAttr(cssFile)}">\`);`,
-    );
-    lines.push(`  }`);
-    lines.push(`  const preloadTags = [];`);
-    lines.push(`  for (const preloadFile of preloadFiles) {`);
-    lines.push(
-      `    preloadTags.push(\`<link rel="modulepreload" href="/\${escapeHtmlAttr(preloadFile)}">\`);`,
-    );
-    lines.push(`  }`);
-    lines.push(
-      `  let bodyTag = \`<script type="module" src="/\${escapeHtmlAttr(entry.file)}"></script>\`;`,
-    );
-    if (pages.mdClientEntryId) {
-      lines.push(`  if (mdEntry && typeof mdEntry.file === "string") {`);
-      lines.push(
-        `    bodyTag += \`\\n<script type="module" src="/\${escapeHtmlAttr(mdEntry.file)}"></script>\`;`,
-      );
-      lines.push(`  }`);
-    }
-    lines.push(
-      `  return { css: cssTags.join("\\n"), preloads: preloadTags.join("\\n"), body: bodyTag };`,
-    );
-    lines.push(`}`);
-    lines.push('');
   }
 
   // Generate lazy loaders and route registrations for each page
@@ -2306,15 +1077,10 @@ function compilePageRoutes(
     // Generate lazy loader for server module (if any)
     if (serverImportPath && !seenServerFiles.has(serverImportPath)) {
       seenServerFiles.add(serverImportPath);
-      const varName = `_pmod_${safeId}`;
       const loaderName = `_pload_${safeId}`;
-      lines.push(`let ${varName};`);
-      lines.push(`async function ${loaderName}() {`);
       lines.push(
-        `  if (!${varName}) ${varName} = await import(${JSON.stringify(serverImportPath)});`,
+        `const ${loaderName} = __createModuleLoader(() => import(${JSON.stringify(serverImportPath)}));`,
       );
-      lines.push(`  return ${varName};`);
-      lines.push(`}`);
     }
 
     // Generate inline head function for markdown pages without .server.ts
@@ -2338,177 +1104,23 @@ function compilePageRoutes(
       page.renderMode === 'island' && pages.islandClientEntryId
         ? 'getIslandsAssetTags'
         : 'getPagesAssetTags';
-    const renderOptions = `, ${JSON.stringify({ renderMode: page.renderMode })}`;
-
-    // Loader (always registered — pages always handle GET)
-    lines.push(`app.get(${JSON.stringify(page.pattern)}, async (c) => {`);
-    if (serverImportPath) {
-      const loaderName = `_pload_${safeId}`;
-      lines.push(`  const mod = await ${loaderName}();`);
-      lines.push(
-        `  return handlePageGet(mod.loader, mod.head, c, ${JSON.stringify(page.componentId)}, ${renderer}, ${assetTags}, __voidHeadConfig${renderOptions});`,
-      );
-    } else {
-      const headArg = mdHeadRef ?? 'undefined';
-      lines.push(
-        `  return handlePageGet(undefined, ${headArg}, c, ${JSON.stringify(page.componentId)}, ${renderer}, ${assetTags}, __voidHeadConfig${renderOptions});`,
-      );
-    }
-    lines.push(`});`);
-
-    // Action (POST, PUT, PATCH, DELETE all route to action)
+    const routeOptions = `{ ${serverImportPath ? 'load: _pload_' + safeId + ', ' : ''}${mdHeadRef ? 'head: ' + mdHeadRef + ', ' : ''}componentId: ${JSON.stringify(page.componentId)}, render: ${renderer}, assets: ${assetTags}, headConfig: __voidHeadConfig, renderOptions: ${JSON.stringify({ renderMode: page.renderMode })} }`;
+    lines.push(
+      `app.get(${JSON.stringify(page.pattern)}, __createPageGetHandler(${routeOptions}));`,
+    );
     if (page.methods.includes('action') || page.methods.includes('actions')) {
-      const loaderName = `_pload_${safeId}`;
       lines.push(
-        `app.on(["POST", "PUT", "PATCH", "DELETE"], ${JSON.stringify(page.pattern)}, async (c) => {`,
+        `app.on(["POST", "PUT", "PATCH", "DELETE"], ${JSON.stringify(page.pattern)}, __createPageMutationHandler({ ...${routeOptions}, namedActions: ${JSON.stringify(page.methods.includes('actions'))} }));`,
       );
-      lines.push(`  const mod = await ${loaderName}();`);
-
-      if (page.methods.includes('actions')) {
-        // Named actions — resolve from query string
-        lines.push(`  const actionName = new URL(c.req.url).searchParams.keys().next().value;`);
-        lines.push(
-          `  const handler = actionName ? mod.actions?.[actionName] : mod.actions?.default;`,
-        );
-        lines.push(
-          `  if (!handler) return new Response("Unknown action" + (actionName ? ": " + actionName : ""), { status: 404 });`,
-        );
-      } else {
-        // Single action (backward compat)
-        lines.push(`  const handler = mod.action;`);
-      }
-
-      lines.push(
-        `  return handlePageMutation(handler, mod.loader, mod.head, c, ${JSON.stringify(page.componentId)}, ${renderer}, ${assetTags}, __voidHeadConfig${renderOptions});`,
-      );
-      lines.push(`});`);
     }
   }
   lines.push('');
 
-  // Asset fallback — delegates to env.ASSETS binding (static files from dist/client)
-  lines.push(`async function fetchPagesAsset(c) {`);
-  lines.push(`  if (c.req.method !== "GET" && c.req.method !== "HEAD") {`);
-  lines.push(`    return new Response("Not Found", { status: 404 });`);
-  lines.push(`  }`);
-  lines.push(`  const assets = c.env?.ASSETS;`);
-  lines.push(`  if (!assets || typeof assets.fetch !== "function") {`);
-  lines.push(
-    `    return __voidMarkNoMatch(c.req.raw, new Response("Not Found", { status: 404 }));`,
-  );
-  lines.push(`  }`);
-  lines.push(`  return assets.fetch(c.req.raw);`);
-  lines.push(`}`);
-  lines.push('');
-
-  // Custom error page helper — serves {status}.html from static assets (e.g. 404.html, 500.html)
-  lines.push(`async function serveCustomErrorPage(c, status, fallbackText, error) {`);
-  lines.push(`  try {`);
-  lines.push(`    const assets = c.env?.ASSETS;`);
-  lines.push(`    if (assets && typeof assets.fetch === "function") {`);
-  lines.push(`      const errReq = new Request(new URL("/" + status + ".html", c.req.url));`);
-  lines.push(`      const errRes = await assets.fetch(errReq);`);
-  lines.push(`      if (errRes.ok) {`);
-  lines.push(`        const assetCss = __voidGetErrorAssetCss(error);`);
-  lines.push(`        if (assetCss) {`);
-  lines.push(`          const html = __voidInjectErrorAssetCss(await errRes.text(), assetCss);`);
-  lines.push(
-    `          const body = __VOID_DEV && status === 500 && error && __voidShouldServeHtmlErrorPage(c.req.raw) ? __voidInjectDevErrorOverlay(html, __voidRenderDevErrorOverlay(c.req.raw, status, fallbackText, error)) : html;`,
-  );
-  lines.push(`          return new Response(c.req.method === "HEAD" ? null : body, {`);
-  lines.push(`            status,`);
-  lines.push(`            headers: { "content-type": "text/html; charset=utf-8" },`);
-  lines.push(`          });`);
-  lines.push(`        }`);
-  lines.push(
-    `        if (__VOID_DEV && status === 500 && error && __voidShouldServeHtmlErrorPage(c.req.raw)) {`,
-  );
-  lines.push(
-    `          const overlay = __voidRenderDevErrorOverlay(c.req.raw, status, fallbackText, error);`,
-  );
-  lines.push(`          const html = await errRes.text();`);
-  lines.push(
-    `          return new Response(c.req.method === "HEAD" ? null : __voidInjectDevErrorOverlay(html, overlay), {`,
-  );
-  lines.push(`            status,`);
-  lines.push(`            headers: { "content-type": "text/html; charset=utf-8" },`);
-  lines.push(`          });`);
-  lines.push(`        }`);
-  lines.push(
-    `        return new Response(errRes.body, { status, headers: { "content-type": "text/html; charset=utf-8" } });`,
-  );
-  lines.push(`      }`);
-  lines.push(`    }`);
-  lines.push(`  } catch {}`);
-  lines.push(`  return __voidCreateErrorResponse(c.req.raw, status, fallbackText, error);`);
-  lines.push(`}`);
-  lines.push('');
-
-  // Global error handler — preserve HTTPException responses (e.g. 401 from requireAuth),
-  // serve custom 500.html for unexpected errors
-  lines.push(`app.onError((err, c) => {`);
-  lines.push(
-    `  if (err && typeof err === "object" && "getResponse" in err) return err.getResponse();`,
-  );
-  lines.push(`  console.error(err);`);
-  lines.push(`  return serveCustomErrorPage(c, 500, "Internal Server Error", err);`);
-  lines.push(`});`);
-  lines.push('');
-
-  // Page fallback — for unmatched non-API paths, try static assets first,
-  // then serve the app's custom/default 404 page.
-  // Uses notFound (not get("*")) so Vite's module pipeline can serve .vue/.ts files in dev.
-  lines.push(`app.notFound(async (c) => {`);
-  lines.push(`  const path = c.req.path;`);
-  lines.push(`  if (path === "/api" || path.startsWith("/api/")) {`);
-  lines.push(`    return c.text("Not Found", 404);`);
-  lines.push(`  }`);
-  lines.push(`  if (c.req.method !== "GET" && c.req.method !== "HEAD") {`);
-  lines.push(`    return c.text("Not Found", 404);`);
-  lines.push(`  }`);
-  // Try static assets for any path (not just dot-containing last segments)
-  lines.push(`  const assetRes = await fetchPagesAsset(c);`);
-  lines.push(`  if (assetRes.status !== 404) return assetRes;`);
-  // Post-asset fallback phase — `routing.fallbacks` / plain `_redirects 200`
-  // rules re-dispatch through the app when assets miss but before the SPA
-  // fallback renders. Targets without managed dispatch emit this themselves;
-  // managed bundles rely on the platform dispatch worker.
   const managedDispatch =
     options.nodeTarget !== true && options.dev !== true && options.managedDispatch === true;
-  if (!managedDispatch && options.fallbackRules?.length) {
-    emitFallbackRulesCheck(
-      lines,
-      options.fallbackRules,
-      options.dev === true,
-      '  ',
-      options.nodeTarget === true,
-    );
-  }
-  // Dot-prefixed path segments (/.well-known/, /.env, /.git/) are never pages — 404
-  lines.push(`  if (path.includes("/.")) {`);
-  lines.push(`    return serveCustomErrorPage(c, 404, "Not Found");`);
-  lines.push(`  }`);
-  // If the last path segment contains a dot (e.g. style.css, favicon.ico),
-  // treat it as a file request — serve 404 so the browser doesn't parse HTML as a file
-  lines.push(`  const lastSeg = path.substring(path.lastIndexOf("/") + 1);`);
-  lines.push(`  if (lastSeg.includes(".")) {`);
-  lines.push(`    return serveCustomErrorPage(c, 404, "Not Found");`);
-  lines.push(`  }`);
-  // Non-root trailing slash — page routes never have trailing slashes,
-  // so redirect /foo/ → /foo (301) instead of falling into the SPA fallback
-  lines.push(`  if (path !== "/" && path.endsWith("/")) {`);
-  lines.push(`    const url = new URL(c.req.url);`);
-  lines.push(`    url.pathname = path.slice(0, -1);`);
-  lines.push(`    return Response.redirect(url.href, 301);`);
-  lines.push(`  }`);
-  // All page routes are registered as explicit Hono handlers above.
-  // Any path reaching here is genuinely unknown — serve the app's custom
-  // 404 page when available, otherwise fall back to Void's default one.
   lines.push(
-    `  return __voidMarkNoMatch(c.req.raw, await serveCustomErrorPage(c, 404, "Not Found"));`,
+    `app.notFound(__createPagesFallback({ routing: __routingRuntime, errors: __errorRenderer, fallbackRules: ${JSON.stringify(!managedDispatch && options.fallbackRules?.length ? (options.dev ? options.fallbackRules : stripOriginForProd(options.fallbackRules)) : undefined)} }));`,
   );
-  lines.push(`});`);
-  lines.push('');
 }
 
 /**
@@ -2532,99 +1144,8 @@ export function compileAssetFallbackHelper(
   serveSpaFallback = false,
   notFound: NotFoundHandling = 'none',
 ): string {
-  // `404-page`: the asset binding served its nearest `404.html` WITH a 404
-  // status, so the `asset.status !== 404` guard above discards it and the
-  // worker's generic body wins — making `routing.notFound: '404-page'` inert on
-  // every worker-first app. Pass the asset response through instead of fetching
-  // `/404.html` by hand: Cloudflare's `404-page` handling is directory-aware
-  // ("nearest 404.html"), a hardcoded root path is not. Guarded on an HTML
-  // content-type because with no `404.html` anywhere the binding answers a bare
-  // 404, and the worker's own response is the better answer then.
-  //
-  // Also gated on the REQUEST accepting HTML — same guard the SPA-fallback
-  // branch below uses, and for the same reason. `serveWithAssets` wraps EVERY
-  // app response with no path filtering, so without this a GET/HEAD API handler
-  // that deliberately answers 404 with JSON has its body, content-type, and any
-  // middleware-set headers (CORS included) replaced by the site's HTML 404 page.
-  // `routing.notFound` is about document navigations; on the asset-first shape
-  // this branch is reached ONLY on `run_worker_first` paths (`/api/*`,
-  // `/__void/*`), where an HTML 404 page is never the right answer.
-  const notFoundPageCode = `  const accept = request.headers.get("accept") ?? "";
-  const assetContentType = asset.headers.get("content-type") ?? "";
-  if (accept.includes("text/html") && assetContentType.includes("text/html")) {
-    const res = new Response(asset.body, asset);
-    res.headers.set("Cache-Control", "no-store");
-    return res;
-  }
-  return response;`;
-
-  const fallthroughCode = serveSpaFallback
-    ? `  // SPA fallback: when HTML-owning features make
-  // assetConfig.not_found_handling = 'none', the asset binding returns 404
-  // instead of falling back to index.html itself. Do that fallback here, after
-  // user routes/middleware have run, so auth gates and OAuth callbacks see the request first.
-  // Pages and SSR apps leave this disabled so intentional HTML 404s stay 404.
-  const accept = request.headers.get("accept") ?? "";
-  if (accept.includes("text/html")) {
-    const indexUrl = new URL("/index.html", request.url);
-    const indexAsset = await env.ASSETS.fetch(new Request(indexUrl, { method: request.method }));
-    if (indexAsset.status === 200) {
-      const res = new Response(indexAsset.body, {
-        status: 200,
-        headers: indexAsset.headers,
-      });
-      res.headers.set("Cache-Control", "no-store");
-      res.headers.set("Content-Type", "text/html; charset=utf-8");
-      return res;
-    }
-  }
-  return response;`
-    : notFound === '404-page'
-      ? notFoundPageCode
-      : `  return response;`;
-
-  return `
-const __voidAssetContentTypes = {
-  ".avif": "image/avif",
-  ".css": "text/css; charset=utf-8",
-  ".gif": "image/gif",
-  ".html": "text/html; charset=utf-8",
-  ".ico": "image/x-icon",
-  ".jpeg": "image/jpeg",
-  ".jpg": "image/jpeg",
-  ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".mjs": "text/javascript; charset=utf-8",
-  ".png": "image/png",
-  ".svg": "image/svg+xml",
-  ".txt": "text/plain; charset=utf-8",
-  ".wasm": "application/wasm",
-  ".webp": "image/webp",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-};
-
-async function serveWithAssets(request, env, response) {
-  if (response.status !== 404 || !env.ASSETS || (request.method !== "GET" && request.method !== "HEAD")) return response;
-  const asset = await env.ASSETS.fetch(new Request(request.url, { method: request.method, headers: request.headers }));
-  if (asset.status !== 404) {
-    const res = new Response(asset.body, asset);
-    const pathname = new URL(request.url).pathname;
-    // Directly uploaded assets can reach the binding without a MIME type.
-    if (!res.headers.get("Content-Type")) {
-      const filename = pathname.slice(pathname.lastIndexOf("/") + 1);
-      const contentType = __voidAssetContentTypes[filename.slice(filename.lastIndexOf(".")).toLowerCase()];
-      if (contentType) res.headers.set("Content-Type", contentType);
-    }
-    if (pathname.startsWith(${JSON.stringify('/' + assetsDir + '/')})) {
-      res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
-    } else {
-      res.headers.set("Cache-Control", "no-store");
-    }
-    return res;
-  }
-${fallthroughCode}
-}
+  return `import { createAssetFallback as __createAssetFallback } from ${JSON.stringify(ROUTING_RUNTIME_PATH)};
+const serveWithAssets = __createAssetFallback(${JSON.stringify({ assetsDir, serveSpaFallback, notFound })});
 `;
 }
 
@@ -2789,49 +1310,9 @@ export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
   const envValidateCall = envSchemaModule ? '  await _validateEnvOnce(env);\n' : '';
   // Discovery reads route metadata in a build-time worker without remote
   // secrets. Readiness and application requests must still validate at boot.
-  const fetchEnvValidateCall = envSchemaModule
-    ? '  if (request.method !== "POST" || new URL(request.url).pathname !== "/__void/prerender-paths") await _validateEnvOnce(env);\n'
-    : '';
-
-  // Filter internal platform bindings so user code cannot access them via c.env.
-  // The original env is preserved for framework internals (withRuntimeEnv, etc.).
-  // Prefixes derived from INTERNAL_BINDING_PREFIXES (shared with env.ts).
-  // ISR_CACHE (the self-host ISR KV binding) is hidden by exact name ONLY when
-  // ISR is emitted — it exists only then (the emitIsr gate). When ISR is absent
-  // the filter stays prefix-only, byte-identical to the pre-ISR base entry, and
-  // a user's own binding named ISR_CACHE (if any) is preserved. `handleIsr`
-  // reads the raw env, so hiding ISR_CACHE from userEnv is safe.
   const exactNames = isr ? INTERNAL_BINDING_EXACT_NAMES : [];
-  const prefixCheck = [
-    ...INTERNAL_BINDING_PREFIXES.map((p) => `prop.startsWith(${JSON.stringify(p)})`),
-    ...exactNames.map((n) => `prop === ${JSON.stringify(n)}`),
-  ].join(' || ');
-  const prefixCheckNeg = [
-    ...INTERNAL_BINDING_PREFIXES.map((p) => `!key.startsWith(${JSON.stringify(p)})`),
-    ...exactNames.map((n) => `key !== ${JSON.stringify(n)}`),
-  ].join(' && ');
-  const filterBindingsHelper = `
-function __filterInternalBindings(env) {
-  return new Proxy(env, {
-    get(target, prop, receiver) {
-      if (typeof prop === "string" && (${prefixCheck})) return undefined;
-      return Reflect.get(target, prop, receiver);
-    },
-    has(target, prop) {
-      if (typeof prop === "string" && (${prefixCheck})) return false;
-      return Reflect.has(target, prop);
-    },
-    ownKeys(target) {
-      return Reflect.ownKeys(target).filter(
-        (key) => typeof key !== "string" || (${prefixCheckNeg})
-      );
-    },
-    getOwnPropertyDescriptor(target, prop) {
-      if (typeof prop === "string" && (${prefixCheck})) return undefined;
-      return Reflect.getOwnPropertyDescriptor(target, prop);
-    },
-  });
-}
+  const filterBindingsHelper = `import { filterInternalBindings as __filterBindings, createWorkerFetch as __createWorkerFetch } from ${JSON.stringify(ROUTING_RUNTIME_PATH)};
+const __filterInternalBindings = (env) => __filterBindings(env, ${JSON.stringify(INTERNAL_BINDING_PREFIXES)}, ${JSON.stringify(exactNames)});
 `;
 
   const assetHelper = compileAssetFallbackHelper(assetsDir, serveSpaFallback, notFound);
@@ -2842,79 +1323,15 @@ function __filterInternalBindings(env) {
   const isrImport = isr
     ? `import { handleIsr } from ${JSON.stringify(isr.runtimePath)};\nimport { __VOID_ISR_REVALIDATE, __VOID_ISR_PAGES, __VOID_ISR_PATH_REVALIDATE, __VOID_ISR_DEPLOYMENT_ID } from 'virtual:void-routes';\n`
     : '';
-  // Capture deployment id + host on the raw env at the top of fetch(), before
-  // dispatch — always, so `revalidate()` (which reads the raw env) can see them
-  // even on requests that never hit the ISR render ladder. The deployment id is
-  // invariant (`??=`), but the host MUST track the CURRENT request: a warm env
-  // object can be reused across hostnames, so `??=` would freeze it to the first
-  // host ever seen and make `revalidate()` from a second custom domain read the
-  // wrong host. Assign it every fetch.
-  const isrEnvCapture = isr
-    ? `  env.__VOID_ISR_DEPLOYMENT_ID ??= __VOID_ISR_DEPLOYMENT_ID;\n  env.__VOID_ISR_HOST = new URL(request.url).hostname;\n`
-    : '';
-  // Scheduled/queue handlers have no request, so there is no host to stamp — but
-  // they still need the deployment id on the raw env so an on-demand
-  // `revalidate()` called from a cron or queue consumer can find it and purge KV
-  // (edge-cache deletes are skipped when host is undefined, per runtime/isr.ts).
   const isrDeploymentStamp = isr
     ? `  env.__VOID_ISR_DEPLOYMENT_ID ??= __VOID_ISR_DEPLOYMENT_ID;\n`
     : '';
-  // Render site: unchanged single line when ISR is off; otherwise the render
-  // closure is threaded through the ISR cache ladder (only when ISR_CACHE binds).
-  const renderBlock = isr
-    ? `      const __render = async (req) => serveWithAssets(req, env, await app.fetch(req, userEnv, ctx));
-      if (env.ISR_CACHE && request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-        const __isr = await handleIsr(request, env, ctx, { revalidate: __VOID_ISR_REVALIDATE, pages: __VOID_ISR_PAGES, pathRevalidate: __VOID_ISR_PATH_REVALIDATE, deploymentId: __VOID_ISR_DEPLOYMENT_ID, queryAllowlist: ${JSON.stringify(isr?.queryAllowlist)} }, __render);
-        if (__isr) return __isr;
-      }
-      return __render(request);`
-    : `      return serveWithAssets(request, env, await app.fetch(request, userEnv, ctx));`;
-
-  const fetchHandler = remotePath
-    ? `async (request, env, ctx) => {
-${fetchEnvValidateCall}  if (env.__VOID_REMOTE === "1") env = ${createRemoteEnvCall};
-${isrEnvCapture}  return __withRawEnv(env, () => {
-    const userEnv = __filterInternalBindings(env);
-    return withRuntimeEnv(env, async () => {
-      const internal = await __handleInternal(request, env, ctx);
-      if (internal) return internal;
-${renderBlock}
-    });
-  });
-}`
-    : `async (request, env, ctx) => {
-${fetchEnvValidateCall}${isrEnvCapture}  return __withRawEnv(env, () => {
-    const userEnv = __filterInternalBindings(env);
-    return withRuntimeEnv(env, async () => {
-      const internal = await __handleInternal(request, env, ctx);
-      if (internal) return internal;
-${renderBlock}
-    });
-  });
-}`;
-
-  const internalRouteHelper = `async function __handleInternal(request, env, ctx) {
-  const url = new URL(request.url);
-  ${hasEmail ? `if (url.pathname === "/__void/email/receipt/v1") return __handleEmailReceipt(request, env, ctx);` : ''}
-  // Readiness probe — platform polls this to confirm the worker is live after WfP upload.
-  // Handled here (before app.fetch) so user middleware cannot block it.
-  if (request.method === "GET" && url.pathname === "/__void/ready") {
-    return Response.json({ ready: true });
-  }
-  const routeInternal = await __voidHandleInternalRoute(request, env, ctx);
-  if (routeInternal) return routeInternal;
-  if (request.method !== "POST" || url.pathname !== "/__void/prerender-paths") return null;
-  const __expected = env.__VOID_PROXY_TOKEN;
-  if (__expected) {
-    const __token = request.headers.get("x-void-internal");
-    if (!__token || __token !== __expected) {
-      return Response.json({ error: "unauthorized" }, { status: 401 });
-    }
-  }
-  const paths = await __voidCollectPrerenderPaths(request, env, ctx);
-  return Response.json({ paths });
-}`;
-
+  const fetchHandler = `__createWorkerFetch({
+    app, assets: serveWithAssets, withRawEnv: __withRawEnv, withRuntimeEnv,
+    filterBindings: __filterInternalBindings,
+    internalRoute: __voidHandleInternalRoute,
+    collectPrerenderPaths: __voidCollectPrerenderPaths${envSchemaModule ? ', validateEnv: _validateEnvOnce' : ''}${remotePath ? ', remoteEnv: (env) => ' + createRemoteEnvCall : ''}${hasEmail ? ', emailReceipt: __handleEmailReceipt' : ''}${isr ? ', isr: { deploymentId: __VOID_ISR_DEPLOYMENT_ID, handle: (request, env, ctx, render) => handleIsr(request, env, ctx, { revalidate: __VOID_ISR_REVALIDATE, pages: __VOID_ISR_PAGES, pathRevalidate: __VOID_ISR_PATH_REVALIDATE, deploymentId: __VOID_ISR_DEPLOYMENT_ID, queryAllowlist: ' + JSON.stringify(isr.queryAllowlist) + ' }, render) }' : ''}
+  })`;
   const scheduledHandler = remotePath
     ? `async function handleScheduled(controller, env, ctx) {
 ${envValidateCall}  if (env.__VOID_REMOTE === "1") env = ${createRemoteEnvCall};
@@ -3018,7 +1435,6 @@ ${queueMethodBody}${emailMethodBody}}`;
   if (hasQueues) {
     return `${sandboxImport}${entryImport}${liveRuntimeImport}import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleInternalRoute, __withRawEnv, __processQueue${emailImport}${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''}${liveRouteImport} } from 'virtual:void-routes';
 ${durableObjectImports}\n${runtimeEnvImport}${emailProxyImport}${envSchemaImport}${remoteImport}${isrImport}${filterBindingsHelper}${assetHelper}
-${internalRouteHelper}
 ${fetchDeclaration}
 ${scheduledHandler}
 ${emailHandler}
@@ -3052,7 +1468,6 @@ ${entryClass}`;
   }
   return `${sandboxImport}${entryImport}${liveRuntimeImport}import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleInternalRoute, __withRawEnv${emailImport}${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''}${liveRouteImport} } from 'virtual:void-routes';
 ${durableObjectImports}\n${runtimeEnvImport}${emailProxyImport}${envSchemaImport}${remoteImport}${isrImport}${filterBindingsHelper}${assetHelper}
-${internalRouteHelper}
 ${fetchDeclaration}
 ${scheduledHandler}
 ${emailHandler}
@@ -3237,270 +1652,25 @@ export async function fetch(path, options) {
 }`;
 }
 
-/** Import the shared cached routing helpers only for modules that use rules. */
-function ensureCompilePatternEmitted(lines: Array<string>): void {
-  if (lines.some((line) => line.includes('compilePattern as __compilePattern'))) {
-    return;
-  }
-  lines.push(
-    `import { compilePattern as __compilePattern, substituteParams as __substituteParams } from ${JSON.stringify(EDGE_MODULE_PATH)};`,
-  );
-  lines.push('const __matchPatternWarned = new Set();');
-  lines.push('function __matchPattern(pattern, pathname) {');
-  lines.push('  try {');
-  lines.push('    return __compilePattern(pattern).regex.test(pathname);');
-  lines.push('  } catch (err) {');
-  lines.push('    if (!__matchPatternWarned.has(pattern)) {');
-  lines.push('      __matchPatternWarned.add(pattern);');
-  lines.push(
-    '      console.warn(`[void] failed to compile route pattern ${JSON.stringify(pattern)}: ${err && err.message ? err.message : err}`);',
-  );
-  lines.push('    }');
-  lines.push('    return false;');
-  lines.push('  }');
-  lines.push('}');
-  lines.push('');
-}
-
-function ensureMergeQueryHelperEmitted(lines: Array<string>): void {
-  if (lines.some((line) => line.includes('mergeQueryIntoLocation as __mergeQueryIntoLocation'))) {
-    return;
-  }
-  lines.push(
-    `import { mergeQueryIntoLocation as __mergeQueryIntoLocation } from ${JSON.stringify(EDGE_MODULE_PATH)};`,
-  );
-}
-
-/**
- * Shared body for routing-rule evaluation: match rules in order (last wins),
- * substitute captures into destination, handle rewrite (200) or redirect (3xx).
- * Used by both the pre-pipeline routing middleware and the post-pipeline
- * fallback (notFound) middleware.
- */
-function emitApplyRoutingRules(
-  lines: Array<string>,
-  rulesVar: string,
-  indent: string,
-  nodeTarget: boolean,
-  markFallbackHandled: boolean = false,
-): void {
-  lines.push(`${indent}let matched;`);
-  lines.push(`${indent}for (const rule of ${rulesVar}) {`);
-  // Host-scoped rules: skip when `rule.host` is set and doesn't match the
-  // request's hostname. Path-only rules apply to every host. Mirrors the
-  // host filter in dispatch's `applyRoutingRules`.
-  lines.push(`${indent}  if (rule.host && rule.host !== requestHost) continue;`);
-  // A malformed rule.source (e.g. `:id/:id` or `:splat`+`*` colliding on
-  // the same group name) makes `new RegExp` throw inside __compilePattern.
-  // Build-time validators reject those, but a hand-crafted manifest could
-  // still reach the worker — skip the offending rule rather than 500ing
-  // every request that hits this middleware. Mirrors dispatch's
-  // applyRoutingRules try/catch (packages/dispatch/src/routing-rules.ts).
-  lines.push(`${indent}  let regex;`);
-  lines.push(`${indent}  try {`);
-  lines.push(`${indent}    ({ regex } = __compilePattern(rule.source));`);
-  lines.push(`${indent}  } catch (err) {`);
-  lines.push(`${indent}    if (!__matchPatternWarned.has(rule.source)) {`);
-  lines.push(`${indent}      __matchPatternWarned.add(rule.source);`);
-  lines.push(
-    `${indent}      console.warn(\`[void] skipping routing rule with invalid source \${JSON.stringify(rule.source)}: \${err && err.message ? err.message : err}\`);`,
-  );
-  lines.push(`${indent}    }`);
-  lines.push(`${indent}    continue;`);
-  lines.push(`${indent}  }`);
-  lines.push(`${indent}  const m = regex.exec(pathname);`);
-  // First-match-wins: assign and break, mirroring dispatch's
-  // `applyRoutingRules`. Header rules use last-match-wins for `_headers`
-  // compat — the asymmetry is intentional.
-  lines.push(`${indent}  if (m) { matched = { rule, params: m.groups || {} }; break; }`);
-  lines.push(`${indent}}`);
-  lines.push(`${indent}if (matched) {`);
-  lines.push(
-    `${indent}  const dest = __substituteParams(matched.rule.destination, matched.params);`,
-  );
-  lines.push(`${indent}  if (matched.rule.status === 200) {`);
-  // Config-level validation already rejects `?` in rewrite/fallback
-  // destinations, but split pathname + search here anyway so emitted code
-  // stays defensive and parallel with the `c.rewrite` helper above.
-  lines.push(`${indent}    const __qIdx = dest.indexOf("?");`);
-  lines.push(`${indent}    const __pathOnly = __qIdx === -1 ? dest : dest.slice(0, __qIdx);`);
-  lines.push(`${indent}    const __searchOnly = __qIdx === -1 ? "" : dest.slice(__qIdx);`);
-  lines.push(`${indent}    const rewriteUrl = new URL(c.req.url);`);
-  lines.push(`${indent}    rewriteUrl.pathname = __pathOnly;`);
-  lines.push(`${indent}    if (__searchOnly) rewriteUrl.search = __searchOnly;`);
-  lines.push(`${indent}    const rewriteReq = new Request(rewriteUrl.toString(), c.req.raw);`);
-  // Seed the WeakMap so re-dispatched handlers see the pre-rewrite URL via
-  // `c.originalUrl()` / `c.isRewritten()`. Inherit a prior hop's value if
-  // one exists (multi-hop via `c.rewrite` from user middleware that wraps
-  // a static rewrite).
-  lines.push(`${indent}    const __prior = __voidOriginalUrls.get(c.req.raw);`);
-  lines.push(`${indent}    __voidOriginalUrls.set(rewriteReq, __prior ?? new URL(c.req.url));`);
-  if (markFallbackHandled) {
-    // Fallback rule re-dispatch: tag the next hop so its `notFound` won't
-    // re-enter the fallback phase (single-hop fallback semantics, parity
-    // with dispatch's single `applyRoutingRules(fallbackRules, ...)` call).
-    lines.push(`${indent}    __voidFallbackHandled.add(rewriteReq);`);
-  }
-  // Branch at compile time on target — Hono's `c.executionCtx` getter throws
-  // on node/bun/deno targets where the ExecutionContext is absent.
-  if (nodeTarget) {
-    lines.push(`${indent}    const __r = await app.fetch(rewriteReq, c.env);`);
-  } else {
-    lines.push(`${indent}    const __r = await app.fetch(rewriteReq, c.env, c.executionCtx);`);
-  }
-  lines.push(`${indent}    if (!__VOID_DEV_ROUTING) return __r;`);
-  lines.push(`${indent}    const __kind = matched.rule.force === true ? "rewrite" : "fallback";`);
-  lines.push(
-    `${indent}    const __trace = __kind + "[" + matched.rule.source + "] -> " + dest + " (" + (matched.rule.origin || "unknown") + ")";`,
-  );
-  lines.push(`${indent}    return __voidAnnotateRouting(__r, __trace);`);
-  lines.push(`${indent}  }`);
-  lines.push(
-    `${indent}  const location = __mergeQueryIntoLocation(dest, new URL(c.req.url).search);`,
-  );
-  lines.push(`${indent}  const __redir = c.redirect(location, matched.rule.status);`);
-  lines.push(`${indent}  if (!__VOID_DEV_ROUTING) return __redir;`);
-  lines.push(
-    `${indent}  const __rtrace = "redirect[" + matched.rule.source + "] -> " + dest + " " + matched.rule.status + " (" + (matched.rule.origin || "unknown") + ")";`,
-  );
-  lines.push(`${indent}  return __voidAnnotateRouting(__redir, __rtrace);`);
-  lines.push(`${indent}}`);
-}
-
-/**
- * Strip dev-only `origin` metadata from a rule list before embedding in the
- * generated worker code. Keeps production bundles free of authoring hints.
- *
- * Keep in sync with `stripDevOnlyRuleFields` in `cli/package.ts`. This helper
- * intentionally preserves `force` because the Node/Bun/Deno-target codegen
- * reads it at runtime to label the `X-Void-Routing` trace header as either
- * `rewrite[...]` (force) or `fallback[...]`. The CLI version strips both
- * fields because the deploy manifest never transmits either to the dispatch
- * worker (phase is implied by which bucket the rule ships in).
- */
 function stripOriginForProd(rules: Array<DevRedirectRule>): Array<DevRedirectRule> {
   return rules.map(({ origin: _origin, ...rest }) => rest);
 }
 
-/**
- * Emit routing rules middleware — handles both redirects (3xx) and rewrites (200).
- * Last match wins. Rewrites re-dispatch with a guard header to prevent loops.
- * Redirects preserve the request's query string in the Location header.
- *
- * When `dev === true` the per-rule `origin` metadata is preserved in the
- * compiled rule table and a matched rule's trace is emitted on the
- * `X-Void-Routing` response header. In production the origin field is
- * stripped and no trace header is emitted.
- */
 function compileRoutingRulesMiddleware(
   lines: Array<string>,
   rules: Array<DevRedirectRule>,
   dev: boolean,
-  nodeTarget: boolean,
+  _nodeTarget: boolean,
 ): void {
-  ensureCompilePatternEmitted(lines);
   lines.push('// Routing rules: redirects + rewrites (applied before route handlers)');
   lines.push(`const __routingRules = ${JSON.stringify(dev ? rules : stripOriginForProd(rules))};`);
-  lines.push('app.use("*", async (c, next) => {');
-  // Re-dispatched rewrites short-circuit: the outer caller (either a static
-  // rule or a user `c.rewrite()`) owns annotating the final response, so
-  // we intentionally don't set a trace header here.
-  lines.push('  if (__voidOriginalUrls.has(c.req.raw)) return next();');
-  lines.push('  const __reqUrl = new URL(c.req.url);');
-  lines.push('  const pathname = __reqUrl.pathname;');
-  lines.push('  const requestHost = __reqUrl.hostname;');
-  emitApplyRoutingRules(lines, '__routingRules', '  ', nodeTarget);
-  if (dev) {
-    // No static rule matched — let the pipeline run, then annotate the final
-    // response with a default pass-through trace (unless downstream already
-    // set one, e.g. from a middleware `c.rewrite()` hop).
-    lines.push('  await next();');
-    lines.push('  if (__VOID_DEV_ROUTING && c.res && !c.res.headers.has("X-Void-Routing")) {');
-    // Some runtimes produce Responses with guarded/immutable Headers; silently
-    // skip the trace annotation rather than crashing the dev middleware.
-    lines.push('    try { c.res.headers.set("X-Void-Routing", "pass-through"); } catch {}');
-    lines.push('  }');
-  } else {
-    lines.push('  return next();');
-  }
-  lines.push('});');
-  lines.push('');
+  lines.push('app.use("*", __routingRuntime.routingMiddleware(__routingRules));');
 }
 
-/**
- * Emit a fallback-rule check inside Hono's `notFound` hook. Fires only when
- * the pipeline didn't match a route — the "asset-miss / no route matched"
- * phase. Re-dispatches through `app.fetch` on a rule match so the re-dispatched
- * request runs through the full middleware + route stack with
- * `X-Void-Original-URL` set; falls through to the caller's existing notFound
- * body when no rule matches.
- *
- * Indent `indent` so the emitted statements nest cleanly within the caller's
- * block. Expects `__matchPattern`, `__voidOriginalUrls`, `__mergeQueryIntoLocation`,
- * `__substituteParams`, and `__voidAnnotateRouting` to already be in scope —
- * which they are, because `compileRoutingRulesMiddleware` runs earlier in
- * compile order and emits every one of them.
- */
-function emitFallbackRulesCheck(
-  lines: Array<string>,
-  rules: Array<DevRedirectRule>,
-  dev: boolean,
-  indent: string,
-  nodeTarget: boolean,
-): void {
-  ensureCompilePatternEmitted(lines);
-  // Emit the rule table once; reference from the notFound body. The table is
-  // hoisted to module scope so multiple notFound call sites see the same
-  // constant — today there's only one, but leaving the door open costs nothing.
-  const tableMarker = '// Fallback rules (applied on no-match, post-route)';
-  if (!lines.includes(tableMarker)) {
-    lines.push(tableMarker);
-    lines.push(
-      `const __fallbackRules = ${JSON.stringify(dev ? rules : stripOriginForProd(rules))};`,
-    );
-    lines.push('');
-  }
-  // Single-hop guard: skip when this request was itself produced by a
-  // fallback re-dispatch. User `c.rewrite` and static-rewrite middleware
-  // re-dispatches are NOT marked here — they should still get a chance at
-  // fallbacks for the rewrite target (`/old → /new` then `/new` matches
-  // a fallback, or `c.rewrite('/missing')` where `/missing` is a fallback
-  // source). See `__voidFallbackHandled` declaration above.
-  lines.push(`${indent}if (!__voidFallbackHandled.has(c.req.raw)) {`);
-  lines.push(`${indent}  const __reqUrl = new URL(c.req.url);`);
-  lines.push(`${indent}  const pathname = __reqUrl.pathname;`);
-  lines.push(`${indent}  const requestHost = __reqUrl.hostname;`);
-  emitApplyRoutingRules(lines, '__fallbackRules', `${indent}  `, nodeTarget, true);
-  lines.push(`${indent}}`);
-}
-
-/**
- * Emit header middleware — applies matching header rules to every response.
- * All matching rules merge; last match wins for same header name.
- */
 function compileHeaderMiddleware(lines: Array<string>, rules: Array<HeaderRule>): void {
-  ensureCompilePatternEmitted(lines);
   lines.push('// Header rules (applied to responses)');
   lines.push(`const __headerRules = ${JSON.stringify(rules)};`);
-  lines.push('app.use("*", async (c, next) => {');
-  lines.push('  await next();');
-  lines.push('  const pathname = new URL(c.req.url).pathname;');
-  lines.push('  const matched = [];');
-  lines.push('  for (const rule of __headerRules) {');
-  lines.push('    if (__matchPattern(rule.pattern, pathname)) matched.push(...rule.headers);');
-  lines.push('  }');
-  lines.push('  if (matched.length === 0) return;');
-  lines.push('  const headers = new Headers(c.res.headers);');
-  lines.push('  for (const [name, value] of matched) {');
-  lines.push('    headers.set(name, value);');
-  lines.push('  }');
-  lines.push('  c.res = new Response(c.res.body, {');
-  lines.push('    headers,');
-  lines.push('    status: c.res.status,');
-  lines.push('    statusText: c.res.statusText,');
-  lines.push('  });');
-  lines.push('});');
-  lines.push('');
+  lines.push('app.use("*", __routingRuntime.headerMiddleware(__headerRules));');
 }
 
 export function compileWorkerClient(authClientPath: string): string {
