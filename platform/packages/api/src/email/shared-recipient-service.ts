@@ -1,5 +1,5 @@
 import { and, asc, eq, ne, sql } from 'drizzle-orm';
-import type { Db } from '../db.ts';
+import type { Db, DbOrTx } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { generateId } from '../id.ts';
 import { CloudflareApiError } from '../provisioning/cloudflare-api.ts';
@@ -12,6 +12,7 @@ import {
 } from './connection-schema.ts';
 import {
   credentialFor,
+  EMAIL_OPERATION_RECOVERY_MIN_AGE_MS,
   EmailOperationError,
   emailInstallationId,
   inspectEmailInboundRoute,
@@ -20,6 +21,240 @@ import {
 type Bindings = ApiEnv['Bindings'];
 type Recipient = typeof emailSharedRecipients.$inferSelect;
 const LEASE_MS = 15 * 60_000;
+
+async function recipientConnection(db: DbOrTx, env: Bindings, row: Recipient) {
+  const [resolved] = await db
+    .select()
+    .from(emailDomainRoutes)
+    .innerJoin(emailZoneConnections, eq(emailZoneConnections.id, emailDomainRoutes.connection_id))
+    .where(eq(emailDomainRoutes.id, row.route_id))
+    .limit(1);
+  const configured = env as Bindings & {
+    EMAIL_SHARED_ACCOUNT_ID?: string;
+    EMAIL_SHARED_ZONE_ID?: string;
+    EMAIL_SHARED_INGRESS_NAME?: string;
+  };
+  const connection = resolved?.email_zone_connections;
+  if (
+    !connection ||
+    resolved.email_domain_routes.addressing !== 'shared' ||
+    connection.installation_id !== row.installation_id ||
+    row.installation_id !== emailInstallationId(env) ||
+    connection.managed_by !== 'admin' ||
+    connection.account_id !== env.CF_ACCOUNT_ID ||
+    connection.account_id !== configured.EMAIL_SHARED_ACCOUNT_ID ||
+    connection.zone_id !== configured.EMAIL_SHARED_ZONE_ID ||
+    connection.ingress_worker_name !== configured.EMAIL_SHARED_INGRESS_NAME
+  ) {
+    throw new EmailOperationError(
+      'Shared recipient cleanup identity does not match this installation',
+    );
+  }
+  return connection;
+}
+
+/** Explicit operator recovery shares the existing 24-hour provider-write fence.
+ * Absence alone never authorizes retry: the operator must attest execution ended
+ * and its audited outcome, then apply the exact preview after fresh readback. */
+export async function inspectSharedEmailRecipientRecovery(
+  db: Db,
+  env: Bindings,
+  id: string,
+  outcome: 'applied' | 'not-applied',
+) {
+  if (outcome !== 'applied' && outcome !== 'not-applied') {
+    throw new EmailOperationError('Provider outcome must be applied or not-applied', 400);
+  }
+  const [row] = await db
+    .select()
+    .from(emailSharedRecipients)
+    .where(eq(emailSharedRecipients.id, id));
+  if (!row) {
+    throw new EmailOperationError('Shared recipient intent not found', 404);
+  }
+  if (!row.create_started_at || row.rule_id || row.status === 'removed') {
+    throw new EmailOperationError('Shared recipient has no ambiguous creation to resolve', 409);
+  }
+  const eligibleAt = new Date(
+    Date.parse(row.create_started_at) + EMAIL_OPERATION_RECOVERY_MIN_AGE_MS,
+  ).toISOString();
+  if (
+    Date.parse(eligibleAt) > Date.now() ||
+    (row.status === 'reconciling' && Date.parse(row.lease_started_at ?? '') > Date.now() - LEASE_MS)
+  ) {
+    throw new EmailOperationError(
+      `Shared recipient cannot be resolved before ${eligibleAt} or while reconciliation is running`,
+      409,
+    );
+  }
+  const connection = await recipientConnection(db, env, row);
+  const [project] = await db.select().from(projects).where(eq(projects.id, row.project_id));
+  if (!project) {
+    throw new EmailOperationError('Shared recipient project is unavailable', 409);
+  }
+  const client = createCfCustomerClient(await credentialFor(env, db, connection));
+  const inspectRules = async () => {
+    const rules = await client.listRoutingRules(connection.zone_id);
+    const named = rules.filter((rule) => rule.name === row.rule_name);
+    if (
+      named.length > 1 ||
+      named.some(
+        (rule) => !isOwnedSharedRecipientRule(rule, row, connection.ingress_worker_name),
+      ) ||
+      rules.some(
+        (rule) =>
+          ruleConflicts(rule, row.recipient) &&
+          !isOwnedSharedRecipientRule(rule, row, connection.ingress_worker_name),
+      )
+    ) {
+      throw new EmailOperationError(
+        'Shared recipient provider ownership is conflicting or changed',
+        409,
+      );
+    }
+    return named[0] ?? null;
+  };
+  const listed = await inspectRules();
+  let providerRuleId: string | null = null;
+  if (outcome === 'applied') {
+    const exact = listed?.id ? await client.getRoutingRule(connection.zone_id, listed.id) : null;
+    if (!exact || !isOwnedSharedRecipientRule(exact, row, connection.ingress_worker_name)) {
+      throw new EmailOperationError(
+        'The exact owned shared recipient rule must be present to confirm applied',
+        409,
+      );
+    }
+    providerRuleId = exact.id;
+  } else if (listed || (await inspectRules())) {
+    throw new EmailOperationError(
+      'A shared recipient rule is present; inspect its applied outcome instead',
+      409,
+    );
+  }
+  const target = {
+    id: row.id,
+    projectId: row.project_id,
+    projectSlug: project.slug,
+    projectStatus: project.status,
+    recipient: row.recipient,
+    ruleName: row.rule_name,
+    createStartedAt: row.create_started_at,
+    attempt: row.attempt,
+    removing: row.removing,
+    status: row.status,
+    leaseStartedAt: row.lease_started_at,
+    routeId: row.route_id,
+    connectionId: connection.id,
+    accountId: connection.account_id,
+    zoneId: connection.zone_id,
+    workerName: connection.ingress_worker_name,
+    providerRuleId,
+    eligibleAt,
+    outcome,
+  };
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(
+      JSON.stringify([
+        target,
+        row.route_id,
+        row.status,
+        row.lease_started_at,
+        project.slug,
+        project.status,
+      ]),
+    ),
+  );
+  const recoveryFence = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+  return { ...target, recoveryFence };
+}
+
+export async function resolveSharedEmailRecipientCreation(
+  db: Db,
+  env: Bindings,
+  input: {
+    id: string;
+    outcome: 'applied' | 'not-applied';
+    ended: true;
+    reason: string;
+    recoveryFence: string;
+  },
+) {
+  if (input.ended !== true || !input.reason.trim()) {
+    throw new EmailOperationError(
+      'Confirm the original execution ended and provide a provider audit reason',
+      400,
+    );
+  }
+  const fence = await inspectSharedEmailRecipientRecovery(db, env, input.id, input.outcome);
+  if (input.recoveryFence !== fence.recoveryFence) {
+    throw new EmailOperationError(
+      'Shared recipient recovery preview changed; inspect a new plan',
+      409,
+    );
+  }
+  return db.transaction(async (tx) => {
+    const [project] = await tx
+      .select()
+      .from(projects)
+      .where(eq(projects.id, fence.projectId))
+      .for('update');
+    const [current] = await tx
+      .select()
+      .from(emailSharedRecipients)
+      .where(eq(emailSharedRecipients.id, input.id))
+      .for('update');
+    if (
+      !project ||
+      project.slug !== fence.projectSlug ||
+      project.status !== fence.projectStatus ||
+      !current ||
+      current.attempt !== fence.attempt ||
+      current.create_started_at !== fence.createStartedAt ||
+      current.rule_id ||
+      current.removing !== fence.removing ||
+      current.status !== fence.status ||
+      current.lease_started_at !== fence.leaseStartedAt ||
+      current.route_id !== fence.routeId ||
+      (current.status === 'reconciling' &&
+        Date.parse(current.lease_started_at ?? '') > Date.now() - LEASE_MS)
+    ) {
+      throw new EmailOperationError(
+        'Shared recipient recovery was superseded; inspect a new plan',
+        409,
+      );
+    }
+    const currentConnection = await recipientConnection(tx, env, current);
+    if (
+      currentConnection.id !== fence.connectionId ||
+      currentConnection.account_id !== fence.accountId ||
+      currentConnection.zone_id !== fence.zoneId ||
+      currentConnection.ingress_worker_name !== fence.workerName
+    ) {
+      throw new EmailOperationError(
+        'Shared recipient recovery ownership changed; inspect a new plan',
+        409,
+      );
+    }
+    const [resolved] = await tx
+      .update(emailSharedRecipients)
+      .set({
+        rule_id: fence.providerRuleId,
+        create_started_at: null,
+        status: current.removing ? 'blocked' : 'pending',
+        reason: `Operator confirmed ${input.outcome}: ${input.reason}`,
+        attempt: current.attempt + 1,
+        lease_started_at: null,
+        observed_at: sql`now()`,
+        updated_at: sql`now()`,
+      })
+      .where(eq(emailSharedRecipients.id, current.id))
+      .returning({ id: emailSharedRecipients.id, status: emailSharedRecipients.status });
+    return resolved!;
+  });
+}
 
 async function sharedRoute(db: Db, env: Bindings) {
   if (!env.EMAIL_SENDER_DOMAIN) {
@@ -457,37 +692,7 @@ export async function removeSharedEmailRecipients(
       ),
     );
   for (const initial of rows) {
-    const [connectionRow] = await db
-      .select()
-      .from(emailDomainRoutes)
-      .innerJoin(emailZoneConnections, eq(emailZoneConnections.id, emailDomainRoutes.connection_id))
-      .where(eq(emailDomainRoutes.id, initial.route_id))
-      .limit(1);
-    if (
-      !connectionRow ||
-      connectionRow.email_zone_connections.installation_id !== initial.installation_id
-    ) {
-      throw new EmailOperationError('Shared recipient cleanup identity is unavailable');
-    }
-    const connection = connectionRow.email_zone_connections;
-    const configured = env as Bindings & {
-      EMAIL_SHARED_ACCOUNT_ID?: string;
-      EMAIL_SHARED_ZONE_ID?: string;
-      EMAIL_SHARED_INGRESS_NAME?: string;
-    };
-    if (
-      connectionRow.email_domain_routes.addressing !== 'shared' ||
-      initial.installation_id !== emailInstallationId(env) ||
-      connection.managed_by !== 'admin' ||
-      connection.account_id !== env.CF_ACCOUNT_ID ||
-      connection.account_id !== configured.EMAIL_SHARED_ACCOUNT_ID ||
-      connection.zone_id !== configured.EMAIL_SHARED_ZONE_ID ||
-      connection.ingress_worker_name !== configured.EMAIL_SHARED_INGRESS_NAME
-    ) {
-      throw new EmailOperationError(
-        'Shared recipient cleanup identity does not match this installation',
-      );
-    }
+    const connection = await recipientConnection(db, env, initial);
     const row = await db.transaction(async (tx) => {
       const [current] = await tx
         .select()

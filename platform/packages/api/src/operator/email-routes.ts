@@ -1,4 +1,4 @@
-import { asc, count, eq, inArray } from 'drizzle-orm';
+import { and, asc, count, eq, inArray } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { capabilityMiddleware } from '../capabilities.ts';
@@ -16,9 +16,15 @@ import {
   setProjectEmailLimits,
 } from '../email/admission.ts';
 import { lookupMxOverDns } from '../email/cf-domain-probes.ts';
-import { emailDomainRoutes, emailZoneConnections } from '../email/connection-schema.ts';
+import {
+  emailDomainRoutes,
+  emailSharedRecipients,
+  emailZoneConnections,
+} from '../email/connection-schema.ts';
 import {
   EmailOperationError,
+  EMAIL_OPERATION_RECOVERY_MIN_AGE_MS,
+  emailInstallationId,
   inspectUnknownEmailOperationRecovery,
   replaceBlockedSystemEmailCleanupCredential,
   resolveUnknownEmailOperation,
@@ -50,6 +56,10 @@ import {
   setEmailRecipientPolicy,
   type EmailRecipientPolicy,
 } from '../email/settings.ts';
+import {
+  inspectSharedEmailRecipientRecovery,
+  resolveSharedEmailRecipientCreation,
+} from '../email/shared-recipient-service.ts';
 import type { ApiEnv } from '../env.ts';
 import { projects } from '../schema.ts';
 import { dryRun, OperatorError, pagination, preview, readBody, stringField } from './common.ts';
@@ -371,6 +381,104 @@ emailOperatorRoutes.post('/email/attempts/:id/resolve', async (context) => {
         error.code === 'NOT_FOUND' ? 404 : error.code === 'INVALID_STATE' ? 409 : 400,
         error.message,
         error.code.toLowerCase(),
+      );
+    }
+    throw error;
+  }
+});
+
+emailOperatorRoutes.get('/email/shared-recipients', async (context) => {
+  const db = context.get('db');
+  const selector = context.req.query('project');
+  const projectId = selector ? (await resolveProject(db, selector)).id : undefined;
+  const { page, limit, offset } = pagination(context);
+  const where = and(
+    eq(emailSharedRecipients.installation_id, emailInstallationId(context.env)),
+    projectId ? eq(emailSharedRecipients.project_id, projectId) : undefined,
+  );
+  const [rows, totals] = await Promise.all([
+    db
+      .select()
+      .from(emailSharedRecipients)
+      .where(where)
+      .orderBy(asc(emailSharedRecipients.created_at), asc(emailSharedRecipients.id))
+      .limit(limit)
+      .offset(offset),
+    db.select({ total: count() }).from(emailSharedRecipients).where(where),
+  ]);
+  const recipients = rows.map((row) => ({
+    id: row.id,
+    projectId: row.project_id,
+    recipient: row.recipient,
+    ruleName: row.rule_name,
+    ruleId: row.rule_id,
+    status: row.status,
+    reason: row.reason,
+    removing: row.removing,
+    attempt: row.attempt,
+    createStartedAt: row.create_started_at,
+    eligibleAt: row.create_started_at
+      ? new Date(
+          Date.parse(row.create_started_at) + EMAIL_OPERATION_RECOVERY_MIN_AGE_MS,
+        ).toISOString()
+      : null,
+  }));
+  const total = totals[0]?.total ?? 0;
+  return context.json({
+    recipients,
+    page,
+    limit,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / limit)),
+  });
+});
+
+emailOperatorRoutes.post('/email/shared-recipients/:id/resolve', async (context) => {
+  const body = await readBody(context);
+  const id = context.req.param('id');
+  const outcome = stringField(body, 'outcome', { maxLength: 32 });
+  const reason = stringField(body, 'reason', { maxLength: 500 });
+  if (
+    (outcome !== 'applied' && outcome !== 'not-applied') ||
+    body.ended !== true ||
+    !reason.trim()
+  ) {
+    throw new OperatorError(
+      400,
+      'Supply --ended, --outcome applied|not-applied, and a provider audit --reason.',
+      'invalid_argument',
+    );
+  }
+  try {
+    const db = context.get('db');
+    const action = 'email.shared-recipient.resolve';
+    if (dryRun(body)) {
+      const target = await inspectSharedEmailRecipientRecovery(db, context.env, id, outcome);
+      return context.json(
+        preview(action, target, {
+          reason,
+          effect:
+            outcome === 'applied'
+              ? 'Record the exact owned provider rule without replaying creation. Delivery remains unready until normal reconciliation verifies it.'
+              : 'Release the verified creation intent for normal reconciliation or project cleanup. No provider write occurs during recovery.',
+        }),
+      );
+    }
+    const recoveryFence = stringField(body, 'recoveryFence', { maxLength: 64 });
+    const result = await resolveSharedEmailRecipientCreation(db, context.env, {
+      id,
+      outcome,
+      ended: true,
+      reason,
+      recoveryFence,
+    });
+    return context.json({ action, target: { id, outcome }, ...result });
+  } catch (error) {
+    if (error instanceof EmailOperationError) {
+      throw new OperatorError(
+        error.status === 404 ? 404 : error.status === 400 ? 400 : 409,
+        error.message,
+        error.status === 404 ? 'not_found' : 'invalid_state',
       );
     }
     throw error;

@@ -190,6 +190,15 @@ function auditTarget(
         reason: boundedString(body.reason, 500),
       });
     }
+    if (segments[1] === 'shared-recipients' && segments[3] === 'resolve') {
+      return JSON.stringify({
+        recipientId: pathIdentifier(segments[2]),
+        ended: body.ended === true,
+        outcome: boundedString(body.outcome, 32),
+        reason: boundedString(body.reason, 500),
+        recoveryFence: boundedString(body.recoveryFence, 64),
+      });
+    }
     // Never the credential: `apiToken` rides the add body and stays out.
     const domain = boundedString(segments[2], 253, true);
     if (segments[1] === 'domains' && segments.length === 2) {

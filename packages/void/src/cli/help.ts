@@ -72,7 +72,9 @@ function operatorHelpTree(): HelpTree {
                         },
                       ]
                     : []),
-                  ...(['list', 'events', 'logs', 'attempts'].includes(entry.action)
+                  ...(['list', 'events', 'logs', 'attempts', 'shared-recipients'].includes(
+                    entry.action,
+                  )
                     ? [
                         {
                           command: '--limit <number>',

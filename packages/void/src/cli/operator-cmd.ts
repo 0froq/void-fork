@@ -609,10 +609,24 @@ export async function runOperatorCommand(args: OperatorArgs): Promise<void> {
         'invalid_preview',
       );
     }
-    const recoveryFence =
+    let recoveryFence: Record<string, unknown> =
       args.group === 'email' && args.action === 'operation-resolve'
         ? operationRecoveryFence(preview.target)
         : {};
+    if (args.group === 'email' && args.action === 'shared-recipient-resolve') {
+      const target = preview.target as Record<string, unknown> | null;
+      if (
+        !target ||
+        typeof target.recoveryFence !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(target.recoveryFence)
+      ) {
+        throw new OperatorClientError(
+          'The server did not return a valid shared recipient recovery fence. No change was requested.',
+          'invalid_preview',
+        );
+      }
+      recoveryFence = { recoveryFence: target.recoveryFence };
+    }
     if (!(await confirmOperatorMutation(origin, preview, args))) {
       return;
     }

@@ -375,6 +375,40 @@ describe('operator argument and help coverage', () => {
     });
   });
   it('routes the email domain verbs', () => {
+    expect(
+      parseOperatorArgs([
+        'email',
+        'shared-recipients',
+        '--project',
+        'app',
+        '--page',
+        '2',
+        '--limit',
+        '10',
+      ]),
+    ).toMatchObject({
+      method: 'GET',
+      path: '/email/shared-recipients',
+      query: { project: 'app', page: '2', limit: '10' },
+    });
+    expect(
+      parseOperatorArgs([
+        'email',
+        'shared-recipient-resolve',
+        'erec/id',
+        '--ended',
+        '--outcome',
+        'not-applied',
+        '--reason',
+        'Provider audit confirms absence',
+        '--yes',
+      ]),
+    ).toMatchObject({
+      method: 'POST',
+      path: '/email/shared-recipients/erec%2Fid/resolve',
+      body: { ended: true, outcome: 'not-applied', reason: 'Provider audit confirms absence' },
+      yes: true,
+    });
     expect(parseOperatorArgs(['email', 'domains', '--project', 'hr-portal'])).toMatchObject({
       method: 'GET',
       path: '/email/domains',
@@ -1024,6 +1058,47 @@ describe('operator transport and execution', () => {
       routeId: 'edr_1',
       routeDesiredGeneration: 3,
     });
+  });
+  it('pins shared recipient recovery to the inspected preview and rejects missing fences', async () => {
+    vi.stubEnv('VOID_API_URL', 'https://one.example');
+    vi.stubEnv('VOID_OPERATOR_TOKEN', 'operator-token');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          dryRun: true,
+          action: 'email.shared-recipient.resolve',
+          target: { recoveryFence: 'a'.repeat(64) },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ status: 'pending' }));
+    vi.stubGlobal('fetch', fetcher);
+    const args = parseOperatorArgs([
+      'email',
+      'shared-recipient-resolve',
+      'erec_1',
+      '--ended',
+      '--outcome',
+      'not-applied',
+      '--reason',
+      'Provider audit completed',
+      '--yes',
+    ]);
+    await runOperatorCommand(args);
+    expect(JSON.parse(String(fetcher.mock.calls[1]![1]!.body))).toEqual({
+      ended: true,
+      outcome: 'not-applied',
+      reason: 'Provider audit completed',
+      recoveryFence: 'a'.repeat(64),
+    });
+    fetcher
+      .mockReset()
+      .mockResolvedValueOnce(
+        Response.json({ dryRun: true, action: 'email.shared-recipient.resolve', target: {} }),
+      );
+    await expect(runOperatorCommand(args)).rejects.toMatchObject({ code: 'invalid_preview' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
   it('drains runtime cursors and rejects repeated cursors instead of spinning', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});

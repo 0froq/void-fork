@@ -10,6 +10,23 @@ These commands apply to a platform that enables email. Every project can send fr
 
 Shared inbound mail uses one exact routing rule per project and enables Cloudflare’s per-zone plus addressing. Existing rules and the apex catch-all remain in place. Cloudflare normally allows [200 routing rules per domain](https://developers.cloudflare.com/email-service/platform/limits/); remove unused rules or request a higher limit if the shared domain reaches capacity. An unrelated rule for a project’s base address or a plus address blocks its setup until that conflict is removed.
 
+If recipient creation is interrupted, inspect its retained intent:
+
+```sh
+void platform email shared-recipients --project my-app
+void platform email shared-recipient-resolve <recipient-id> --ended --outcome not-applied --reason "Provider audit confirms the request did not create a rule" --plan
+```
+
+Wait until the reported recovery time, confirm the original execution ended,
+and inspect the exact provider resource shown in the plan. Use `applied` when
+the exact owned rule exists, or `not-applied` only when the provider audit
+establishes that creation did not occur. Absence alone does not establish the
+outcome. Run the same command with `--yes` after inspection. Recovery records
+the decision in platform events without creating or deleting rules. Normal
+reconciliation verifies delivery afterward; a deleting project stays closed
+and its deletion can be retried. See [operator email commands](/reference/cli#operator-email)
+for the recovery requirements.
+
 ### Deciding who mail may reach
 
 By default, mail from the shared sender reaches only the recipients each project has verified. For a team whose applications mainly mail colleagues, widen that once for the whole installation:

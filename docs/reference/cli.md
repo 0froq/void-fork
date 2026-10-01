@@ -765,6 +765,8 @@ void platform email logs <project-id|slug> [--page <n>] [--limit <n>] [--json]
 void platform email attempts [--project <id|slug>] [--page <n>] [--limit <n>]
 void platform email attempt-resolve <attempt-id> --ended --reason <text>
 void platform email operation-resolve <operation-id> --ended --outcome <applied|not-applied> --reason <text>
+void platform email shared-recipients [--project <id|slug>] [--page <n>] [--limit <n>]
+void platform email shared-recipient-resolve <recipient-id> --ended --outcome <applied|not-applied> --reason <text>
 ```
 
 `policy` decides which recipients a project's `<slug>+tag@<mail domain>` sender reaches: `verified` (the default) means only that project's verified destinations; `domains` adds every address on the listed domains; `any` lifts the check. Neither widens delivery to addresses on the platform's own mail domain: those stay verified-destination-only, so no project reaches another project's inbox without its consent. Cloudflare still refuses a destination it has not verified until the platform mail domain is onboarded for Email Sending, so under `domains` or `any` such refusals arrive as per-recipient `UNVERIFIED_DESTINATION` results. Custom-domain sends are not affected.
@@ -790,6 +792,23 @@ persisted intent. The running platform version must match that intent, so restor
 the matching version before recovering an operation created by older code. The
 preview pins the step, attempt, connection and route generations, resource
 identity, and digest used by the apply request. Time alone never retries a write.
+
+`shared-recipients` discovers shared inbound addresses, provider rule names and
+IDs, and interrupted creation intents, including projects awaiting deletion.
+If creation has an unknown outcome, use `shared-recipient-resolve` after the
+original execution has ended and its creation intent is at least 24 hours old.
+Inspect the exact account, zone, recipient and rule named by `--plan`, and use
+Cloudflare's provider audit to establish whether creation was `applied` or
+`not-applied`. A missing rule alone is insufficient evidence for `not-applied`.
+Supply that finding in `--reason`; it is recorded in platform events.
+
+Applied recovery requires the exact owned rule to be present and records its
+ID. Not-applied recovery releases the creation intent only after repeated
+provider inspection and your attestation. Both outcomes leave delivery unready
+until normal reconciliation verifies it. Recovery itself creates or deletes no
+provider rule and never reopens a deleting project; retry deletion afterward
+when recovering cleanup. Use `--yes` to apply the preview without a prompt.
+If the intent or provider ownership changes, inspect a new plan.
 
 Register and maintain email domains for projects whose owners hold no Cloudflare credential:
 

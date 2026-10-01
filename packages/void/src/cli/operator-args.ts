@@ -444,6 +444,26 @@ export const operatorCommands: Array<OperatorCommand> = [
   },
   {
     group: 'email',
+    action: 'shared-recipients',
+    description: 'Inspect shared inbound recipient rules and interrupted creation intents',
+    path: '/email/shared-recipients',
+    values: { project: 'Project id or slug, including a project awaiting deletion' },
+  },
+  {
+    group: 'email',
+    action: 'shared-recipient-resolve',
+    description: 'Resolve an ended ambiguous shared recipient creation after provider inspection',
+    path: '/email/shared-recipients/:id/resolve',
+    positional: ['id'],
+    values: {
+      outcome: 'Provider outcome: applied or not-applied',
+      reason: 'Audit reason for the verified provider outcome',
+    },
+    booleans: ['ended'],
+    method: 'POST',
+  },
+  {
+    group: 'email',
     action: 'domains',
     description: 'List email domains registered on this platform',
     path: '/email/domains',
@@ -646,7 +666,11 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
     );
   }
   const paged =
-    action === 'list' || action === 'events' || action === 'logs' || action === 'attempts';
+    action === 'list' ||
+    action === 'events' ||
+    action === 'logs' ||
+    action === 'attempts' ||
+    action === 'shared-recipients';
   const allowed = new Set([
     'connection',
     ...(command.method ? ['timeout'] : []),

@@ -24,12 +24,13 @@ import {
 } from '../../src/email/shared-recipient-service.ts';
 import type { ApiEnv } from '../../src/env.ts';
 import app from '../../src/index.ts';
-import { projects, resources } from '../../src/schema.ts';
+import { operatorEvents, projects, resources } from '../../src/schema.ts';
 import { callsByTag, stubCustomerCf } from './email-domain-cf-stub.ts';
 import {
   clearTables,
   createTestProject,
   createTestUser,
+  createOperatorToken,
   setupEnv,
   teardownEnv,
   type TestEnv,
@@ -98,6 +99,218 @@ async function setup(config: NonNullable<Parameters<typeof stubCustomerCf>[0]> =
 async function ledger() {
   return (await env.db.select().from(emailSharedRecipients))[0]!;
 }
+
+async function recoveryOperator() {
+  const admin = await createTestUser(
+    env.db,
+    'recipient-admin',
+    'github',
+    undefined,
+    'free',
+    'admin',
+  );
+  return createOperatorToken(env.db, admin);
+}
+function operatorRequest(token: string, path: string, body?: Record<string, unknown>) {
+  return app.fetch(
+    new Request(`http://localhost/operator/v1/email/${path}`, {
+      method: body ? 'POST' : 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    }),
+    bindings(),
+  );
+}
+async function ageCreation(id: string) {
+  await env.db
+    .update(emailSharedRecipients)
+    .set({ create_started_at: sql`now() - interval '25 hours'` })
+    .where(eq(emailSharedRecipients.id, id));
+}
+
+describe('operator shared recipient creation recovery', () => {
+  it('discovers and resolves an inspected absent creation for a deleting project without replaying it', async () => {
+    const { project, user, provider } = await setup({
+      failOn: { literalRuleCreate: { status: 503, message: 'request did not reach provider' } },
+      failBeforeEffect: ['literalRuleCreate'],
+    });
+    await reconcileSharedEmailRecipient(env.db, bindings(), project.id);
+    const row = await ledger();
+    await ageCreation(row.id);
+    await env.db.update(projects).set({ status: 'deleting' }).where(eq(projects.id, project.id));
+    await expect(removeSharedEmailRecipients(env.db, bindings(), project.id)).rejects.toThrow(
+      'unknown outcome',
+    );
+    const token = await recoveryOperator();
+    const discovery = await operatorRequest(token, `shared-recipients?project=${project.slug}`);
+    expect(await discovery.json()).toMatchObject({
+      recipients: [
+        { id: row.id, projectId: project.id, removing: true, createStartedAt: expect.any(String) },
+      ],
+    });
+    expect((await operatorRequest(user.jwt, 'shared-recipients')).status).toBe(401);
+    const body = {
+      ended: true,
+      outcome: 'not-applied',
+      reason: 'Provider request audit confirms no creation occurred',
+    };
+    const before = await ledger();
+    const planned = await operatorRequest(token, `shared-recipients/${row.id}/resolve`, {
+      ...body,
+      dryRun: true,
+    });
+    expect(planned.status).toBe(200);
+    const plan = (await planned.json()) as { target: { recoveryFence: string } };
+    expect(await ledger()).toEqual(before);
+    expect(await env.db.select().from(operatorEvents)).toHaveLength(0);
+    const resolved = await operatorRequest(token, `shared-recipients/${row.id}/resolve`, {
+      ...body,
+      recoveryFence: plan.target.recoveryFence,
+    });
+    expect(resolved.status).toBe(200);
+    expect(await ledger()).toMatchObject({
+      create_started_at: null,
+      removing: true,
+      status: 'blocked',
+    });
+    expect(
+      (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0]?.status,
+    ).toBe('deleting');
+    expect(callsByTag(provider.calls, 'literalRuleCreate')).toHaveLength(1);
+    expect(callsByTag(provider.calls, 'literalRuleDelete')).toHaveLength(0);
+    const [audit] = await env.db.select().from(operatorEvents);
+    expect(audit).toMatchObject({ status: 'success' });
+    expect(JSON.parse(audit!.target)).toMatchObject({
+      recipientId: row.id,
+      outcome: 'not-applied',
+      reason: body.reason,
+      recoveryFence: plan.target.recoveryFence,
+    });
+    await removeSharedEmailRecipients(env.db, bindings(), project.id);
+    await deleteProjectCascade(env.db, project.id);
+    expect(await ledger()).toMatchObject({ status: 'removed' });
+  });
+
+  it('adopts only an exact owned applied rule and keeps it unready until reconciliation', async () => {
+    const config = { failOn: { literalRuleCreate: { status: 503, message: 'lost response' } } };
+    const { project, provider } = await setup(config);
+    await reconcileSharedEmailRecipient(env.db, bindings(), project.id);
+    const row = await ledger();
+    await ageCreation(row.id);
+    const rule = [...provider.routingRuleStates.get('shared-zone')!.values()][0]!;
+    rule.enabled = false;
+    const token = await recoveryOperator();
+    const body = {
+      ended: true,
+      outcome: 'applied',
+      reason: 'Provider audit and exact rule confirm original creation',
+    };
+    const planned = await operatorRequest(token, `shared-recipients/${row.id}/resolve`, {
+      ...body,
+      dryRun: true,
+    });
+    expect(planned.status).toBe(200);
+    const plan = (await planned.json()) as {
+      target: { recoveryFence: string; providerRuleId: string };
+    };
+    const result = await operatorRequest(token, `shared-recipients/${row.id}/resolve`, {
+      ...body,
+      recoveryFence: plan.target.recoveryFence,
+    });
+    expect(result.status).toBe(200);
+    expect(await ledger()).toMatchObject({
+      rule_id: plan.target.providerRuleId,
+      create_started_at: null,
+      status: 'pending',
+    });
+    expect(callsByTag(provider.calls, 'literalRuleCreate')).toHaveLength(1);
+    expect(callsByTag(provider.calls, 'literalRuleUpdate')).toHaveLength(0);
+    await reconcileSharedEmailRecipient(env.db, bindings(), project.id);
+    expect(await ledger()).toMatchObject({ status: 'ready', rule_id: plan.target.providerRuleId });
+    expect(callsByTag(provider.calls, 'literalRuleCreate')).toHaveLength(1);
+    expect(callsByTag(provider.calls, 'literalRuleUpdate')).toHaveLength(1);
+  });
+
+  it('rejects recent attempts, missing attestation, stale previews, live leases, and changed provider ownership', async () => {
+    const { project, provider } = await setup({
+      failOn: { literalRuleCreate: { status: 503, message: 'lost response' } },
+    });
+    await reconcileSharedEmailRecipient(env.db, bindings(), project.id);
+    const row = await ledger();
+    const token = await recoveryOperator();
+    const path = `shared-recipients/${row.id}/resolve`;
+    const body = {
+      ended: true,
+      outcome: 'applied',
+      reason: 'Provider audit completed',
+      dryRun: true,
+    };
+    expect((await operatorRequest(token, path, { ...body, ended: false })).status).toBe(400);
+    expect((await operatorRequest(token, path, body)).status).toBe(409);
+    await ageCreation(row.id);
+    const plan = (await (await operatorRequest(token, path, body)).json()) as {
+      target: { recoveryFence: string };
+    };
+    await env.db
+      .update(emailSharedRecipients)
+      .set({ attempt: row.attempt + 1 })
+      .where(eq(emailSharedRecipients.id, row.id));
+    expect(
+      (
+        await operatorRequest(token, path, {
+          ...body,
+          dryRun: false,
+          recoveryFence: plan.target.recoveryFence,
+        })
+      ).status,
+    ).toBe(409);
+    await env.db
+      .update(emailSharedRecipients)
+      .set({ status: 'reconciling', lease_started_at: sql`now()` })
+      .where(eq(emailSharedRecipients.id, row.id));
+    expect((await operatorRequest(token, path, body)).status).toBe(409);
+    await env.db
+      .update(emailSharedRecipients)
+      .set({ status: 'unknown', lease_started_at: null })
+      .where(eq(emailSharedRecipients.id, row.id));
+    const rule = [...provider.routingRuleStates.get('shared-zone')!.values()][0]!;
+    rule.actions = [{ type: 'worker', value: ['foreign-worker'] }];
+    expect((await operatorRequest(token, path, body)).status).toBe(409);
+    expect(await ledger()).toMatchObject({ create_started_at: expect.any(String), rule_id: null });
+    expect(callsByTag(provider.calls, 'literalRuleCreate')).toHaveLength(1);
+  });
+  it('refuses an absence preview when the original owned rule appears before apply', async () => {
+    const { project, provider } = await setup({
+      failOn: { literalRuleCreate: { status: 503, message: 'unknown outcome' } },
+      failBeforeEffect: ['literalRuleCreate'],
+    });
+    await reconcileSharedEmailRecipient(env.db, bindings(), project.id);
+    const row = await ledger();
+    await ageCreation(row.id);
+    const token = await recoveryOperator();
+    const path = `shared-recipients/${row.id}/resolve`;
+    const body = { ended: true, outcome: 'not-applied', reason: 'Provider audit completed' };
+    const plan = (await (await operatorRequest(token, path, { ...body, dryRun: true })).json()) as {
+      target: { recoveryFence: string };
+    };
+    provider.routingRuleStates.get('shared-zone')!.set('late-rule', {
+      id: 'late-rule',
+      name: row.rule_name,
+      enabled: true,
+      matchers: [{ type: 'literal', field: 'to', value: row.recipient }],
+      actions: [{ type: 'worker', value: ['native-gateway'] }],
+    });
+    expect(
+      (await operatorRequest(token, path, { ...body, recoveryFence: plan.target.recoveryFence }))
+        .status,
+    ).toBe(409);
+    expect(await ledger()).toMatchObject({ create_started_at: expect.any(String), rule_id: null });
+    expect(callsByTag(provider.calls, 'literalRuleCreate')).toHaveLength(1);
+  });
+});
 
 function pauseProviderRead(
   provider: ReturnType<typeof stubCustomerCf>,

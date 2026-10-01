@@ -296,6 +296,17 @@ Only reservations that never started can be cancelled and refunded. Started or u
 
 Destinations are added through the owner/project-administrator `POST /projects/:id/email/destinations` consent flow. Operators cannot consent on a recipient’s behalf. Incomplete provider operations retain their operation ID and outcome for reconciliation or audited recovery; the page must not report them as completed.
 
+Shared inbound recipient creation has the same explicit recovery boundary:
+operators discover intents with `void platform email shared-recipients`, inspect
+the exact provider resource, and use `shared-recipient-resolve --plan` before
+applying an attested outcome. Recovery waits at least 24 hours, requires the
+original execution to have ended, and pins the inspected identity and attempt.
+Not-applied recovery requires provider-audit evidence as well as repeated
+absence readback. Applied recovery records only the exact owned rule ID.
+Recovery performs no provider writes and keeps deleting projects closed; normal
+reconciliation or cleanup verifies the remaining work. Operator intents and
+outcomes use the existing `operator_events` audit.
+
 Every admin write is additionally same-origin checked in `admin/middleware/auth.ts` before authentication runs; a `POST` whose `Origin` (or, failing that, `Referer`) does not match the request host is rejected with `403`, as is one that carries neither.
 
 ## Usage and Plan Enforcement

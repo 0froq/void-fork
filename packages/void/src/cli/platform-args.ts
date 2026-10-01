@@ -17,7 +17,7 @@ export const platformSubcommands: Array<SubcommandDef> = [
     name,
     hint:
       name === 'email'
-        ? 'Domains, policy, limits, outcomes, and recovery'
+        ? 'Domains, shared recipients, policy, limits, and recovery'
         : name === 'zero-trust'
           ? 'Configure Access protection and project overrides'
           : name === 'project'
