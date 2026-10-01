@@ -23,6 +23,7 @@
     "test:pages:react-vue": "vp test run --project parallel-integration packages/react packages/vue",
     "test:pages:svelte-solid": "vp test run --project parallel-integration packages/svelte packages/solid",
     "test:platform": "vp test run --project 'platform-*'",
+    "test:profile": "vp test run --reporter=default --experimental.importDurations.print --experimental.importDurations.limit=20",
     "test:unit": "vp test run --project unit --project cli-unit",
     "uninstall:void-dev": "node scripts/void-dev-link.mjs uninstall"
   },

@@ -99,6 +99,30 @@ cache test results or remove per-file module isolation. The first run primes it;
 runs with the same selection and machine load. For a control use `--no-fsModuleCache`; use
 `vp test --clearCache` only when diagnosing cache problems, not before ordinary tests.
 
+## Profiling slow tests
+
+Vitest 5's import diagnostics are opt-in so ordinary runs stay quiet:
+
+```sh
+vp run test:profile packages/void/test/unit/plugin-routing.test.ts
+vp run test:profile --project 'platform-api-integration*' api-delete-accounting.test.ts
+vp test doctor packages/void/test/unit/plugin-routing.test.ts
+```
+
+The profile shortcut enables `experimental.importDurations.print` and reports the top 20 imports
+with the default reporter. Use `--experimental.importDurations.print=verbose` or `=tree` when more
+detail is useful. `Self` is work attributed to the module; `Total` includes imported dependencies,
+so do not add totals together. Prefer narrow entry points and production lazy loading when an
+optional feature brings in a heavy graph. Do not replace production imports with mocks just to
+make the measurement smaller. See [Vitest's profiling guide](https://main.vitest.dev/guide/profiling-test-performance).
+
+If import/transform time dominates, inspect import diagnostics or a main-thread CPU profile. If
+test time dominates, investigate real code, database setup/reset, server readiness, and teardown.
+Worker phase percentages are aggregated and are not independent wall-clock savings. `doctor`
+executes its selection multiple times; never run it on the whole monorepo as a routine agent step.
+Its suggestions require correctness checks: this repository's native dependencies and timezone
+tests rule out blanket VM pools, and shared mocks/state require keeping isolation enabled.
+
 ## Suite organization and CI scheduling
 
 CI builds and typechecks every playground once per OS in a dedicated required job. Integration
