@@ -646,13 +646,15 @@ export class PlatformClient {
     return res.json();
   }
 
-  /** A lightweight project list for interactive linking; older platforms use the full list. */
+  /** A lightweight project list for interactive linking. */
   async listProjectChoices(): Promise<Array<ProjectResponse>> {
     const res = await this.request(`${this.baseUrl}/projects/choices`, {
       headers: { ...this.authHeaders },
     });
     if (res.status === 404) {
-      return this.listProjects();
+      throw new Error(
+        'This platform does not support project lookup. Ask its administrator to upgrade the platform runtime.',
+      );
     }
     if (!res.ok) {
       await throwPlatformApiError('Failed to list project choices', res);
@@ -674,14 +676,15 @@ export class PlatformClient {
     return res.json();
   }
 
-  /** New platforms resolve a slug directly; older installations retain the list fallback. */
+  /** Resolve a slug through the current platform contract. */
   async findProjectBySlug(slug: string): Promise<ProjectResponse | null> {
     const url = new URL(`${this.baseUrl}/projects/resolve`);
     url.searchParams.set('slug', slug);
     const res = await this.request(url.toString(), { headers: { ...this.authHeaders } });
     if (res.status === 404) {
-      const projects = await this.listProjects();
-      return projects.find((project) => project.slug === slug) ?? null;
+      throw new Error(
+        'This platform does not support project lookup. Ask its administrator to upgrade the platform runtime.',
+      );
     }
     if (!res.ok) {
       await throwPlatformApiError('Failed to resolve project', res);

@@ -56,6 +56,8 @@ Repair recreates missing infrastructure that the installer owns. It does not res
 
 ### Upgrade the platform
 
+Keep the platform runtime current when updating the Void CLI. If a developer's CLI reports that project lookup requires an upgrade, upgrade the platform before retrying.
+
 Use the installed CLI's packaged runtime to upgrade:
 
 ```sh

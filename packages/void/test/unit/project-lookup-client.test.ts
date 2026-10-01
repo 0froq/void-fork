@@ -29,16 +29,6 @@ describe('targeted project lookup', () => {
     ]);
   });
 
-  it('falls back to the full list for choices on older platforms', async () => {
-    fetchMock.mockResolvedValueOnce(Response.json({ error: 'not found' }, { status: 404 }));
-    fetchMock.mockResolvedValueOnce(Response.json([project]));
-    await expect(client().listProjectChoices()).resolves.toEqual([project]);
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      'https://api.example.test/projects/choices',
-      'https://api.example.test/projects',
-    ]);
-  });
-
   it('resolves a slug without loading the project list', async () => {
     fetchMock.mockResolvedValueOnce(Response.json({ project }));
 
@@ -55,16 +45,18 @@ describe('targeted project lookup', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it('uses the existing list endpoint when an older platform lacks resolution', async () => {
-    fetchMock.mockResolvedValueOnce(Response.json({ error: 'not found' }, { status: 404 }));
-    fetchMock.mockResolvedValueOnce(Response.json([project]));
-
-    await expect(client().findProjectBySlug('my-app')).resolves.toEqual(project);
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      'https://api.example.test/projects/resolve?slug=my-app',
-      'https://api.example.test/projects',
-    ]);
-  });
+  it.each(['listProjectChoices', 'findProjectBySlug'] as const)(
+    'requires an upgrade when %s is unsupported',
+    async (method) => {
+      fetchMock.mockResolvedValueOnce(Response.json({ error: 'not found' }, { status: 404 }));
+      const api = client();
+      await expect(
+        method === 'findProjectBySlug' ? api.findProjectBySlug('my-app') : api.listProjectChoices(),
+      ).rejects.toThrow('Ask its administrator to upgrade the platform runtime.');
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock.mock.calls[0][0]).not.toBe('https://api.example.test/projects');
+    },
+  );
 
   it('loads a linked project by ID and treats 404 as unavailable', async () => {
     fetchMock.mockResolvedValueOnce(Response.json(project));
