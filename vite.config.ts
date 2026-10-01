@@ -9,6 +9,11 @@ const apiTimezoneTests = [
   'platform/packages/api/test/integration/api-delete-accounting.test.ts',
   'platform/packages/api/test/integration/email-connections.test.ts',
 ];
+const cliUnitTests = [
+  'packages/void/test/unit/cf-*.test.ts',
+  'packages/void/test/unit/provision-*.test.ts',
+  'packages/void/test/unit/deploy-drift.test.ts',
+];
 
 // Vitest forwards a FILTERED env to test workers — in CI only VOID_E2E_CF_TOKEN survives, while
 // VOID_E2E_CF_ACCOUNT_ID and VOID_E2E_RUN_ID are dropped. The gated live Cloudflare deploy e2e
@@ -395,8 +400,19 @@ export default defineConfig({
       {
         extends: false,
         test: {
+          name: 'cli-unit',
+          include: cliUnitTests,
+          pool: 'threads',
+          maxWorkers,
+          ...(process.platform === 'win32' ? { testTimeout: 20_000 } : {}),
+        },
+      },
+      {
+        extends: false,
+        test: {
           name: 'unit',
           include: ['packages/*/test/unit/**/*.test.ts'],
+          exclude: cliUnitTests,
           sequence: { groupOrder: 2 },
           pool: 'threads',
           maxWorkers,

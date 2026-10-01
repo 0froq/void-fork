@@ -46,6 +46,15 @@ it('keeps process-timezone tests in forks', () => {
   }
 });
 
+it('assigns every SDK unit file exactly once including the subprocess project', () => {
+  const discovered = [...globSync('packages/*/test/unit/**/*.test.ts', { cwd: root })];
+  const selected = projects
+    .filter((project) => ['unit', 'cli-unit'].includes(project.test.name))
+    .flatMap(files);
+  expect(selected.sort()).toEqual(discovered.sort());
+  expect(new Set(selected).size).toBe(discovered.length);
+});
+
 it('keeps module isolation for every project', () => {
   for (const project of projects) {
     expect(project.test.isolate, project.test.name).not.toBe(false);
