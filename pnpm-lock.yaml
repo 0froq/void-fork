@@ -549,6 +549,9 @@ importers:
       '@cloudflare/build-output-utils':
         specifier: 0.8.4
         version: 0.8.4
+      '@cloudflare/codemods':
+        specifier: 0.3.0
+        version: 0.3.0
       '@cloudflare/config':
         specifier: 0.22.0
         version: 0.22.0

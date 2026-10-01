@@ -330,6 +330,7 @@
   },
   "dependencies": {
     "@cloudflare/build-output-utils": "0.8.4",
+    "@cloudflare/codemods": "0.3.0",
     "@cloudflare/config": "0.22.0",
     "@cloudflare/sandbox": "1.0.0",
     "@cloudflare/vite-plugin": "1.62.2",

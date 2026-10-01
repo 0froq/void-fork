@@ -1,16 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import type { MigrationFollowUp } from '@cloudflare/codemods';
 import { InputConfigSchema } from '@cloudflare/config';
 import { dirname, join } from 'pathslash';
 
@@ -191,23 +184,20 @@ function uncredentialedEnvironment(): NodeJS.ProcessEnv {
   return env;
 }
 
-function migrationFollowUps(output: string): Array<{ path: string; message: string }> {
-  return [...output.matchAll(/\[required\] ([^:\n]+): ([^\n]+)/g)].map((match) => ({
-    path: match[1]!,
-    message: match[2]!,
-  }));
-}
-
-function assertHandledFollowUps(output: string): void {
-  for (const item of migrationFollowUps(output)) {
+function assertHandledFollowUps(followUps: Array<MigrationFollowUp>): void {
+  for (const item of followUps) {
+    if (!item.blocking) {
+      continue;
+    }
+    const path = item.sourcePath ?? item.code;
     const handled =
-      (item.path === 'assets.directory' && item.message.includes('assets directory')) ||
-      (/^d1_databases\.\d+$/.test(item.path) && /`migrations_(?:dir|table)`/.test(item.message)) ||
-      /^durable_objects\.bindings\.\d+$/.test(item.path) ||
-      item.path === 'migrations' ||
-      item.path === 'containers';
+      (path === 'assets.directory' && item.message.includes('assets directory')) ||
+      (/^d1_databases\.\d+$/.test(path) && /`migrations_(?:dir|table)`/.test(item.message)) ||
+      /^durable_objects\.bindings\.\d+$/.test(path) ||
+      path === 'migrations' ||
+      path === 'containers';
     if (!handled) {
-      throw new Error(`cf cannot migrate Cloudflare setting ${item.path}: ${item.message}`);
+      throw new Error(`cf cannot migrate Cloudflare setting ${path}: ${item.message}`);
     }
   }
 }
@@ -352,16 +342,31 @@ function containersFromWrangler(raw: JsonObject, exports: JsonObject): Array<Jso
   });
 }
 
-/**
- * Ask the pinned cf CLI to translate the Vite plugin's generated JSON config.
- * Migration runs on a disposable copy without Cloudflare credentials; its
- * generated module is evaluated in a second uncredentialed Node process.
- */
+const migrationScript = String.raw`
+import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const { migrateWranglerToCf } = await import(process.argv[1]);
+const configPath = process.argv[2];
+const migration = await migrateWranglerToCf(configPath, {
+  bundler: 'vite', force: true, installDependencies: false,
+});
+const directory = dirname(configPath);
+const generated = readFileSync(join(directory, 'cloudflare.config.ts'), 'utf8');
+const executable = generated.replace(/^throw new Error\("Migration incomplete\.[^\n]*\);\s*$/m, '');
+if (executable === generated && migration.status !== 'complete') {
+  throw new Error('cf did not provide a usable Cloudflare configuration.');
+}
+const executablePath = join(directory, 'cloudflare.config.mjs');
+writeFileSync(executablePath, executable, { mode: 0o600 });
+const config = (await import(pathToFileURL(executablePath).href)).default;
+process.stdout.write(JSON.stringify({ config, followUps: migration.followUps }));
+`;
+
 export function migrateBuiltWranglerConfig(
   raw: JsonObject,
 ): ReturnType<typeof InputConfigSchema.parse> {
   const cfPackage = fileURLToPath(import.meta.resolve('cf/package.json'));
-  const cfBinary = join(dirname(cfPackage), 'bin', 'cf');
   const directory = mkdtempSync(join(tmpdir(), 'void-cf-config-'));
   try {
     mkdirSync(join(directory, 'node_modules'));
@@ -378,41 +383,32 @@ export function migrateBuiltWranglerConfig(
     );
     const configPath = join(directory, 'wrangler.json');
     writeFileSync(configPath, JSON.stringify(migrationInput(raw)), { mode: 0o600 });
-    const env = uncredentialedEnvironment();
     const migrated = spawnSync(
-      process.execPath,
-      [cfBinary, 'migrate', configPath, '--bundler', 'vite', '--no-install', '--force'],
-      { cwd: directory, env, encoding: 'utf8', timeout: 30_000, maxBuffer: 4 * 1024 * 1024 },
-    );
-    const generatedPath = join(directory, 'cloudflare.config.ts');
-    if (!existsSync(generatedPath) || migrated.error) {
-      throw new Error('cf could not translate the built Cloudflare configuration.');
-    }
-    assertHandledFollowUps(migrated.stdout);
-    const generated = readFileSync(generatedPath, 'utf8');
-    const executable = generated.replace(
-      /^throw new Error\("Migration incomplete\.[^\n]*\);\s*$/m,
-      '',
-    );
-    if (executable === generated && migrated.status !== 0) {
-      throw new Error('cf did not provide a usable Cloudflare configuration.');
-    }
-    const executablePath = join(directory, 'cloudflare.config.mjs');
-    writeFileSync(executablePath, executable, { mode: 0o600 });
-    const evaluated = spawnSync(
       process.execPath,
       [
         '--input-type=module',
         '-e',
-        'const mod = await import(process.argv[1]); process.stdout.write(JSON.stringify(mod.default));',
-        pathToFileURL(executablePath).href,
+        migrationScript,
+        import.meta.resolve('@cloudflare/codemods'),
+        configPath,
       ],
-      { cwd: directory, env, encoding: 'utf8', timeout: 10_000, maxBuffer: 4 * 1024 * 1024 },
+      {
+        cwd: directory,
+        env: uncredentialedEnvironment(),
+        encoding: 'utf8',
+        timeout: 30_000,
+        maxBuffer: 4 * 1024 * 1024,
+      },
     );
-    if (evaluated.status !== 0 || evaluated.error) {
-      throw new Error('cf generated a configuration that Void could not validate.');
+    if (migrated.status !== 0 || migrated.error) {
+      throw new Error('cf could not translate the built Cloudflare configuration.');
     }
-    const result = record(JSON.parse(evaluated.stdout));
+    const migration = JSON.parse(migrated.stdout) as {
+      config: unknown;
+      followUps: Array<MigrationFollowUp>;
+    };
+    assertHandledFollowUps(migration.followUps);
+    const result = record(migration.config);
     const worker = record(result?.worker);
     if (!result || !worker) {
       throw new Error('cf did not generate a Worker configuration.');
