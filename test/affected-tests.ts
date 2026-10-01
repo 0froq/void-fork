@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -10,29 +9,6 @@ export type AffectedTestPlan = {
   related: Array<string>;
   reasons: Array<string>;
 };
-
-export function changedFiles(root: string, base?: string): Array<string> {
-  const git = (args: Array<string>) =>
-    execFileSync('git', args, {
-      cwd: root,
-      encoding: 'utf8',
-      stdio: 'pipe',
-      maxBuffer: 16 * 1024 * 1024,
-    });
-  const revision = base ? git(['merge-base', base, 'HEAD']).trim() : 'HEAD';
-  return [
-    ...new Set(
-      [
-        git(['diff', '--name-only', '-z', '--no-renames', revision, '--']),
-        git(['diff', '--name-only', '-z', '--no-renames', '--cached', 'HEAD', '--']),
-        git(['diff', '--name-only', '-z', '--no-renames', '--']),
-        git(['ls-files', '--others', '--exclude-standard', '-z']),
-      ]
-        .flatMap((output) => output.split('\0'))
-        .filter(Boolean),
-    ),
-  ].sort();
-}
 
 export function planAffectedTests(
   changes: Array<string>,

@@ -3,7 +3,8 @@ import { globSync, readFileSync, realpathSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { changedFiles, deletedFiles, planAffectedTests } from './affected-tests.ts';
+import { deletedFiles, planAffectedTests } from './affected-tests.ts';
+import { createAffectedVcsProvider } from './affected-vcs.ts';
 
 export async function runAffected(root, values) {
   root = realpathSync(root);
@@ -17,7 +18,11 @@ export async function runAffected(root, values) {
     );
     return;
   }
-  const changes = changedFiles(root, values.base);
+  const vcsProvider = createAffectedVcsProvider();
+  const changed = values.base ?? true;
+  const changes = (await vcsProvider.findChangedFiles({ root, changedSince: changed })).map(
+    (file) => relative(root, file).replaceAll('\\', '/'),
+  );
   if (!changes.length) {
     console.log(
       'No changed files. Use --base <ref> for committed work, or vp test run for all tests.',
@@ -51,6 +56,8 @@ export async function runAffected(root, values) {
   const vitest = await createVitest({
     root,
     watch: false,
+    changed: initial.full ? false : changed,
+    experimental: { vcsProvider },
     ...(values.unit ? { project: ['unit', 'cli-unit', 'platform-unit'] } : {}),
   });
   try {
@@ -58,12 +65,13 @@ export async function runAffected(root, values) {
     if (!all.length) {
       throw new Error('No tests discovered. Check the Vitest project configuration.');
     }
+    const needsSources = changes.some((file) => file.startsWith('playground/'));
     const files = initial.full
       ? []
       : all.map((spec) => ({
           path: relative(root, spec.moduleId).replaceAll('\\', '/'),
           project: spec.project.name,
-          source: readFileSync(spec.moduleId, 'utf8'),
+          source: needsSources ? readFileSync(spec.moduleId, 'utf8') : '',
         }));
     const plan = initial.full
       ? initial
@@ -73,12 +81,9 @@ export async function runAffected(root, values) {
     if (!plan.full) {
       const forced = all.filter((spec, index) => plan.forced.has(files[index].path));
       const remaining = all.filter((spec, index) => !plan.forced.has(files[index].path));
-      vitest.config.related = plan.related.map((file) => join(root, file).replaceAll('\\', '/'));
       if (plan.build) {
-        vitest.config.related.push(
-          ...globSync('packages/*/dist/**/*', { cwd: root }).map((file) =>
-            join(root, file).replaceAll('\\', '/'),
-          ),
+        vcsProvider.addRelatedFiles(
+          [...globSync('packages/*/dist/**/*', { cwd: root })].map((file) => join(root, file)),
         );
       }
       let affected = [];
@@ -107,8 +112,12 @@ export async function runAffected(root, values) {
         );
       }
     } else if (selected.length) {
-      vitest.config.related = undefined;
-      await vitest.start(selected.map((spec) => spec.moduleId));
+      if (plan.full) {
+        await vitest.start();
+      } else {
+        await vitest.standalone();
+        await vitest.runTestSpecifications(selected);
+      }
     } else {
       console.log(
         'No tests import these changes. Add focused regression coverage when changing behavior.',

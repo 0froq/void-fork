@@ -1,15 +1,11 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vite-plus/test';
-import {
-  changedFiles,
-  deletedFiles,
-  planAffectedTests,
-  type TestFile,
-} from '../../../../test/affected-tests.ts';
+import { deletedFiles, planAffectedTests, type TestFile } from '../../../../test/affected-tests.ts';
+import { changedFiles, createAffectedVcsProvider } from '../../../../test/affected-vcs.ts';
 
 const tests: Array<TestFile> = [
   { path: 'packages/void/test/unit/router.test.ts', project: 'unit', source: '' },
@@ -136,7 +132,7 @@ describe('affected test planning', () => {
 });
 
 describe('Git change collection', () => {
-  it('includes staged, unstaged, untracked, deleted, renamed, and committed branch paths', () => {
+  it('includes staged, unstaged, untracked, deleted, renamed, and committed branch paths', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-affected-git-'));
     const git = (...args: Array<string>) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
     const write = (path: string, content = path) => writeFileSync(join(root, path), content);
@@ -156,7 +152,7 @@ describe('Git change collection', () => {
       }
       git('add', '.');
       git('commit', '--quiet', '--no-verify', '-m', 'Base.');
-      expect(changedFiles(root)).toEqual([]);
+      expect(await changedFiles(root)).toEqual([]);
       const base = git('rev-parse', 'HEAD').toString().trim();
       write('committed.ts', 'changed');
       git('add', '.');
@@ -169,21 +165,42 @@ describe('Git change collection', () => {
       write('cancelled.ts');
       mkdirSync(join(root, 'new folder'));
       write('new folder/untracked.ts');
+      write('line\nbreak.ts');
       git('rm', 'deleted.ts');
       git('mv', 'old name.ts', 'new name.ts');
       const local = [
         'cancelled.ts',
         'deleted.ts',
+        'line\nbreak.ts',
         'new folder/untracked.ts',
         'new name.ts',
         'old name.ts',
         'staged.ts',
         'unstaged.ts',
       ].sort();
-      expect(changedFiles(root)).toEqual(local);
-      expect(changedFiles(root, base)).toEqual([...local, 'committed.ts'].sort());
+      expect(await changedFiles(root)).toEqual(local);
+      expect(await changedFiles(root, base)).toEqual([...local, 'committed.ts'].sort());
       expect(deletedFiles(root, local)).toEqual(['deleted.ts', 'old name.ts']);
-      expect(() => changedFiles(root, 'missing-ref')).toThrow();
+      await expect(changedFiles(root, 'missing-ref')).rejects.toThrow();
+      const provider = createAffectedVcsProvider();
+      const snapshot = await provider.findChangedFiles({ root, changedSince: true });
+      expect(snapshot.map((file) => relative(root, file).replaceAll('\\', '/')).sort()).toEqual(
+        local,
+      );
+      write('later.ts');
+      expect(await provider.findChangedFiles({ root, changedSince: true })).toEqual(snapshot);
+      expect(
+        await createAffectedVcsProvider().findChangedFiles({ root, changedSince: true }),
+      ).toContain(join(root, 'later.ts').replaceAll('\\', '/'));
+      const built = join(root, 'packages/void/dist/index.mjs').replaceAll('\\', '/');
+      provider.addRelatedFiles([built, built]);
+      expect(await provider.findChangedFiles({ root, changedSince: true })).toEqual([
+        ...snapshot,
+        built,
+      ]);
+      expect(await provider.findChangedFiles({ root, changedSince: base })).toContain(
+        join(root, 'committed.ts').replaceAll('\\', '/'),
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -283,6 +300,65 @@ it('previews the native transitive import graph without running test or setup co
     expect(failed.error).toBeUndefined();
     expect(failed.status).toBe(1);
     expect(failed.stdout + failed.stderr).toContain('expected 2 to be 3');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 20_000);
+
+it('executes conservative integration consumers without an import edge', () => {
+  const root = mkdtempSync(join(tmpdir(), 'void-affected-consumer-'));
+  const repository = fileURLToPath(new URL('../../../../', import.meta.url));
+  const git = (...args: Array<string>) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
+  const write = (path: string, content: string) => writeFileSync(join(root, path), content);
+  try {
+    mkdirSync(join(root, 'platform/packages/api/src'), { recursive: true });
+    mkdirSync(join(root, 'platform/packages/api/test/integration'), { recursive: true });
+    mkdirSync(join(root, 'packages/void/test/unit'), { recursive: true });
+    symlinkSync(join(repository, 'node_modules'), join(root, 'node_modules'), 'junction');
+    write('.gitignore', 'node_modules\n');
+    write('package.json', '{"type":"module"}');
+    write(
+      'vite.config.ts',
+      "export default { test: { projects: [{ test: { name: 'unit', include: ['packages/*/test/unit/*.test.ts'] } }, { test: { name: 'platform-api-integration', include: ['platform/packages/api/test/integration/*.test.ts'] } }] } };",
+    );
+    write('platform/packages/api/src/entry.ts', 'export const value = 1;');
+    write(
+      'platform/packages/api/test/integration/consumer.test.ts',
+      "import { expect, it } from 'vite-plus/test'; import { readFileSync } from 'node:fs'; it('filesystem consumer', () => expect(readFileSync('platform/packages/api/src/entry.ts', 'utf8')).toContain('value = 2'));",
+    );
+    write(
+      'packages/void/test/unit/unrelated.test.ts',
+      "throw new Error('unrelated test executed');",
+    );
+    git('init', '--quiet');
+    git('add', '.');
+    git(
+      '-c',
+      'user.email=tests@example.com',
+      '-c',
+      'user.name=Tests',
+      'commit',
+      '--quiet',
+      '--no-verify',
+      '-m',
+      'Fixture.',
+    );
+    write('platform/packages/api/src/entry.ts', 'export const value = 2;');
+    const runner = new URL('../../../../test/affected.mjs', import.meta.url).href;
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `import { runAffected } from ${JSON.stringify(runner)}; await runAffected(${JSON.stringify(root)}, {});`,
+      ],
+      { cwd: root, encoding: 'utf8', timeout: 15_000 },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(result.stdout).toContain('Selected 1/2 test files');
+    expect(result.stdout).toContain('Test Files  1 passed');
+    expect(result.stdout).toContain('Tests  1 passed');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

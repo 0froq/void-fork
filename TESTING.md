@@ -22,7 +22,7 @@ Do not pass `vp run --cache` to this task.
 ```sh
 vp run test --list                 # Preview files and fallback reasons; no builds or test hooks
 vp run test                       # Staged, unstaged, and untracked changes against HEAD
-vp run test --base origin/main     # Merge-base to working tree, including committed changes
+vp run test --base origin/main     # Branch commits since merge-base, plus local changes
 vp run test --unit                 # Faster iteration only; explicitly skips integration projects
 ```
 
@@ -31,7 +31,13 @@ selects nothing unless `--base` includes earlier commits. Invalid Git refs or se
 fail the command rather than silently skipping coverage.
 
 The runner uses Vitest's static import graph, including transitive and literal dynamic imports.
-It adds coverage that imports cannot describe:
+It supplies changed paths through [Vitest's `experimental.vcsProvider` hook](https://vitest.dev/config/experimental#experimental-vcsprovider).
+Independent Git queries run asynchronously in parallel, and filtering reuses one snapshot per invocation.
+Neither test results nor Git state are cached between commands. Built public exports join that snapshot
+before import-based selection. The hook is specific to the smart runner: native `vp test run --changed`
+still lacks the repository's integration fallbacks.
+
+The runner adds coverage that imports cannot describe:
 
 - SDK source changes rebuild public packages, select all SDK build/server/browser integrations,
   and include built public exports in the related graph so platform and adapter consumers are covered.
