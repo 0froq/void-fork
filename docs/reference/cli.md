@@ -1377,12 +1377,10 @@ Deploy-on-GitHub works from **any** Void login — Google, GitHub, or other SSO.
 void github link
 ```
 
-Link your current Void account to a GitHub identity. Opens your browser to authorize Void on GitHub (a localhost + PKCE handshake, the same mechanics as `void account login`), then binds that GitHub identity to the logged-in account. Requires an authenticated CLI (`void account login` first).
-
-You normally don't need to run this directly — `void github install` runs the link automatically when your account has no GitHub identity yet. Run it on its own to link ahead of time, or to link a GitHub identity without installing the App.
+Link your signed-in Void account to GitHub through your browser. `void github install` does this automatically when needed.
 
 ::: warning Existing GitHub sign-in
-Void accounts cannot be merged. If the GitHub account you authorize is already linked to a different Void account, including one created through GitHub sign-in, `void github link` is refused with `This GitHub account is already linked to another Void account.` Run `void account logout` and sign in to that existing account, or authorize a different GitHub account. The command is also refused if your current Void account is already linked to a different GitHub identity. Re-authorizing the GitHub account attached to your current Void account is allowed and reports `GitHub account already linked.`
+A GitHub identity can belong to only one Void account. If it is already linked elsewhere, sign in to that Void account or authorize a different GitHub identity.
 :::
 
 ### `void github install`
@@ -1407,11 +1405,9 @@ List all GitHub App installations linked to your account. Each entry includes th
 void github join
 ```
 
-Join the GitHub App installations your organization already has. If a teammate installed the Void GitHub App on a shared GitHub organization, run `void github join` to discover those installations without re-installing. Void opens your browser to authorize (a localhost + PKCE handshake, the same mechanics as `void github link`), confirms which installations GitHub makes visible to you, and records that visibility. Afterwards `void github installations` lists them without exposing the installation-wide private repository list; `void github connect` separately proves access to the repository you name.
+Join an existing organization installation through your browser. `void github connect` can do this automatically in an interactive terminal. Run `join` locally before non-interactive setup when needed.
 
-In an interactive terminal you rarely need to run this yourself — `void github connect` runs the same join automatically when no active installations are linked to your account. Running `void github join` yourself matters mainly for non-interactive use (without a TTY, `void github connect` never opens a browser), or to link installations ahead of time.
-
-Requires an authenticated CLI (`void account login` first) and organization-installation sharing enabled on your Void instance; when it is not enabled the command fails closed with a clear message. You can only join installations your GitHub authorization actually returns — you cannot name or join one you cannot access on GitHub.
+Requires a signed-in Void account and organization-installation sharing enabled by your platform. Use `void github installations` to find the installation ID.
 
 ### `void github connect`
 
@@ -1421,7 +1417,7 @@ void github connect [project] [options]
 
 Connect a GitHub repository to a Void project for automatic deploys. On every push to the configured branch, Void builds and deploys your project automatically.
 
-Interactively (TTY), if your account has no active installations linked, `void github connect` first runs the same browser authorize as `void github join` automatically — if a teammate already installed the Void GitHub App on your organization, you join it on the spot and the connect continues. Only when no shared installation is found does it ask you to run `void github install`. The same recovery runs when `--installation <id>` names an installation your account is not linked to yet. Without a TTY, connect never opens a browser: it fails closed and tells you to run `void github install`, or `void github join` if your organization already installed the App.
+The CLI opens your browser when it needs GitHub authorization. If no installation is available, run `void github install`.
 
 **Options**
 
@@ -1434,13 +1430,11 @@ Interactively (TTY), if your account has no active installations linked, `void g
 | `--executor <type>`   | Build executor: `container` (default) or `github_actions`                         |
 | `--workflow <path>`   | Authorized deploy workflow file — defaults to `.github/workflows/void-deploy.yml` |
 
-The `--workflow` path is the workflow file the GitHub OIDC exchange authorizes to mint this project's deploy token. It defaults to the scaffolded `.github/workflows/void-deploy.yml`; set it only if your deploy step lives in a different workflow file (it must be under `.github/workflows/` and end in `.yml`/`.yaml`). Because the exchange is secretless, **only this one workflow** can mint a deploy token — any other workflow in the repo (including an unsafe `pull_request_target`) is rejected. Pointing it at a broad, multi-purpose workflow widens that trust, so prefer a dedicated file.
+Choose `container` for platform builds or `github_actions` for a deployment workflow. The CLI prompts for the executor and, for GitHub Actions, the workflow file. Pass the corresponding flags to skip those prompts.
 
-Interactively (TTY), after resolving the repository and branch, `void github connect` prompts for the **build executor** (defaulting to `container`). If you pick `github_actions`, it then prompts for the **deploy workflow file**, defaulting to `.github/workflows/void-deploy.yml` and validated locally before it is sent. Pass `--executor` and/or `--workflow` to skip the respective prompt. The workflow prompt is skipped entirely for the `container` executor, which does not use a workflow file.
+The workflow must be a `.yml` or `.yaml` file under `.github/workflows/`. Only that workflow can obtain the project's OIDC deployment token. Prefer a dedicated deployment workflow.
 
-**Non-interactive use (CI)**
-
-When stdin is not a TTY, `void github connect` never prompts — it fails closed and names any flag it needs. `--branch` is always required. `--project` must be resolvable (positional / `--project` / `VOID_PROJECT` / linked `.void/project.json`). `--installation` is required only when your account has more than one installation; otherwise the sole installation is used. `--repo` is required when the installation grants access to all repos or to more than one selected repo; when it grants exactly one repo that repo is used automatically. `--repo` is also required when the installation does not expose a repository list to your account (shared org installations hide it). Use `void github installations` to discover the `installation_id`.
+For CI, supply the project and branch, plus the installation and repository when they cannot be selected automatically. Organization connections require repository authorization in a local browser first.
 
 ```
 void github connect my-app \
@@ -1451,9 +1445,7 @@ void github connect my-app \
 
 **Project resolution** follows the same order as deploy: positional / `--project`, `VOID_PROJECT`, linked project (`.void/project.json`).
 
-**Connecting as an organization member**
-
-For every organization installation, `void github connect` confirms that you personally have access to the specific repository, including when you originally installed the App. Interactively (TTY), it opens your browser once to authorize access to that repo on GitHub (a localhost + PKCE handshake), then completes the connection automatically. Without a TTY, this per-repo authorization never opens a browser: connect fails closed with an error explaining that the installation requires per-repo authorization and telling you to run `void github connect` locally. Interactively, connect joins the shared installation automatically when your account has no active installations linked, so running `void github join` first is optional. You can only connect repositories you can access on GitHub; seeing the organization installation never grants access to its other private repositories.
+You can connect only repositories your GitHub account can access.
 
 A project has one GitHub connection. Running `void github connect` on a project that is already connected fails. To connect a different repository, run `void github disconnect` first.
 
@@ -1463,7 +1455,7 @@ A project has one GitHub connection. Running `void github connect` on a project 
 void github update [project] [options]
 ```
 
-Update an existing connection's deploy **branch**, **build executor**, and/or authorized **workflow file**. Use this to change settings on a project that is already connected — for example, flipping the executor from `container` to `github_actions` for a monorepo whose Void app lives in a subdirectory, moving the deploy branch, or pointing the OIDC trust at a different workflow file. The project must already be connected (run `void github connect` first); the repository and installation are not changed.
+Change the branch, executor, or workflow for an existing connection. To change the repository, disconnect and reconnect.
 
 **Options**
 
@@ -1474,7 +1466,7 @@ Update an existing connection's deploy **branch**, **build executor**, and/or au
 | `--executor <type>` | New build executor: `container` or `github_actions`              |
 | `--workflow <path>` | New authorized deploy workflow file (under `.github/workflows/`) |
 
-Interactively (TTY), `void github update` shows the current branch and executor and prompts for new values, defaulting each to the current setting. If the resulting executor is `github_actions`, it then prompts for the **deploy workflow file**, defaulting to the current path and validated locally; pass `--workflow` to skip that prompt. The workflow prompt is skipped when the executor is `container`, which does not use a workflow file. When stdin is not a TTY, it never prompts: pass at least one of `--branch` / `--executor` / `--workflow`, or it fails closed. If nothing actually changes, the command reports "no changes" and does not call the API.
+The CLI prompts for new settings using the current values as defaults. In CI, pass at least one of `--branch`, `--executor`, or `--workflow`.
 
 ```
 void github update my-app --executor github_actions
@@ -1488,7 +1480,7 @@ void github update my-app --executor github_actions
 void github status [project]
 ```
 
-Show a project's current GitHub connection: the connected **repository**, the deploy **branch**, the **build executor** (`container` or `github_actions`), and the authorized **deploy workflow file**. Read-only — it never changes anything. The workflow file is the OIDC pin used only for `github_actions` builds; on a `container` connection it is still shown but marked unused. The project must already be connected (run `void github connect` first, otherwise it reports that and exits).
+Show the connected repository, branch, executor, and workflow. Container builds do not use the workflow file.
 
 **Options**
 
@@ -1581,8 +1573,6 @@ void domain delete <hostname> [--project <name>]
 
 Direct Cloudflare projects apply the change immediately. Deleting the final custom domain uses your browser session from `void cloudflare login` or an API token with Workers Scripts: Edit permission. If Cloudflare rejects the change, Void attempts to restore the previous domain configuration and reports whether recovery succeeded.
 
-Remove a custom domain from the saved target. For Cloudflare, this removes the matching `custom_domain` route and synchronizes triggers. If Cloudflare rejects the update, Void restores the exact previous local config and immediately reapplies it remotely. If that second synchronization also fails, the CLI reports that remote route state may be partial instead of claiming a successful rollback.
-
 ### `void domain list`
 
 ```
@@ -1597,11 +1587,7 @@ List all custom domains. Hosted projects show active/pending state from the plat
 void domain status <hostname> [--project <name>] [--verbose]
 ```
 
-Check verification and SSL status for a specific domain. Prints a rolled-up state (`awaiting_dns`, `verifying_dns`, `issuing_cert`, `deploying_cert`, `awaiting_deployment`, `active`, `error`, or `pending`) with a one-line diagnostic explaining what Cloudflare is doing and any user action required. While the certificate is not yet active, the command also surfaces the records to configure — the traffic **CNAME** and the `_cf-custom-hostname` ownership **TXT** — so you can verify them. Activation is automatic: a background job reconciles pending domains (about every 2 minutes for the first 30 minutes after adding, then hourly), so this command is for instant feedback rather than required polling.
-
-Pass `--verbose` to additionally print the raw multi-line status breakdown (DB status, SSL status, ownership state, verification errors) underneath the rollup.
-
-Project resolution for domain commands follows the same order as deploy (`--project`, `VOID_PROJECT`, linked project).
+Show domain verification and TLS certificate status, including DNS records to configure and any required action. Domains activate automatically once verification and certificate issuance finish.
 
 For direct Cloudflare projects, status reports whether the route is present in the Void Cloudflare config. It does not claim to inspect remote certificate issuance; Cloudflare owns that state and exposes it in the dashboard. `--project` is hosted-only.
 
@@ -1715,7 +1701,7 @@ Disable the domain assignment and record cleanup. Zone resources used by another
 void email status --platform cloudflare
 ```
 
-Read-only. Checks the email setup on your own Cloudflare account for the domain of `email.from` in `void.config.ts` — session scopes, zone, MX records, Email Routing (and its subaddressing setting), Email Sending, the routing rule for every `email/` handler, and the `send_email` binding — then prints the status rows and the address map (`inbound <address> → email/<handler>`, `outbound sendEmail() from <email.from>`). Exits 1 when anything is not ready. A domain still not onboarded for Email Sending reads as set up once the `send_email` binding is committed — the binding is written only after an onboarding attempt, so that pair is how a Workers Free refusal is remembered — and the sending row says so (`not onboarded — verified destinations only; after upgrading to Workers Paid run void email setup --platform cloudflare`). Takes no `--project`: it reads the local project and your Cloudflare session, never a Void project.
+Check the domain configured in `email.from`: permissions, DNS, routing, sending, handler addresses, and the email binding. Exits unsuccessfully when setup is incomplete. Workers Free setup can be ready with sending limited to verified destinations; run `void email setup --platform cloudflare` after upgrading to Workers Paid.
 
 Without `--platform cloudflare` (or with `--platform void`) the command is not available yet; on the Void platform use `void email usage` and `void email destinations`.
 
@@ -1725,14 +1711,11 @@ Without `--platform cloudflare` (or with `--platform void`) the command is not a
 void email setup --platform cloudflare
 ```
 
-The same setup `void deploy --platform cloudflare` offers on its first deploy, on its own — for CI, which cannot press Enter: run it locally once, commit `void.lock.json`, then let CI run `void deploy --platform cloudflare --require-email`. Needs `email.from` in `void.config.ts` and a `void cloudflare login` session (a session created by older Cloudflare tooling lacks the email scopes: `void cloudflare logout`, then sign in again) or a `CLOUDFLARE_API_TOKEN` with Email Routing Edit + Email Sending Edit — the CI credential. It runs the preflight above, prints the checklist of what will change on your account, asks once, then:
+Set up email before deploying from CI. Requires `email.from` in `void.config.ts`, an interactive terminal, and Cloudflare email permissions.
 
-1. enables Email Routing on the domain (on an apex through Void's bundled Cloudflare tooling; a subdomain through your session's bearer, borrowed for that one call and dropped),
-2. turns on subaddressing for the zone, so `support+anything@` reaches `support@`,
-3. onboards the domain for Email Sending (a Workers Free account keeps inbound and sends to verified destinations only),
-4. writes `send_email: [{ "name": "SEND_EMAIL" }]`, the derived `addresses` array, and `vars.__VOID_EMAIL_FROM` into `void.lock.json`.
+Void shows the planned DNS, routing, plus-addressing, and sending changes and asks before applying them. Commit `void.lock.json`, then run `void deploy --platform cloudflare --require-email` in CI.
 
-The routing rules themselves are created by the next `void deploy --platform cloudflare`: wrangler applies its Email Routing plan from `addresses` on deploy. `void email setup` never writes `addresses` unless routing is ready for the domain, prunes an address already routed to another worker or a forward (and says so), and skips the whole step when the existing `addresses` array holds entries it did not derive. A run that finds every row ready asks nothing and changes nothing on your account — with one exception: a domain still not onboarded for Email Sending while the `send_email` binding is committed (a remembered Workers Free refusal, see `void email status`) is offered as a retry on its own prompt, `Onboard <domain> for Email Sending? Inbound already works; onboarding needs Workers Paid.` — the step to run once after upgrading; answer No and nothing changes. The deploy never retries it. Needs an interactive terminal; exits 1 when the inbound rows are still not ready afterwards — routing not enabled, subaddressing still off, or `addresses` withheld — naming the row and saying to rerun. A Workers Free account's refused sending row is not a failure: inbound is complete, `addresses` is written, the plan hint is printed, and the binding written alongside is what makes the next deploy and `void email status` read the domain as set up. See [Your own Cloudflare account](../guide/email.md#your-own-cloudflare-account).
+On Workers Free, inbound mail and sends to verified recipients remain available. Run this command again after upgrading to Workers Paid to enable arbitrary recipients. See [Email setup](../guide/email.md#your-own-cloudflare-account).
 
 ## Agent
 
