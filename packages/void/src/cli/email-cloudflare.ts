@@ -44,20 +44,13 @@
  *     its permissions, so it is gated by the reads, which fail closed; a Global API Key is
  *     refused by name (no single bearer for the two REST-only calls).
  *
- * The prose parsers retain the historical Wrangler fixture format (see
- * `WRANGLER_EMAIL_PROSE_VERSION` and `test/fixtures/wrangler-email/<version>/`).
- * The private cf adapter emits that format from cf's structured responses.
- * A parser miss fails CLOSED: the row reads `unknown` and the checklist says to run
- * `void email setup`. Every `wrangler email` command prints an "open beta command"
- * warning on stderr, so the parsers read STDOUT only; stderr is consulted solely for
- * wrangler's `[code: N]` API error token on a FAILED command.
+ * Email reads return structured Cloudflare data through the private command adapter.
+ * Invalid data fails closed: the row reads `unknown` and the checklist directs the
+ * developer to `void email setup`. Failed commands retain their API error codes.
  */
 
 import type { EmailHandlersScan } from '../router/email.ts';
 import { findBindingNameOwner } from './wrangler.ts';
-
-/** Historical fixture version for the email prose compatibility parser. */
-export const WRANGLER_EMAIL_PROSE_VERSION = '4.131.0';
 
 /** The `send_email` binding name Void provisions and the runtime reads. */
 export const SEND_EMAIL_BINDING = 'SEND_EMAIL';
@@ -298,7 +291,7 @@ export function deriveAddresses(
   return { addresses, refused, routes };
 }
 
-// ── Prose parsers (pinned to WRANGLER_EMAIL_PROSE_VERSION) ─────────────────────
+// ── Structured command results ────────────────────────────────────────────────
 
 /**
  * `wrangler whoami --json` — the fields Mode B reads. `tokenPermissions` is filled from
@@ -337,166 +330,151 @@ export function parseWhoamiJson(stdout: string): WhoamiJson | null {
   }
 }
 
-/**
- * `wrangler email routing settings <zone>` stdout (4.131 `src/email-routing/settings.ts`):
- *
- *   Email Routing for void.cloud:
- *     Enabled:  true
- *     Status:   ready
- *     Created:  …
- *     Modified: …
- *     Tag:      5b66f5cb84fd7dcfdd0170515e622181
- *
- * `Tag` is the Email Routing settings tag, which is the ZONE ID in practice (measured:
- * void.app's tag equals its zone id). `GET /zones?name=` is the documented authority;
- * it is consulted only when the session bearer is already in hand (see `preflightEmail`).
- */
-export interface RoutingSettingsProse {
+export interface RoutingSettings {
   name: string;
   enabled: boolean;
   status: string;
   tag: string;
 }
 
-export function parseRoutingSettings(stdout: string): RoutingSettingsProse | null {
-  const name = /^Email Routing for (\S+):\s*$/m.exec(stdout)?.[1];
-  const enabled = /^\s*Enabled:\s+(true|false)\s*$/m.exec(stdout)?.[1];
-  const status = /^\s*Status:\s+(\S+)\s*$/m.exec(stdout)?.[1];
-  const tag = /^\s*Tag:\s+([0-9a-f]{32})\s*$/m.exec(stdout)?.[1];
-  if (!name || !enabled || !status || !tag) {
-    return null;
-  }
-  return { name, enabled: enabled === 'true', status, tag };
-}
-
-export interface RoutingRuleProse {
+export interface RoutingRule {
   id: string;
   name: string;
   enabled: boolean;
-  /** `to:<address>` matchers, lowercased addresses. */
   to: Array<string>;
-  /** `worker:<name>`, `forward:<a>,<b>`, `drop` — verbatim wrangler tokens. */
   actions: Array<string>;
 }
 
-export interface RoutingRulesProse {
-  rules: Array<RoutingRuleProse>;
+export interface RoutingRules {
+  rules: Array<RoutingRule>;
   catchAll: { enabled: boolean; actions: Array<string> } | null;
 }
 
-/**
- * `wrangler email routing rules list <zone>` stdout (4.131 `src/email-routing/rules/list.ts`):
- *
- *   Rule: <id>
- *     Name:     <name|(none)>
- *     Enabled:  true
- *     Matchers: to:support@void.cloud
- *     Actions:  worker:acme-support
- *     Priority: 0
- *
- *   Catch-all rule: disabled, action: drop
- *     (use `wrangler email routing rules get catch-all` to view details)
- *
- * With no rule at all: `No routing rules found.` / no custom rule: `No custom routing
- * rules found.`. Both forms are pinned by fixture.
- */
-export function parseRoutingRules(stdout: string): RoutingRulesProse | null {
-  const lines = stdout.split(/\r?\n/);
-  const rules: Array<RoutingRuleProse> = [];
-  let catchAll: RoutingRulesProse['catchAll'] = null;
-  let sawSentinel = false;
-  let current: RoutingRuleProse | null = null;
-
-  for (const raw of lines) {
-    const line = raw.trimEnd();
-    if (/^No (custom )?routing rules found\.$/.test(line)) {
-      sawSentinel = true;
-      continue;
-    }
-    const catchAllMatch = /^Catch-all rule: (enabled|disabled), action: (.*)$/.exec(line);
-    if (catchAllMatch) {
-      catchAll = {
-        enabled: catchAllMatch[1] === 'enabled',
-        actions: splitActionList(catchAllMatch[2] ?? ''),
-      };
-      current = null;
-      continue;
-    }
-    const ruleMatch = /^Rule: (\S+)$/.exec(line);
-    if (ruleMatch) {
-      current = { id: ruleMatch[1] as string, name: '', enabled: false, to: [], actions: [] };
-      rules.push(current);
-      continue;
-    }
-    if (!current) {
-      continue;
-    }
-    const field = /^\s{2}(Name|Enabled|Matchers|Actions|Priority):\s*(.*)$/.exec(line);
-    if (!field) {
-      continue;
-    }
-    const value = (field[2] ?? '').trim();
-    switch (field[1]) {
-      case 'Name':
-        current.name = value;
-        break;
-      case 'Enabled':
-        current.enabled = value === 'true';
-        break;
-      case 'Matchers':
-        current.to = value
-          .split(', ')
-          .filter((m) => m.startsWith('to:'))
-          .map((m) => m.slice(3).toLowerCase());
-        break;
-      case 'Actions':
-        current.actions = splitActionList(value);
-        break;
-      default:
-        break;
-    }
-  }
-
-  // Fail closed on prose we did not recognise: an output with neither a sentinel, a
-  // rule, nor a catch-all line is not this wrangler's rules listing.
-  if (!sawSentinel && rules.length === 0 && !catchAll) {
-    return null;
-  }
-  return { rules, catchAll };
-}
-
-function splitActionList(value: string): Array<string> {
-  return value
-    .split(', ')
-    .map((a) => a.trim())
-    .filter(Boolean);
-}
-
-/**
- * `wrangler email sending settings <domain>` stdout (4.131 `src/email-routing/sending/settings.ts`):
- *
- *   Email Sending for void.cloud:
- *     Enabled:            true
- *     Tag:                19af4fdbee924a92916afea0de5a8fdd
- *     …
- *     Return-path domain: cf-bounce.void.cloud
- *
- * Not onboarded: exit 1 with `No sending subdomain found for \`<domain>\`.` on STDERR.
- */
-export interface SendingSettingsProse {
+export interface SendingSettings {
   name: string;
   enabled: boolean;
   tag: string;
 }
 
-export function parseSendingSettings(stdout: string): SendingSettingsProse | null {
-  const name = /^Email Sending for (\S+):\s*$/m.exec(stdout)?.[1];
-  const enabled = /^\s*Enabled:\s+(true|false)\s*$/m.exec(stdout)?.[1];
-  const tag = /^\s*Tag:\s+([0-9a-f]{32})\s*$/m.exec(stdout)?.[1];
-  if (!name || !enabled || !tag) {
+function readJson(stdout: string): unknown {
+  try {
+    return JSON.parse(stdout);
+  } catch {
     return null;
   }
-  return { name, enabled: enabled === 'true', tag };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function readRoutingSettings(stdout: string): RoutingSettings | null {
+  const data = readJson(stdout);
+  return isRecord(data) &&
+    typeof data.name === 'string' &&
+    data.name.length > 0 &&
+    typeof data.enabled === 'boolean' &&
+    typeof data.status === 'string' &&
+    data.status.length > 0 &&
+    typeof data.tag === 'string' &&
+    /^[0-9a-f]{32}$/.test(data.tag)
+    ? { name: data.name, enabled: data.enabled, status: data.status, tag: data.tag }
+    : null;
+}
+
+export function readRoutingRules(stdout: string): RoutingRules | null {
+  const data = readJson(stdout);
+  if (!Array.isArray(data)) {
+    return null;
+  }
+  const rules: Array<RoutingRule> = [];
+  let catchAll: RoutingRules['catchAll'] = null;
+  for (const entry of data) {
+    if (
+      !isRecord(entry) ||
+      typeof entry.enabled !== 'boolean' ||
+      !Array.isArray(entry.actions) ||
+      entry.actions.length === 0 ||
+      !Array.isArray(entry.matchers) ||
+      entry.matchers.length === 0
+    ) {
+      return null;
+    }
+    const actions: Array<string> = [];
+    for (const action of entry.actions) {
+      if (!isRecord(action) || typeof action.type !== 'string') {
+        return null;
+      }
+      if (action.type === 'drop') {
+        actions.push('drop');
+      } else if (action.type === 'worker' || action.type === 'forward') {
+        const values = typeof action.value === 'string' ? [action.value] : action.value;
+        if (
+          !Array.isArray(values) ||
+          values.length === 0 ||
+          !values.every((value) => typeof value === 'string' && value.length > 0)
+        ) {
+          return null;
+        }
+        if (action.type === 'worker') {
+          actions.push('worker:' + values.join(','));
+        } else {
+          actions.push('forward:' + values.join(','));
+        }
+      } else {
+        // Unknown actions cannot prove ownership or authorize taking over a rule.
+        return null;
+      }
+    }
+    const to: Array<string> = [];
+    let all = false;
+    for (const matcher of entry.matchers) {
+      if (!isRecord(matcher)) {
+        return null;
+      }
+      if (matcher.type === 'all') {
+        all = true;
+      } else if ((matcher.type === 'literal' && matcher.field === 'to') || matcher.type === 'to') {
+        if (typeof matcher.value !== 'string' || matcher.value.length === 0) {
+          return null;
+        }
+        to.push(matcher.value.toLowerCase());
+      } else {
+        return null;
+      }
+    }
+    if (all) {
+      if (catchAll || entry.matchers.length !== 1) {
+        return null;
+      }
+      catchAll = { enabled: entry.enabled, actions };
+    } else {
+      if (
+        typeof entry.id !== 'string' ||
+        entry.id.length === 0 ||
+        (entry.name !== undefined && typeof entry.name !== 'string')
+      ) {
+        return null;
+      }
+      rules.push({ id: entry.id, name: entry.name ?? '', enabled: entry.enabled, to, actions });
+    }
+  }
+  return { rules, catchAll };
+}
+
+export function readSendingSettings(stdout: string): SendingSettings | null {
+  const data = readJson(stdout);
+  if (!isRecord(data)) {
+    return null;
+  }
+  const tag = data.tag ?? data.id;
+  return typeof data.name === 'string' &&
+    data.name.length > 0 &&
+    typeof data.enabled === 'boolean' &&
+    typeof tag === 'string' &&
+    /^[0-9a-f]{32}$/.test(tag)
+    ? { name: data.name, enabled: data.enabled, tag }
+    : null;
 }
 
 /** wrangler renders an `APIError` note as `<message> [code: <n>]`; extract the code. */
@@ -773,8 +751,8 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
 
   // 2. Zone: walk the labels the way wrangler's own `resolveDomain` does, through
   //    `email routing settings <candidate>` — the first candidate that is a zone in the
-  //    pinned account is the apex, and its prose also carries routing status + zone id.
-  let settings: RoutingSettingsProse | null = null;
+  //    pinned account is the apex, and its data also carries routing status + zone id.
+  let settings: RoutingSettings | null = null;
   let settingsMiss = false;
   if (pre.session.state === 'ok') {
     for (const candidate of zoneCandidates(domain)) {
@@ -790,7 +768,7 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
         settingsMiss = true;
         break;
       }
-      settings = parseRoutingSettings(result.stdout);
+      settings = readRoutingSettings(result.stdout);
       if (!settings) {
         settingsMiss = true;
       }
@@ -829,7 +807,7 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
   //    `GET /zones?name=<apex>` (documented zone authority — WITHOUT `account.id`, so a
   //    zone in another account is told apart from one not on Cloudflare, and `type`
   //    refuses partial/secondary zones) and `GET /zones/{z}/email/routing`
-  //    (`support_subaddress`, which the settings prose does not print). A `null` bearer
+  //    (`support_subaddress`, which the settings command does not return). A `null` bearer
   //    leaves both rows `unknown`; nothing about the deploy fails on that.
   let bearer: string | null = null;
   if (pre.session.state === 'ok') {
@@ -977,7 +955,7 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
   const rules =
     isHardFailure(rulesResult) || rulesResult.status !== 0
       ? null
-      : parseRoutingRules(rulesResult.stdout);
+      : readRoutingRules(rulesResult.stdout);
   if (!rules) {
     pre.rules.state = 'unknown';
     block(
@@ -1028,7 +1006,7 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
   if (isHardFailure(sendingResult)) {
     pre.sending.state = 'unknown';
   } else if (sendingResult.status === 0) {
-    const parsed = parseSendingSettings(sendingResult.stdout);
+    const parsed = readSendingSettings(sendingResult.stdout);
     pre.sending.state = parsed ? (parsed.enabled ? 'ready' : 'pending') : 'unknown';
   } else if (SENDING_NOT_FOUND_RE.test(stripAnsi(sendingResult.stderr))) {
     pre.sending.state = 'pending';

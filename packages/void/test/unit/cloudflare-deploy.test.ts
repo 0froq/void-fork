@@ -9896,7 +9896,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
   function routingSettings(name: string, status: string): DeployWranglerRunResult {
     return {
       ...cleanExit,
-      stdout: `\n ⛅️ wrangler 4.131.0\n────────────────────\nEmail Routing for ${name}:\n  Enabled:  true\n  Status:   ${status}\n  Created:  2026-03-18T02:37:48.990322Z\n  Modified: 2026-03-18T02:44:54.833251Z\n  Tag:      ${ZONE_ID}\n`,
+      stdout: JSON.stringify({ name, enabled: true, status, tag: ZONE_ID }),
       stderr: BETA_WARNING,
     };
   }
@@ -9907,14 +9907,23 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
   });
   const noRules: DeployWranglerRunResult = {
     ...cleanExit,
-    stdout:
-      ' ⛅️ wrangler 4.131.0\n────────────────────\nNo custom routing rules found.\n\nCatch-all rule: disabled, action: drop\n  (use `wrangler email routing rules get catch-all` to view details)\n',
+    stdout: JSON.stringify([
+      { enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] },
+    ]),
     stderr: BETA_WARNING,
   };
   const myRule: DeployWranglerRunResult = {
     ...cleanExit,
-    stdout:
-      ' ⛅️ wrangler 4.131.0\n────────────────────\nRule: 1a2b3c\n  Name:     support\n  Enabled:  true\n  Matchers: to:support@mail.acme.com\n  Actions:  worker:myapp\n  Priority: 0\n\n\nCatch-all rule: disabled, action: drop\n  (use `wrangler email routing rules get catch-all` to view details)\n',
+    stdout: JSON.stringify([
+      {
+        id: '1a2b3c',
+        name: 'support',
+        enabled: true,
+        matchers: [{ type: 'literal', field: 'to', value: 'support@mail.acme.com' }],
+        actions: [{ type: 'worker', value: ['myapp'] }],
+      },
+      { enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] },
+    ]),
     stderr: BETA_WARNING,
   };
   const sendingNotFound: DeployWranglerRunResult = {
@@ -9924,8 +9933,11 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
   };
   const sendingEnabled: DeployWranglerRunResult = {
     ...cleanExit,
-    stdout:
-      '\n ⛅️ wrangler 4.131.0\n────────────────────\nEmail Sending for mail.acme.com:\n  Enabled:            true\n  Tag:                19af4fdbee924a92916afea0de5a8fdd\n  Created:            2026-03-30T16:39:39.300911Z\n  Modified:           2026-03-30T16:39:39.300911Z\n  DKIM selector:      cf-bounce\n  Return-path domain: cf-bounce.mail.acme.com\n',
+    stdout: JSON.stringify({
+      name: 'mail.acme.com',
+      enabled: true,
+      tag: '19af4fdbee924a92916afea0de5a8fdd',
+    }),
     stderr: BETA_WARNING,
   };
 
@@ -10133,7 +10145,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     expect(confirms).toEqual(['Set up email on mail.acme.com?']);
 
     // Exact argv per branch — every email call carries the SAME `-c <cfg> --env=` context as
-    // whoami / migrate / deploy, and is captured (its prose is parsed, never streamed).
+    // whoami / migrate / deploy, and is captured (its JSON is read, never streamed).
     const emailSpawns = spawns.filter((s) => s.args[0] === 'email');
     expect(emailSpawns.map((s) => s.args)).toEqual([
       ['email', 'routing', 'settings', 'mail.acme.com', ...configArgs(root)],
@@ -10806,10 +10818,16 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
     // dashboard. Left in the array it reaches wrangler's plan as a takeover `conflict`.
     const forwardedBilling: DeployWranglerRunResult = {
       ...myRule,
-      stdout: myRule.stdout.replace(
-        '\n\nCatch-all',
-        '\nRule: 4d5e6f\n  Name:     (none)\n  Enabled:  true\n  Matchers: to:billing@mail.acme.com\n  Actions:  forward:ceo@gmail.com\n  Priority: 1\n\n\nCatch-all',
-      ),
+      stdout: JSON.stringify([
+        ...JSON.parse(myRule.stdout),
+        {
+          id: '4d5e6f',
+          name: '(none)',
+          enabled: true,
+          matchers: [{ type: 'literal', field: 'to', value: 'billing@mail.acme.com' }],
+          actions: [{ type: 'forward', value: ['ceo@gmail.com'] }],
+        },
+      ]),
     };
     const root = emailProject(
       { ...COMMITTED_EMAIL, addresses: ['support@mail.acme.com', 'billing@mail.acme.com'] },

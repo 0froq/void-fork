@@ -801,21 +801,14 @@ function email(): Result {
         ? result(1, '', `Could not find a zone for \`${candidate}\`.`)
         : read;
     }
-    const settings = object(parsedJson(read.stdout));
-    if (typeof settings.tag !== 'string' || typeof settings.name !== 'string') {
-      throw new Error('Email Routing settings were incomplete.');
-    }
-    return result(
-      0,
-      `Email Routing for ${settings.name}:\n  Enabled: ${settings.enabled === true}\n  Status: ${settings.status}\n  Tag: ${settings.tag}\n`,
-    );
+    return read;
   }
   if (product === 'routing' && operation === 'enable') {
     return runCf(['email-routing', 'enable', '--zone', candidate, '--name', candidate]);
   }
   if (product === 'routing' && operation === 'rules' && args[3] === 'list' && args[4]) {
     const zone = args[4];
-    const lines: Array<string> = [];
+    const rules: Array<unknown> = [];
     for (let page = 1; page <= 100; page++) {
       const listed = runCf([
         'email-routing',
@@ -835,36 +828,9 @@ function email(): Result {
       if (!Array.isArray(items)) {
         throw new Error('Email Routing rules were malformed.');
       }
-      for (const entry of items.map(object)) {
-        const actions = Array.isArray(entry.actions)
-          ? entry.actions.map((action) => {
-              const item = object(action);
-              return item.type === 'worker'
-                ? `worker:${item.value}`
-                : item.type === 'forward' && Array.isArray(item.value)
-                  ? `forward:${item.value.join(',')}`
-                  : String(item.type);
-            })
-          : [];
-        const matchers = Array.isArray(entry.matchers) ? entry.matchers.map(object) : [];
-        if (matchers.some((item) => item.type === 'all')) {
-          lines.push(
-            `Catch-all rule: ${entry.enabled === true ? 'enabled' : 'disabled'}, action: ${actions.join(', ')}`,
-          );
-        } else {
-          if (typeof entry.id !== 'string') {
-            throw new Error('Email Routing rule ID was missing.');
-          }
-          const recipients = matchers
-            .filter((item) => item.type === 'literal' || item.type === 'to')
-            .map((item) => `to:${item.value}`);
-          lines.push(
-            `Rule: ${entry.id}\n  Name: ${entry.name || '(none)'}\n  Enabled: ${entry.enabled === true}\n  Matchers: ${recipients.join(', ')}\n  Actions: ${actions.join(', ')}\n  Priority: ${entry.priority ?? 0}`,
-          );
-        }
-      }
+      rules.push(...items);
       if (items.length < 100) {
-        return result(0, lines.length ? `${lines.join('\n')}\n` : 'No routing rules found.\n');
+        return result(0, `${JSON.stringify(rules)}\n`);
       }
     }
     throw new Error('Email Routing rules exceeded the supported page limit.');
@@ -882,14 +848,7 @@ function email(): Result {
     if (!match) {
       return result(1, '', `No sending subdomain found for \`${candidate}\`.`);
     }
-    const tag = match.tag ?? match.id;
-    if (typeof tag !== 'string') {
-      throw new Error('Email Sending subdomain ID was missing.');
-    }
-    return result(
-      0,
-      `Email Sending for ${candidate}:\n  Enabled: ${match.enabled === true}\n  Tag: ${tag}\n`,
-    );
+    return result(0, `${JSON.stringify(match)}\n`);
   }
   if (product === 'sending' && operation === 'enable') {
     return runCf([

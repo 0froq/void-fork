@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { connect } from 'node:net';
@@ -888,3 +888,148 @@ syncBuiltinESMExports();
     rmSync(directory, { recursive: true, force: true });
   }
 }, 15_000);
+
+it.each([
+  {
+    operation: ['routing', 'settings', 'acme.com'],
+    commands: [
+      {
+        command: ['email-routing', 'settings', 'get', '--zone', 'acme.com'],
+        data: {
+          name: 'acme.com',
+          enabled: true,
+          status: 'ready',
+          tag: '11111111111111111111111111111111',
+        },
+      },
+    ],
+    expected: {
+      name: 'acme.com',
+      enabled: true,
+      status: 'ready',
+      tag: '11111111111111111111111111111111',
+    },
+  },
+  {
+    operation: ['sending', 'settings', 'mail.acme.com'],
+    commands: [
+      {
+        command: ['email-routing', 'settings', 'get', '--zone', 'mail.acme.com'],
+        status: 1,
+        stderr: 'Zone not found: mail.acme.com',
+      },
+      {
+        command: ['email-routing', 'settings', 'get', '--zone', 'acme.com'],
+        data: {
+          name: 'acme.com',
+          enabled: true,
+          status: 'ready',
+          tag: '11111111111111111111111111111111',
+        },
+      },
+      {
+        command: ['email-sending', 'subdomains', 'list', '--zone', 'acme.com'],
+        data: [{ name: 'mail.acme.com', enabled: true, id: '22222222222222222222222222222222' }],
+      },
+    ],
+    expected: { name: 'mail.acme.com', enabled: true, id: '22222222222222222222222222222222' },
+  },
+  {
+    operation: ['routing', 'rules', 'list', 'acme.com'],
+    commands: [
+      {
+        command: [
+          'email-routing',
+          'rules',
+          'list-account',
+          '--zone',
+          'acme.com',
+          '--page',
+          '1',
+          '--per-page',
+          '100',
+        ],
+        data: Array.from({ length: 100 }, (_, index) => ({
+          id: `rule-${index}`,
+          name: 'support',
+          enabled: index % 2 === 0,
+          matchers: [{ type: 'literal', field: 'to', value: `support-${index}@acme.com` }],
+          actions: [{ type: 'worker', value: ['my-worker'] }],
+        })),
+      },
+      {
+        command: [
+          'email-routing',
+          'rules',
+          'list-account',
+          '--zone',
+          'acme.com',
+          '--page',
+          '2',
+          '--per-page',
+          '100',
+        ],
+        data: [{ enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] }],
+      },
+    ],
+  },
+])('returns structured email data for $operation', async ({ operation, commands, ...example }) => {
+  const directory = mkdtempSync(join(tmpdir(), 'void-cf-email-json-'));
+  try {
+    const preload = join(directory, 'mock-cf.mjs');
+    const callsPath = join(directory, 'calls.json');
+    writeFileSync(
+      preload,
+      `import child from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { writeFileSync } from 'node:fs';
+const commands = ${JSON.stringify(commands)};
+const calls = [];
+child.spawnSync = (_executable, args) => {
+  const command = args.slice(1);
+  calls.push(command);
+  writeFileSync(${JSON.stringify(callsPath)}, JSON.stringify(calls));
+  const response = commands[calls.length - 1];
+  if (JSON.stringify(command) !== JSON.stringify(response?.command)) {
+    return { status: 1, stdout: '', stderr: 'Unexpected email transport command' };
+  }
+  return { status: response.status ?? 0, stdout: response.data === undefined ? '' : JSON.stringify(response.data), stderr: response.stderr ?? '' };
+};
+syncBuiltinESMExports();
+`,
+    );
+    const entry = join(import.meta.dirname, '..', '..', 'src', 'cli', 'cf-compat.ts');
+    const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
+      (resolve) => {
+        execFile(
+          process.execPath,
+          ['--import', pathToFileURL(preload).href, entry, 'email', ...operation],
+          {
+            cwd: directory,
+            encoding: 'utf8',
+            timeout: 10_000,
+            env: {
+              PATH: process.env.PATH,
+              SYSTEMROOT: process.env.SYSTEMROOT,
+              WINDIR: process.env.WINDIR,
+              CI: 'true',
+              CLOUDFLARE_AUTH_USE_KEYRING: 'false',
+            },
+          },
+          (error, stdout, stderr) => resolve({ status: error ? 1 : 0, stdout, stderr }),
+        );
+      },
+    );
+    expect(output.status, output.stderr).toBe(0);
+    expect(JSON.parse(output.stdout)).toEqual(
+      'expected' in example
+        ? example.expected
+        : commands.flatMap<unknown>((command) => command.data ?? []),
+    );
+    expect(JSON.parse(readFileSync(callsPath, 'utf8'))).toEqual(
+      commands.map((command) => command.command),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vite-plus/test';
 import {
   applyEmailSetup,
@@ -7,16 +5,15 @@ import {
   emailFromDomain,
   fetchWithSessionBearer,
   findEmailConfigConflicts,
-  parseRoutingRules,
-  parseRoutingSettings,
-  parseSendingSettings,
+  readRoutingRules,
+  readRoutingSettings,
+  readSendingSettings,
   parseWhoamiJson,
   preflightEmail,
   renderAddressMap,
   renderEmailChecklist,
   subdomainDashboardFallback,
   SENDING_FREE_PLAN_HINT,
-  WRANGLER_EMAIL_PROSE_VERSION,
   wranglerApiErrorCode,
   type EmailCloudflareInputs,
   type EmailDns,
@@ -26,46 +23,63 @@ import {
 import type { EmailHandlersScan } from '../../src/router/email.ts';
 import { compileEmailPattern } from '../../src/router/email.ts';
 
-// ── Fixtures: verbatim stdout/stderr of the pinned wrangler (read-only captures) ──
+// ── Structured command fakes ───────────────────────────────────────────────────
 
-const FIXTURES = join(
-  import.meta.dirname,
-  '..',
-  'fixtures',
-  'wrangler-email',
-  WRANGLER_EMAIL_PROSE_VERSION,
-);
-
-function fixture(name: string): EmailWranglerRunResult {
+function whoamiResult(): EmailWranglerRunResult {
   return {
-    status: Number(readFileSync(join(FIXTURES, `${name}.exit`), 'utf-8').trim()),
-    stdout: readFileSync(join(FIXTURES, `${name}.stdout`), 'utf-8'),
-    stderr: readFileSync(join(FIXTURES, `${name}.stderr`), 'utf-8'),
+    status: 0,
+    stdout: JSON.stringify({
+      loggedIn: true,
+      authType: 'OAuth Token',
+      email: 'dev@example.com',
+      accounts: [{ id: ACCOUNT, name: 'Acme' }],
+      tokenPermissions: ['account:read', 'email_routing:write', 'email_sending:write'],
+    }),
+    stderr: '',
   };
 }
 
-/** The wrangler-sourced prose shapes the fixtures cannot show (rules present, catch-all to a worker). */
-const RULES_WITH_ENTRIES = `
- ⛅️ wrangler 4.131.0
-────────────────────
-Rule: 1a2b3c
-  Name:     support
-  Enabled:  true
-  Matchers: to:support@acme.com
-  Actions:  worker:acme-support
-  Priority: 0
+const emptyRules = JSON.stringify([
+  { enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] },
+]);
 
-Rule: 4d5e6f
-  Name:     (none)
-  Enabled:  true
-  Matchers: to:sales@acme.com
-  Actions:  forward:sales@gmail.com
-  Priority: 1
-
-
-Catch-all rule: enabled, action: worker:acme-support
-  (use \`wrangler email routing rules get catch-all\` to view details)
-`;
+function routingRules(
+  options: {
+    supportDomain?: string;
+    salesDomain?: string;
+    supportEnabled?: boolean;
+    supportAction?: { type: string; value?: string | Array<string> };
+    catchAllWorker?: string;
+    extra?: Array<unknown>;
+  } = {},
+): string {
+  return JSON.stringify([
+    {
+      id: '1a2b3c',
+      name: 'support',
+      enabled: options.supportEnabled ?? true,
+      matchers: [
+        { type: 'literal', field: 'to', value: 'support@' + (options.supportDomain ?? 'acme.com') },
+      ],
+      actions: [options.supportAction ?? { type: 'worker', value: ['acme-support'] }],
+    },
+    {
+      id: '4d5e6f',
+      name: '(none)',
+      enabled: true,
+      matchers: [
+        { type: 'literal', field: 'to', value: 'sales@' + (options.salesDomain ?? 'acme.com') },
+      ],
+      actions: [{ type: 'forward', value: ['sales@gmail.com'] }],
+    },
+    ...(options.extra ?? []),
+    {
+      enabled: true,
+      matchers: [{ type: 'all' }],
+      actions: [{ type: 'worker', value: [options.catchAllWorker ?? 'acme-support'] }],
+    },
+  ]);
+}
 
 const BETA_WARNING =
   '\u001b[33m▲ \u001b[43;33m[\u001b[43;30mWARNING\u001b[43;33m]\u001b[0m \u001b[1m🚧 `wrangler email x` is an open beta command.\u001b[0m\n';
@@ -78,7 +92,7 @@ function routingSettings(
 ): EmailWranglerRunResult {
   return {
     status: 0,
-    stdout: `\n ⛅️ wrangler 4.131.0\n────────────────────\nEmail Routing for ${name}:\n  Enabled:  ${enabled}\n  Status:   ${status}\n  Created:  2026-03-18T02:37:48.990322Z\n  Modified: 2026-03-18T02:44:54.833251Z\n  Tag:      ${tag}\n`,
+    stdout: JSON.stringify({ name, enabled: enabled, status, tag: tag }),
     stderr: BETA_WARNING,
   };
 }
@@ -248,12 +262,12 @@ function transcriptInputs(
 ): { inputs: EmailCloudflareInputs; calls: Array<Call>; fetchCalls: Array<FetchCall> } {
   const calls = overrides.calls ?? [];
   const fetchCalls = overrides.fetchCalls ?? [];
-  const whoami = fixture('whoami');
+  const whoami = whoamiResult();
   const runnerTable = {
     'whoami --json': whoami,
     'email routing settings mail.acme.com': zoneNotFound('mail.acme.com'),
     'email routing settings acme.com': routingSettings('acme.com', true, 'ready', ZONE_ID),
-    'email routing rules list acme.com': fixture('routing-rules-list-void.cloud'),
+    'email routing rules list acme.com': { status: 0, stdout: emptyRules, stderr: '' },
     'email sending settings mail.acme.com': sendingNotFound('mail.acme.com'),
     ...overrides.runnerTable,
   };
@@ -372,101 +386,98 @@ describe('emailFromDomain', () => {
   });
 });
 
-// ── Prose parsers pinned to the shipped wrangler ─────────────────────────────────
-
-describe(`wrangler ${WRANGLER_EMAIL_PROSE_VERSION} prose parsers (fixtures)`, () => {
-  it('routing settings: ready zone', () => {
-    const f = fixture('routing-settings-void.cloud');
-    expect(f.status).toBe(0);
-    expect(parseRoutingSettings(f.stdout)).toEqual({
-      name: 'void.cloud',
+describe('structured email results', () => {
+  it('reads routing and sending settings', () => {
+    const value = { name: 'acme.com', enabled: true, status: 'ready', tag: ZONE_ID };
+    expect(readRoutingSettings(JSON.stringify(value))).toEqual(value);
+    expect(readSendingSettings(JSON.stringify(value))).toEqual({
+      name: 'acme.com',
       enabled: true,
-      status: 'ready',
-      tag: '5b66f5cb84fd7dcfdd0170515e622181',
+      tag: ZONE_ID,
     });
+    expect(
+      readSendingSettings(JSON.stringify({ name: 'acme.com', enabled: false, id: ZONE_ID })),
+    ).toEqual({ name: 'acme.com', enabled: false, tag: ZONE_ID });
   });
 
-  it('routing settings: unconfigured zone', () => {
-    const f = fixture('routing-settings-void.app');
-    expect(parseRoutingSettings(f.stdout)).toEqual({
-      name: 'void.app',
-      enabled: false,
-      status: 'unconfigured',
-      tag: '198763c1ff7c51a4c97e5f6e6ee1d2f4',
-    });
-  });
-
-  it('routing settings: a subdomain is not a zone (exit 1, message on stderr, stdout empty)', () => {
-    const f = fixture('routing-settings-mail.void.cloud');
-    expect(f.status).toBe(1);
-    expect(parseRoutingSettings(f.stdout)).toBeNull();
-    expect(f.stderr).toContain('Could not find zone for `mail.void.cloud`');
-  });
-
-  it('rules list: no custom rules, catch-all disabled', () => {
-    const f = fixture('routing-rules-list-void.cloud');
-    expect(parseRoutingRules(f.stdout)).toEqual({
+  it('reads empty rules and disabled catch-all', () => {
+    expect(readRoutingRules('[]')).toEqual({ rules: [], catchAll: null });
+    expect(readRoutingRules(emptyRules)).toEqual({
       rules: [],
       catchAll: { enabled: false, actions: ['drop'] },
     });
   });
 
-  it('rules list: rules and an enabled catch-all (shape from wrangler src/email-routing/rules/list.ts)', () => {
-    expect(parseRoutingRules(RULES_WITH_ENTRIES)).toEqual({
-      rules: [
+  it.each(['acme-support', ['acme-support']].map((value) => ({ value })))(
+    'reads Worker action values $value',
+    ({ value }) => {
+      const result = readRoutingRules(routingRules({ supportAction: { type: 'worker', value } }));
+      expect(result?.rules[0]?.actions).toEqual(['worker:acme-support']);
+      expect(result?.catchAll?.actions).toEqual(['worker:acme-support']);
+    },
+  );
+
+  it('does not claim ownership of a multi-Worker action', () => {
+    const result = readRoutingRules(
+      routingRules({ supportAction: { type: 'worker', value: ['acme-support', 'other-worker'] } }),
+    );
+    expect(result?.rules[0]?.actions).toEqual(['worker:acme-support,other-worker']);
+    expect(result?.rules[0]?.actions).not.toContain('worker:acme-support');
+  });
+
+  it.each(
+    [
+      null,
+      {},
+      [{ enabled: 'false', matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] }],
+      [{ enabled: true, matchers: [{ type: 'all' }], actions: [] }],
+      [{ enabled: true, matchers: [{ type: 'all' }], actions: [{ type: 'worker', value: [] }] }],
+      [{ enabled: true, matchers: [{ type: 'all' }], actions: [{ type: 'worker', value: [42] }] }],
+      [
         {
-          id: '1a2b3c',
-          name: 'support',
           enabled: true,
-          to: ['support@acme.com'],
-          actions: ['worker:acme-support'],
-        },
-        {
-          id: '4d5e6f',
-          name: '(none)',
-          enabled: true,
-          to: ['sales@acme.com'],
-          actions: ['forward:sales@gmail.com'],
+          matchers: [{ type: 'all' }],
+          actions: [{ type: 'unrecognized', value: ['acme-support'] }],
         },
       ],
-      catchAll: { enabled: true, actions: ['worker:acme-support'] },
-    });
+      [
+        {
+          enabled: true,
+          matchers: [{ type: 'literal', field: 'from', value: 'support@acme.com' }],
+          actions: [{ type: 'drop' }],
+        },
+      ],
+      [
+        {
+          enabled: true,
+          matchers: [{ type: 'all' }, { type: 'literal', field: 'to', value: 'support@acme.com' }],
+          actions: [{ type: 'drop' }],
+        },
+      ],
+    ].map((value) => ({ value })),
+  )('fails closed on malformed or unsupported rules $value', ({ value }) => {
+    expect(readRoutingRules(JSON.stringify(value))).toBeNull();
+  });
+
+  it('fails closed on malformed JSON and settings', () => {
+    expect(readRoutingSettings('not json')).toBeNull();
+    expect(readRoutingRules('not json')).toBeNull();
+    expect(readSendingSettings('not json')).toBeNull();
     expect(
-      parseRoutingRules('\n ⛅️ wrangler 4.131.0\n────────────────────\nNo routing rules found.\n'),
-    ).toEqual({
-      rules: [],
-      catchAll: null,
-    });
-  });
-
-  it('sending settings: onboarded domain, and the not-found variant', () => {
-    expect(parseSendingSettings(fixture('sending-settings-void.cloud').stdout)).toEqual({
-      name: 'void.cloud',
-      enabled: true,
-      tag: '19af4fdbee924a92916afea0de5a8fdd',
-    });
-    const missing = fixture('sending-settings-nonexistent.void.cloud');
-    expect(missing.status).toBe(1);
-    expect(parseSendingSettings(missing.stdout)).toBeNull();
-    expect(missing.stderr).toContain('No sending subdomain found for `nonexistent.void.cloud`');
-  });
-
-  it('whoami --json: scopes and accounts', () => {
-    const who = parseWhoamiJson(fixture('whoami').stdout)!;
-    expect(who.loggedIn).toBe(true);
-    expect(who.tokenPermissions).toContain('email_routing:write');
-    expect(who.tokenPermissions).toContain('email_sending:write');
-    expect(who.accounts?.map((a) => a.id)).toContain(ACCOUNT);
-  });
-
-  it('every parser fails closed on prose it does not recognise', () => {
-    expect(parseRoutingSettings('Email Routing for x:\n  Enabled: maybe\n')).toBeNull();
-    expect(parseRoutingRules('Rules:\n  - stuff\n')).toBeNull();
-    expect(parseSendingSettings('Email Sending enabled for x (enabled: true)')).toBeNull();
+      readRoutingSettings(
+        JSON.stringify({ name: 'acme.com', enabled: 'true', status: 'ready', tag: ZONE_ID }),
+      ),
+    ).toBeNull();
+    expect(
+      readSendingSettings(JSON.stringify({ name: 'acme.com', enabled: true, tag: 'invalid' })),
+    ).toBeNull();
     expect(parseWhoamiJson('not json')).toBeNull();
   });
 
-  it('extracts wrangler API error codes through ANSI', () => {
+  it('reads session scopes and API error codes', () => {
+    expect(parseWhoamiJson(whoamiResult().stdout)?.tokenPermissions).toContain(
+      'email_routing:write',
+    );
     expect(wranglerApiErrorCode(apiFailure(2040, '/zones/x/email/sending/subdomains').stderr)).toBe(
       2040,
     );
@@ -547,12 +558,16 @@ describe('preflightEmail', () => {
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout: RULES_WITH_ENTRIES.replace('to:support@acme.com', 'to:support@mail.acme.com'),
+          stdout: routingRules({ supportDomain: 'mail.acme.com' }),
           stderr: BETA_WARNING,
         },
         'email sending settings mail.acme.com': {
           status: 0,
-          stdout: `Email Sending for mail.acme.com:\n  Enabled:            true\n  Tag:                19af4fdbee924a92916afea0de5a8fdd\n`,
+          stdout: JSON.stringify({
+            name: 'mail.acme.com',
+            enabled: true,
+            tag: '19af4fdbee924a92916afea0de5a8fdd',
+          }),
           stderr: BETA_WARNING,
         },
       },
@@ -602,13 +617,16 @@ describe('preflightEmail', () => {
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout:
-            rules ?? RULES_WITH_ENTRIES.replace('to:support@acme.com', 'to:support@mail.acme.com'),
+          stdout: rules ?? routingRules({ supportDomain: 'mail.acme.com' }),
           stderr: BETA_WARNING,
         },
         'email sending settings mail.acme.com': {
           status: 0,
-          stdout: `Email Sending for mail.acme.com:\n  Enabled:            true\n  Tag:                19af4fdbee924a92916afea0de5a8fdd\n`,
+          stdout: JSON.stringify({
+            name: 'mail.acme.com',
+            enabled: true,
+            tag: '19af4fdbee924a92916afea0de5a8fdd',
+          }),
           stderr: BETA_WARNING,
         },
         ...runnerTable,
@@ -713,7 +731,9 @@ describe('preflightEmail', () => {
   it('a committed config whose rules wrangler has not created yet still reads ready (rules are `wrangler deploy` work)', async () => {
     // Right after `void email setup`, before the first deploy: the array is committed, the
     // rule is absent. Apply has nothing to do; the deploy creates the rule.
-    const { inputs } = readyAccount({ rules: fixture('routing-rules-list-void.cloud').stdout });
+    const { inputs } = readyAccount({
+      rules: { status: 0, stdout: emptyRules, stderr: '' }.stdout,
+    });
     const pre = await preflightEmail(inputs);
     expect(pre.rules.state).toBe('pending');
     expect(pre.rules.absent).toEqual(['support@mail.acme.com']);
@@ -728,10 +748,10 @@ describe('preflightEmail', () => {
   it('flags a committed `addresses` array that is not the pruned set as stale, without losing ready', async () => {
     // A rule Void created was later re-pointed at a forward: the entry is pruned, and the
     // committed array still listing it would reach wrangler's plan as a `conflict`.
-    const forwarded = RULES_WITH_ENTRIES.replace(
-      'to:support@acme.com',
-      'to:support@mail.acme.com',
-    ).replace('to:sales@acme.com', 'to:sales@mail.acme.com');
+    const forwarded = routingRules({
+      supportDomain: 'mail.acme.com',
+      salesDomain: 'mail.acme.com',
+    });
     const retarget = await preflightEmail(
       readyAccount({
         rules: forwarded,
@@ -855,7 +875,7 @@ describe('preflightEmail', () => {
   });
 
   it('blocks on a session without the email scopes (`void cloudflare logout`, then `login`)', async () => {
-    const who = JSON.parse(fixture('whoami').stdout) as { tokenPermissions: Array<string> };
+    const who = JSON.parse(whoamiResult().stdout) as { tokenPermissions: Array<string> };
     who.tokenPermissions = who.tokenPermissions.filter((s) => !s.startsWith('email_'));
     const calls: Array<Call> = [];
     const { inputs } = transcriptInputs({
@@ -879,7 +899,7 @@ describe('preflightEmail', () => {
     // from `void email setup` / `status`, and through `formatCloudflareUserMessage` on the
     // deploy path, where a `wrangler …` command would render as "the underlying Cloudflare
     // operation" — no guidance at all.
-    const who = JSON.parse(fixture('whoami').stdout) as { tokenPermissions: Array<string> };
+    const who = JSON.parse(whoamiResult().stdout) as { tokenPermissions: Array<string> };
     who.tokenPermissions = who.tokenPermissions.filter((s) => !s.startsWith('email_'));
     const sessions: Array<{
       state: EmailPreflight['session']['state'];
@@ -1051,10 +1071,7 @@ describe('preflightEmail', () => {
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout: RULES_WITH_ENTRIES.replace(
-            'to:support@acme.com',
-            'to:support@mail.acme.com',
-          ).replace('to:sales@acme.com', 'to:sales@mail.acme.com'),
+          stdout: routingRules({ supportDomain: 'mail.acme.com', salesDomain: 'mail.acme.com' }),
           stderr: BETA_WARNING,
         },
       },
@@ -1074,14 +1091,7 @@ describe('preflightEmail', () => {
   it('treats a disabled custom rule as absent, like the disabled catch-all', async () => {
     // A rule to this worker that Cloudflare has switched off routes no mail: the row is
     // `absent`, so the deploy's `addresses` entry stays and wrangler's plan turns it back on.
-    const disabled = RULES_WITH_ENTRIES.replace(
-      'to:support@acme.com',
-      'to:support@mail.acme.com',
-    ).replace(
-      'Enabled:  true\n  Matchers: to:support@mail.acme.com',
-      'Enabled:  false\n  Matchers: to:support@mail.acme.com',
-    );
-    expect(disabled).toContain('Enabled:  false');
+    const disabled = routingRules({ supportDomain: 'mail.acme.com', supportEnabled: false });
     const pre = await preflightEmail(readyAccount({ rules: disabled }).inputs);
     expect(pre.rules.mine).toEqual([]);
     expect(pre.rules.absent).toEqual(['support@mail.acme.com']);
@@ -1094,20 +1104,19 @@ describe('preflightEmail', () => {
 
     // A disabled rule is skipped, not matched: an enabled sibling on the same address still
     // decides the row — here a forward that owns the address, so it is pruned (decision 12).
-    const sibling = disabled.replace(
-      '\n\nCatch-all rule:',
-      `
-Rule: 7g8h9i
-  Name:     (none)
-  Enabled:  true
-  Matchers: to:support@mail.acme.com
-  Actions:  forward:support@gmail.com
-  Priority: 2
-
-
-Catch-all rule:`,
-    );
-    expect(sibling).toContain('Rule: 7g8h9i');
+    const sibling = routingRules({
+      supportDomain: 'mail.acme.com',
+      supportEnabled: false,
+      extra: [
+        {
+          id: '7g8h9i',
+          name: '(none)',
+          enabled: true,
+          matchers: [{ type: 'literal', field: 'to', value: 'support@mail.acme.com' }],
+          actions: [{ type: 'forward', value: ['support@gmail.com'] }],
+        },
+      ],
+    });
     const preSibling = await preflightEmail(readyAccount({ rules: sibling }).inputs);
     expect(preSibling.rules.absent).toEqual([]);
     expect(preSibling.rules.foreign).toEqual([
@@ -1117,11 +1126,11 @@ Catch-all rule:`,
     // A disabled FOREIGN rule is still somebody else's matcher: the row stays `foreign`
     // and the address is pruned, exactly as when the rule is enabled — Void does not
     // take over another owner's rule because it is switched off.
-    const disabledForeign = disabled.replace(
-      'Actions:  worker:acme-support',
-      'Actions:  forward:support@gmail.com',
-    );
-    expect(disabledForeign).toContain('Actions:  forward:support@gmail.com');
+    const disabledForeign = routingRules({
+      supportDomain: 'mail.acme.com',
+      supportEnabled: false,
+      supportAction: { type: 'forward', value: ['support@gmail.com'] },
+    });
     const preForeign = await preflightEmail(readyAccount({ rules: disabledForeign }).inputs);
     expect(preForeign.rules.absent).toEqual([]);
     expect(preForeign.rules.mine).toEqual([]);
@@ -1146,10 +1155,7 @@ Catch-all rule:`,
         ...base.runnerTable,
         'email routing rules list acme.com': {
           status: 0,
-          stdout: RULES_WITH_ENTRIES.replace(
-            'worker:acme-support\n  (use',
-            'worker:other-worker\n  (use',
-          ),
+          stdout: routingRules({ catchAllWorker: 'other-worker' }),
           stderr: BETA_WARNING,
         },
       },
@@ -1166,7 +1172,7 @@ Catch-all rule:`,
         ...base.runnerTable,
         'email routing rules list acme.com': {
           status: 0,
-          stdout: RULES_WITH_ENTRIES,
+          stdout: routingRules(),
           stderr: BETA_WARNING,
         },
       },
@@ -1259,7 +1265,7 @@ Catch-all rule:`,
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout: 'Rules:\n  totally new prose\n',
+          stdout: '{broken json',
           stderr: '',
         },
       },
@@ -1290,7 +1296,7 @@ Catch-all rule:`,
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout: RULES_WITH_ENTRIES.replace('to:support@acme.com', 'to:support@mail.acme.com'),
+          stdout: routingRules({ supportDomain: 'mail.acme.com' }),
           stderr: BETA_WARNING,
         },
       },
@@ -1397,7 +1403,7 @@ Catch-all rule:`,
 
 describe('renderEmailChecklist', () => {
   it('renders the 0078 transcript block for the first subdomain deploy', async () => {
-    const who = JSON.parse(fixture('whoami').stdout) as {
+    const who = JSON.parse(whoamiResult().stdout) as {
       email: string;
       accounts: Array<{ id: string; name: string }>;
     };
@@ -1809,7 +1815,7 @@ describe('applyEmailSetup', () => {
         runnerTable: {
           'email routing rules list acme.com': {
             status: 0,
-            stdout: RULES_WITH_ENTRIES.replace('to:support@acme.com', 'to:support@mail.acme.com'),
+            stdout: routingRules({ supportDomain: 'mail.acme.com' }),
             stderr: BETA_WARNING,
           },
         },
@@ -1865,12 +1871,16 @@ describe('applyEmailSetup', () => {
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout: RULES_WITH_ENTRIES.replace('to:support@acme.com', 'to:support@mail.acme.com'),
+          stdout: routingRules({ supportDomain: 'mail.acme.com' }),
           stderr: BETA_WARNING,
         },
         'email sending settings mail.acme.com': {
           status: 0,
-          stdout: `Email Sending for mail.acme.com:\n  Enabled:            true\n  Tag:                19af4fdbee924a92916afea0de5a8fdd\n`,
+          stdout: JSON.stringify({
+            name: 'mail.acme.com',
+            enabled: true,
+            tag: '19af4fdbee924a92916afea0de5a8fdd',
+          }),
           stderr: BETA_WARNING,
         },
       },

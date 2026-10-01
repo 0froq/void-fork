@@ -6,7 +6,6 @@ import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   SENDING_FREE_PLAN_HINT,
-  WRANGLER_EMAIL_PROSE_VERSION,
   type EmailDns,
   type EmailWranglerRunResult,
 } from '../../src/cli/email-cloudflare.ts';
@@ -16,24 +15,26 @@ import { runEmailCloudflareCommand, runEmailCommand } from '../../src/cli/email.
  * `void email setup|status --platform cloudflare` on the 0078 transcript project:
  * `email/support+[ticket].ts` + `email/_default.ts`, `email.from = noreply@mail.acme.com`,
  * zone `acme.com` (routing ready on the apex, Google MX there), nothing on `mail.acme.com`.
- * Every Cloudflare touch is a fake; the wrangler prose comes from the pinned fixtures.
+ * Every Cloudflare touch is a fake returning structured account data.
  */
 
-const FIXTURES = join(
-  import.meta.dirname,
-  '..',
-  'fixtures',
-  'wrangler-email',
-  WRANGLER_EMAIL_PROSE_VERSION,
-);
-
-function fixture(name: string): EmailWranglerRunResult {
+function whoamiResult(): EmailWranglerRunResult {
   return {
-    status: Number(readFileSync(join(FIXTURES, `${name}.exit`), 'utf-8').trim()),
-    stdout: readFileSync(join(FIXTURES, `${name}.stdout`), 'utf-8'),
-    stderr: readFileSync(join(FIXTURES, `${name}.stderr`), 'utf-8'),
+    status: 0,
+    stdout: JSON.stringify({
+      loggedIn: true,
+      authType: 'OAuth Token',
+      email: 'dev@example.com',
+      accounts: [{ id: ACCOUNT, name: 'Acme' }],
+      tokenPermissions: ['account:read', 'email_routing:write', 'email_sending:write'],
+    }),
+    stderr: '',
   };
 }
+
+const emptyRules = JSON.stringify([
+  { enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] },
+]);
 
 const ZONE_ID = '5b66f5cb84fd7dcfdd0170515e622181';
 const ACCOUNT = 'f721b8e5f721b8e5f721b8e5f721b8e5';
@@ -43,7 +44,7 @@ const BETA_WARNING = '▲ [WARNING] 🚧 `wrangler email x` is an open beta comm
 function routingSettings(name: string, status: string, enabled = true): EmailWranglerRunResult {
   return {
     status: 0,
-    stdout: `Email Routing for ${name}:\n  Enabled:  ${enabled}\n  Status:   ${status}\n  Tag:      ${ZONE_ID}\n`,
+    stdout: JSON.stringify({ name, enabled: enabled, status, tag: ZONE_ID }),
     stderr: BETA_WARNING,
   };
 }
@@ -216,10 +217,10 @@ function transcriptDeps(
   const fetchCalls: Array<FetchCall> = [];
   const printed: Array<string> = [];
   const runnerTable: Record<string, EmailWranglerRunResult> = {
-    'whoami --json': fixture('whoami'),
+    'whoami --json': whoamiResult(),
     'email routing settings mail.acme.com': zoneNotFound('mail.acme.com'),
     'email routing settings acme.com': routingSettings('acme.com', 'ready'),
-    'email routing rules list acme.com': fixture('routing-rules-list-void.cloud'),
+    'email routing rules list acme.com': { status: 0, stdout: emptyRules, stderr: '' },
     'email sending settings mail.acme.com': sendingNotFound('mail.acme.com'),
     ...extra.runnerTable,
   };
@@ -286,8 +287,16 @@ function freeAfterSetup(extra: { runnerTable?: Record<string, EmailWranglerRunRe
     runnerTable: {
       'email routing rules list acme.com': {
         status: 0,
-        stdout:
-          'Rule: 1a2b3c\n  Name:     support\n  Enabled:  true\n  Matchers: to:support@mail.acme.com\n  Actions:  worker:acme-support\n  Priority: 0\n\nCatch-all rule: disabled, action: drop\n',
+        stdout: JSON.stringify([
+          {
+            id: '1a2b3c',
+            name: 'support',
+            enabled: true,
+            matchers: [{ type: 'literal', field: 'to', value: 'support@mail.acme.com' }],
+            actions: [{ type: 'worker', value: ['acme-support'] }],
+          },
+          { enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] },
+        ]),
         stderr: BETA_WARNING,
       },
       ...extra.runnerTable,
@@ -429,7 +438,7 @@ describe('void email setup --platform cloudflare', () => {
   it('a session without the email scopes: the ✘ row says `void cloudflare logout`, then `login` — exit 1, no prompt', async () => {
     const root = makeProject();
     roots.push(root);
-    const who = JSON.parse(fixture('whoami').stdout) as { tokenPermissions: Array<string> };
+    const who = JSON.parse(whoamiResult().stdout) as { tokenPermissions: Array<string> };
     who.tokenPermissions = who.tokenPermissions.filter((s) => !s.startsWith('email_'));
     const { deps, calls, fetchCalls, printed } = transcriptDeps({
       runnerTable: { 'whoami --json': { status: 0, stdout: JSON.stringify(who), stderr: '' } },
@@ -734,13 +743,21 @@ describe('void email setup --platform cloudflare', () => {
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout:
-            'Rule: 1a2b3c\n  Name:     support\n  Enabled:  true\n  Matchers: to:support@mail.acme.com\n  Actions:  worker:acme-support\n  Priority: 0\n\nCatch-all rule: disabled, action: drop\n',
+          stdout: JSON.stringify([
+            {
+              id: '1a2b3c',
+              name: 'support',
+              enabled: true,
+              matchers: [{ type: 'literal', field: 'to', value: 'support@mail.acme.com' }],
+              actions: [{ type: 'worker', value: ['acme-support'] }],
+            },
+            { enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] },
+          ]),
           stderr: BETA_WARNING,
         },
         'email sending settings mail.acme.com': {
           status: 0,
-          stdout: `Email Sending for mail.acme.com:\n  Enabled:            true\n  Tag:                ${ZONE_ID}\n`,
+          stdout: JSON.stringify({ name: 'mail.acme.com', enabled: true, tag: ZONE_ID }),
           stderr: BETA_WARNING,
         },
       },
@@ -938,7 +955,7 @@ describe('void email status --platform cloudflare', () => {
       runnerTable: {
         'email sending settings mail.acme.com': {
           status: 0,
-          stdout: `Email Sending for mail.acme.com:\n  Enabled:            true\n  Tag:                ${ZONE_ID}\n`,
+          stdout: JSON.stringify({ name: 'mail.acme.com', enabled: true, tag: ZONE_ID }),
           stderr: BETA_WARNING,
         },
       },
@@ -982,13 +999,21 @@ describe('void email status --platform cloudflare', () => {
         },
         'email routing rules list acme.com': {
           status: 0,
-          stdout:
-            'Rule: 1a2b3c\n  Name:     support\n  Enabled:  true\n  Matchers: to:support@mail.acme.com\n  Actions:  worker:acme-support\n  Priority: 0\n\nCatch-all rule: disabled, action: drop\n',
+          stdout: JSON.stringify([
+            {
+              id: '1a2b3c',
+              name: 'support',
+              enabled: true,
+              matchers: [{ type: 'literal', field: 'to', value: 'support@mail.acme.com' }],
+              actions: [{ type: 'worker', value: ['acme-support'] }],
+            },
+            { enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] },
+          ]),
           stderr: BETA_WARNING,
         },
         'email sending settings mail.acme.com': {
           status: 0,
-          stdout: `Email Sending for mail.acme.com:\n  Enabled:            true\n  Tag:                ${ZONE_ID}\n`,
+          stdout: JSON.stringify({ name: 'mail.acme.com', enabled: true, tag: ZONE_ID }),
           stderr: BETA_WARNING,
         },
       },
@@ -1048,13 +1073,21 @@ describe('void email status --platform cloudflare', () => {
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout:
-            'Rule: 1a2b3c\n  Name:     support\n  Enabled:  true\n  Matchers: to:support@mail.acme.com\n  Actions:  worker:acme-support\n  Priority: 0\n\nCatch-all rule: disabled, action: drop\n',
+          stdout: JSON.stringify([
+            {
+              id: '1a2b3c',
+              name: 'support',
+              enabled: true,
+              matchers: [{ type: 'literal', field: 'to', value: 'support@mail.acme.com' }],
+              actions: [{ type: 'worker', value: ['acme-support'] }],
+            },
+            { enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] },
+          ]),
           stderr: BETA_WARNING,
         },
         'email sending settings mail.acme.com': {
           status: 0,
-          stdout: `Email Sending for mail.acme.com:\n  Enabled:            true\n  Tag:                ${ZONE_ID}\n`,
+          stdout: JSON.stringify({ name: 'mail.acme.com', enabled: true, tag: ZONE_ID }),
           stderr: BETA_WARNING,
         },
       },
