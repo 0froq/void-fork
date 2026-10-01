@@ -38,6 +38,14 @@ const tests: Array<TestFile> = [
 ];
 
 describe('affected test planning', () => {
+  it('does not report provisional fixture ownership before test discovery', () => {
+    const plan = planAffectedTests(['package.json', 'playground/spa/src/index.ts'], []);
+    expect(plan.full).toBe(true);
+    expect(plan.reasons).toEqual([
+      'Deleted files, configuration, dependencies, or shared test tooling changed.',
+    ]);
+  });
+
   it('leaves a changed test to the native import graph without adding integrations', () => {
     const plan = planAffectedTests([tests[0].path], tests);
     expect(plan.full).toBe(false);
@@ -233,6 +241,7 @@ it('previews the native transitive import graph without running test or setup co
       { cwd: root, encoding: 'utf8', stdio: 'pipe', timeout: 15_000 },
     );
     expect(output).toContain('Selected 1/2 test files');
+    expect(output).toContain('Finding tests affected by changed imports...');
     expect(output).toContain('[unit] packages/void/test/unit/affected.test.ts');
     expect(output).not.toContain('[unit] packages/void/test/unit/unrelated.test.ts');
     write('setup.ts', 'export default function setup() {}');
@@ -278,3 +287,72 @@ it('previews the native transitive import graph without running test or setup co
     rmSync(root, { recursive: true, force: true });
   }
 }, 20_000);
+
+it.each([false, true])(
+  'skips reading test sources for a full fallback (unit-only: %s)',
+  (unit) => {
+    const root = mkdtempSync(join(tmpdir(), 'void-affected-full-'));
+    const repository = fileURLToPath(new URL('../../../../', import.meta.url));
+    const git = (...args: Array<string>) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
+    const write = (path: string, content: string) => writeFileSync(join(root, path), content);
+    try {
+      mkdirSync(join(root, 'packages/void/test/unit'), { recursive: true });
+      mkdirSync(join(root, 'packages/void/test/integration'), { recursive: true });
+      symlinkSync(join(repository, 'node_modules'), join(root, 'node_modules'), 'junction');
+      write('.gitignore', 'node_modules\n');
+      write('package.json', '{"type":"module"}');
+      write(
+        'vite.config.ts',
+        "export default { test: { projects: [{ test: { name: 'unit', include: ['packages/*/test/unit/*.test.ts'] } }, { test: { name: 'parallel-integration', include: ['packages/*/test/integration/*.test.ts'] } }] } };",
+      );
+      for (const file of ['unit', 'integration']) {
+        write(
+          `packages/void/test/${file}/unread.test.ts`,
+          "throw new Error('preview must not execute tests');",
+        );
+      }
+      git('init', '--quiet');
+      git('add', '.');
+      git(
+        '-c',
+        'user.email=tests@example.com',
+        '-c',
+        'user.name=Tests',
+        'commit',
+        '--quiet',
+        '--no-verify',
+        '-m',
+        'Fixture.',
+      );
+      write('package.json', '{"type":"module","private":true}');
+      const runner = new URL('../../../../test/affected.mjs', import.meta.url).href;
+      const output = execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          `import fs from 'node:fs';
+          import { syncBuiltinESMExports } from 'node:module';
+          const original = fs.readFileSync;
+          fs.readFileSync = (path, ...options) => {
+            if (String(path).endsWith('.test.ts')) throw new Error('Full fallback must not read test sources');
+            return original(path, ...options);
+          };
+          syncBuiltinESMExports();
+          const { runAffected } = await import(${JSON.stringify(runner)});
+          await runAffected(${JSON.stringify(root)}, { list: true, unit: ${unit} });`,
+        ],
+        { cwd: root, encoding: 'utf8', stdio: 'pipe', timeout: 15_000 },
+      );
+      expect(output).toContain(`Selected ${unit ? '1/1' : '2/2'} test files`);
+      expect(output).toContain('[unit] packages/void/test/unit/unread.test.ts');
+      expect(output.includes('[parallel-integration]')).toBe(!unit);
+      expect(output).toContain('Initializing Vitest and discovering test files...');
+      expect(output.indexOf('Initializing Vitest')).toBeLessThan(output.indexOf('Selected'));
+      expect(output).not.toContain('Finding tests affected by changed imports');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  20_000,
+);

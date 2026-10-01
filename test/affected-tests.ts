@@ -46,7 +46,9 @@ export function planAffectedTests(
   let build = false;
   const select = (predicate: (test: TestFile) => boolean, reason: string) => {
     tests.filter(predicate).forEach((test) => forced.add(test.path));
-    reasons.add(reason);
+    if (tests.length) {
+      reasons.add(reason);
+    }
   };
   const sdkIntegration = (test: TestFile) => test.project === 'parallel-integration';
   for (const changed of changes) {

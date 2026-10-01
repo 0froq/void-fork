@@ -46,6 +46,7 @@ export async function runAffected(root, values) {
       throw new Error(`Public package build failed (${build.status ?? build.signal}).`);
     }
   }
+  console.log('Initializing Vitest and discovering test files...');
   const { createVitest } = await import('vite-plus/test/node');
   const vitest = await createVitest({
     root,
@@ -57,12 +58,16 @@ export async function runAffected(root, values) {
     if (!all.length) {
       throw new Error('No tests discovered. Check the Vitest project configuration.');
     }
-    const files = all.map((spec) => ({
-      path: relative(root, spec.moduleId).replaceAll('\\', '/'),
-      project: spec.project.name,
-      source: readFileSync(spec.moduleId, 'utf8'),
-    }));
-    const plan = planAffectedTests(changes, files, deletedFiles(root, changes));
+    const files = initial.full
+      ? []
+      : all.map((spec) => ({
+          path: relative(root, spec.moduleId).replaceAll('\\', '/'),
+          project: spec.project.name,
+          source: readFileSync(spec.moduleId, 'utf8'),
+        }));
+    const plan = initial.full
+      ? initial
+      : planAffectedTests(changes, files, deletedFiles(root, changes));
     plan.reasons.forEach((reason) => console.log(reason));
     let selected = all;
     if (!plan.full) {
@@ -76,9 +81,13 @@ export async function runAffected(root, values) {
           ),
         );
       }
-      const affected = remaining.length
-        ? await vitest.getRelevantTestSpecifications(remaining.map((spec) => spec.moduleId))
-        : [];
+      let affected = [];
+      if (remaining.length) {
+        console.log('Finding tests affected by changed imports...');
+        affected = await vitest.getRelevantTestSpecifications(
+          remaining.map((spec) => spec.moduleId),
+        );
+      }
       selected = [...forced, ...affected];
     }
     console.log(
