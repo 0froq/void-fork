@@ -1,13 +1,14 @@
-import { execFile } from 'node:child_process';
+import childProcess, { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { syncBuiltinESMExports } from 'node:module';
 import { connect, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { getWorkerConfigPath } from '@cloudflare/build-output-utils';
-import { afterEach, expect, it } from 'vite-plus/test';
+import { afterEach, expect, it, vi } from 'vite-plus/test';
 import {
   activateCloudflareVersion,
   deployCloudflareVersionTriggers,
@@ -110,6 +111,61 @@ it('preserves real cf provider codes so a missing Worker can reach its first upl
     expect(result).toMatchObject({ ok: false, reason: 'upload-failed' });
     expect(operations).toEqual(['deployments status', 'versions list', 'versions upload']);
   } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+it('classifies the pinned prebuilt uploader’s missing-Worker diagnostic', async () => {
+  const prepared = await output();
+  const requests: Array<string> = [];
+  const server = createServer((request, response) => {
+    requests.push(request.url ?? '');
+    request.resume();
+    response.writeHead(404, { 'Content-Type': 'application/json' });
+    response.end(
+      JSON.stringify({
+        success: false,
+        errors: [{ code: 10007, message: 'The given script does not exist.' }],
+        result: null,
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const apiBaseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`;
+    const command = createCfCommand({
+      accountId: 'account-id',
+      apiBaseUrl,
+      verifyUploader: () => true,
+      env: () => ({
+        PATH: process.env.PATH,
+        SYSTEMROOT: process.env.SYSTEMROOT,
+        WINDIR: process.env.WINDIR,
+        TMP: process.env.TMP,
+        TEMP: process.env.TEMP,
+        CI: 'true',
+        CLOUDFLARE_API_TOKEN: 'synthetic-token',
+        CLOUDFLARE_ACCOUNT_ID: 'account-id',
+        CLOUDFLARE_API_BASE_URL: apiBaseUrl,
+      }),
+    });
+    const result = await command(['workers', 'versions', 'create', '--prebuilt'], {
+      cwd: prepared.directory,
+      capture: true,
+    });
+    expect(result, result.stdout + result.stderr).toMatchObject({
+      status: 1,
+      failure: 'not-found',
+      signal: null,
+      error: null,
+    });
+    // cf deliberately omits the API code from this local error.
+    expect(result.errorCode).toBeUndefined();
+    expect(requests).toEqual(['/client/v4/accounts/account-id/workers/services/void-test']);
+  } finally {
+    prepared.dispose();
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     );
@@ -458,32 +514,57 @@ it('captures noninteractive cf output when Void owns the terminal', async () => 
   expect(result.stdout).toContain(pinnedCfVersion);
 });
 
-it('does not classify buffered provider codes from an interrupted real cf process', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'void-cf-interrupted-command-'));
-  roots.push(root);
-  const preload = join(root, 'interrupt.cjs');
-  writeFileSync(
-    preload,
-    `process.stderr.write('synthetic provider failure [10007]\\n', () => process.kill(process.pid, 'SIGTERM'));\n` +
-      `setInterval(() => {}, 1 << 30);\n`,
-  );
-  const command = createCfCommand({
-    accountId: 'test-account',
-    apiBaseUrl: 'https://api.cloudflare.com/client/v4',
-    verifyUploader: () => true,
-    env: () => ({
-      PATH: process.env.PATH,
-      NODE_OPTIONS: `--require ${JSON.stringify(preload)}`,
-      CI: 'true',
-    }),
-  });
-  const result = await command(['--version'], { cwd: root, capture: true });
-  expect(result.status).toBe(1);
-  expect(result.signal).toBe('SIGTERM');
-  expect(result.stderr).toContain('[10007]');
-  expect(result.errorCode).toBeUndefined();
-  expect(result.errors).toBeUndefined();
-});
+it.each([
+  { diagnostic: 'synthetic provider failure [10007]', args: ['--version'] },
+  {
+    diagnostic: 'You cannot upload a new version of a Worker that does not yet exist.',
+    args: ['workers', 'versions', 'create', '--prebuilt'],
+  },
+])(
+  'does not classify buffered diagnostics from a terminated real cf process ($diagnostic)',
+  async ({ diagnostic, args }) => {
+    const root = mkdtempSync(join(tmpdir(), 'void-cf-interrupted-command-'));
+    roots.push(root);
+    const preload = join(root, 'interrupt.cjs');
+    writeFileSync(
+      preload,
+      `process.stderr.write(${JSON.stringify(diagnostic + '\n')});\n` +
+        `setInterval(() => {}, 1 << 30);\n`,
+    );
+    const command = createCfCommand({
+      accountId: 'test-account',
+      apiBaseUrl: 'https://api.cloudflare.com/client/v4',
+      verifyUploader: () => true,
+      env: () => ({
+        PATH: process.env.PATH,
+        NODE_OPTIONS: `--require ${JSON.stringify(preload)}`,
+        CI: 'true',
+      }),
+    });
+    const spawn = childProcess.spawn;
+    // Windows does not report a signal when a process kills itself. Terminate
+    // the real child from its parent after the diagnostic is buffered instead.
+    const spawnSpy = vi.spyOn(childProcess, 'spawn').mockImplementation((...args) => {
+      const child = spawn(...args);
+      child.stderr?.once('data', () => child.kill('SIGTERM'));
+      return child;
+    });
+    syncBuiltinESMExports();
+    let result: Awaited<ReturnType<typeof command>>;
+    try {
+      result = await command(args, { cwd: root, capture: true });
+    } finally {
+      spawnSpy.mockRestore();
+      syncBuiltinESMExports();
+    }
+    expect(result.status).toBe(1);
+    expect(result.signal).toBe('SIGTERM');
+    expect(result.stderr).toContain(diagnostic);
+    expect(result.errorCode).toBeUndefined();
+    expect(result.errors).toBeUndefined();
+    expect(result.failure).toBeUndefined();
+  },
+);
 
 it('preserves interruption provenance before interpreting an empty cf deployment list', async () => {
   const prepared = await output();

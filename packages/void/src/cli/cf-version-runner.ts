@@ -313,11 +313,25 @@ export function createCfCommand(options: {
         const code = completed
           ? (output + '\n' + diagnostic).match(/\[(?:code:\s*)?(\d{4,})\]/)?.[1]
           : undefined;
+        // The pinned cf uploader replaces its missing-Worker API error with a
+        // local diagnostic and drops code 10007. Decode it at this CLI boundary
+        // so the activation protocol can safely select its first-deploy path.
+        const missingUploadTarget =
+          completed &&
+          status !== 0 &&
+          code === undefined &&
+          args[0] === 'workers' &&
+          args[1] === 'versions' &&
+          args[2] === 'create' &&
+          (output + '\n' + diagnostic)
+            .replace(/\s+/g, ' ')
+            .includes('You cannot upload a new version of a Worker that does not yet exist.');
         resolve({
           status: typeof status === 'number' ? status : 1,
           stdout: output,
           stderr: diagnostic,
           ...(code ? { errorCode: Number(code) } : {}),
+          ...(missingUploadTarget ? { failure: 'not-found' as const } : {}),
           ...(completed && status !== 0
             ? { errors: [{ message: output + '\n' + diagnostic }] }
             : {}),
