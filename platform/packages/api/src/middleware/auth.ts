@@ -43,6 +43,7 @@ const DEPLOY_TOKEN_ALLOWLIST: ReadonlyArray<DeployAllowEntry> = [
   { method: 'POST', segments: ['projects', null, 'database'] },
   { method: 'POST', segments: ['projects', null, 'prerender-token'] },
   { method: 'GET', segments: ['projects', null, 'deployments'] },
+  { method: 'GET', segments: ['projects', null, 'deployments', ':deploymentId', 'events'] },
   { method: 'GET', segments: ['projects', null, 'secrets'] },
   { method: 'POST', segments: ['projects', null, 'deploy', 'preflight'] },
   { method: 'POST', segments: ['projects', null, 'deploy', 'upload-urls'] },
@@ -63,7 +64,11 @@ function isDeployTokenAllowed(method: string, path: string, projectScope: string
       return false;
     }
     return entry.segments.every((expected, index) =>
-      expected === null ? segments[index] === projectScope : segments[index] === expected,
+      expected === ':deploymentId'
+        ? /^[A-Za-z0-9_-]{1,128}$/.test(segments[index]!)
+        : expected === null
+          ? segments[index] === projectScope
+          : segments[index] === expected,
     );
   });
 }

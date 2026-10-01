@@ -35,6 +35,8 @@ export type PlatformRuntimeDatabaseManifest = Readonly<{
 }>;
 
 export type PlatformRuntimeManifest = Readonly<{
+  /** Durable deployment Queue payload and PostgreSQL operation journal contract. */
+  deploymentExecution?: 1;
   authenticationProtocolVersion?: 1;
   applicationRoutingVersion?: 1;
   artifacts: Readonly<
@@ -88,6 +90,9 @@ export function parsePlatformRuntimeManifest(value: unknown): PlatformRuntimeMan
   const root = record(value, 'runtime manifest');
   if (root.schemaVersion !== 2) {
     throw new Error('runtime manifest schemaVersion must be 2');
+  }
+  if (root.deploymentExecution !== undefined && root.deploymentExecution !== 1) {
+    throw new Error('Unsupported deployment execution protocol.');
   }
   if (
     root.authenticationProtocolVersion !== undefined &&
@@ -204,6 +209,7 @@ export function parsePlatformRuntimeManifest(value: unknown): PlatformRuntimeMan
   }
   return {
     artifacts,
+    ...(root.deploymentExecution === 1 ? { deploymentExecution: 1 as const } : {}),
     ...(assets ? { assets } : {}),
     ...(root.authenticationProtocolVersion === 1
       ? { authenticationProtocolVersion: 1 as const }

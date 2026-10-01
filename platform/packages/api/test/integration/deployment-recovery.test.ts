@@ -1,0 +1,291 @@
+import { eq } from 'drizzle-orm';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vite-plus/test';
+import { getDeployment, getProject, type Db } from '../../src/db.ts';
+import { settleExpiredDeployment } from '../../src/deployment-recovery.ts';
+import type { ApiEnv } from '../../src/env.ts';
+import { deployments, domains, projectMigrations, projects, resources } from '../../src/schema.ts';
+import {
+  clearTables,
+  createTestDeployment,
+  createTestProject,
+  createTestUser,
+  setupEnv,
+  teardownEnv,
+  type TestEnv,
+} from './helpers.ts';
+
+let env: TestEnv;
+let project: Awaited<ReturnType<typeof createTestProject>>;
+
+beforeAll(async () => {
+  env = await setupEnv();
+});
+afterAll(async () => {
+  await teardownEnv();
+});
+beforeEach(async () => {
+  await clearTables(env.db);
+  const owner = await createTestUser(env.db, 'recovery-owner');
+  project = await createTestProject(env.db, owner.id, 'recovery-project');
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+function settle(deploymentId: string) {
+  return settleExpiredDeployment(env as unknown as ApiEnv['Bindings'], env.db, deploymentId);
+}
+
+function providerDelete(status = 200) {
+  const fetch = vi.fn(
+    async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status }),
+  );
+  vi.stubGlobal('fetch', fetch);
+  return fetch;
+}
+
+test('confirms candidate cleanup before failing interrupted preparation, preserving committed app and SQL', async () => {
+  const committed = await createTestDeployment(env.db, project.id);
+  const candidate = await createTestDeployment(env.db, project.id, 'migrating');
+  await env.db.insert(resources).values({
+    id: 'resource-recovery',
+    project_id: project.id,
+    type: 'd1',
+    cf_id: 'existing-database',
+    binding_name: 'DB',
+  });
+  await env.db.insert(projectMigrations).values({
+    project_id: project.id,
+    name: '0001_created_table',
+    source_deployment_id: candidate.id,
+  });
+  await env.ROUTING.put(project.slug, JSON.stringify({ workerName: 'committed-worker' }));
+  await env.ROUTING.put(`manifest:${candidate.id}`, '{}');
+  await env.STATIC_ASSETS_R2.put(`assets/${project.id}/shared-asset`, 'preserve');
+  await env.STATIC_ASSETS_R2.put(
+    `worker-bundles/${project.id}/${candidate.id}/index.js`,
+    'candidate',
+  );
+  await env.db
+    .update(deployments)
+    .set({ bundle_stored: true })
+    .where(eq(deployments.id, candidate.id));
+  const fetch = providerDelete();
+
+  expect(await settle(candidate.id)).toMatchObject({
+    terminal: true,
+    event: { event: 'error', step: 'recovery', message: expect.stringContaining('interrupted') },
+  });
+  expect(await getDeployment(env.db, candidate.id)).toMatchObject({
+    status: 'failed',
+    bundle_stored: false,
+  });
+  expect((await getProject(env.db, project.id))?.active_deployment_id).toBe(committed.id);
+  expect(await env.ROUTING.get(project.slug, 'json')).toEqual({ workerName: 'committed-worker' });
+  expect(await env.ROUTING.get(`manifest:${candidate.id}`)).toBeNull();
+  expect(
+    await env.STATIC_ASSETS_R2.head(`worker-bundles/${project.id}/${candidate.id}/index.js`),
+  ).toBeNull();
+  expect(await env.STATIC_ASSETS_R2.head(`assets/${project.id}/shared-asset`)).not.toBeNull();
+  expect(await env.db.select().from(resources)).toHaveLength(1);
+  expect(await env.db.select().from(projectMigrations)).toHaveLength(1);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls[0]?.[0]).toContain(`scripts/user-${project.slug}-${candidate.id}`);
+  expect(fetch.mock.calls[0]?.[1]).toMatchObject({ method: 'DELETE' });
+});
+
+test('keeps cancellation and candidate artifacts when provider deletion is unconfirmed, then recovers on retry', async () => {
+  const candidate = await createTestDeployment(env.db, project.id, 'uploading');
+  await env.ROUTING.put(`manifest:${candidate.id}`, '{}');
+  providerDelete(503);
+  await expect(settle(candidate.id)).rejects.toThrow('cleanup failed');
+  expect(await getDeployment(env.db, candidate.id)).toMatchObject({ status: 'canceling' });
+  expect(await env.ROUTING.get(`manifest:${candidate.id}`)).toBe('{}');
+
+  providerDelete(404);
+  expect(await settle(candidate.id)).toMatchObject({ terminal: true });
+  expect(await getDeployment(env.db, candidate.id)).toMatchObject({ status: 'failed' });
+});
+
+test('preserves an explicit user cancellation after confirmed cleanup', async () => {
+  const candidate = await createTestDeployment(
+    env.db,
+    project.id,
+    'canceling',
+    undefined,
+    'canceled by user',
+  );
+  providerDelete(404);
+  expect(await settle(candidate.id)).toMatchObject({
+    terminal: true,
+    event: { event: 'error', message: 'canceled by user' },
+  });
+  expect(await getDeployment(env.db, candidate.id)).toMatchObject({ status: 'canceled' });
+});
+
+test('preserves an already acknowledged canceled status during cleanup retry', async () => {
+  const candidate = await createTestDeployment(
+    env.db,
+    project.id,
+    'canceled',
+    undefined,
+    'canceled by user',
+  );
+  providerDelete(404);
+  expect(await settle(candidate.id)).toMatchObject({ terminal: true });
+  expect(await getDeployment(env.db, candidate.id)).toMatchObject({ status: 'canceled' });
+});
+
+test('reconciles a lost cleanup commit acknowledgement without another deployment or SQL execution', async () => {
+  const candidate = await createTestDeployment(env.db, project.id, 'uploading');
+  const realTransaction = env.db.transaction.bind(env.db);
+  let injected = false;
+  const wrappedDb = new Proxy(env.db, {
+    get(target, property, receiver) {
+      if (property === 'transaction') {
+        return async (callback: Parameters<Db['transaction']>[0]) => {
+          const result = await realTransaction(callback);
+          if (!injected && (await getDeployment(env.db, candidate.id))?.status === 'failed') {
+            injected = true;
+            throw new Error('cleanup COMMIT acknowledgement lost');
+          }
+          return result;
+        };
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  const fetch = providerDelete(404);
+  await expect(
+    settleExpiredDeployment(env as unknown as ApiEnv['Bindings'], wrappedDb, candidate.id),
+  ).rejects.toThrow('COMMIT');
+  expect(injected).toBe(true);
+  expect(await getDeployment(env.db, candidate.id)).toMatchObject({ status: 'failed' });
+  expect(await settle(candidate.id)).toMatchObject({ terminal: true });
+  expect(await env.db.select().from(deployments)).toHaveLength(1);
+  expect(fetch.mock.calls.every(([, init]) => init?.method === 'DELETE')).toBe(true);
+});
+
+test('reports a committed live deployment after a lost result without deleting it', async () => {
+  const live = await createTestDeployment(env.db, project.id);
+  await env.db
+    .update(deployments)
+    .set({
+      manifest: JSON.stringify({ version: 3, type: 'spa', bindings: {} }),
+      asset_hashes: JSON.stringify({ '/index.html': { hash: 'a'.repeat(32), size: 10 } }),
+    })
+    .where(eq(deployments.id, live.id));
+  await env.db.insert(domains).values({
+    id: 'domain-recovery',
+    project_id: project.id,
+    hostname: 'recovered.example.com',
+    cf_hostname_id: 'hostname-recovery',
+    status: 'active',
+  });
+  const fetch = providerDelete();
+  expect(await settle(live.id)).toMatchObject({
+    terminal: true,
+    event: {
+      event: 'done',
+      deployment: live.id,
+      url: 'https://recovered.example.com',
+      urls: ['https://recovered.example.com', `https://${project.slug}.void.app`],
+      assets: 1,
+      workers: 0,
+    },
+  });
+  expect(fetch).not.toHaveBeenCalled();
+  expect(await getDeployment(env.db, live.id)).toMatchObject({ status: 'live' });
+});
+
+test('compensates an expired protected cutover immediately to committed static code', async () => {
+  const committed = await createTestDeployment(env.db, project.id);
+  await env.db
+    .update(deployments)
+    .set({
+      manifest: JSON.stringify({ version: 3, type: 'static', bindings: {} }),
+    })
+    .where(eq(deployments.id, committed.id));
+  await env.db.update(projects).set({ type: 'static' }).where(eq(projects.id, project.id));
+  const candidate = await createTestDeployment(env.db, project.id, 'uploading');
+  await env.db
+    .update(deployments)
+    .set({ status: 'cutover' })
+    .where(eq(deployments.id, candidate.id));
+  await env.ROUTING.put(
+    `cutover-intent:${candidate.id}`,
+    JSON.stringify({
+      projectId: project.id,
+      ownerId: 'expired-owner',
+      buildId: null,
+    }),
+  );
+  await env.ROUTING.put(project.slug, JSON.stringify({ deploymentId: candidate.id }));
+  providerDelete();
+
+  expect(await settle(candidate.id)).toMatchObject({ terminal: true, event: { event: 'error' } });
+  expect(await env.ROUTING.get(project.slug, 'json')).toMatchObject({
+    staticDeploymentId: committed.id,
+  });
+  expect((await getProject(env.db, project.id))?.active_deployment_id).toBe(committed.id);
+  expect(await getDeployment(env.db, candidate.id)).toMatchObject({ status: 'failed' });
+});
+
+test('retains the protected fence when compensation fails, then retries from durable state', async () => {
+  const candidate = await createTestDeployment(env.db, project.id, 'uploading');
+  await env.db
+    .update(deployments)
+    .set({ status: 'cutover' })
+    .where(eq(deployments.id, candidate.id));
+  const originalDelete = env.ROUTING.delete.bind(env.ROUTING);
+  vi.spyOn(env.ROUTING, 'delete').mockImplementation(async (key) => {
+    if (key === project.slug) {
+      throw new Error('routing unavailable');
+    }
+    return originalDelete(key);
+  });
+  const fetch = providerDelete();
+  expect(await settle(candidate.id)).toEqual({ terminal: false });
+  expect(await getDeployment(env.db, candidate.id)).toMatchObject({ status: 'compensating' });
+  expect(fetch).not.toHaveBeenCalled();
+
+  vi.restoreAllMocks();
+  providerDelete();
+  expect(await settle(candidate.id)).toMatchObject({ terminal: true });
+});
+
+test('settles static preparation without dispatch provider access', async () => {
+  const candidate = await createTestDeployment(env.db, project.id, 'uploading');
+  await env.db
+    .update(deployments)
+    .set({
+      manifest: JSON.stringify({ version: 3, type: 'spa', bindings: {} }),
+    })
+    .where(eq(deployments.id, candidate.id));
+  const fetch = providerDelete(403);
+  expect(await settle(candidate.id)).toMatchObject({ terminal: true });
+  expect(fetch).not.toHaveBeenCalled();
+  expect(await getDeployment(env.db, candidate.id)).toMatchObject({ status: 'failed' });
+});
+
+test('does not clean up a nonterminal candidate referenced by the committed active pointer', async () => {
+  const candidate = await createTestDeployment(env.db, project.id, 'uploading');
+  await env.db
+    .update(projects)
+    .set({ active_deployment_id: candidate.id })
+    .where(eq(projects.id, project.id));
+  const fetch = providerDelete();
+  expect(await settle(candidate.id)).toEqual({ terminal: false });
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test('preserves retained historical deployment artifacts while terminalizing its journal', async () => {
+  const candidate = await createTestDeployment(env.db, project.id, 'failed');
+  await env.db.update(deployments).set({ retained: true }).where(eq(deployments.id, candidate.id));
+  await env.ROUTING.put(`manifest:${candidate.id}`, '{}');
+  const fetch = providerDelete();
+  expect(await settle(candidate.id)).toMatchObject({ terminal: true });
+  expect(fetch).not.toHaveBeenCalled();
+  expect(await env.ROUTING.get(`manifest:${candidate.id}`)).toBe('{}');
+});

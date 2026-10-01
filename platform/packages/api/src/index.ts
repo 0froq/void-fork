@@ -49,6 +49,7 @@ import {
   getUsersByIds,
   type Db,
 } from './db.ts';
+import { deploymentExecutionStatus, dispatchPendingDeployments } from './deployment-execution.ts';
 import { escapeHtml } from './email.ts';
 import { pruneEmailActionHistory } from './email/admission.ts';
 import { emailDomainRoutes, emailOperations } from './email/connection-schema.ts';
@@ -184,6 +185,7 @@ const app = new Hono<ApiEnv>()
       (context.req.path === '/health' ||
         context.req.path === '/.well-known/void-platform' ||
         context.req.path === '/internal/platform/sandbox-drain' ||
+        context.req.path === '/__void/platform/deployment-execution' ||
         (context.req.path === '/internal/platform/email-bootstrap' &&
           context.req.method === 'POST') ||
         (context.req.path === '/internal/platform/domain-preflight' &&
@@ -401,6 +403,15 @@ const app = new Hono<ApiEnv>()
       );
     }
   })
+  .get('/__void/platform/deployment-execution', async (context) => {
+    const token = context.env.PLATFORM_HEALTH_PROBE_TOKEN;
+    if (!token || context.req.header('X-Void-Platform-Probe') !== token) {
+      return context.json({ error: 'not found' }, 404);
+    }
+    return context.json(
+      await deploymentExecutionStatus(context.get('db'), context.env.PLATFORM_INSTALLATION_ID),
+    );
+  })
   .get('/capabilities', (context) =>
     context.json({
       acceptsExecutionPlans: true,
@@ -555,6 +566,13 @@ async function scheduled(
   _ctx: ExecutionContext,
 ): Promise<void> {
   env = await resolvePlatformApplicationEnvironment(env);
+  const deploymentDb = env.DEPLOYMENTS_QUEUE ? createDb(env.HYPERDRIVE.connectionString) : null;
+  // Durable jobs admitted before maintenance must still execute and settle.
+  if (deploymentDb) {
+    await dispatchPendingDeployments(env, deploymentDb).catch((error) =>
+      console.error('[scheduled] deployment outbox failed', error),
+    );
+  }
   if (
     env.PLATFORM_TRAFFIC_STATE === 'staging' ||
     env.PLATFORM_TRAFFIC_STATE === 'sandbox-drain' ||
@@ -563,7 +581,7 @@ async function scheduled(
   ) {
     return;
   }
-  const db = createDb(env.HYPERDRIVE.connectionString);
+  const db = deploymentDb ?? createDb(env.HYPERDRIVE.connectionString);
   const capabilities = getPlatformCapabilities(env);
 
   await reconcileProjectCleanupJobs(db, env).catch((error) =>
@@ -1186,6 +1204,7 @@ export default {
   fetch: app.fetch,
   scheduled,
   async queue(batch: MessageBatch<unknown>, env: ApiEnv['Bindings']): Promise<void> {
+    env = await resolvePlatformApplicationEnvironment(env);
     await processPlatformQueue(batch, env);
   },
 } satisfies ExportedHandler<ApiEnv['Bindings']>;

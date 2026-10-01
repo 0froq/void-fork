@@ -574,6 +574,50 @@ export const deployments = pgTable(
   ],
 );
 
+// The receipt survives a no-op deployment's placeholder deletion. Execution is
+// claimed once; an expired invocation is reconciled, never replayed.
+export const deploymentOperations = pgTable(
+  'deployment_operations',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    actor_id: text('actor_id').notNull(),
+    build_id: text('build_id'),
+    original_active_id: text('original_active_id'),
+    cli_version: text('cli_version'),
+    idempotency_key: text('idempotency_key').notNull(),
+    input_digest: text('input_digest').notNull(),
+    input_prefix: text('input_prefix').notNull(),
+    payload: jsonb('payload')
+      .notNull()
+      .$type<import('./deployment-operation-types.ts').DeploymentInput>(),
+    status: text('status')
+      .notNull()
+      .default('queued')
+      .$type<'queued' | 'running' | 'recovering' | 'terminal'>(),
+    owner_id: text('owner_id'),
+    lease_expires_at: timestamp('lease_expires_at', { mode: 'string' }),
+    next_dispatch_at: timestamp('next_dispatch_at', { mode: 'string' }).notNull().defaultNow(),
+    events: jsonb('events')
+      .notNull()
+      .default(sql`'[]'::jsonb`)
+      .$type<Array<import('./deployment-operation-types.ts').DeploymentProgress>>(),
+    last_seq: integer('last_seq').notNull().default(0),
+    inputs_deleted: boolean('inputs_deleted').notNull().default(false),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('idx_deployment_operations_key').on(
+      table.project_id,
+      table.actor_id,
+      table.idempotency_key,
+    ),
+    index('idx_deployment_operations_dispatch').on(table.status, table.next_dispatch_at),
+  ],
+);
+
 // External project resources can outlive a deleted project when a provider
 // deletion fails. These jobs deliberately have no project FK: the project row
 // and its resource handles are removed after jobs have been recorded.

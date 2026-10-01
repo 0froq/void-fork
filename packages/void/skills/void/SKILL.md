@@ -105,6 +105,8 @@ For self-hosted recovery, `VOID_PLATFORM_PROJECT_SECRET_KEY` restores an origina
 
 For Cloudflare user switching, `void cloudflare login` always opens a fresh browser sign-in. `void cloudflare status` distinguishes the authenticated user and credential method from the project's pinned deployment account. Login never retargets a project. Remove API-credential environment overrides from the current shell before browser sign-in, without printing their values; automatic deployment checks continue to reuse valid sessions.
 
+On an upgraded Void platform, accepted deployments continue after a CLI disconnect and the CLI reconnects to progress automatically. Ctrl+C stops observation; use `void project cancel` for cancellation. Inspect `void project status` and wait for recovery to finish before submitting another deployment or retrying project deletion.
+
 ## No-Args Behavior
 
 Published self-hosted platform routes and custom domains are observed and recorded as retained attachments. Lifecycle commands gate traffic through installation-owned routing storage but never delete those attachments unattended.

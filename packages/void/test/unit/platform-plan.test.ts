@@ -80,6 +80,107 @@ function legacyInstallation(suffix = '0123456789ab') {
 }
 
 describe('platform installation planning', () => {
+  it('provisions the deployment Queue only for a runtime that supports its consumer', async () => {
+    const listQueues = vi.fn(async () => []);
+    const old = await createPlatformInstallPlan(client({ listQueues }), input, null);
+    expect(old.actions).not.toContainEqual(expect.objectContaining({ key: 'deployment-queue' }));
+    expect(listQueues.mock.calls).not.toContainEqual(['account', 'void-example-deployments']);
+    const current = await createPlatformInstallPlan(client({ listQueues }), input, null, {
+      deploymentExecution: true,
+    });
+    expect(current.actions).toContainEqual(
+      expect.objectContaining({
+        action: 'create',
+        key: 'deployment-queue',
+        kind: 'queue',
+        name: 'void-example-deployments',
+      }),
+    );
+    expect(listQueues.mock.calls).toContainEqual(['account', 'void-example-deployments']);
+  });
+
+  it('rejects a deployment Queue name collision without installation ownership', async () => {
+    await expect(
+      createPlatformInstallPlan(
+        client({
+          listQueues: async (_account: string, name: string) =>
+            name === 'void-example-deployments' ? [{ id: 'someone-elses-queue', name }] : [],
+        }),
+        input,
+        null,
+        { deploymentExecution: true },
+      ),
+    ).rejects.toThrow('not owned');
+  });
+
+  it('recovers and revalidates the owned deployment Queue without replacing its recorded name', async () => {
+    let manifest = legacyInstallation();
+    manifest = {
+      ...manifest,
+      deployment: createPlatformDeploymentManifest({
+        ...manifest.deployment,
+        resources: {
+          ...manifest.deployment.resources,
+          deploymentQueue: 'void-example-deployments-legacy',
+        },
+      }),
+    };
+    for (const resource of [
+      {
+        key: 'routing-kv',
+        kind: 'kv-namespace' as const,
+        name: manifest.deployment.resources.routingKv,
+      },
+      {
+        key: 'deployment-queue',
+        kind: 'queue' as const,
+        name: manifest.deployment.resources.deploymentQueue,
+      },
+    ]) {
+      manifest = recordInstallationResource(
+        manifest,
+        {
+          ...resource,
+          id: `${resource.key}-id`,
+          ownership: 'created',
+          state: 'ready',
+          configHash: 'fixture',
+        },
+        '2026-10-01T00:00:00.000Z',
+      );
+    }
+    const api = client({
+      listKvNamespaces: async (_account: string, name: string) =>
+        name === manifest.deployment.resources.routingKv
+          ? [{ id: 'routing-kv-id', title: name }]
+          : [],
+      listQueues: async (_account: string, name: string) =>
+        name === manifest.deployment.resources.deploymentQueue
+          ? [{ id: 'deployment-queue-id', name }]
+          : [],
+      getKvValue: async () => JSON.stringify(manifest),
+    });
+    const recovered = await createPlatformInstallPlan(api, input, manifest);
+    const queue = recovered.actions.find((action) => action.key === 'deployment-queue')!;
+    expect(queue).toMatchObject({
+      action: 'reuse',
+      id: 'deployment-queue-id',
+      name: 'void-example-deployments-legacy',
+    });
+    await expect(
+      revalidatePlatformInstallAction(api, recovered, manifest, queue),
+    ).resolves.toBeUndefined();
+    const unsupported = await createPlatformInstallPlan(api, input, manifest, {
+      deploymentExecution: false,
+    });
+    expect(unsupported.actions).not.toContainEqual(
+      expect.objectContaining({ key: 'deployment-queue' }),
+    );
+    expect(manifest.resources).toContainEqual(
+      expect.objectContaining({ key: 'deployment-queue', state: 'ready' }),
+    );
+  });
+
   it('adopts an explicitly selected Hyperdrive without coupling its name to the installation', async () => {
     const fake = client({
       listHyperdriveConfigs: async () => [

@@ -732,6 +732,7 @@ export async function deleteWorkerBundle(
  */
 export async function deleteProjectAssets(r2: R2Bucket, projectId: string): Promise<void> {
   await paginatedR2Delete(r2, `assets/${projectId}/`);
+  await paginatedR2Delete(r2, `deployment-inputs/${projectId}/`);
 }
 
 /**

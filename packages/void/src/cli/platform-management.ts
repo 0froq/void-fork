@@ -283,6 +283,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       allowUnverifiedAiGateway: args.plan,
       includeEmailGateway: runtime!.manifest.artifacts.emailGateway !== undefined,
       enableSandbox: runtime!.manifest.safetyProtocols.sandboxDrain >= 3,
+      deploymentExecution: runtime!.manifest.deploymentExecution === 1,
     });
     markPhase('plan');
     note(
@@ -435,6 +436,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
             repairMissing: true,
             includeEmailGateway: runtime!.manifest.artifacts.emailGateway !== undefined,
             enableSandbox: runtime!.manifest.safetyProtocols.sandboxDrain >= 3,
+            deploymentExecution: runtime!.manifest.deploymentExecution === 1,
           })
         ).actions.filter((action) => action.kind === 'worker'),
       revalidateBeforeWorkerDeploy: (manifest, action) =>

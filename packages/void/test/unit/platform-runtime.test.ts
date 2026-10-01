@@ -14,6 +14,18 @@ import { describe, expect, it } from 'vite-plus/test';
 import { loadPlatformRuntime } from '../../src/cli/platform-installer.ts';
 
 describe('platform runtime manifest', () => {
+  it('declares durable deployment execution without rejecting legacy runtime manifests', () => {
+    const current = readPlatformRuntimeManifest();
+    const { deploymentExecution: _deploymentExecution, ...legacy } = current;
+    expect(parsePlatformRuntimeManifest(legacy).deploymentExecution).toBeUndefined();
+    expect(
+      parsePlatformRuntimeManifest({ ...legacy, deploymentExecution: 1 }).deploymentExecution,
+    ).toBe(1);
+    expect(() => parsePlatformRuntimeManifest({ ...legacy, deploymentExecution: 2 })).toThrow(
+      'deployment execution protocol',
+    );
+  });
+
   it('packages migration inputs without Drizzle authoring snapshots', () => {
     const runtimeDirectory = getPlatformRuntimeDirectory();
     const manifest = readPlatformRuntimeManifest();

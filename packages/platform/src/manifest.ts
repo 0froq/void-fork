@@ -25,6 +25,7 @@ export type PlatformResourceNames = Readonly<{
   apiWorker: string;
   assetsBucket: string;
   cronQueue: string;
+  deploymentQueue: string;
   dashboardWorker: string;
   dispatchNamespace: string;
   dispatchWorker: string;
@@ -156,6 +157,7 @@ export function createPlatformResourceNames(installationSlug: string): PlatformR
     apiWorker: `${prefix}-api`,
     assetsBucket: `${prefix}-assets`,
     cronQueue: `${prefix}-cron-fires`,
+    deploymentQueue: `${prefix}-deployments`,
     dashboardWorker: `${prefix}-dashboard`,
     dispatchNamespace: `${prefix}-users`,
     dispatchWorker: `${prefix}-dispatch`,
@@ -364,7 +366,10 @@ export function parsePlatformDeploymentManifest(value: unknown): PlatformDeploym
   const resources: Partial<Record<keyof PlatformResourceNames, string>> = {};
   for (const key of Object.keys(resourceDefaults) as Array<keyof PlatformResourceNames>) {
     resources[key] = requiredString(
-      rawResources[key] ?? (key === 'emailGatewayWorker' ? resourceDefaults[key] : undefined),
+      rawResources[key] ??
+        (key === 'emailGatewayWorker' || key === 'deploymentQueue'
+          ? resourceDefaults[key]
+          : undefined),
       `resources.${key}`,
     );
   }

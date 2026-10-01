@@ -24,6 +24,7 @@ import {
   deleteProjectEmailDestinations,
   getAllProjectDeployments,
   getActiveDeployment,
+  getPendingDeploymentOperation,
   getDomainsByProjectId,
   getProject,
   getProjectResources,
@@ -555,6 +556,11 @@ async function lockAndMarkDeleting(
     const activeDeployment = await getActiveDeployment(txDb, projectId);
     if (activeDeployment?.source === 'rollback-lease') {
       throw new ProjectOperationInProgressError();
+    }
+    if (await getPendingDeploymentOperation(txDb, projectId)) {
+      throw new ProjectOperationInProgressError(
+        'Deployment execution is still settling. Cancel it or wait for its result, then retry project deletion.',
+      );
     }
     const owner = await getUser(txDb, lockedProject.user_id);
     if (!owner) {

@@ -13,6 +13,9 @@
 - Code defines current behavior; public docs may intentionally omit paused
   features. Distinguish implemented code from shipped behavior and verified
   release status. Read package scripts before documenting their scope.
+- Trace existing contracts before proposing replacements. `void.config.ts`
+  already owns authored configuration and `void.lock.json` owns generated
+  resource state; prioritize a replacement only after demonstrating its payoff.
 - Introduce one idea, show a small example, then explain its behavior, following
   [Fate's guides](https://fate.technology/guide/requests). Put implementation
   details in maintainer docs and keep command references easy to scan.

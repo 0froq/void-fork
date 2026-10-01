@@ -379,6 +379,7 @@ export type PlatformInstallerDependencies = Readonly<{
   bootstrapEmail?: typeof bootstrapPlatformSharedEmail;
   verifyHealth?: typeof verifyPlatformHealth;
   verifySandboxDrain?: (apiUrl: string, healthProbeToken: string) => Promise<boolean>;
+  verifyDeploymentExecutionDrain?: typeof verifyPlatformDeploymentExecutionDrain;
   verifyWorkerCutover?: (
     manifest: PlatformInstallationManifest,
     generation: number,
@@ -1600,6 +1601,25 @@ export async function installPlatform(
       manifest = transitionInstallation(manifest, 'provisioning', now());
       writeInstallationManifest(manifest);
     }
+    if (
+      runtime.deploymentExecution !== 1 &&
+      (manifest.deploymentExecution === 1 ||
+        dependencies.databaseRollbackSource?.manifest.deploymentExecution === 1)
+    ) {
+      // Admission takes a shared row lock on this authoritative checkpoint in the
+      // transaction that creates its deployment job. This update closes admission
+      // before the probe counts jobs, and before a Queue consumer can be removed.
+      if (!releaseDatabaseLock.checkpoint) {
+        throw new Error('platform: The database lifecycle lock cannot fence deployment admission.');
+      }
+      await releaseDatabaseLock.checkpoint(manifest);
+      dependencies.onProgress?.('Verifying durable deployment operations have drained');
+      await (dependencies.verifyDeploymentExecutionDrain ?? verifyPlatformDeploymentExecutionDrain)(
+        plan.apiUrl,
+        createPlatformHealthProbeToken(manifest.ownershipNonce),
+        manifest.id,
+      );
+    }
 
     if (dependencies.prepareAuthentication) {
       dependencies.onProgress?.('Preparing platform authentication');
@@ -1948,6 +1968,7 @@ export async function installPlatform(
       accountId: plan.account.id,
       apiUrl: plan.apiUrl,
       deployment: plan.deployment,
+      deploymentExecution: runtime.deploymentExecution,
       healthProbeToken: createPlatformHealthProbeToken(manifest.ownershipNonce),
       installationId: manifest.id,
       ownershipNonce: manifest.ownershipNonce,
@@ -2350,6 +2371,7 @@ export async function installPlatform(
       manifest = {
         ...manifest,
         deployment: plan.deployment,
+        deploymentExecution: runtime.deploymentExecution,
         platformVersion: version,
         runtime: runtimeProvenance,
         updatedAt: now(),
@@ -2772,6 +2794,7 @@ export async function installPlatform(
     manifest = {
       ...manifest,
       deployment: plan.deployment,
+      deploymentExecution: runtime.deploymentExecution,
       platformVersion: version,
       runtime: runtimeProvenance,
       safetyProtocols: runtime.safetyProtocols ?? { sandboxDrain: 0 },
@@ -6629,6 +6652,51 @@ export async function verifyPlatformSandboxDrain(
     );
   }
   return status.state === 'complete';
+}
+
+export async function verifyPlatformDeploymentExecutionDrain(
+  apiUrl: string,
+  healthProbeToken: string,
+  installationId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  const response = await fetcher(`${apiUrl}/__void/platform/deployment-execution`, {
+    headers: {
+      'X-Void-Platform-Probe': healthProbeToken,
+      ...cfAccessHeaders(process.env, apiUrl),
+    },
+    signal: AbortSignal.timeout(30_000),
+    redirect: 'manual',
+  });
+  if (!response.ok) {
+    throw new Error(
+      `platform: Deployment execution drain probe failed (HTTP ${response.status}). Keep the current runtime until its durable deployment operations have drained.`,
+    );
+  }
+  let value: unknown;
+  try {
+    value = await response.json();
+  } catch {
+    throw new Error('platform: Deployment execution drain probe returned an invalid document.');
+  }
+  const status =
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  if (
+    status?.protocolVersion !== 1 ||
+    status.installationId !== installationId ||
+    typeof status.admissionClosed !== 'boolean' ||
+    !Number.isSafeInteger(status.pendingDeployments) ||
+    Number(status.pendingDeployments) < 0
+  ) {
+    throw new Error('platform: Deployment execution drain probe returned an invalid document.');
+  }
+  if (!status.admissionClosed || status.pendingDeployments !== 0) {
+    throw new Error(
+      'platform: Durable deployment operations are still admitted or unfinished. Keep the current runtime and retry this command after they finish.',
+    );
+  }
 }
 
 export async function bootstrapPlatformSharedEmail(

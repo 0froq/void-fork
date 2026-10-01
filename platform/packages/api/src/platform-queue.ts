@@ -1,16 +1,19 @@
 import { PLATFORM_DISABLED_KEY, PLATFORM_DISABLED_VALUE } from '@void/platform';
 import { type CronFireMessage, processCronFiresBatch } from './cron-fires-queue.ts';
+import { processDeploymentBatch } from './deployment-execution.ts';
 import type { ApiEnv } from './env.ts';
 import { processUsageEventBatch } from './usage-queue.ts';
 
 type PlatformQueueProcessors = Readonly<{
   cron: (batch: MessageBatch<CronFireMessage>, env: ApiEnv['Bindings']) => Promise<void>;
   usage: (batch: MessageBatch<unknown>, env: ApiEnv['Bindings']) => Promise<void>;
+  deployments?: (batch: MessageBatch<unknown>, env: ApiEnv['Bindings']) => Promise<void>;
 }>;
 
 const defaultProcessors: PlatformQueueProcessors = {
   cron: processCronFiresBatch,
   usage: processUsageEventBatch,
+  deployments: processDeploymentBatch,
 };
 
 export async function processPlatformQueue(
@@ -18,6 +21,12 @@ export async function processPlatformQueue(
   env: ApiEnv['Bindings'],
   processors: PlatformQueueProcessors = defaultProcessors,
 ): Promise<void> {
+  if (batch.queue === (env.DEPLOYMENTS_QUEUE_NAME ?? 'void-deployments')) {
+    // Admitted operations drain through maintenance; the database lifecycle
+    // checkpoint closes new admission before a downgrade waits for this Queue.
+    await (processors.deployments ?? processDeploymentBatch)(batch, env);
+    return;
+  }
   const cronQueue = env.CRON_FIRES_QUEUE_NAME ?? 'void-cron-fires';
   if (batch.queue !== cronQueue) {
     // Usage is durable accounting data. It must drain even while application

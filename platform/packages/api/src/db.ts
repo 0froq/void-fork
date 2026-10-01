@@ -1633,6 +1633,7 @@ export async function failStaleDeployments(db: Db): Promise<number> {
         ne(deployments.status, 'compensating'),
         or(isNull(deployments.source), ne(deployments.source, 'rollback-lease')),
         sql`${deployments.updated_at} < now() - interval '30 minutes'`,
+        sql`NOT EXISTS (SELECT 1 FROM deployment_operations op WHERE op.id = ${deployments.id} AND op.status <> 'terminal')`,
       ),
     );
   return result.rowCount ?? 0;
@@ -1651,6 +1652,23 @@ export async function getActiveDeployment(db: Db, projectId: string): Promise<De
     .orderBy(desc(deployments.created_at))
     .limit(1);
   return row ?? null;
+}
+
+export async function getPendingDeploymentOperation(
+  db: Db,
+  projectId: string,
+): Promise<{ id: string } | null> {
+  const [operation] = await db
+    .select({ id: schema.deploymentOperations.id })
+    .from(schema.deploymentOperations)
+    .where(
+      and(
+        eq(schema.deploymentOperations.project_id, projectId),
+        ne(schema.deploymentOperations.status, 'terminal'),
+      ),
+    )
+    .limit(1);
+  return operation ?? null;
 }
 
 /** Newest historical live row for verifying legacy Zero Trust routing freshness. */

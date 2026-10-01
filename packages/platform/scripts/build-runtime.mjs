@@ -140,6 +140,7 @@ try {
     },
     applicationRoutingVersion: 1,
     authenticationProtocolVersion: 1,
+    deploymentExecution: 1,
     emailProtocolVersion: 1,
     database,
     platformVersion: packageJson.version,

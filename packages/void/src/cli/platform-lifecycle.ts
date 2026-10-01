@@ -559,6 +559,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       allowUnverifiedAiGateway: true,
       includeEmailGateway: runtime.manifest.artifacts.emailGateway !== undefined,
       enableSandbox: runtime.manifest.safetyProtocols.sandboxDrain >= 3,
+      deploymentExecution: runtime.manifest.deploymentExecution === 1,
     });
     note(
       formatPlatformInstallPlan(plan),
@@ -908,6 +909,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
             repairMissing: true,
             includeEmailGateway: runtime.manifest.artifacts.emailGateway !== undefined,
             enableSandbox: runtime.manifest.safetyProtocols.sandboxDrain >= 3,
+            deploymentExecution: runtime.manifest.deploymentExecution === 1,
           })
         ).actions.filter((action) => action.kind === 'worker'),
       revalidateBeforeWorkerDeploy: (manifest, action) =>
@@ -1027,6 +1029,7 @@ export async function verifyPlatformAiGatewayPlan(
       authoritativeProvisionIntents,
       includeEmailGateway: preview.actions.some((entry) => entry.key === 'email-gateway-worker'),
       enableSandbox: preview.deployment.capabilities.sandbox,
+      deploymentExecution: preview.actions.some((entry) => entry.key === 'deployment-queue'),
     });
   } catch (error) {
     if (

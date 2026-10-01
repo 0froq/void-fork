@@ -961,6 +961,8 @@ void deploy --platform cloudflare --atomic
 
 Auto-detects your project type and chooses the right pipeline. See [Supported App Types](../guide/app-types.md) and [Deployment](../guide/deployment.md) for details.
 
+On an upgraded Void platform, an accepted deployment continues if the CLI disconnects. The CLI automatically reconnects to its progress. Pressing Ctrl+C stops observation; use `void project cancel` to request cancellation and `void project status` to inspect the result. If interrupted execution requires recovery, wait for its result before deploying again.
+
 An unlinked project with a root `wrangler.jsonc`, `wrangler.json`, or a single root `wrangler*.json(c)` file explicitly referenced by a supported framework adapter gets a prompt to link and deploy to Cloudflare using its existing Worker and resources. Accepting verifies the target, saves Cloudflare as the destination, and continues deployment. A failed build retains the link for retry. Declining changes nothing. Explicit platform/project selections and saved destinations take precedence; CI must select a destination explicitly.
 
 The first handoff preserves production bindings, variables, secrets, event handlers, and triggers. The active version must be the latest uploaded version so inherited secrets have an unambiguous source. Apart from an explicitly enabled ISR cache, new resources, migrations, runtime features, auth setup, or local secret overrides must be handled separately. See [Deploy an existing Worker](../integrations/cloudflare.md#deploy-an-existing-worker).

@@ -99,6 +99,7 @@ export async function createPlatformInstallPlan(
     allowUnverifiedAiGateway?: boolean;
     includeEmailGateway?: boolean;
     enableSandbox?: boolean;
+    deploymentExecution?: boolean;
   },
 ): Promise<PlatformInstallPlan> {
   const accounts = await client.listAccounts();
@@ -290,6 +291,7 @@ export async function createPlatformInstallPlan(
     r2Buckets,
     usageQueues,
     cronQueues,
+    deploymentQueues,
     dispatchNamespaces,
     hyperdrives,
     workers,
@@ -302,6 +304,10 @@ export async function createPlatformInstallPlan(
     client.listR2Buckets(account.id),
     client.listQueues(account.id, names.usageQueue),
     client.listQueues(account.id, names.cronQueue),
+    (options?.deploymentExecution ??
+    existing?.resources.some((resource) => resource.key === 'deployment-queue'))
+      ? client.listQueues(account.id, names.deploymentQueue)
+      : Promise.resolve([]),
     client.listDispatchNamespaces(account.id),
     client.listHyperdriveConfigs(account.id),
     client.listWorkerNames(account.id),
@@ -555,6 +561,22 @@ export async function createPlatformInstallPlan(
     options,
     remoteOwnership,
   );
+  if (
+    options?.deploymentExecution ??
+    existing?.resources.some((resource) => resource.key === 'deployment-queue')
+  ) {
+    addNamedPlan(
+      actions,
+      existing,
+      'deployment-queue',
+      'queue',
+      names.deploymentQueue,
+      deploymentQueues,
+      'reuse',
+      options,
+      remoteOwnership,
+    );
+  }
   addNamedPlan(
     actions,
     existing,
@@ -749,6 +771,7 @@ export async function revalidatePlatformInstallAction(
       ...options,
       includeEmailGateway: original.actions.some((entry) => entry.key === 'email-gateway-worker'),
       enableSandbox: original.deployment.capabilities.sandbox,
+      deploymentExecution: original.actions.some((entry) => entry.key === 'deployment-queue'),
     },
   );
   const current = refreshed.actions.find((entry) => entry.key === action.key);
@@ -1124,6 +1147,7 @@ const RESOURCE_NAME_KEY_BY_ACTION: Readonly<
   'api-worker': 'apiWorker',
   'assets-bucket': 'assetsBucket',
   'cron-queue': 'cronQueue',
+  'deployment-queue': 'deploymentQueue',
   'dispatch-namespace': 'dispatchNamespace',
   'dispatch-worker': 'dispatchWorker',
   hyperdrive: 'hyperdrive',

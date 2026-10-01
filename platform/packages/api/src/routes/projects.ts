@@ -36,6 +36,7 @@ import {
   deleteRollbackLease,
   updateRollbackLeaseState,
   cancelDeployment,
+  getPendingDeploymentOperation,
   setActiveDeployment,
   updateProjectType,
   appendAppliedMigrations,
@@ -1111,6 +1112,10 @@ const app = new Hono<ApiEnv>()
           }
           throw error;
         }
+        const pendingOperation = await getPendingDeploymentOperation(txDb, projectId);
+        if (pendingOperation) {
+          throw new RollbackError(409, `deploy in progress: ${pendingOperation.id}`);
+        }
         const activeDeploy = await getActiveDeployment(txDb, projectId);
         if (activeDeploy) {
           if (activeDeploy.source === 'rollback-lease' && activeDeploy.manifest) {
@@ -1270,6 +1275,10 @@ const app = new Hono<ApiEnv>()
           const lockedProject = lockedAccess.project;
           if (lockedProject.status === 'deleting') {
             throw new RollbackError(409, 'project is being deleted');
+          }
+          const pendingOperation = await getPendingDeploymentOperation(txDb, projectId);
+          if (pendingOperation) {
+            throw new RollbackError(409, `deploy in progress: ${pendingOperation.id}`);
           }
           const activeDeploy = await getActiveDeployment(txDb, projectId);
           let ownsRollbackLease = false;

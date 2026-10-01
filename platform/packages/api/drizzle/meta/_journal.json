@@ -337,6 +337,13 @@
       "when": 1790841384175,
       "tag": "0054_project_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1790864531640,
+      "tag": "0055_durable_deployment_execution",
+      "breakpoints": true
     }
   ]
 }

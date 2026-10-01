@@ -13,6 +13,7 @@ describe('platform deployment manifest', () => {
       apiWorker: 'void-developer-platform-experience-api',
       assetsBucket: 'void-developer-platform-experience-assets',
       cronQueue: 'void-developer-platform-experience-cron-fires',
+      deploymentQueue: 'void-developer-platform-experience-deployments',
       dashboardWorker: 'void-developer-platform-experience-dashboard',
       dispatchNamespace: 'void-developer-platform-experience-users',
       dispatchWorker: 'void-developer-platform-experience-dispatch',

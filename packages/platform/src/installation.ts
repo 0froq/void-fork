@@ -91,6 +91,8 @@ export type PlatformInstallationManifest = Readonly<{
   /** Actual forward-only PostgreSQL schema, independent of the running runtime. */
   databaseSchemaDigest: string | null;
   deployment: PlatformDeploymentManifest;
+  /** Last durable deployment execution protocol activated by the installer. */
+  deploymentExecution?: 1;
   /** Desired domain while DNS/TLS activation is pending; current addressing remains live. */
   pendingDomain?: PlatformDeploymentManifest['application'];
   desiredState: 'enabled' | 'disabled';
@@ -247,6 +249,7 @@ export function createPlatformInstallationManifest(input: {
   account: { id: string; name: string };
   createdAt: string;
   deployment: PlatformDeploymentManifest;
+  deploymentExecution?: 1;
   id: string;
   ownershipNonce: string;
   platformVersion: string;
@@ -267,6 +270,7 @@ export function createPlatformInstallationManifest(input: {
     },
     createdAt,
     databaseSchemaDigest: null,
+    ...(input.deploymentExecution === 1 ? { deploymentExecution: 1 as const } : {}),
     deployment: parsePlatformDeploymentManifest(
       JSON.parse(JSON.stringify(input.deployment)) as unknown,
     ),
@@ -386,6 +390,9 @@ export function parsePlatformInstallationManifest(value: unknown): PlatformInsta
   const account = value.account;
   const endpoints = value.endpoints;
   assertRecord(account, 'account');
+  if (value.deploymentExecution !== undefined && value.deploymentExecution !== 1) {
+    throw new Error('Unsupported deployment execution protocol.');
+  }
   assertRecord(endpoints, 'endpoints');
   if (!isInstallationStatus(value.status)) {
     throw new Error(`Invalid installation status: ${String(value.status)}.`);
@@ -403,6 +410,7 @@ export function parsePlatformInstallationManifest(value: unknown): PlatformInsta
     },
     createdAt: requiredString(value.createdAt, 'createdAt'),
     deployment: parsePlatformDeploymentManifest(value.deployment),
+    ...(value.deploymentExecution === 1 ? { deploymentExecution: 1 as const } : {}),
     id: requiredString(value.id, 'id'),
     ownershipNonce: requiredString(value.ownershipNonce, 'ownershipNonce'),
     platformVersion: requiredString(value.platformVersion, 'platformVersion'),

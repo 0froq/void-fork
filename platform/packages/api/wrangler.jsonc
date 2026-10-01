@@ -149,6 +149,7 @@
     "producers": [
       { "binding": "CRON_FIRES_QUEUE", "queue": "void-cron-fires" },
       { "binding": "USAGE_EVENTS_QUEUE", "queue": "void-usage-events" },
+      { "binding": "DEPLOYMENTS_QUEUE", "queue": "void-deployments" },
     ],
     "consumers": [
       {
@@ -163,6 +164,13 @@
         "max_batch_size": 50,
         "max_batch_timeout": 1,
         "max_retries": 3,
+      },
+      {
+        "queue": "void-deployments",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 100,
+        "retry_delay": 60,
       },
     ],
   },
@@ -179,6 +187,7 @@
   "routes": [{ "pattern": "api.void.cloud", "custom_domain": true }],
   "vars": {
     "CRON_FIRES_QUEUE_NAME": "void-cron-fires",
+    "DEPLOYMENTS_QUEUE_NAME": "void-deployments",
     "PLATFORM_ENV": "production",
     "SANDBOX_CONTROL_SERVICE": "void-api",
     "PROXY_URL": "https://proxy.void.cloud",
@@ -301,6 +310,7 @@
         "producers": [
           { "binding": "CRON_FIRES_QUEUE", "queue": "void-cron-fires" },
           { "binding": "USAGE_EVENTS_QUEUE", "queue": "void-usage-events" },
+          { "binding": "DEPLOYMENTS_QUEUE", "queue": "void-deployments" },
         ],
         "consumers": [
           {
@@ -314,6 +324,13 @@
             "max_batch_timeout": 1,
             "max_retries": 3,
           },
+          {
+            "queue": "void-deployments",
+            "max_batch_size": 1,
+            "max_batch_timeout": 1,
+            "max_retries": 100,
+            "retry_delay": 60,
+          },
         ],
       },
       "send_email": [
@@ -326,6 +343,7 @@
       "routes": [{ "pattern": "api.void.cloud", "custom_domain": true }],
       "vars": {
         "CRON_FIRES_QUEUE_NAME": "void-cron-fires",
+        "DEPLOYMENTS_QUEUE_NAME": "void-deployments",
         "PLATFORM_ENV": "production",
         "SANDBOX_CONTROL_SERVICE": "void-api",
         "PROXY_URL": "https://proxy.void.cloud",
@@ -439,6 +457,7 @@
         "producers": [
           { "binding": "CRON_FIRES_QUEUE", "queue": "void-cron-fires-staging" },
           { "binding": "USAGE_EVENTS_QUEUE", "queue": "void-usage-events-staging" },
+          { "binding": "DEPLOYMENTS_QUEUE", "queue": "void-deployments-staging" },
         ],
         "consumers": [
           {
@@ -452,6 +471,13 @@
             "max_batch_timeout": 1,
             "max_retries": 3,
           },
+          {
+            "queue": "void-deployments-staging",
+            "max_batch_size": 1,
+            "max_batch_timeout": 1,
+            "max_retries": 100,
+            "retry_delay": 60,
+          },
         ],
       },
       "send_email": [
@@ -463,6 +489,7 @@
       "routes": [{ "pattern": "api.staging.void.cloud", "custom_domain": true }],
       "vars": {
         "CRON_FIRES_QUEUE_NAME": "void-cron-fires-staging",
+        "DEPLOYMENTS_QUEUE_NAME": "void-deployments-staging",
         "DISPATCH_NAMESPACE": "void-users-staging",
         "DISPATCH_WORKER_NAME": "void-dispatch-staging",
         "VOID_PROXY_SERVICE": "void-proxy-staging",

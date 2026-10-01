@@ -100,6 +100,8 @@ export type ApiEnv = Env & {
     VOID_PROXY_TOKEN?: string;
     /** Trusted producer used by the API-owned sandbox lease counter. */
     USAGE_EVENTS_QUEUE?: Queue<unknown>;
+    DEPLOYMENTS_QUEUE?: Queue<{ deploymentId: string }>;
+    DEPLOYMENTS_QUEUE_NAME?: string;
     SITE_DOMAIN?: string;
     PLATFORM_APPLICATION?: string;
     DASHBOARD_URL?: string;
@@ -214,5 +216,10 @@ export type ApiEnv = Env & {
      * credential's project, owner, revocation, and expiry checks pass.
      */
     deployCredential?: string;
+    /** Only set by the Queue executor, never by request authentication. */
+    deploymentExecution?: {
+      operation: import('./deployment-operation-types.ts').DeploymentOperation;
+      workerFiles: Array<{ name: string; content: Blob }>;
+    };
   };
 };
