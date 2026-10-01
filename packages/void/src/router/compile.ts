@@ -1199,6 +1199,7 @@ export function compileRouteTable(
             params: route.params,
             className: route.className,
             bindingName: route.bindingName,
+            ...(route.name !== undefined && { name: route.name }),
           },
         )}, ${auth ? '__voidAuthOptions' : 'undefined'}, ${auth ? '__resolveVoidAuthState' : 'undefined'});`,
       );
@@ -1211,10 +1212,14 @@ export function compileRouteTable(
           params: route.params,
           className: route.className,
           bindingName: route.bindingName,
+          ...(route.name !== undefined && { name: route.name }),
         })),
       )};`,
     );
     lines.push('');
+  }
+  for (let i = 0; i < webSockets.length; i++) {
+    lines.push(`__voidWebSocketRoutes[${i}].key = websocket${i}.key;`);
   }
   for (const className of options.webSocketTombstones ?? []) {
     lines.push(
@@ -2697,7 +2702,12 @@ export interface WorkerEntryOptions {
    * imported from `filePath`, bound to `bindingName`, and re-exported as
    * `className` so wrangler's `durable_objects.bindings` can find it.
    */
-  durableObjects?: Array<{ bindingName: string; className: string; filePath: string }>;
+  durableObjects?: Array<{
+    bindingName: string;
+    className: string;
+    filePath: string;
+    name?: string;
+  }>;
 }
 
 export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
@@ -2762,8 +2772,8 @@ export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
     .join('\n');
   const durableObjectExports = durableObjects
     .map(
-      ({ bindingName, className }, index) =>
-        `__voidDurableObject${index}.__bind(${JSON.stringify(bindingName)});\nexport const ${className} = __voidDurableObject${index}.class;`,
+      ({ bindingName, className, name }, index) =>
+        `__voidDurableObject${index}.__bind(${JSON.stringify(bindingName)}${name !== undefined ? `, ${JSON.stringify(name)}` : ''});\nexport const ${className} = __voidDurableObject${index}.class;`,
     )
     .join('\n');
   const runtimeEnvImport = `import { withRuntimeEnv } from ${JSON.stringify(runtimeEnvPath)};\n`;

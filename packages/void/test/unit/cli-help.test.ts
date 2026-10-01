@@ -84,6 +84,13 @@ describe('CLI help resolver', () => {
     expect(hasHelpPage(['github', 'missing'])).toBe(false);
   });
 
+  it('resolves local resource discovery help and documents JSON output', () => {
+    expect(getHelpPath(['info', '--help'])).toEqual(['info']);
+    expect(hasHelpPage(['info'])).toBe(true);
+    printHelpPage(['info']);
+    expect(vi.mocked(note).mock.calls[0]?.[0]).toContain('void info [--json]');
+  });
+
   it('tracks Cloudflare authentication help pages', () => {
     expect(hasHelpPage(['cloudflare'])).toBe(true);
     expect(hasHelpPage(['cloudflare', 'login'])).toBe(true);

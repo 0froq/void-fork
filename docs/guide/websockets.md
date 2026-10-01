@@ -34,6 +34,49 @@ Filename rules match regular server routes:
 
 The environment suffix goes **before** `.ws`. `chat.ws.dev.ts` is not recognised.
 
+## Move a route while keeping its state
+
+Existing routes keep their current behavior without any changes. Before moving a deployed route, run `void info`. For `routes/chat/[room].ws.ts`, the output includes:
+
+```text
+To preserve this resource when moving its code, add this to 'defineRoom':
+  name: "chat-room",
+```
+
+Add the displayed name to your existing definition:
+
+```ts
+export default defineRoom({
+  name: 'chat-room',
+  messages: { client: ClientMessage, server: ServerMessage },
+  // Keep your existing hooks.
+});
+```
+
+Move the file to `routes/rooms/[room].ws.ts`, update clients to connect to `/rooms/:room`, and deploy normally. Keep the same parameter names and values: room `general` still uses its existing storage. The Worker class, binding, and migration history stay the same on both Cloudflare and Void platform deployments.
+
+Both `defineRoom()` and `defineWebSocket()` accept optional `name`. Use a static string, inline or in a local `const`. Each route must produce a distinct Worker class; changing the name selects a different resource. If you already moved a route, `void info` also shows unmatched identities recorded in `void.lock.json`. Identify the original resource before adopting its suggested name; otherwise restore the original source and discover the name there.
+
+### Rename a route parameter
+
+By default, the instance key includes parameter names. `/chat/:room` with `room: 'general'` uses `room=general`; a route without parameters uses `default`. Multiple parameters are joined in route order, for example `team=acme&room=general`.
+
+If you also rename `[room]` to `[id]`, preserve the old key explicitly:
+
+```ts
+// routes/rooms/[id].ws.ts
+export default defineRoom({
+  name: 'chat-room',
+  key: ({ params }) => `room=${params.id}`,
+  messages: { client: ClientMessage, server: ServerMessage },
+  // Keep your existing hooks.
+});
+```
+
+Clients now connect to `/rooms/:id` with `params: { id: 'general' }`. The key remains `room=general`, so storage and `ctx.id` stay the same. Returning only `params.id` would select a different instance.
+
+`key` is optional on both WebSocket helpers. It must return a string synchronously and consistently for the same parameters. Preserve the complete old key when migrating multiple parameters. Keep the callback stable after deployment.
+
 ## `defineRoom()`
 
 Use `defineRoom()` when clients should share a room or document identified by the route.

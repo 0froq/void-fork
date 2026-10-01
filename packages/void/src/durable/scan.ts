@@ -1,17 +1,36 @@
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'pathslash';
+import { readResourceDefinition } from '../shared/resource-definition.ts';
+import { resourceNameWords } from '../shared/resource-name.ts';
 
 export type DurableObjectModule = {
   filePath: string;
   bindingName: string;
   className: string;
   migrationTag: string;
+  name?: string;
 };
 
 const MODULE_PATTERN = /\.(?:[cm]?[jt]s)$/;
 
-function words(value: string): Array<string> {
-  return value.split(/[^a-zA-Z0-9]+/).filter(Boolean);
+export function inferDurableResourceName(filePath: string): string {
+  return filePath.replace(/\\/g, '/').split('/').pop()!.replace(MODULE_PATTERN, '');
+}
+
+const DURABLE_HELPERS = new Set(['defineDurableState']);
+
+export function deriveDurableResourceIdentity(name: string): {
+  bindingName: string;
+  className: string;
+  migrationTag: string;
+} {
+  const parts = resourceNameWords(name);
+  const classBase = parts.map((part) => part[0]!.toUpperCase() + part.slice(1)).join('');
+  return {
+    bindingName: parts.join('_').toUpperCase(),
+    className: `${classBase}DurableObject`,
+    migrationTag: `void-durable-${parts.join('-').toLowerCase()}-v1`,
+  };
 }
 
 export function scanDurableObjectModules(root: string): Array<DurableObjectModule> {
@@ -26,19 +45,21 @@ export function scanDurableObjectModules(root: string): Array<DurableObjectModul
     )
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((entry) => {
-      const stem = entry.name.replace(MODULE_PATTERN, '');
-      const parts = words(stem);
+      const filePath = join(directory, entry.name);
+      const definition = readResourceDefinition(
+        filePath,
+        readFileSync(filePath, 'utf-8'),
+        DURABLE_HELPERS,
+      );
+      const name = definition?.name;
+      const parts = resourceNameWords(name ?? inferDurableResourceName(entry.name));
       if (parts.length === 0) {
         throw new Error(`durable: cannot derive a name from durable-objects/${entry.name}.`);
       }
-      const classBase = parts.map((part) => part[0].toUpperCase() + part.slice(1)).join('');
-      const bindingName = parts.join('_').toUpperCase();
-      const slug = parts.join('-').toLowerCase();
       return {
-        filePath: join(directory, entry.name),
-        bindingName,
-        className: `${classBase}DurableObject`,
-        migrationTag: `void-durable-${slug}-v1`,
+        filePath,
+        ...deriveDurableResourceIdentity(name ?? inferDurableResourceName(entry.name)),
+        ...(name === undefined ? {} : { name }),
       };
     });
 
@@ -47,7 +68,7 @@ export function scanDurableObjectModules(root: string): Array<DurableObjectModul
   for (const module of modules) {
     if (bindings.has(module.bindingName) || classes.has(module.className)) {
       throw new Error(
-        `durable: duplicate generated name for '${module.filePath}'. Rename one of the durable-objects files.`,
+        `durable: duplicate generated name for '${module.filePath}'. Choose a different resource name or rename one of the durable-objects files.`,
       );
     }
     bindings.add(module.bindingName);

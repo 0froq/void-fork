@@ -1278,6 +1278,17 @@ const HELP_TREE: HelpTree = {
       queue: basicSubcommand('Generate a queue consumer file.', 'void gen queue <name>'),
     },
   },
+  info: {
+    summary: 'Inspect persistent resource names in this project without deploying.',
+    usage: ['void info [--json]'],
+    options: [{ command: '--json', description: 'Write structured JSON to stdout' }],
+    examples: [
+      {
+        command: 'void info',
+        description: 'Find names to preserve before moving persistent definitions',
+      },
+    ],
+  },
   prepare: {
     summary: 'Generate .void artifacts without starting Vite.',
     usage: ['void prepare'],
@@ -1334,6 +1345,8 @@ export function printGlobalHelp(): void {
       ...globalOptionLines(['init']),
       '',
       globalCommandLine(['migrate'], 'void migrate'),
+      '',
+      globalCommandLine(['info'], 'void info [--json]'),
       '',
       globalCommandLine(['connect'], 'void connect [url]'),
       ...globalOptionLines(['connect']),

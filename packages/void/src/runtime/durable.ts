@@ -1,4 +1,5 @@
 import { DurableObject as CloudflareDurableObject } from 'cloudflare:workers';
+import { isResourceName } from '../shared/resource-name.ts';
 import { requireRuntimeBinding, withRuntimeEnv } from './env.ts';
 
 const DEFAULT_STORAGE_KEY = '__void_durable_state';
@@ -65,6 +66,8 @@ export type DurableStateDefinition<
   TEnv extends Record<string, unknown>,
   TMethods extends DurableStateMethods<TState, TEnv>,
 > = {
+  /** Optional persistent resource name. Pin the name reported by `void info` before moving this definition. */
+  name?: string;
   initialState: TState | ((env: TEnv) => TState | Promise<TState>);
   /** Current persisted state version. Defaults to 0. */
   version?: number;
@@ -78,7 +81,7 @@ export type DurableStateDefinition<
 export type DurableStateApi<TMethods> = {
   class: DurableStateClass<TMethods>;
   /** @internal Called by Void's generated worker entry. */
-  __bind(bindingName: string): void;
+  __bind(bindingName: string, resourceName?: string): void;
   get(name: string): TypedDurableObjectStub<TMethods>;
   get(namespace: DurableObjectNamespace, name: string): TypedDurableObjectStub<TMethods>;
   getById(id: DurableObjectId): TypedDurableObjectStub<TMethods>;
@@ -127,6 +130,9 @@ export function defineDurableState<
   TEnv extends Record<string, unknown> = Record<string, unknown>,
   const TMethods extends DurableStateMethods<TState, TEnv> = DurableStateMethods<TState, TEnv>,
 >(definition: DurableStateDefinition<TState, TEnv, TMethods>): DurableStateApi<TMethods> {
+  if (definition.name !== undefined && !isResourceName(definition.name)) {
+    throw new Error('durable: name must contain a word starting with a letter.');
+  }
   const version = definition.version ?? 0;
   if (!Number.isInteger(version) || version < 0) {
     throw new Error('durable: version must be a non-negative integer.');
@@ -286,7 +292,12 @@ export function defineDurableState<
 
   return {
     class: VoidDurableState as unknown as DurableStateClass<TMethods>,
-    __bind(name) {
+    __bind(name, resourceName) {
+      if (definition.name !== resourceName) {
+        throw new Error(
+          'durable: name must be statically discoverable in defineDurableState(). Run void info to inspect this definition.',
+        );
+      }
       if (bindingName && bindingName !== name) {
         throw new Error(
           `durable: state definition is already bound to '${bindingName}' and cannot also bind to '${name}'.`,

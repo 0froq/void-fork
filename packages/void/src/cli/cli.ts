@@ -18,6 +18,7 @@ import { envSubcommands, parseEnvArgs } from './env-args.ts';
 import { genSubcommands, parseGenArgs } from './gen-args.ts';
 import { githubSubcommands, parseGithubArgs } from './github-args.ts';
 import { getHelpPath, printGlobalHelp, printHelpPage, printVoidHeader } from './help.ts';
+import { parseInfoArgs } from './info-args.ts';
 import { OperatorClientError } from './operator-client.ts';
 import { parsePlatformArgs, platformSubcommands } from './platform-args.ts';
 import { parsePrepareArgs } from './prepare-args.ts';
@@ -212,6 +213,20 @@ if (helpPath) {
   runSubcommandGroup('build', buildSubcommands, parseBuildArgs, (root, parsed) =>
     import('./build-cmd.ts').then(({ runBuildCommand }) => runBuildCommand(root, parsed)),
   );
+} else if (command === 'info') {
+  import('./info.ts').then(async ({ runInfoCommand }) => {
+    try {
+      await runInfoCommand(process.cwd(), parseInfoArgs(args.slice(1)));
+    } catch (err) {
+      const message = formatCloudflareUserMessage(err instanceof Error ? err.message : String(err));
+      if (args.includes('--json')) {
+        console.error(JSON.stringify({ error: 'invalid_command', message }));
+      } else {
+        log.error(message);
+      }
+      process.exit(1);
+    }
+  });
 } else if (command === 'prepare') {
   const root = process.cwd();
   let prepareArgs;
@@ -269,6 +284,11 @@ if (helpPath) {
       description: 'Set up void in a new or existing project',
     },
     { name: 'migrate', description: 'Migrate legacy project configuration' },
+    {
+      name: 'info',
+      hint: '--json',
+      description: 'Inspect persistent resource names in this project',
+    },
     { name: 'connect', description: 'Connect to Cloudflare or a Void platform' },
     { name: 'deploy', description: 'Build and deploy, or link an existing Cloudflare Worker' },
     {
@@ -430,6 +450,11 @@ if (helpPath) {
         return runSubcommandGroup('gen', genSubcommands, parseGenArgs, (r, p) =>
           import('./gen.ts').then(({ runGenCommand }) => runGenCommand(r, p)),
         );
+      case 'info': {
+        const { runInfoCommand } = await import('./info.ts');
+        await runInfoCommand(root, parseInfoArgs([]));
+        return;
+      }
       case 'prepare': {
         const { runPrepareCommand } = await import('./prepare.ts');
         await runPrepareCommand(root, parsePrepareArgs([]));

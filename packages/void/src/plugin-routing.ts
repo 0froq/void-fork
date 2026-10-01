@@ -100,7 +100,12 @@ type RoutingPluginOptions = {
   sandboxClassName?: string;
   sandboxInstanceType?: string;
   live?: { bindingName: string; className: string };
-  durableObjects?: Array<{ bindingName: string; className: string; filePath: string }>;
+  durableObjects?: Array<{
+    bindingName: string;
+    className: string;
+    filePath: string;
+    name?: string;
+  }>;
   /** Data-preserving exports for removed WebSocket Durable Object routes. */
   websocketTombstones?: Array<string>;
   onDevAssetRoutingPolicyChange?: (policy: AssetRoutingPolicy) => boolean;

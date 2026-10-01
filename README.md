@@ -95,6 +95,8 @@ pnpm void deploy
 - **Typed durable state** — modules in `durable-objects/` get inferred SQLite-backed bindings and typed RPC methods
 - **Local dev parity** — `vite dev` runs handlers in the real `workerd` runtime with local D1, KV, and R2
 
+Before moving deployed Durable State or WebSocket definitions, run `void info` and pin the displayed `name`. Existing unnamed definitions keep their defaults. See the [Durable State](./docs/guide/durable-state.md#rename-a-file-while-keeping-its-state) and [WebSocket](./docs/guide/websockets.md#move-a-route-while-keeping-its-state) migration guides.
+
 ## Documentation
 
 Full docs at [void.cloud](https://void.cloud). Run `vp run dev:docs` in this repo to view the documentation locally.

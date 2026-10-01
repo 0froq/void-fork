@@ -17,6 +17,8 @@ Docs in this skill are bundled from `docs/` during `void` package build and live
 
 ## Command Naming
 
+Before moving a deployed Durable State or WebSocket definition, run `void info` and pin its displayed `name` in the existing helper. Keep that name and the existing instance names. Renaming WebSocket parameters also needs a `key` callback preserving the complete old key; follow `docs/guide/websockets.md`. Existing unnamed definitions remain supported.
+
 For a new platform installation, prefer an app domain at the zone apex. Nested
 app domains need an active wildcard edge certificate and SSL-and-Certificates
 read permission; `void platform install --plan` verifies coverage. Use the

@@ -14,6 +14,7 @@ Use this page as a command reference. If you are setting up a project for the fi
 | --------------------------------- | ----------------------------------------------------------------------------- |
 | `void deploy`                     | Build and deploy to the configured platform                                   |
 | `void prepare`                    | Generate `.void` artifacts without starting Vite                              |
+| `void info [--json]`              | Inspect persistent resource names before moving their code                    |
 | `void gen model <name> [cols...]` | Scaffold migration + CRUD routes                                              |
 | `void gen route <path>`           | Create an API route                                                           |
 | `void db push`                    | Apply schema directly without migration files                                 |
@@ -77,6 +78,21 @@ void <group> help <command>
 Use `void --help` for the command list. For a specific command, try `void deploy --help` or `void db execute --help`. Help runs without signing in, validating the project, or making network requests.
 
 ## Setup
+
+### `void info`
+
+```sh
+void info
+void info --json
+```
+
+Shows each Durable State and WebSocket definition's source file, inferred or explicit name, Worker class, and binding. WebSocket entries also include their route in JSON output. It runs locally without authentication, network requests, or file generation.
+
+Before moving a deployed definition, copy the suggested `name` into `defineDurableState()`, `defineRoom()`, or `defineWebSocket()`. Keep that name after moving the file to preserve the resource. See [Durable State](../guide/durable-state.md#rename-a-file-while-keeping-its-state) and [WebSockets](../guide/websockets.md#move-a-route-while-keeping-its-state) for migration flows, including WebSocket parameter renames.
+
+Resources recorded in `void.lock.json` without a matching definition appear separately. Adopt a suggested name only after identifying the resource you moved. If Void cannot suggest a name, restore its original source and inspect it before moving it again.
+
+`--json` returns `resources` and `recordedResources`. Current entries contain `file`, `definition`, `name`, `nameSource` (`inferred` or `explicit`), `className`, `bindingName`, and an optional `route`. Recorded entries contain `className` and `bindingName`, with `name` and `definition` when a matching name is available.
 
 ### `void migrate`
 

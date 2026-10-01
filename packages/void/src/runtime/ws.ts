@@ -1,10 +1,13 @@
 import type { WebSocketRouteMap } from 'void/routes';
+import { isResourceName } from '../shared/resource-name.ts';
 import type { StandardSchemaV1 } from '../standard-schema.ts';
 import type { AuthUser } from './auth.ts';
 import type { CloudEnv } from './handler.ts';
 
 type MaybePromise<T> = T | Promise<T>;
 type ParamsRecord = Record<string, string>;
+
+export type WebSocketInstanceKey = (context: { params: ParamsRecord }) => string;
 
 type WsEntry<P extends keyof WebSocketRouteMap> = WebSocketRouteMap[P];
 type ParamsOf<P extends keyof WebSocketRouteMap> =
@@ -57,6 +60,10 @@ export type RoomDefinition<
   ServerSchema extends StandardSchemaV1 = StandardSchemaV1,
 > = {
   readonly __kind: 'room';
+  /** Optional persistent resource name. Pin the name reported by `void info` before moving this route. */
+  readonly name?: string;
+  /** Optional instance key; preserve existing keys when renaming route parameters. */
+  readonly key?: WebSocketInstanceKey;
   readonly messages: {
     client: ClientSchema;
     server: ServerSchema;
@@ -83,6 +90,10 @@ export type SocketDefinition<
   ServerSchema extends StandardSchemaV1 = StandardSchemaV1,
 > = {
   readonly __kind: 'socket';
+  /** Optional persistent resource name. Pin the name reported by `void info` before moving this route. */
+  readonly name?: string;
+  /** Optional instance key; preserve existing keys when renaming route parameters. */
+  readonly key?: WebSocketInstanceKey;
   readonly messages: {
     client: ClientSchema;
     server: ServerSchema;
@@ -112,6 +123,7 @@ export function defineRoom<
 >(
   definition: Omit<RoomDefinition<ClientSchema, ServerSchema>, '__kind'>,
 ): RoomDefinition<ClientSchema, ServerSchema> {
+  assertResourceName(definition.name);
   return { ...definition, __kind: 'room' };
 }
 
@@ -121,7 +133,14 @@ export function defineWebSocket<
 >(
   definition: Omit<SocketDefinition<ClientSchema, ServerSchema>, '__kind'>,
 ): SocketDefinition<ClientSchema, ServerSchema> {
+  assertResourceName(definition.name);
   return { ...definition, __kind: 'socket' };
+}
+
+function assertResourceName(name: string | undefined): void {
+  if (name !== undefined && !isResourceName(name)) {
+    throw new Error('ws: name must contain a word starting with a letter.');
+  }
 }
 
 export type VoidSocketCloseEvent = {

@@ -9,9 +9,12 @@ import type {
   RoomDefinition,
   SocketDefinition,
   WebSocketConnection,
+  WebSocketInstanceKey,
 } from './ws.ts';
 
 export type WebSocketRouteMeta = {
+  name?: string;
+  key?: WebSocketInstanceKey;
   pattern: string;
   params: Array<string>;
   className: string;
@@ -101,9 +104,16 @@ function getRouteMatch(request: Request, route: WebSocketRouteMeta): Record<stri
 }
 
 export function buildWebSocketInstanceId(
-  route: Pick<WebSocketRouteMeta, 'params'>,
+  route: Pick<WebSocketRouteMeta, 'params' | 'key'>,
   params: Record<string, string>,
 ): string {
+  if (route.key) {
+    const key = route.key({ params });
+    if (typeof key !== 'string') {
+      throw new Error('ws: key must return a string synchronously.');
+    }
+    return key;
+  }
   if (route.params.length === 0) {
     return 'default';
   }
@@ -292,6 +302,12 @@ export function createWebSocketDurableObject(
   resolveAuthState?: ResolveVoidAuthState,
 ): WebSocketDurableObjectClass {
   assertDefinition(definition);
+  if (definition.name !== route.name) {
+    throw new Error(
+      'ws: name must be statically discoverable in the route definition. Run void info to inspect this route.',
+    );
+  }
+  const instanceRoute = { ...route, key: definition.key };
 
   class VoidWebSocketDurableObject implements WebSocketDurableObjectInstance {
     constructor(
@@ -305,7 +321,7 @@ export function createWebSocketDurableObject(
 
     private async handleFetch(request: Request): Promise<Response> {
       const params = getRouteMatch(request, route) ?? {};
-      const roomId = buildWebSocketInstanceId(route, params);
+      const roomId = buildWebSocketInstanceId(instanceRoute, params);
       const authState =
         authRuntime && resolveAuthState
           ? await resolveAuthState(request, this.env as VoidAuthEnv, authRuntime)

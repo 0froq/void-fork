@@ -1,19 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'pathslash';
 import { glob, globSync } from 'tinyglobby';
-import { parseSync } from 'vite';
 import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
 import {
-  isCallExpression,
   isIdentifier,
   isLiteral,
   isObjectExpression,
-  type AstExportDefaultDeclaration,
   type AstNode,
-  type AstProgram,
   type AstProperty,
-  type AstVariableDeclaration,
 } from '../shared/ast.ts';
+import { readResourceDefinition } from '../shared/resource-definition.ts';
+import { resourceNameWords } from '../shared/resource-name.ts';
 import {
   isRouteEnabledForEnvironment,
   parseWebSocketFilename,
@@ -29,18 +26,20 @@ export type WebSocketRouteDefinition = RouteDefinition & {
   bindingName: string;
   mode: 'room' | 'socket';
   hasAuthGate: boolean;
+  name?: string;
 };
 
 type WebSocketSourceInfo = {
   mode: 'room' | 'socket';
   hasAuthGate: boolean;
+  name?: string;
 };
 
 function isWebSocketRouteFile(filePath: string): boolean {
   return WEBSOCKET_ROUTE_RE.test(filePath.replace(/\\/g, '/'));
 }
 
-function toIdentifierPart(segment: string): string {
+function identifierWords(segment: string): Array<string> {
   const normalized = segment
     .replace(/^\(\s*|\s*\)$/g, '')
     .replace(/^\[\.\.\.(.+)\]$/, '$1')
@@ -49,22 +48,29 @@ function toIdentifierPart(segment: string): string {
     .replace(/\.(dev|prod)$/, '')
     .replace(/[^a-zA-Z0-9]+/g, ' ');
 
-  return normalized
-    .split(' ')
-    .filter(Boolean)
-    .map((part) => part[0]!.toUpperCase() + part.slice(1))
-    .join('');
+  return normalized.split(' ').filter(Boolean);
 }
 
-export function deriveWebSocketClassName(filePath: string): string {
+export function deriveWebSocketClassNameFromName(name: string): string {
+  return (
+    resourceNameWords(name)
+      .map((part) => part[0]!.toUpperCase() + part.slice(1))
+      .join('') + 'Ws'
+  );
+}
+
+export function inferWebSocketResourceName(filePath: string): string {
   const normalized = filePath.replace(/\\/g, '/').replace(/\.(ts|mts|js|mjs)$/, '');
   const parts = normalized
     .split('/')
     .filter((segment) => segment.length > 0 && !(segment.startsWith('(') && segment.endsWith(')')))
-    .map(toIdentifierPart)
-    .filter(Boolean);
+    .flatMap(identifierWords);
 
-  return (parts.length > 0 ? parts.join('') : 'WebSocket') + 'Ws';
+  return parts.length > 0 ? parts.join('-') : 'WebSocket';
+}
+
+export function deriveWebSocketClassName(filePath: string): string {
+  return deriveWebSocketClassNameFromName(inferWebSocketResourceName(filePath));
 }
 
 function getPropertyName(node: AstNode | undefined): string | null {
@@ -80,74 +86,26 @@ function getPropertyName(node: AstNode | undefined): string | null {
   return null;
 }
 
-function extractDefinition(call: AstNode | undefined): WebSocketSourceInfo | null {
-  if (!isCallExpression(call)) {
-    return null;
-  }
-  if (!isIdentifier(call.callee)) {
-    return null;
-  }
-
-  const calleeName = call.callee.name;
-  if (calleeName !== 'defineRoom' && calleeName !== 'defineWebSocket') {
-    return null;
-  }
-
-  let hasAuthGate = false;
-  const options = call.arguments?.[0];
-  if (isObjectExpression(options)) {
-    for (const property of options.properties ?? []) {
-      if (property.type !== 'Property') {
-        continue;
-      }
-      if (getPropertyName((property as AstProperty).key) === 'onBeforeConnect') {
-        hasAuthGate = true;
-        break;
-      }
-    }
-  }
-
-  return {
-    mode: calleeName === 'defineRoom' ? 'room' : 'socket',
-    hasAuthGate,
-  };
-}
+const WEBSOCKET_HELPERS = new Set(['defineRoom', 'defineWebSocket']);
 
 export function detectWebSocketDefinition(absPath: string): WebSocketSourceInfo | null {
   const code = readFileSync(absPath, 'utf-8');
-  const filename = absPath.split('/').pop() ?? absPath;
-  let parsed: ReturnType<typeof parseSync>;
-  try {
-    parsed = parseSync(filename, code);
-  } catch {
+  const definition = readResourceDefinition(absPath, code, WEBSOCKET_HELPERS);
+  if (!definition) {
     return null;
   }
-
-  const program = parsed.program as unknown as AstProgram;
-  const variableInitializers = new Map<string, AstNode>();
-
-  for (const node of program.body ?? []) {
-    if (node.type === 'VariableDeclaration') {
-      for (const declarator of (node as AstVariableDeclaration).declarations ?? []) {
-        if (isIdentifier(declarator.id) && declarator.init) {
-          variableInitializers.set(declarator.id.name, declarator.init);
-        }
-      }
-    }
-  }
-
-  for (const node of program.body ?? []) {
-    if (node.type !== 'ExportDefaultDeclaration') {
-      continue;
-    }
-    const declaration = (node as AstExportDefaultDeclaration).declaration;
-    if (isIdentifier(declaration)) {
-      return extractDefinition(variableInitializers.get(declaration.name));
-    }
-    return extractDefinition(declaration);
-  }
-
-  return null;
+  const hasAuthGate =
+    isObjectExpression(definition.options) &&
+    (definition.options.properties ?? []).some(
+      (property) =>
+        property.type === 'Property' &&
+        getPropertyName((property as AstProperty).key) === 'onBeforeConnect',
+    );
+  return {
+    mode: definition.helper === 'defineRoom' ? 'room' : 'socket',
+    hasAuthGate,
+    ...(definition.name === undefined ? {} : { name: definition.name }),
+  };
 }
 
 function buildWebSocketRoute(
@@ -157,7 +115,10 @@ function buildWebSocketRoute(
 ): WebSocketRouteDefinition {
   const parsed = parseWebSocketFilename(filePath);
   const info = detectWebSocketDefinition(join(paths.routesDir, filePath));
-  const className = deriveWebSocketClassName(filePath);
+  const className =
+    info?.name === undefined
+      ? deriveWebSocketClassName(filePath)
+      : deriveWebSocketClassNameFromName(info.name);
 
   return {
     ...parsed,
@@ -165,6 +126,7 @@ function buildWebSocketRoute(
     bindingName: className,
     mode: info?.mode ?? 'socket',
     hasAuthGate: info?.hasAuthGate ?? false,
+    ...(info?.name === undefined ? {} : { name: info.name }),
   };
 }
 
@@ -174,7 +136,7 @@ function parseWebSocketFiles(
   paths = readProjectPaths(root),
   environment?: RouteEnvironment,
 ): Array<WebSocketRouteDefinition> {
-  return files
+  const routes = files
     .filter((f) => isWebSocketRouteFile(f))
     .filter((f) => !f.split('/').some((segment) => segment.startsWith('_')))
     .filter((filePath) =>
@@ -187,6 +149,20 @@ function parseWebSocketFiles(
       }
       return a.pattern.localeCompare(b.pattern);
     });
+  const byClass = new Map<string, Array<WebSocketRouteDefinition>>();
+  for (const route of routes) {
+    const previous = byClass.get(route.className) ?? [];
+    if (
+      previous.some((other) => other.env === null || route.env === null || other.env === route.env)
+    ) {
+      throw new Error(
+        `websocket: duplicate generated name '${route.className}' for '${route.filePath}'. Choose a different resource name or rename one of the WebSocket route files.`,
+      );
+    }
+    previous.push(route);
+    byClass.set(route.className, previous);
+  }
+  return routes;
 }
 
 export async function scanWebSocketRoutes(
