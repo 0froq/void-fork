@@ -3,6 +3,37 @@ import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
 import { assertNoninteractivePlatformMutationAcknowledged } from '../../src/cli/platform-lifecycle.ts';
 
 describe('platform args', () => {
+  it('accepts explicit planned choices and rejects contradictory configuration', () => {
+    expect(
+      parsePlatformArgs([
+        'install',
+        '--no-control-plane-domain',
+        '--no-dedicated-zone',
+        '--hyperdrive',
+        'drive-id',
+        '--login-methods',
+        'google,oidc',
+        '--no-access-protection',
+      ]),
+    ).toMatchObject({
+      noControlPlaneDomain: true,
+      dedicatedZoneSpecified: true,
+      hyperdrive: 'drive-id',
+      loginMethods: ['google', 'oidc'],
+      accessProtection: false,
+    });
+    for (const flags of [
+      ['--control-plane-domain', 'api.example.com', '--no-control-plane-domain'],
+      ['--dedicated-zone', '--no-dedicated-zone'],
+      ['--access-protection', '--no-access-protection'],
+      ['--auth-config', 'auth.json', '--login-methods', 'github'],
+      ['--auth-config', 'auth.json', '--access-protection'],
+      ['--login-methods', 'unknown'],
+      ['--login-methods', 'github,'],
+    ]) {
+      expect(() => parsePlatformArgs(['install', ...flags])).toThrow();
+    }
+  });
   it('parses resumable domain setup without confusing app-domain commands', () => {
     expect(
       parsePlatformArgs(['domain', 'set', 'example.com', '--installation', 'team', '--plan']),

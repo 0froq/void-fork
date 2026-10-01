@@ -41,6 +41,36 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 describe('installer login selection', () => {
+  it('uses planned login and protection choices without interactive selection', async () => {
+    expect(
+      await selectInstallationAuthentication(undefined, undefined, {
+        loginMethods: ['google', 'oidc'],
+        accessProtection: true,
+      }),
+    ).toEqual({
+      authentication: { providers: ['google', 'oidc'], configurable: true, accessProtection: true },
+    });
+    expect(
+      await selectInstallationAuthentication(undefined, undefined, {
+        loginMethods: ['github'],
+        accessProtection: false,
+      }),
+    ).toEqual({ authentication: { providers: ['github'] } });
+    await expect(
+      selectInstallationAuthentication(
+        undefined,
+        { providers: ['github'] },
+        { loginMethods: ['google'], accessProtection: false },
+      ),
+    ).rejects.toThrow('recorded');
+    await expect(
+      selectInstallationAuthentication(
+        undefined,
+        { providers: ['github'] },
+        { accessProtection: true },
+      ),
+    ).rejects.toThrow('recorded');
+  });
   it('connects Access login in a separate identity account without Cloudflare management calls', async () => {
     const file = join(directory, 'auth.json');
     await writeFile(

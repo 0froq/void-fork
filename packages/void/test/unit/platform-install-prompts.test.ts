@@ -162,6 +162,27 @@ describe('interactive platform installation prompts', () => {
       null,
       expect.anything(),
     );
+    vi.clearAllMocks();
+    await runPlatformLifecycleCommand(
+      parsePlatformArgs([
+        ...args,
+        '--workers-dev',
+        '--no-control-plane-domain',
+        '--hyperdrive',
+        'terraform-id',
+        '--login-methods',
+        'github',
+        '--no-access-protection',
+      ]),
+    );
+    expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.multiselect).not.toHaveBeenCalled();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(PlatformCloudflareClient.prototype.getHyperdriveConfig).toHaveBeenCalledWith(
+      'account',
+      'terraform-id',
+    );
+    expect(mocks.plan.mock.calls[0]![1].externalHyperdrive.id).toBe('terraform-id');
   });
 
   it('keeps the environment override for unattended installation', async () => {

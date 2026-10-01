@@ -851,11 +851,17 @@ void platform install [options] [--yes]
 | `--display-name <name>`           | Human-readable platform name                                                         |
 | `--account <id>`                  | Cloudflare account id                                                                |
 | `--auth-config <path>`            | Login methods, signup policy, and environment references for provider secrets        |
+| `--login-methods <methods>`       | Comma-separated `github`, `google`, `oidc`, or `cloudflare-access` login methods     |
+| `--access-protection`             | Protect the platform UI and APIs with Cloudflare Access                              |
+| `--no-access-protection`          | Skip Cloudflare Access protection                                                    |
+| `--hyperdrive <create\|id>`       | Create Hyperdrive or use the specified existing configuration                        |
 | `--application-domain <domain>`   | Base domain for deployed apps                                                        |
 | `--workers-dev`                   | Explicit testing mode; add an application domain later                               |
 | `--zone <domain>`                 | Cloudflare zone containing the application domain                                    |
 | `--dedicated-zone`                | Add zone-wide catch-all routes; valid only when the app domain is the whole zone     |
+| `--no-dedicated-zone`             | Skip zone-wide application catch-all routes                                          |
 | `--control-plane-domain <domain>` | Optional API custom hostname; defaults to `workers.dev`                              |
+| `--no-control-plane-domain`       | Use the default `workers.dev` API hostname                                           |
 | `--plan`                          | Resolve and print a read-only plan                                                   |
 | `--resume`                        | Continue the matching checkpointed installation                                      |
 | `--runtime <path>`                | Deploy a locally built, integrity-checked runtime directory                          |
@@ -869,7 +875,7 @@ The installed platform needs a separate runtime token to provision resources for
 
 To enable email during install or upgrade, set both `VOID_EMAIL_SENDER_DOMAIN` and `VOID_EMAIL_SHARED_ZONE_ID`. Void records the pair for later upgrades; supplying only one is an error.
 
-`--plan` shows resource names, login methods, the callback URL, and setup links without opening credential pages or saving a draft. Cloudflare browser login can still open if needed. It prints an install command with the resolved name, account, domain, and any supplied authentication file or runtime. Run that command later to recalculate and confirm the plan. If you chose login methods interactively, choose them again during installation. For unfinished installations, the plan prints the saved `--resume` command instead.
+`--plan` shows resource names, login methods, the callback URL, and setup links without opening credential pages or saving a draft. Cloudflare browser login can still open if needed. It prints an install command that preserves your configuration choices, including the default API hostname, Hyperdrive selection, login methods, and Access protection. Run that command to recalculate and confirm the plan without answering the same configuration questions again. Missing credentials are collected during installation. For unfinished installations, the plan prints the saved `--resume` command instead. Use `--auth-config` on its own for login configuration, or use `--login-methods` and the Access protection flags.
 
 New resources use `void-<name>-<role>` names. Existing installations keep their recorded names; an unowned name conflict stops installation. After confirmation, Void opens setup pages for missing credentials. The runtime-token link preselects required account permissions, including Workers Tail, Hyperdrive, and AI Gateway when needed; select the indicated zone for domain installs. Supplied credentials skip those pages.
 

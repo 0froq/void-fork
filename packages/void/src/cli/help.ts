@@ -427,6 +427,19 @@ const HELP_TREE: HelpTree = {
             description:
               'Read login methods and signup policy from nonsecret JSON with environment secret references',
           },
+          {
+            command: '--login-methods <methods>',
+            description: 'Comma-separated github, google, oidc, or cloudflare-access login methods',
+          },
+          {
+            command: '--access-protection',
+            description: 'Protect platform UI and APIs with Cloudflare Access',
+          },
+          { command: '--no-access-protection', description: 'Skip Cloudflare Access protection' },
+          {
+            command: '--hyperdrive <create|id>',
+            description: 'Create Hyperdrive or use the specified existing configuration',
+          },
           { command: '--name <slug>', description: 'Installation name' },
           {
             command: '--workers-dev',
@@ -443,7 +456,15 @@ const HELP_TREE: HelpTree = {
             command: '--dedicated-zone',
             description: 'Allow zone-wide application catch-all routes',
           },
+          {
+            command: '--no-dedicated-zone',
+            description: 'Skip zone-wide application catch-all routes',
+          },
           { command: '--control-plane-domain <domain>', description: 'Optional API hostname' },
+          {
+            command: '--no-control-plane-domain',
+            description: 'Use the default workers.dev API hostname',
+          },
           { command: '--plan', description: 'Print the exact plan without changing Cloudflare' },
           { command: '--resume', description: 'Resume the matching local installation' },
           {

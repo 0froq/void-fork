@@ -1,5 +1,6 @@
 import { createPlatformDeploymentManifest } from '@void/platform';
 import { describe, it, expect, vi } from 'vite-plus/test';
+import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
 import type { PlatformInstallPlan } from '../../src/cli/platform-plan.ts';
 import {
   formatPlatformInstallCommand,
@@ -41,6 +42,30 @@ function plan(domain = ''): PlatformInstallPlan {
   };
 }
 describe('platform credential setup links', () => {
+  it('round-trips planned defaults, Hyperdrive, and login choices into install arguments', () => {
+    const command = formatPlatformInstallCommand({
+      commandName: 'void',
+      accountId: 'account',
+      installationSlug: 'team',
+      displayName: 'Team',
+      applicationDomain: 'example.com',
+      zoneName: 'example.com',
+      controlPlaneDomain: '',
+      dedicatedZone: false,
+      workersDev: false,
+      authentication: { providers: ['google', 'oidc'], configurable: true, accessProtection: true },
+      hyperdrive: 'drive-id',
+      runtime: '',
+      yes: false,
+    });
+    expect(parsePlatformArgs(command.split(' ').slice(2))).toMatchObject({
+      noControlPlaneDomain: true,
+      dedicatedZoneSpecified: true,
+      hyperdrive: 'drive-id',
+      loginMethods: ['google', 'oidc'],
+      accessProtection: true,
+    });
+  });
   it('keeps planned domain, authentication, and runtime choices in a copyable command', () => {
     const command = formatPlatformInstallCommand({
       commandName: 'void-dev',

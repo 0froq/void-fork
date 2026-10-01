@@ -342,7 +342,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   const controlPlaneDomain = recorded
     ? (recorded.controlPlane.apiHostname ?? '')
     : args.controlPlaneDomain ||
-      (process.stdin.isTTY
+      (process.stdin.isTTY && !args.noControlPlaneDomain
         ? await promptText('Optional custom API hostname (leave empty for workers.dev):', '', true)
         : '');
   let dedicatedZone = recorded?.application.dedicatedZone ?? args.dedicatedZone;
@@ -350,6 +350,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     !workersDev &&
     !recorded &&
     !args.dedicatedZone &&
+    !args.dedicatedZoneSpecified &&
     applicationDomain === zoneName &&
     process.stdin.isTTY
   ) {
@@ -413,9 +414,13 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
           user: externalHyperdriveUser,
         }
       : undefined;
+    if (args.hyperdrive && externalHyperdrive && args.hyperdrive !== externalHyperdrive.id) {
+      throw new Error('platform: --hyperdrive conflicts with VOID_PLATFORM_HYPERDRIVE_ID.');
+    }
     if (
       !externalHyperdrive &&
-      process.stdin.isTTY &&
+      args.hyperdrive !== 'create' &&
+      (process.stdin.isTTY || args.hyperdrive) &&
       (!existing || isPlatformSetupDraft(existing)) &&
       !existing?.resources.some((resource) => resource.key === 'hyperdrive')
     ) {
@@ -426,18 +431,20 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       const suggestedNameAvailable = !configurations.some(
         (resource) => resource.name === suggestedName,
       );
-      const choice = await select({
-        message: 'How should Void set up Hyperdrive?',
-        options: [
-          ...(configurations.length > 0
-            ? [{ value: 'existing', label: 'Use an existing Hyperdrive' }]
-            : []),
-          ...(suggestedNameAvailable
-            ? [{ value: 'create', label: 'Let Void create Hyperdrive', hint: 'recommended' }]
-            : []),
-          { value: 'setup', label: 'Set up a separately managed Hyperdrive' },
-        ],
-      });
+      const choice = args.hyperdrive
+        ? 'existing'
+        : await select({
+            message: 'How should Void set up Hyperdrive?',
+            options: [
+              ...(configurations.length > 0
+                ? [{ value: 'existing', label: 'Use an existing Hyperdrive' }]
+                : []),
+              ...(suggestedNameAvailable
+                ? [{ value: 'create', label: 'Let Void create Hyperdrive', hint: 'recommended' }]
+                : []),
+              { value: 'setup', label: 'Set up a separately managed Hyperdrive' },
+            ],
+          });
       if (isCancel(choice)) {
         throw new Error('platform: Cancelled.');
       }
@@ -450,21 +457,23 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         return;
       }
       if (choice === 'existing') {
-        const selectedId = await select({
-          message: 'Which Hyperdrive should Void use?',
-          options: [...configurations]
-            .sort(
-              (a, b) =>
-                Number(b.name === suggestedName) - Number(a.name === suggestedName) ||
-                a.name.localeCompare(b.name) ||
-                a.id.localeCompare(b.id),
-            )
-            .map((resource) => ({
-              value: resource.id,
-              label: resource.name,
-              hint: resource.name === suggestedName ? `suggested · ${resource.id}` : resource.id,
-            })),
-        });
+        const selectedId =
+          args.hyperdrive ??
+          (await select({
+            message: 'Which Hyperdrive should Void use?',
+            options: [...configurations]
+              .sort(
+                (a, b) =>
+                  Number(b.name === suggestedName) - Number(a.name === suggestedName) ||
+                  a.name.localeCompare(b.name) ||
+                  a.id.localeCompare(b.id),
+              )
+              .map((resource) => ({
+                value: resource.id,
+                label: resource.name,
+                hint: resource.name === suggestedName ? `suggested · ${resource.id}` : resource.id,
+              })),
+          }));
         if (isCancel(selectedId)) {
           throw new Error('platform: Cancelled.');
         }
@@ -487,10 +496,12 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
             `platform: Disable SQL result caching on existing Hyperdrive ${live.name} before installing.`,
           );
         }
-        const confirmed = await confirm({
-          message: `Use ${live.name} for this platform?`,
-          initialValue: true,
-        });
+        const confirmed = args.hyperdrive
+          ? true
+          : await confirm({
+              message: `Use ${live.name} for this platform?`,
+              initialValue: true,
+            });
         if (isCancel(confirmed) || !confirmed) {
           throw new Error('platform: Cancelled.');
         }
@@ -535,6 +546,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     const authenticationSelection = await selectInstallationAuthentication(
       args.authConfig,
       existing?.deployment.authentication,
+      args,
     );
     const planInput = {
       authentication: authenticationSelection.authentication,
@@ -581,15 +593,17 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
             dedicatedZone,
             workersDev,
             authConfig: args.authConfig,
+            authentication: authenticationSelection.authentication,
+            hyperdrive:
+              !existing || isPlatformSetupDraft(existing)
+                ? (externalHyperdrive?.id ?? 'create')
+                : undefined,
             runtime: args.runtime,
             ...(existing ? { resumeId: existing.id } : {}),
             yes: args.yes || process.stdin.isTTY !== true,
           },
         )}\n`,
       );
-      if (!existing && !args.authConfig && process.stdin.isTTY) {
-        console.log('Choose the same login methods when prompted.\n');
-      }
       outro('No Cloudflare or local installation state was changed.');
       return;
     }

@@ -49,6 +49,7 @@ function answer<T>(value: T | typeof CANCEL_SYMBOL): T {
 export async function selectInstallationAuthentication(
   file: string | undefined,
   recorded?: PlatformDeploymentManifest['authentication'],
+  choices: { loginMethods?: Array<PlatformLoginKind>; accessProtection?: boolean } = {},
 ): Promise<PlatformAuthSelection> {
   if (file) {
     const input: unknown = JSON.parse(await readFile(file, 'utf8'));
@@ -102,30 +103,46 @@ export async function selectInstallationAuthentication(
     return { authentication, file: selected };
   }
   if (recorded) {
+    if (
+      (choices.loginMethods &&
+        JSON.stringify(choices.loginMethods) !== JSON.stringify(recorded.providers)) ||
+      (choices.accessProtection !== undefined &&
+        choices.accessProtection !== !!recorded.accessProtection)
+    ) {
+      throw new Error('platform: Resume with the recorded login methods and protection settings.');
+    }
     return { authentication: recorded };
   }
-  if (!process.stdin.isTTY) {
+  if (!process.stdin.isTTY && !choices.loginMethods && choices.accessProtection === undefined) {
     return { authentication: { providers: ['github'] } };
   }
-  const providers = answer(
-    await multiselect<PlatformLoginKind>({
-      message: 'Platform login methods:',
-      initialValues: ['github'],
-      required: true,
-      options: [
-        { value: 'github' as const, label: 'GitHub' },
-        { value: 'google' as const, label: 'Google' },
-        { value: 'oidc' as const, label: 'Generic OIDC' },
-        { value: 'cloudflare-access' as const, label: 'Cloudflare Access login' },
-      ],
-    }),
-  );
-  const protection = answer(
-    await confirm({
-      message: 'Also protect the platform UI and APIs with Cloudflare Access?',
-      initialValue: false,
-    }),
-  );
+  const providers =
+    choices.loginMethods ??
+    (!process.stdin.isTTY
+      ? ['github' as const]
+      : answer(
+          await multiselect<PlatformLoginKind>({
+            message: 'Platform login methods:',
+            initialValues: ['github'],
+            required: true,
+            options: [
+              { value: 'github' as const, label: 'GitHub' },
+              { value: 'google' as const, label: 'Google' },
+              { value: 'oidc' as const, label: 'Generic OIDC' },
+              { value: 'cloudflare-access' as const, label: 'Cloudflare Access login' },
+            ],
+          }),
+        ));
+  const protection =
+    choices.accessProtection ??
+    (!process.stdin.isTTY
+      ? false
+      : answer(
+          await confirm({
+            message: 'Also protect the platform UI and APIs with Cloudflare Access?',
+            initialValue: false,
+          }),
+        ));
   const modern = protection || providers.length !== 1 || providers[0] !== 'github';
   return {
     authentication: {

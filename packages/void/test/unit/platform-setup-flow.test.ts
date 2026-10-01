@@ -250,7 +250,9 @@ describe('platform credential onboarding', () => {
         'void platform install --name test-setup --account account --display-name Test --workers-dev',
       ),
     );
-    expect(console.log).toHaveBeenCalledWith('Choose the same login methods when prompted.\n');
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('--login-methods github --no-access-protection'),
+    );
     expect(listInstallationManifests()).toEqual([]);
   });
 
@@ -861,6 +863,29 @@ describe('platform credential onboarding', () => {
     expect(listInstallationManifests()).toEqual([]);
     expect(readdirSync(directory)).toEqual([]);
     expect(mocks.spinner).not.toHaveBeenCalled();
+  });
+  it('continues from the printed command without repeating nonsecret choices', async () => {
+    await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));
+    const output = vi.mocked(console.log).mock.calls.flat().join('\n');
+    const command = output
+      .split('\n')
+      .find((line) => /^void(?:-dev)? platform install /.test(line))!;
+    expect(command).toContain('--no-control-plane-domain');
+    expect(command).toContain('--hyperdrive create');
+    expect(command).toContain('--login-methods github --no-access-protection');
+    expect(listInstallationManifests()).toEqual([]);
+    expect(mocks.password).not.toHaveBeenCalled();
+    vi.clearAllMocks();
+    await runPlatformLifecycleCommand(parsePlatformArgs(command.split(' ').slice(2)));
+    expect(mocks.multiselect).not.toHaveBeenCalled();
+    expect(mocks.select).not.toHaveBeenCalled();
+    expect(
+      mocks.text.mock.calls.some(([input]) =>
+        input.message.startsWith('Optional custom API hostname'),
+      ),
+    ).toBe(false);
+    expect(mocks.password).toHaveBeenCalled();
+    expect(mocks.install).toHaveBeenCalledOnce();
   });
   it('does not save a draft or open pages when the plan is declined', async () => {
     mocks.confirm.mockResolvedValue(false);

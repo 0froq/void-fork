@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { log } from '@clack/prompts';
+import type { PlatformDeploymentManifest } from '@void/platform';
 import { openBrowser } from './auth.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
 
@@ -195,6 +196,8 @@ export function formatPlatformInstallCommand(options: {
   dedicatedZone: boolean;
   workersDev: boolean;
   authConfig?: string;
+  authentication?: PlatformDeploymentManifest['authentication'];
+  hyperdrive?: string;
   runtime: string;
   resumeId?: string;
   yes: boolean;
@@ -227,11 +230,23 @@ export function formatPlatformInstallCommand(options: {
       flag('--zone', options.zoneName);
       if (options.dedicatedZone) {
         parts.push('--dedicated-zone');
+      } else {
+        parts.push('--no-dedicated-zone');
       }
     }
     flag('--control-plane-domain', options.controlPlaneDomain);
+    if (!options.controlPlaneDomain) {
+      parts.push('--no-control-plane-domain');
+    }
   }
+  flag('--hyperdrive', options.hyperdrive ?? '');
   flag('--auth-config', options.authConfig ?? '');
+  if (!options.authConfig && !options.resumeId && options.authentication) {
+    flag('--login-methods', options.authentication.providers.join(','));
+    parts.push(
+      options.authentication.accessProtection ? '--access-protection' : '--no-access-protection',
+    );
+  }
   flag('--runtime', options.runtime);
   if (options.yes) {
     parts.push('--yes');
