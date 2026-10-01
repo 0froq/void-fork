@@ -201,14 +201,3 @@ export async function completeSandboxDrain(
   }
   return row;
 }
-
-/** The legacy tenant-owned provisioner remains closed after its drain. */
-export async function assertSandboxContainerCreationAllowed(
-  routing: Pick<KVNamespace, 'get'>,
-): Promise<void> {
-  if (await readSandboxDrainState(routing)) {
-    throw new Error(
-      'Legacy tenant-owned Sandbox container creation is disabled by the platform drain gate.',
-    );
-  }
-}
