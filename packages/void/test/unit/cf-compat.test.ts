@@ -773,7 +773,19 @@ it('inspects existing Worker versions through an HTTP proxy', async () => {
       }),
     );
   });
-  const proxy = createServer();
+  const proxy = createServer((request, response) => {
+    proxied++;
+    const upstream = httpRequest(
+      new URL(request.url!),
+      { method: request.method, headers: request.headers },
+      (upstreamResponse) => {
+        response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+        upstreamResponse.pipe(response);
+      },
+    );
+    upstream.on('error', () => response.destroy());
+    request.pipe(upstream);
+  });
   proxy.on('connect', (request, socket, head) => {
     proxied++;
     const [host, port] = request.url!.split(':');

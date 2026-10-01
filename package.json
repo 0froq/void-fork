@@ -6,15 +6,16 @@
     "build:core": "vp run --filter ./packages/deploy-core --filter ./packages/deploy-cloudflare --filter ./packages/edge --filter ./packages/isr --filter ./packages/platform --filter ./packages/void build",
     "build:docs": "vp run --filter ./docs build",
     "build:platform": "vp run --filter './platform/packages/**' build",
-    "check": "vp run -r --parallel typecheck",
+    "check": "vp run -r --parallel --concurrency-limit=4 typecheck",
     "check:platform": "vp run --filter './platform/**' --parallel typecheck",
     "check:sdk": "vp run --filter './packages/**' --parallel typecheck",
+    "deploy:docs": "vp run build:core && node packages/void/dist/cli/cli.mjs deploy",
     "dev:docs": "vp run --filter ./docs dev",
     "dev:platform": "vp run --filter @voidcloud/platform dev",
     "fmt": "vp fmt --write .",
     "install:void-dev": "vp run build:core && node scripts/void-dev-link.mjs install",
     "lint": "vp lint",
-    "prepare": "vp config",
+    "prepare": "vp config && vp run build:core",
     "test": "vp test run",
     "test:integration": "vp test run --project parallel-integration",
     "test:metaframeworks": "vp test run --project parallel-integration analog.test.ts astro.test.ts nuxt.test.ts react-router.test.ts sveltekit.test.ts tanstack-start.test.ts vinext-app.test.ts vinext-pages.test.ts",
@@ -29,11 +30,10 @@
     "cross-spawn": "^7.0.6",
     "eslint-plugin-react-hooks": "^7.1.1",
     "playwright": "^1.63.0",
-    "rolldown": "^1.2.8",
+    "rolldown": "^1.2.11",
     "typescript": "catalog:",
     "vite": "catalog:",
-    "vite-plus": "catalog:",
-    "void": "npm:void@0.21.1"
+    "vite-plus": "catalog:"
   },
-  "packageManager": "pnpm@12.6.0"
+  "packageManager": "pnpm@12.8.1"
 }

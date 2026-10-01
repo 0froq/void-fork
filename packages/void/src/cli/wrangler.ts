@@ -887,12 +887,11 @@ export function readWranglerWebSocketTombstones(
     ? (parsed.migrations as Array<DurableObjectMigration>)
     : [];
   const historicalClasses = new Set(
-    migrations
-      .filter((migration) => /^void-ws-v1(?:-\d+)?$/.test(migration.tag ?? ''))
-      .flatMap((migration) => [
-        ...(migration.new_classes ?? []),
-        ...(migration.new_sqlite_classes ?? []),
-      ]),
+    migrations.flatMap((migration) =>
+      /^void-ws-v1(?:-\d+)?$/.test(migration.tag ?? '')
+        ? [...(migration.new_classes ?? []), ...(migration.new_sqlite_classes ?? [])]
+        : [],
+    ),
   );
   const currentClasses = new Set(websockets.map((route) => route.className));
   const bindings = (

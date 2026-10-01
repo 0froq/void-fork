@@ -5,7 +5,7 @@ import pc from 'picocolors';
 /** A visual example for an empty secret field; never a default value or an unmasked input. */
 export async function passwordWithPlaceholder(
   options: PasswordOptions & { placeholder: string },
-): Promise<string | symbol> {
+): Promise<string | typeof CANCEL_SYMBOL> {
   const value = await new PasswordPrompt({
     input: options.input,
     output: options.output,

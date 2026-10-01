@@ -21,6 +21,8 @@ playground/*/.node-version
 playground-local
 .worktrees
 .svelte-kit/
+.next/
+next-env.d.ts
 docs/superpowers/
 
 # Test temp dirs (unique per test; a Windows run may leave one behind when the OS has not

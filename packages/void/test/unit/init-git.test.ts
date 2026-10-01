@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cancel, confirm, log } from '@clack/prompts';
+import { CANCEL_SYMBOL, cancel, confirm, log } from '@clack/prompts';
 import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { initialCommitCommand, setupGit } from '../../src/cli/init-git.ts';
@@ -12,12 +12,16 @@ vi.mock('node:child_process', async (importOriginal) => {
   return { ...actual, spawnSync: vi.fn(actual.spawnSync) };
 });
 
-vi.mock('@clack/prompts', () => ({
-  cancel: vi.fn(),
-  confirm: vi.fn(),
-  isCancel: (value: unknown) => value === Symbol.for('cancel'),
-  log: { warn: vi.fn(), info: vi.fn() },
-}));
+vi.mock('@clack/prompts', async (importOriginal) => {
+  const { CANCEL_SYMBOL, isCancel } = await importOriginal<typeof import('@clack/prompts')>();
+  return {
+    CANCEL_SYMBOL,
+    cancel: vi.fn(),
+    confirm: vi.fn(),
+    isCancel,
+    log: { warn: vi.fn(), info: vi.fn() },
+  };
+});
 
 let root: string;
 const ttyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
@@ -109,7 +113,7 @@ describe('init Git setup', () => {
   );
 
   it('cancels before running Git', async () => {
-    vi.mocked(confirm).mockResolvedValueOnce(Symbol.for('cancel'));
+    vi.mocked(confirm).mockResolvedValueOnce(CANCEL_SYMBOL);
     vi.spyOn(process, 'exit').mockImplementation(() => {
       throw new Error('cancelled');
     });

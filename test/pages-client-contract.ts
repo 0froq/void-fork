@@ -163,7 +163,7 @@ export function registerSharedClientTests({
     }
   });
 
-  it.sequential('form submission adds a user and navigates to its detail', async () => {
+  it('form submission adds a user and navigates to its detail', { concurrent: false }, async () => {
     const page = await newPage();
     const id = crypto.randomUUID();
     const name = `Browser Dana ${id}`;

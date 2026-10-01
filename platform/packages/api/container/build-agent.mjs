@@ -2008,6 +2008,27 @@ function redactUrl(raw) {
 
 // --- main ---------------------------------------------------------------------
 
+/** Resolve the CLI when deploying the Void source repository or a fork. */
+export function resolveSourceVoidCli(root = WORK_DIR) {
+  const packageRoot = `${root}/packages/void`;
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(`${packageRoot}/package.json`, 'utf8'));
+  } catch {
+    return null;
+  }
+  if (manifest.name !== 'void' || typeof manifest.bin?.void !== 'string') {
+    return null;
+  }
+  const cli = `${packageRoot}/${manifest.bin.void}`;
+  if (!existsSync(cli)) {
+    throw new Error(
+      'The workspace Void CLI is not built. Run build:core during dependency installation.',
+    );
+  }
+  return cli;
+}
+
 /**
  * Run the build pipeline and resolve to the process exit code (0 = success,
  * non-zero = failure). This function NEVER calls `process.exit` and NEVER
@@ -2025,6 +2046,7 @@ function redactUrl(raw) {
  *   runChild?: (cmd: string, args: Array<string>, opts?: { env?: NodeJS.ProcessEnv }) => Promise<number>,
  *   reportStatus?: (status: string) => Promise<void>,
  *   hasLocalVoid?: () => boolean,
+ *   resolveSourceVoidCli?: () => string | null,
  *   chownWorkDir?: () => Promise<void>,
  * }} [deps]
  * @returns {Promise<number>}
@@ -2157,7 +2179,8 @@ export async function runBuild(deps = {}) {
     // 3. Tell the DO we're past install and into the deploy phase.
     await status('deploying');
 
-    // 4. Run the REAL deploy via the repo-local CLI. `npx` resolves the
+    // 4. Run the REAL deploy via the built CLI in Void source checkouts or the
+    //    repo-local CLI in consumer projects. `npx` resolves the
     //    version pinned in the repo's package.json (installed in step 2); if
     //    the repo has no local `void`, npx fetches the pinned fallback. The
     //    --no-install guard is intentionally omitted so the fallback path works.
@@ -2181,6 +2204,7 @@ export async function runBuild(deps = {}) {
     //    CLI's build child still inherits — both are the CLI trust-split
     //    escalation (build and upload share one process), a pending owner design
     //    decision, NOT addressable from this agent.
+    const sourceCli = (deps.resolveSourceVoidCli ?? resolveSourceVoidCli)();
     const localVoid = hasLocalVoid();
     const fallbackVersion = voidFallbackVersion();
     // Yarn Berry PnP repos have no `node_modules`, so a bare `npx void deploy`
@@ -2194,7 +2218,11 @@ export async function runBuild(deps = {}) {
     let deployCmd;
     /** @type {Array<string>} */
     let deployArgs;
-    if (pnpPresent) {
+    if (sourceCli) {
+      deployCmd = process.execPath;
+      deployArgs = [sourceCli, 'deploy', '--project', project];
+      agentLog('using the built workspace Void CLI');
+    } else if (pnpPresent) {
       deployCmd = 'corepack';
       deployArgs = localVoid
         ? ['yarn', 'void', 'deploy', '--project', project]

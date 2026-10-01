@@ -22,21 +22,21 @@ allowBuilds:
   workerd: true
 
 catalog:
-  '@clack/prompts': ^1.8.0
-  # Stays on 4.x on purpose: wrangler 4.131 lists workers-types ^5 as an OPTIONAL peer, and
+  '@clack/prompts': ^1.8.1
+  # Stays on 4.x on purpose: Wrangler lists workers-types ^5 as an OPTIONAL peer, and
   # every 5.x since 5.20260807.2 declares global `Buffer`/`process` as `any`, which collides
   # with `@types/node` under packages/void's `types: ["node", "@cloudflare/workers-types"]`
   # (Buffer loses its members; ~30 typecheck errors). Revisit when upstream drops those globals.
   '@cloudflare/workers-types': ^4.20260702.1
-  '@types/node': ^26.5.1
+  '@types/node': ^26.6.3
   typescript: 7.0.2
   '@voidzero-dev/vitepress-theme': ^5.0.7
   pathslash: ^0.1.0
-  vite: npm:@voidzero-dev/vite-plus-core@0.3.1
-  vite-plus: 0.3.1
-  vitest: 4.1.11
-  wrangler: 4.131.0
-  cf: 1.0.0-beta.5
+  vite: npm:@voidzero-dev/vite-plus-core@1.0.0
+  vite-plus: 1.0.0
+  vitest: 5.0.2
+  wrangler: 4.144.0
+  cf: 1.0.0-beta.9
   oauth4webapi: ^3.8.8
   '@astryxdesign/core': 0.6.3
   '@astryxdesign/theme-neutral': 0.6.3
@@ -46,21 +46,30 @@ catalogs:
   angular:
     typescript: 6.0.3
   platform:
-    '@cloudflare/workers-types': ^5.0.0
-    hono: 4.13.7
-    wrangler: ^4.90.0
+    '@cloudflare/workers-types': ^5.20260929.1
+    hono: 4.13.11
+    wrangler: ^4.144.0
   sveltekit:
     typescript: 6.0.3
 
 packageExtensions:
-  '@analogjs/vite-plugin-angular@2.7.2':
+  '@analogjs/vite-plugin-angular@2.7.5':
     peerDependencies:
       typescript: '>=6.0 <6.1'
 
 overrides:
-  esbuild: ^0.27.3
-  react-server-dom-webpack: 19.2.7
+  # Keep Vite+'s pinned Vitest internals on the same patch as the runner.
+  '@vitest/browser': 5.0.2
+  '@vitest/browser-preview': 5.0.2
+  '@vitest/mocker': 5.0.2
+  '@vitest/pretty-format': 5.0.2
+  '@vitest/snapshot': 5.0.2
+  '@vitest/spy': 5.0.2
+  '@vitest/utils': 5.0.2
+  esbuild: ^0.28.2
+  react-server-dom-webpack: 19.3.0
   vite@*: 'catalog:'
+  vitest@*: 'catalog:'
 
 peerDependencyRules:
   allowAny:
@@ -70,12 +79,21 @@ peerDependencyRules:
     vite: '*'
 
 minimumReleaseAgeExclude:
-  - '@cloudflare/codemods@0.2.1'
-  - cf@1.0.0-beta.5
-  - '@void/deploy-cloudflare@0.21.1'
-  - '@void/deploy-core@0.21.1'
-  - '@void/edge@0.21.1'
-  - '@void/isr@0.21.1'
-  - '@void/md@0.21.1'
-  - '@void/platform@0.21.1'
-  - void@0.21.1
+  - '@nkzw/*'
+  - '@void/*'
+  - cf
+  - react-fate
+  - void
+  - void-fate
+  # Required by cf beta 9; keep these exceptions limited to its exact dependency releases.
+  - '@cloudflare/build-output-utils@0.8.4'
+  - '@cloudflare/codemods@0.3.0'
+  - '@cloudflare/config@0.22.0'
+  - '@cloudflare/runtime-types@0.1.6'
+  - '@cloudflare/workerd-darwin-64@1.20260930.2'
+  - '@cloudflare/workerd-darwin-arm64@1.20260930.2'
+  - '@cloudflare/workerd-linux-64@1.20260930.2'
+  - '@cloudflare/workerd-linux-arm64@1.20260930.2'
+  - '@cloudflare/workerd-windows-64@1.20260930.2'
+  - 'miniflare@5.20260930.0-alpha'
+  - 'workerd@1.20260930.2'

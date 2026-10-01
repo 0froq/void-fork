@@ -5,6 +5,7 @@ import { connect, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import { getWorkerConfigPath } from '@cloudflare/build-output-utils';
 import { afterEach, expect, it } from 'vite-plus/test';
 import {
@@ -22,6 +23,9 @@ import {
 } from '../../src/cli/cf-version-runner.ts';
 
 const roots: Array<string> = [];
+const pinnedCfVersion = JSON.parse(
+  readFileSync(fileURLToPath(import.meta.resolve('cf/package.json')), 'utf8'),
+).version as string;
 afterEach(() => {
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
@@ -433,7 +437,7 @@ it('does not delegate credentialed commands to a project-local cf', async () => 
   const result = await command(['--version'], { cwd: root, capture: true });
   expect(result.status, result.stderr).toBe(0);
   expect(result.stdout).not.toContain('UNPINNED_PROJECT_CF_EXECUTED');
-  expect(result.stdout).toContain('1.0.0-beta.5');
+  expect(result.stdout).toContain(pinnedCfVersion);
 });
 
 it('captures noninteractive cf output when Void owns the terminal', async () => {
@@ -447,7 +451,7 @@ it('captures noninteractive cf output when Void owns the terminal', async () => 
   });
   const result = await command(['--version'], { cwd: root, capture: false });
   expect(result.status, result.stderr).toBe(0);
-  expect(result.stdout).toContain('1.0.0-beta.5');
+  expect(result.stdout).toContain(pinnedCfVersion);
 });
 
 it('uses the configured HTTP proxy for direct cf activation reads', async () => {

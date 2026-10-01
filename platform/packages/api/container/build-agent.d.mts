@@ -240,9 +240,11 @@ export interface RunBuildDeps {
   ) => Promise<number>;
   reportStatus?: (status: string) => Promise<void>;
   hasLocalVoid?: () => boolean;
+  resolveSourceVoidCli?: () => string | null;
   chownWorkDir?: () => Promise<void>;
   killBuilderProcesses?: () => Promise<void>;
 }
 
 /** Runs the build pipeline and always resolves to a process exit code. */
 export function runBuild(deps?: RunBuildDeps): Promise<number>;
+export function resolveSourceVoidCli(root?: string): string | null;

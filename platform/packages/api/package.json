@@ -25,8 +25,8 @@
     "@astryxdesign/core": "catalog:",
     "@astryxdesign/theme-neutral": "catalog:",
     "@cloudflare/containers": "0.3.7",
-    "@cloudflare/sandbox": "0.12.9",
-    "@nkzw/fate": "1.6.1",
+    "@cloudflare/sandbox": "0.12.10",
+    "@nkzw/fate": "1.7.3",
     "@stylexjs/stylex": "catalog:",
     "@void/deploy-core": "workspace:*",
     "@void/isr": "workspace:*",
@@ -34,19 +34,17 @@
     "@xterm/headless": "^6.0.0",
     "aws4fetch": "^1.0.20",
     "blake3-jit": "^1.1.0",
-    "cron-parser": "5.10.0",
-    "drizzle-orm": "^0.45.2",
-    "graphql": "16.14.2",
-    "graphql-sse": "2.6.1",
+    "cron-parser": "5.10.1",
+    "drizzle-orm": "^0.45.3",
     "hono": "catalog:platform",
     "jose": "6.2.12",
-    "lucide-react": "1.48.0",
+    "lucide-react": "1.49.0",
     "mime": "^4.1.0",
     "oauth4webapi": "catalog:",
     "pg": "8.23.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "react-fate": "1.6.1",
+    "react-fate": "1.7.3",
     "void": "workspace:*"
   },
   "devDependencies": {
@@ -55,13 +53,13 @@
     "@types/pg": "8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "drizzle-kit": "^0.31.10",
+    "drizzle-kit": "^0.31.11",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "wrangler": "catalog:platform"
   },
   "optionalDependencies": {
-    "@clack/prompts": "^1.8.0"
+    "@clack/prompts": "catalog:"
   }
 }

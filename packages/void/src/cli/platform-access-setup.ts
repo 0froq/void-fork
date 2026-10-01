@@ -1,6 +1,14 @@
 import { createHash } from 'node:crypto';
 import { stripVTControlCharacters } from 'node:util';
-import { confirm, isCancel, multiselect, password, select, text } from '@clack/prompts';
+import {
+  type CANCEL_SYMBOL,
+  confirm,
+  isCancel,
+  multiselect,
+  password,
+  select,
+  text,
+} from '@clack/prompts';
 import type { PlatformInstallationManifest } from '@void/platform';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import {
@@ -179,7 +187,7 @@ export function parsePlatformAccessSetupSpec(input: unknown): PlatformAccessSetu
   return value as PlatformAccessSetupSpec;
 }
 
-function answer<T>(value: T | symbol): T {
+function answer<T>(value: T | typeof CANCEL_SYMBOL): T {
   if (isCancel(value) || typeof value === 'symbol') {
     throw new Error('platform: Cancelled.');
   }

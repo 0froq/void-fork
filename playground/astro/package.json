@@ -7,8 +7,8 @@
     "dev": "astro dev"
   },
   "dependencies": {
-    "@astrojs/cloudflare": "^14.3.1",
-    "astro": "^7.3.2"
+    "@astrojs/cloudflare": "^14.3.3",
+    "astro": "^7.3.5"
   },
   "devDependencies": {
     "typescript": "catalog:",

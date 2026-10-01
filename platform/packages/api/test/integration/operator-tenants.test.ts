@@ -200,13 +200,14 @@ describe('operator tenant reads', () => {
     const ownedFrom = new Date(Date.now() - 5 * 24 * 60 * 60 * 1_000);
     const transferredAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1_000);
     transferredAt.setMilliseconds(500);
+    // Keep both ownership intervals in this billing cycle across month boundaries.
     await env.db
       .update(users)
-      .set({ billing_cycle_start: '2020-01-01T00:00:00.000Z' })
+      .set({ billing_cycle_start: ownedFrom.toISOString() })
       .where(eq(users.id, formerOwner.id));
     await env.db
       .update(users)
-      .set({ billing_cycle_start: '2020-01-01T00:00:00.000Z' })
+      .set({ billing_cycle_start: ownedFrom.toISOString() })
       .where(eq(users.id, currentOwner.id));
     await env.db
       .delete(projectOwnershipPeriods)

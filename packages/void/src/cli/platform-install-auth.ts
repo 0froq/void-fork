@@ -1,6 +1,14 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { confirm, isCancel, multiselect, password, select, text } from '@clack/prompts';
+import {
+  type CANCEL_SYMBOL,
+  confirm,
+  isCancel,
+  multiselect,
+  password,
+  select,
+  text,
+} from '@clack/prompts';
 import {
   PLATFORM_LOGIN_KINDS,
   parsePlatformAccessProtection,
@@ -31,7 +39,7 @@ export type PlatformAuthSelection = {
   file?: AuthFile;
 };
 
-function answer<T>(value: T | symbol): T {
+function answer<T>(value: T | typeof CANCEL_SYMBOL): T {
   if (isCancel(value) || typeof value === 'symbol') {
     throw new Error('platform: Cancelled.');
   }

@@ -2,7 +2,15 @@ import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { stripVTControlCharacters } from 'node:util';
-import { confirm, isCancel, multiselect, password, select, text } from '@clack/prompts';
+import {
+  type CANCEL_SYMBOL,
+  confirm,
+  isCancel,
+  multiselect,
+  password,
+  select,
+  text,
+} from '@clack/prompts';
 import {
   parsePlatformLoginConfiguration,
   type PlatformLoginConfiguration,
@@ -31,7 +39,7 @@ type Listing = {
   protection?: unknown;
 };
 
-function value<T>(input: T | symbol): T {
+function value<T>(input: T | typeof CANCEL_SYMBOL): T {
   if (isCancel(input) || typeof input === 'symbol') {
     throw new Error('platform: Cancelled.');
   }

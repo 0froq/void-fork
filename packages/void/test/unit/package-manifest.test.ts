@@ -110,14 +110,7 @@ describe('package manifests', () => {
     for (const { manifest, packageRoot } of packages) {
       for (const field of dependencyFields) {
         for (const [name, specifier] of Object.entries(manifest[field] ?? {})) {
-          // The docs build agent runs the root CLI before workspace packages
-          // are built, so this one dependency must resolve to a published CLI.
-          const publishedDocsCli =
-            packageRoot === '.' &&
-            field === 'devDependencies' &&
-            name === 'void' &&
-            /^npm:void@\d+\.\d+\.\d+$/u.test(specifier);
-          if (workspacePackageNames.has(name) && specifier !== 'workspace:*' && !publishedDocsCli) {
+          if (workspacePackageNames.has(name) && specifier !== 'workspace:*') {
             violations.push(`${packageRoot} ${field}.${name} = ${specifier}`);
           }
         }
@@ -127,8 +120,11 @@ describe('package manifests', () => {
     expect(violations).toEqual([]);
   });
 
-  it('pins a published Void CLI for the root docs deployment', () => {
-    expect(readPackageJson('').devDependencies?.void).toMatch(/^npm:void@\d+\.\d+\.\d+$/u);
+  it('declares the local docs CLI in the docs workspace', () => {
+    expect(readPackageJson('docs').devDependencies?.void).toBe('workspace:*');
+    for (const field of dependencyFields) {
+      expect(readPackageJson('')[field]?.void).toBeUndefined();
+    }
   });
 
   it('uses catalog: for dependencies managed by the default pnpm catalog', () => {

@@ -34,12 +34,12 @@
     "typecheck": "tsc --noEmit --rootDir ../.."
   },
   "dependencies": {
-    "@sveltejs/vite-plugin-svelte": "^7.3.0"
+    "@sveltejs/vite-plugin-svelte": "^7.3.1"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "pathslash": "catalog:",
-    "svelte": "^5.57.0",
+    "svelte": "^5.57.1",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "void": "workspace:*"
