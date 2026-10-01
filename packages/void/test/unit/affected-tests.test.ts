@@ -166,18 +166,24 @@ describe('Git change collection', () => {
       write('cancelled.ts');
       mkdirSync(join(root, 'new folder'));
       write('new folder/untracked.ts');
-      write('line\nbreak.ts');
+      write('unicode λ.ts');
+      // Windows does not permit control characters in filenames.
+      const newlinePaths = process.platform === 'win32' ? [] : ['line\nbreak.ts'];
+      for (const path of newlinePaths) {
+        write(path);
+      }
       git('rm', 'deleted.ts');
       git('mv', 'old name.ts', 'new name.ts');
       const local = [
         'cancelled.ts',
         'deleted.ts',
-        'line\nbreak.ts',
+        ...newlinePaths,
         'new folder/untracked.ts',
         'new name.ts',
         'old name.ts',
         'staged.ts',
         'unstaged.ts',
+        'unicode λ.ts',
       ].sort();
       expect(await changedFiles(root)).toEqual(local);
       expect(await changedFiles(root, base)).toEqual([...local, 'committed.ts'].sort());

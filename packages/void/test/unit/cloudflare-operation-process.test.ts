@@ -320,6 +320,8 @@ it('reports an absent cf session as authentication failure', async () => {
               USERPROFILE: directory,
               XDG_CONFIG_HOME: directory,
               APPDATA: directory,
+              // Test absent credentials independently of host keyring support.
+              CLOUDFLARE_AUTH_USE_KEYRING: 'false',
               CI: 'true',
             },
           },
@@ -327,14 +329,9 @@ it('reports an absent cf session as authentication failure', async () => {
         );
       },
     );
-    expect(output.status, output.stdout).toBe(1);
-    if (output.stdout) {
-      expect(JSON.parse(output.stdout).data).toEqual({ loggedIn: false });
-      expect(output.stderr).toContain('authentication is required');
-    } else {
-      // cf may fail before returning JSON when the host has no keyring backend.
-      expect(output.stderr).toMatch(/auth|token|keyring|credential/i);
-    }
+    expect(output.status, output.stdout + output.stderr).toBe(1);
+    expect(JSON.parse(output.stdout).data, output.stderr).toEqual({ loggedIn: false });
+    expect(output.stderr).toContain('authentication is required');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

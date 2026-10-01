@@ -1,4 +1,6 @@
+import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
@@ -14,12 +16,51 @@ const routeTablePath = join(temporary, 'virtual-void-routes.ts');
 const workerPath = join(temporary, 'worker.ts');
 
 type MiniflareInstance = {
+  ready: Promise<URL>;
   dispatchFetch(input: string, init?: RequestInit): Promise<Response>;
   dispose(): Promise<void>;
   getBindings<T extends Record<string, unknown>>(): Promise<T>;
 };
 
 let miniflare: MiniflareInstance;
+
+async function rejectedUpgrade(url: URL): Promise<{ status: number | undefined; body: string }> {
+  const upgrade = request(url, {
+    agent: false,
+    headers: {
+      Connection: 'Upgrade',
+      Upgrade: 'websocket',
+      'Sec-WebSocket-Version': '13',
+      'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+    },
+  });
+  const socket = once(upgrade, 'socket').then(async ([socket]) => {
+    await once(socket, 'close');
+  });
+  const response = new Promise<{ status: number | undefined; body: string }>((resolve, reject) => {
+    upgrade.once('error', reject);
+    upgrade.once('upgrade', (_response, socket) => {
+      socket.destroy();
+      reject(new Error('Unauthorized request unexpectedly upgraded to a WebSocket.'));
+    });
+    upgrade.once('response', (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => (body += chunk));
+      response.once('error', reject);
+      response.once('end', () => resolve({ status: response.statusCode, body }));
+    });
+  });
+  // Miniflare's dispatchFetch rejection path does not own/close its WebSocket
+  // ClientRequest. Own this real upgrade request and wait for its TCP teardown.
+  const completed = Promise.all([response, socket]);
+  upgrade.end();
+  try {
+    return (await completed)[0];
+  } finally {
+    upgrade.destroy();
+  }
+}
 
 describe('generated worker WebSocket middleware', () => {
   beforeAll(async () => {
@@ -145,13 +186,10 @@ export default {
   });
 
   it('authorizes upgrades before Durable Object dispatch and preserves the WebSocket response', async () => {
-    const unauthorized = await miniflare.dispatchFetch('http://localhost/chat', {
-      headers: { Upgrade: 'websocket' },
-    });
+    const unauthorized = await rejectedUpgrade(new URL('/chat', await miniflare.ready));
 
     expect(unauthorized.status).toBe(401);
-    expect(await unauthorized.text()).toBe('Unauthorized');
-    expect(unauthorized.webSocket).toBeNull();
+    expect(unauthorized.body).toBe('Unauthorized');
 
     const { CHAT_WS } = await miniflare.getBindings<{
       CHAT_WS: DurableObjectNamespace;

@@ -98,7 +98,7 @@ describe('shared application analysis', () => {
 
     const analysis = analyzeApplicationSync(applicationRoot, { config });
     expect(analysis.config).toBe(config);
-    expect(analysis.paths.sourceRoot).toBe(join(applicationRoot, 'appsrc'));
+    expect(analysis.paths.sourceRoot).toBe(join(applicationRoot, 'appsrc').replaceAll('\\', '/'));
     expect(analysis.bindingNames).toEqual({ kv: 'CACHE' });
     expect(analysis.bindings).toMatchObject({
       needsD1: false,
@@ -106,7 +106,9 @@ describe('shared application analysis', () => {
       needsKV: true,
       needsEmail: false,
     });
-    expect(analysis.authConfigPath).toBe(join(applicationRoot, 'appsrc/auth.ts'));
+    expect(analysis.authConfigPath).toBe(
+      join(applicationRoot, 'appsrc/auth.ts').replaceAll('\\', '/'),
+    );
     expect(analysis.needsDatabase).toBe(true);
     expect(analysis.migrations.map((migration) => migration.name)).toEqual(['001.sql', '002.sql']);
     expect(analysis.jobs).toMatchObject([{ name: 'cleanup', crons: ['0 * * * *'] }]);

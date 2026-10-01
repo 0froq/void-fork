@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import spawn from 'cross-spawn';
@@ -279,11 +287,20 @@ export default defineRoom({
       mkdirSync(join(directory, 'durable-objects'));
       mkdirSync(join(directory, 'routes', 'api'), { recursive: true });
       mkdirSync(join(directory, 'routes', 'rooms'), { recursive: true });
-      symlinkSync(
-        join(repository, 'playground/spa/node_modules'),
-        join(directory, 'node_modules'),
-        process.platform === 'win32' ? 'junction' : 'dir',
-      );
+      const nodeModules = join(directory, 'node_modules');
+      mkdirSync(nodeModules);
+      // Link each package to its real directory so pnpm's relative workspace
+      // links do not depend on the temporary app's ancestors on Windows.
+      for (const [name, source] of [
+        ['vite-plus', join(repository, 'node_modules/vite-plus')],
+        ['void', join(repository, 'packages/void')],
+      ]) {
+        symlinkSync(
+          realpathSync(source),
+          join(nodeModules, name),
+          process.platform === 'win32' ? 'junction' : 'dir',
+        );
+      }
       writeFileSync(
         join(directory, 'package.json'),
         JSON.stringify({ name: 'void-resource-name-fixture', private: true, type: 'module' }),
