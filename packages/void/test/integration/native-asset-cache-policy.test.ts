@@ -1,26 +1,119 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { build } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
+import { routingPlugin } from '../../src/plugin-routing.ts';
 
 const runtimeSource = (file: string) => join(import.meta.dirname, '../../src/runtime', file);
 let directory: string;
 let runtime: Miniflare | undefined;
+let clientAsset: string;
+let cssAsset: string;
+let privateAsset: string;
+let customAsset: string;
+let uncachedAsset: string;
 
 beforeAll(async () => {
   directory = mkdtempSync(join(tmpdir(), 'void-native-asset-policy-'));
   const assets = join(directory, 'client');
   const output = join(directory, 'output');
+  const clientRoot = join(directory, 'app');
+  mkdirSync(clientRoot);
+  writeFileSync(join(clientRoot, 'package.json'), '{"type":"module"}');
+  writeFileSync(join(clientRoot, 'client.js'), 'import "./client.css"; window.value = 1;');
+  writeFileSync(join(clientRoot, 'client.css'), 'body { color: red; }');
+  for (const file of ['private', 'custom', 'uncached', 'app-settings']) {
+    writeFileSync(join(clientRoot, `${file}.js`), `window.${file.replace('-', '_')} = 1;`);
+  }
+  mkdirSync(join(clientRoot, 'public'));
+  writeFileSync(
+    join(clientRoot, 'public/_headers'),
+    '/static/uncached-*\n  Cache-Control: public, max-age=0, must-revalidate\n',
+  );
+  await build({
+    root: clientRoot,
+    configFile: false,
+    logLevel: 'silent',
+    plugins: [
+      routingPlugin(clientRoot, { isAuthEnabled: () => false }),
+      {
+        name: 'explicit-stable-css',
+        buildStart() {
+          this.emitFile({
+            type: 'asset',
+            name: 'app.css',
+            originalFileName: 'app.css',
+            fileName: 'static/app-settings.css',
+            source: '.settings { color: blue; }',
+          });
+        },
+      },
+    ],
+    build: {
+      outDir: assets,
+      emptyOutDir: true,
+      assetsDir: 'static',
+      rollupOptions: {
+        input: Object.fromEntries(
+          ['client', 'private', 'custom', 'uncached', 'app-settings'].map((name) => [
+            name,
+            join(clientRoot, `${name}.js`),
+          ]),
+        ),
+        output: {
+          entryFileNames: (chunk) =>
+            chunk.name === 'app-settings' ? 'static/app-settings.js' : 'static/[name]-[hash].js',
+          assetFileNames: 'static/[name]-[hash].[ext]',
+        },
+      },
+    },
+  });
+  const manifest = JSON.parse(readFileSync(join(assets, '.vite/manifest.json'), 'utf8'));
+  clientAsset = manifest['client.js'].file;
+  cssAsset = manifest['client.js'].css[0];
+  privateAsset = manifest['private.js'].file;
+  customAsset = manifest['custom.js'].file;
+  uncachedAsset = manifest['uncached.js'].file;
+  expect(manifest['uncached.js']).not.toHaveProperty('immutableFiles');
+  expect(manifest['client.js'].immutableFiles).toEqual([clientAsset]);
+  expect(manifest['app.css'].file).toBe('static/app-settings.css');
+  expect(manifest['app.css']).not.toHaveProperty('immutableFiles');
+  expect(manifest['app-settings.js'].file).toBe('static/app-settings.js');
+  expect(manifest['app-settings.js']).not.toHaveProperty('immutableFiles');
+  const stableOutput = join(directory, 'stable-client');
+  await build({
+    root: clientRoot,
+    configFile: false,
+    logLevel: 'silent',
+    plugins: [routingPlugin(clientRoot, { isAuthEnabled: () => false })],
+    build: {
+      outDir: stableOutput,
+      assetsDir: 'static',
+      rollupOptions: {
+        input: join(clientRoot, 'client.js'),
+        output: {
+          entryFileNames: 'static/[name]-settings.js',
+          assetFileNames: 'static/[name]-settings.[ext]',
+        },
+      },
+    },
+  });
+  const stableManifest = JSON.parse(
+    readFileSync(join(stableOutput, '.vite/manifest.json'), 'utf8'),
+  );
+  expect(stableManifest['client.js']).not.toHaveProperty('immutableFiles');
+  for (const file of [stableManifest['client.js'].file, ...stableManifest['client.js'].css]) {
+    writeFileSync(join(assets, file), readFileSync(join(stableOutput, file)));
+  }
+  writeFileSync(
+    join(assets, '.vite/manifest.json'),
+    JSON.stringify({ ...manifest, stable: stableManifest['client.js'] }),
+  );
   mkdirSync(join(assets, 'static'), { recursive: true });
-  for (const file of [
-    'client-abcdefgh.js',
-    'private-abcdefgh.js',
-    'client.js',
-    'page-abcdefgh.html',
-  ]) {
+  for (const file of ['app-settings.json', 'client.js', 'page-abcdefgh.html']) {
     writeFileSync(
       join(assets, 'static', file),
       file.endsWith('.html') ? '<html>asset</html>' : 'export const value = 1;',
@@ -28,7 +121,7 @@ beforeAll(async () => {
   }
   writeFileSync(
     join(assets, '_headers'),
-    '/static/private-abcdefgh.js\n  Cache-Control: private, no-store\n',
+    `/${privateAsset}\n  Cache-Control: private, no-store\n/${customAsset}\n  Cache-Control: public, max-age=120\n/${uncachedAsset}\n  Cache-Control: public, max-age=0, must-revalidate\n`,
   );
   const entry = join(directory, 'worker.ts');
   writeFileSync(
@@ -119,15 +212,18 @@ describe('native asset cache policy in real Workers', () => {
     async (mode) => {
       for (let attempt = 0; attempt < 2; attempt++) {
         const response = await runtime!.dispatchFetch(
-          `https://app.test/static/client-abcdefgh.js?mode=${mode}`,
+          `https://app.test/${clientAsset}?mode=${mode}`,
         );
         expect(response.status, response.status === 200 ? undefined : await response.text()).toBe(
           200,
         );
         expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
         expect(response.headers.get('content-type')).toContain('javascript');
-        await expect(response.text()).resolves.toBe('export const value = 1;');
+        expect(await response.text()).toContain('value');
       }
+      const css = await runtime!.dispatchFetch(`https://app.test/${cssAsset}?mode=${mode}`);
+      expect(css.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate');
+      expect(await css.text()).toContain('color');
     },
   );
 
@@ -135,13 +231,18 @@ describe('native asset cache policy in real Workers', () => {
     'preserves authored privacy, unhashed/HTML defaults and missing files in %s',
     async (mode) => {
       for (const [file, policy] of [
-        ['private-abcdefgh.js', 'private, no-store'],
-        ['client.js', 'public, max-age=0, must-revalidate'],
-        ['page-abcdefgh.html', 'public, max-age=0, must-revalidate'],
+        [privateAsset, 'private, no-store'],
+        [customAsset, 'public, max-age=120'],
+        [uncachedAsset, 'public, max-age=0, must-revalidate'],
+        ['static/app-settings.json', 'public, max-age=0, must-revalidate'],
+        ['static/app-settings.js', 'public, max-age=0, must-revalidate'],
+        ['static/app-settings.css', 'public, max-age=0, must-revalidate'],
+        ['static/client-settings.js', 'public, max-age=0, must-revalidate'],
+        ['static/client-settings.css', 'public, max-age=0, must-revalidate'],
+        ['static/client.js', 'public, max-age=0, must-revalidate'],
+        ['static/page-abcdefgh.html', 'public, max-age=0, must-revalidate'],
       ]) {
-        const response = await runtime!.dispatchFetch(
-          `https://app.test/static/${file}?mode=${mode}`,
-        );
+        const response = await runtime!.dispatchFetch(`https://app.test/${file}?mode=${mode}`);
         expect(response.status).toBe(200);
         expect(response.headers.get('cache-control')).toBe(policy);
       }

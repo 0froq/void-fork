@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import { handlePageGet, handlePageMutation } from '../pages/protocol.ts';
 import type { ClientAssetTags } from './routing-assets.ts';
 import type { ErrorRenderer } from './routing-errors.ts';
-import { applyAssetCachePolicy } from './routing-worker.ts';
+import { createAssetCachePolicy } from './routing-worker.ts';
 import type { RoutingRule, RoutingRuntime } from './routing.ts';
 
 type PageGetArguments = Parameters<typeof handlePageGet>;
@@ -71,6 +71,7 @@ export function createPagesFallback(options: {
   fallbackRules?: Array<RoutingRule>;
   assetsDir?: string;
 }): (c: Context) => Promise<Response> {
+  const cachePolicy = createAssetCachePolicy(options.assetsDir);
   return async (c) => {
     const path = c.req.path;
     if (
@@ -86,7 +87,7 @@ export function createPagesFallback(options: {
         ? await assets.fetch(c.req.raw)
         : options.routing.markNoMatch(c.req.raw, new Response('Not Found', { status: 404 }));
     if (assetResponse.status !== 404) {
-      return applyAssetCachePolicy(c.req.raw, assetResponse, options.assetsDir);
+      return cachePolicy(c.req.raw, c.env, assetResponse);
     }
     const fallback = options.fallbackRules
       ? await options.routing.applyFallback(c, options.fallbackRules)
@@ -121,6 +122,7 @@ export function createSsrFallback(options: {
   assets: (request: Request, env: Context['env']) => Promise<ClientAssetTags>;
   assetsDir?: string;
 }): (c: Context) => Promise<Response> {
+  const cachePolicy = createAssetCachePolicy(options.assetsDir);
   const fetchAssets = async (c: Context): Promise<Response> => {
     const binding = c.env?.ASSETS;
     if (!binding || typeof binding.fetch !== 'function') {
@@ -129,7 +131,7 @@ export function createSsrFallback(options: {
     const response: Response = await binding.fetch(c.req.raw);
     return response.status === 404
       ? options.routing.markNoMatch(c.req.raw, new Response('Not Found', { status: 404 }))
-      : applyAssetCachePolicy(c.req.raw, response, options.assetsDir);
+      : cachePolicy(c.req.raw, c.env, response);
   };
   return async (c) => {
     if (options.nodeTarget && options.fallbackRules) {
@@ -169,13 +171,14 @@ export function createAssetNotFound(options: {
   fallbackRules?: Array<RoutingRule>;
   assetsDir?: string;
 }): (c: Context) => Promise<Response> {
+  const cachePolicy = createAssetCachePolicy(options.assetsDir);
   return async (c) => {
     if (!options.nodeTarget) {
       const assets = c.env?.ASSETS;
       if (assets && typeof assets.fetch === 'function') {
         const response: Response = await assets.fetch(c.req.raw);
         if (response.status !== 404) {
-          return applyAssetCachePolicy(c.req.raw, response, options.assetsDir);
+          return cachePolicy(c.req.raw, c.env, response);
         }
       }
     }

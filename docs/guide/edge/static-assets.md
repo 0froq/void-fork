@@ -31,6 +31,12 @@ If `build.assetsDir` is set to `""`, meaning hashed files live at the root, the 
 
 Void also includes presets for where supported meta frameworks (Astro, Nuxt, SvelteKit, etc.) place their hashed assets, so framework-generated assets enjoy optimal caching out of the box.
 
+### Native Cloudflare deployments
+
+With `void deploy --platform cloudflare`, generated JavaScript bundles with content fingerprints receive immutable caching. Files copied from `public/` and custom build outputs with stable filenames keep normal revalidation, even when they live in the assets directory. CSS and other assets keep Cloudflare's default or your configured `Cache-Control`.
+
+Use [Custom Headers](./headers) to choose a cache policy for other files. Apply immutable caching only to URLs that change whenever their content changes.
+
 ## Non-hashed assets
 
 Other static files, such as `index.html` and `favicon.ico`, are cached until the next deploy. You do not need to purge them manually.

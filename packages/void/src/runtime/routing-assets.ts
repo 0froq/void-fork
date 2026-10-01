@@ -9,7 +9,13 @@ export type ClientAssetTags = {
 };
 export type ClientManifest = Record<
   string,
-  { file?: string; imports?: Array<string>; css?: Array<string> }
+  {
+    file?: string;
+    imports?: Array<string>;
+    css?: Array<string>;
+    /** Build-proven fingerprinted outputs; absent in older/third-party manifests. */
+    immutableFiles?: Array<string>;
+  }
 >;
 export type ManifestLoader = (
   request: Request,

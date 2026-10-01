@@ -11,6 +11,7 @@ import {
 } from '../../src/runtime/routing-pages.ts';
 import {
   applyAssetCachePolicy,
+  createAssetCachePolicy,
   createAssetFallback,
   createWorkerFetch,
   filterInternalBindings,
@@ -278,12 +279,15 @@ describe('typed asset fallthrough', () => {
       const response = applyAssetCachePolicy(
         new Request('https://app.test/assets/client-abcdefgh.js'),
         source,
+        'assets',
+        true,
       );
       expect(response.headers.get('cache-control')).toBe(policy);
       expect(source.headers.get('content-type')).toBe('text/plain;charset=UTF-8');
     },
   );
   it.each([
+    ['/assets/app-settings.json', 'application/json'],
     ['/assets/client.js', 'text/javascript'],
     ['/assets/page-abcdefgh.html', 'text/html'],
     ['/assets/client-abcdefgh.js', 'text/html'],
@@ -308,14 +312,47 @@ describe('typed asset fallthrough', () => {
     const source = new Response(null, {
       headers: { 'cache-control': 'must-revalidate, PUBLIC, max-age=0' },
     });
-    expect(applyAssetCachePolicy(request, source, '/static/').headers.get('cache-control')).toBe(
-      'public, max-age=31536000, immutable',
-    );
+    expect(
+      applyAssetCachePolicy(request, source, '/static/', true).headers.get('cache-control'),
+    ).toBe('public, max-age=31536000, immutable');
     expect(source.headers.get('cache-control')).toBe('must-revalidate, PUBLIC, max-age=0');
     const cookie = new Response('asset', { headers: { 'set-cookie': 'local=value; Path=/' } });
-    expect(applyAssetCachePolicy(request, cookie, 'static').headers.get('cache-control')).toBe(
-      'no-store',
+    expect(
+      applyAssetCachePolicy(request, cookie, 'static', true).headers.get('cache-control'),
+    ).toBe('no-store');
+  });
+  it.each([null, { client: { file: 'assets/client-abcdefgh.js' } }])(
+    'uses conservative cache policy without build provenance: %j',
+    async (manifest) => {
+      const load = vi.fn(async () => manifest);
+      const policy = createAssetCachePolicy('assets', load);
+      const response = await policy(
+        new Request('https://app.test/assets/client-abcdefgh.js'),
+        {},
+        new Response('asset', {
+          headers: { 'cache-control': 'public, max-age=0, must-revalidate' },
+        }),
+      );
+      expect(response.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate');
+      await policy(
+        new Request('https://app.test/assets/app-settings.json'),
+        {},
+        new Response('asset'),
+      );
+      expect(load).toHaveBeenCalledTimes(1);
+    },
+  );
+  it('keeps assets available when optional manifest lookup fails', async () => {
+    const policy = createAssetCachePolicy('assets', async () => {
+      throw new Error('unavailable');
+    });
+    const response = await policy(
+      new Request('https://app.test/assets/app-settings.json'),
+      {},
+      new Response('asset'),
     );
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    await expect(response.text()).resolves.toBe('asset');
   });
   it('preserves non-success, redirects and mutation responses', () => {
     for (const source of [
@@ -335,7 +372,17 @@ describe('typed asset fallthrough', () => {
     ).toBe(source);
   });
   it('uses fresh requests, skips mutations and preserves intentional responses', async () => {
-    const binding = vi.fn(async (request: Request) => new Response(new URL(request.url).pathname));
+    const binding = vi.fn(async (request: Request) => {
+      const path = new URL(request.url).pathname;
+      return path === '/.vite/manifest.json'
+        ? Response.json({
+            client: {
+              file: 'assets/file-abcdefgh.js',
+              immutableFiles: ['assets/file-abcdefgh.js'],
+            },
+          })
+        : new Response(path);
+    });
     const serve = createAssetFallback();
     const post = new Request('https://app.test/mutate', { method: 'POST', body: 'body' });
     await post.text();

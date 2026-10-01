@@ -14,6 +14,7 @@ import {
 import { loadVoidAuthConfig } from './auth/config.ts';
 import { generateVoidAuthDatabaseModule, generateVoidAuthDrizzleSchema } from './auth/drizzle.ts';
 import { lintDestinationSplats, lintDuplicateSources, mergeRoutingRules } from './cli/headers.ts';
+import { stampClientAssetCachePolicy } from './client-asset-manifest.ts';
 import { findEnvFileForPaths } from './codegen/env-types.ts';
 import { generateQueueTypes } from './codegen/queue-types.ts';
 import { generateRouteTypes } from './codegen/route-types.ts';
@@ -532,18 +533,36 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       }
 
       const entries = validateSsrEntries(root, paths);
-      if (!entries || env.command !== 'build') {
+      if (env.command !== 'build') {
         return;
       }
 
       return {
         build: {
-          manifest: true,
-          rollupOptions: {
-            input: entries.client.absolutePath,
-          },
+          manifest: entries ? true : (_.build?.manifest ?? true),
+          ...(entries
+            ? {
+                rollupOptions: {
+                  input: entries.client.absolutePath,
+                },
+              }
+            : {}),
         },
       };
+    },
+
+    generateBundle: {
+      order: 'post',
+      handler(_output, bundle) {
+        const manifest = this.environment.config.build.manifest;
+        if (this.environment.name === 'client' && manifest) {
+          stampClientAssetCachePolicy(
+            bundle,
+            typeof manifest === 'string' ? manifest : '.vite/manifest.json',
+            compileOptions.headerRules,
+          );
+        }
+      },
     },
 
     async buildStart() {

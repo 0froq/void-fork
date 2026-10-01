@@ -1,4 +1,5 @@
 import type { ExecutionContext } from 'hono';
+import { createManifestLoader, type ManifestLoader } from './routing-assets.ts';
 
 export type AssetBinding = { fetch: (request: Request) => Promise<Response> };
 export type RuntimeEnvironment = Record<string, unknown> & { ASSETS?: AssetBinding };
@@ -32,6 +33,7 @@ export function applyAssetCachePolicy(
   request: Request,
   asset: Response,
   assetsDir = 'assets',
+  fingerprinted = false,
 ): Response {
   if (!['GET', 'HEAD'].includes(request.method) || ![200, 206, 304].includes(asset.status)) {
     return asset;
@@ -51,8 +53,8 @@ export function applyAssetCachePolicy(
     .sort();
   const providerDefault = directives.join(',') === 'max-age=0,must-revalidate,public';
   const hashed =
+    fingerprinted &&
     pathname.startsWith('/' + assetsDir.replace(/^\/+|\/+$/g, '') + '/') &&
-    /[-._][A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/.test(filename) &&
     extension !== '.html' &&
     !(headers.get('Content-Type') ?? '').toLowerCase().includes('text/html');
   if (!headers.has('Set-Cookie') && hashed && (!policy || providerDefault)) {
@@ -65,9 +67,41 @@ export function applyAssetCachePolicy(
   return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
 }
 
+/** Public filenames are never evidence of a content fingerprint. */
+export function createAssetCachePolicy(
+  assetsDir?: string,
+  loadManifest: ManifestLoader = createManifestLoader(),
+): (request: Request, env: RuntimeEnvironment, asset: Response) => Promise<Response> {
+  let files: Promise<Set<string>> | undefined;
+  return async (request, env, asset) => {
+    const path = new URL(request.url).pathname;
+    if (
+      !['GET', 'HEAD'].includes(request.method) ||
+      ![200, 206, 304].includes(asset.status) ||
+      !path.startsWith('/' + (assetsDir ?? 'assets').replace(/^\/+|\/+$/g, '') + '/')
+    ) {
+      return applyAssetCachePolicy(request, asset, assetsDir);
+    }
+    if (!files) {
+      // Optional cache metadata must not make a successfully served asset fail.
+      files = loadManifest(request, env).then(
+        (manifest) =>
+          new Set(
+            Object.values(manifest ?? {}).flatMap((entry) =>
+              Array.isArray(entry?.immutableFiles) ? entry.immutableFiles : [],
+            ),
+          ),
+        () => new Set(),
+      );
+    }
+    return applyAssetCachePolicy(request, asset, assetsDir, (await files).has(path.slice(1)));
+  };
+}
+
 export function createAssetFallback(
   options: AssetFallbackOptions = {},
 ): (request: Request, env: RuntimeEnvironment, response: Response) => Promise<Response> {
+  const cachePolicy = createAssetCachePolicy(options.assetsDir);
   return async (request, env, response) => {
     if (
       response.status !== 404 ||
@@ -80,7 +114,7 @@ export function createAssetFallback(
       new Request(request.url, { method: request.method, headers: request.headers }),
     );
     if (asset.status !== 404) {
-      return applyAssetCachePolicy(request, asset, options.assetsDir);
+      return cachePolicy(request, env, asset);
     }
     const accept = request.headers.get('accept') ?? '';
     if (options.serveSpaFallback && accept.includes('text/html')) {

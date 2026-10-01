@@ -35,6 +35,16 @@ describe('typed routing in generated Workers', () => {
       }
       mkdirSync(join(assets, 'static'));
       writeFileSync(join(assets, 'static/client-abcdefgh.js'), 'export const value = 1;');
+      mkdirSync(join(assets, '.vite'));
+      writeFileSync(
+        join(assets, '.vite/manifest.json'),
+        JSON.stringify({
+          client: {
+            file: 'static/client-abcdefgh.js',
+            immutableFiles: ['static/client-abcdefgh.js'],
+          },
+        }),
+      );
       writeFileSync(
         join(routes, 'hello.ts'),
         `export function GET(c) { return { path: c.req.path, original: c.originalUrl()?.pathname, rewritten: c.isRewritten(), public: c.env.PUBLIC, hidden: c.env.__VOID_PROXY_TOKEN }; }\n`,
