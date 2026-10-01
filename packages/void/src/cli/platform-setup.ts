@@ -161,27 +161,33 @@ export function formatPlatformSetupPlan(plan: PlatformInstallPlan): string {
   const pages = platformSetupPages(plan);
   // Keep URLs outside wrapping note boxes so terminal links remain intact.
   return [
-    'Credentials needed (paste them into the installer; keep a password-manager copy):',
+    'Credentials needed during installation:',
+    'PostgreSQL database URL',
     platformSetupLink(pages.runtime),
-    pages.runtime.instructions,
-    '',
     platformSetupLink(pages.r2),
-    pages.r2.instructions,
-    '',
     ...(plan.deployment.authentication.providers.includes('github')
-      ? [platformSetupLink(pages.github), pages.github.instructions]
+      ? [platformSetupLink(pages.github)]
       : []),
     ...plan.deployment.authentication.providers
       .filter((provider) => provider !== 'github')
       .map(
         (provider) =>
-          `${provider === 'google' ? 'Google OAuth client' : provider === 'oidc' ? 'OIDC connection' : 'Cloudflare Access OIDC application'}: client ID and secret; callback ${plan.apiUrl}/auth/callback.`,
+          (provider === 'google'
+            ? 'Google OAuth'
+            : provider === 'oidc'
+              ? 'OIDC'
+              : 'Cloudflare Access OIDC') + ' client ID and secret',
       ),
     ...(plan.deployment.authentication.accessProtection
-      ? [
-          'Cloudflare Access protection: configure API and proxy origins and admitted installer/CI credentials.',
-        ]
+      ? ['Cloudflare Access application and installer credentials']
       : []),
+    platformSetupLink({
+      title: 'JWT signing key and project encryption key',
+      url: 'https://void.cloud/guide/platform/installation/credentials#signing-and-encryption-keys',
+    }),
+    '',
+    'Login callback: ' + plan.apiUrl + '/auth/callback',
+    'Installation collects and validates missing credentials after you confirm the plan.',
   ].join('\n');
 }
 

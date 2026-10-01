@@ -811,7 +811,9 @@ describe('platform credential onboarding', () => {
     expect(draft.deployment.resources).toEqual(preview.deployment.resources);
     expect(isPlatformSetupDraft(draft)).toBe(true);
     const callback = `https://${draft.deployment.resources.apiWorker}.void-platform-e2e-test.workers.dev/auth/callback`;
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Redirect URI: ' + callback));
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Login callback: ' + callback),
+    );
     expect(info).toHaveBeenCalledWith(expect.stringContaining('Redirect URI: ' + callback));
     mocks.password.mockImplementation(normalPassword);
     mocks.open.mockClear();

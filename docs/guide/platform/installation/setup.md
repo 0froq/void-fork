@@ -29,7 +29,7 @@ void platform install
 
 :::
 
-After `--plan`, run the printed install command. It carries your configuration choices into installation, including the API hostname, Hyperdrive selection, login methods, and Access protection. Void recalculates the plan and asks you to confirm it. Void then saves a local setup draft and opens the runtime-token page when that token is missing. Paste the token into the masked prompt. As you continue, it opens GitHub and R2 at their respective steps. Each page has a short checklist and a clickable fallback link in the terminal. Values already supplied through the environment or saved setup are reused without opening their pages again.
+The plan shows a brief credential checklist and setup links. It does not collect secrets. After `--plan`, run the printed install command. It carries your configuration choices into installation, including the API hostname, Hyperdrive selection, login methods, and Access protection. Void recalculates the plan and asks you to confirm it. Void then saves a local setup draft and opens the runtime-token page when that token is missing. Paste the token into the masked prompt. As you continue, it opens GitHub and R2 at their respective steps. Each page has a short checklist and a clickable fallback link in the terminal. Values already supplied through the environment or saved setup are reused without opening their pages again.
 
 ## Choose login methods
 
