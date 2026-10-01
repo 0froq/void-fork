@@ -150,8 +150,9 @@ describe('platform credential setup links', () => {
     const page = platformSetupPages(plan()).r2;
     const url = new URL(page.url);
     expect([...url.searchParams.keys()]).toEqual(['to', 'type']);
-    expect(page.instructions).toContain('the form defaults to read-only');
-    expect(page.instructions).toContain('including newly created buckets');
+    expect(page.instructions).toContain('Select Object Read & Write.');
+    expect(page.instructions).toContain('Keep Apply to all buckets in this account selected.');
+    expect(page.instructions).not.toMatch(/[();]/);
     expect(page.instructions).toContain('Access Key ID and Secret Access Key');
     expect(page.instructions).not.toContain('Admin Read');
   });

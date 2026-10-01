@@ -490,7 +490,7 @@ describe('platform credential onboarding', () => {
         [reason]: true,
       }));
       await runPlatformLifecycleCommand(parsePlatformArgs(args));
-      expect(mocks.progress.stop).toHaveBeenCalledWith('Installation paused; progress is saved.');
+      expect(mocks.progress.stop).toHaveBeenCalledWith('Installation paused. Progress is saved.');
       expect(mocks.progress.error).not.toHaveBeenCalled();
     },
   );
@@ -802,7 +802,7 @@ describe('platform credential onboarding', () => {
     );
     expect(mocks.text).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: 'Optional custom API hostname (leave empty for workers.dev):',
+        message: 'Custom API hostname. Leave empty for workers.dev:',
       }),
     );
     const draft = listInstallationManifests()[0]!;
@@ -882,9 +882,7 @@ describe('platform credential onboarding', () => {
     expect(mocks.multiselect).not.toHaveBeenCalled();
     expect(mocks.select).not.toHaveBeenCalled();
     expect(
-      mocks.text.mock.calls.some(([input]) =>
-        input.message.startsWith('Optional custom API hostname'),
-      ),
+      mocks.text.mock.calls.some(([input]) => input.message.startsWith('Custom API hostname')),
     ).toBe(false);
     expect(mocks.password).toHaveBeenCalled();
     expect(mocks.install).toHaveBeenCalledOnce();

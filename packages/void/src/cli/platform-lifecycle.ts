@@ -343,7 +343,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     ? (recorded.controlPlane.apiHostname ?? '')
     : args.controlPlaneDomain ||
       (process.stdin.isTTY && !args.noControlPlaneDomain
-        ? await promptText('Optional custom API hostname (leave empty for workers.dev):', '', true)
+        ? await promptText('Custom API hostname. Leave empty for workers.dev:', '', true)
         : '');
   let dedicatedZone = recorded?.application.dedicatedZone ?? args.dedicatedZone;
   if (
@@ -450,7 +450,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       }
       if (choice === 'setup') {
         note(
-          `Create a Hyperdrive in account ${accountId} with any unused name${suggestedNameAvailable ? ` (for example ${suggestedName})` : ''}. Point it at the same dedicated PostgreSQL database you will give Void, use a runtime database user, and disable SQL result caching. If your organization manages Hyperdrive, ask its administrator to create it. Then rerun this command and select it from the list.\nSetup: https://developers.cloudflare.com/hyperdrive/get-started/`,
+          `Create a Hyperdrive in account ${accountId} with any unused name${suggestedNameAvailable ? ` such as ${suggestedName}` : ''}. Point it at the same dedicated PostgreSQL database you will give Void, use a runtime database user, and disable SQL result caching. If your organization manages Hyperdrive, ask its administrator to create it. Then rerun this command and select it from the list.\nSetup: https://developers.cloudflare.com/hyperdrive/get-started/`,
           'Set up Hyperdrive first',
         );
         outro('No Cloudflare or local installation state was changed.');
@@ -947,7 +947,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     });
     progress?.stop(
       result.waitingForDns || result.waitingForSandboxDrain
-        ? 'Installation paused; progress is saved.'
+        ? 'Installation paused. Progress is saved.'
         : 'Platform installed.',
     );
     progress = undefined;
@@ -963,7 +963,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     }
     if (result.waitingForSandboxDrain) {
       note(
-        "The compatible candidate runtime is live in sandbox-drain maintenance mode and application traffic remains disabled. Preview bounded work with `void platform system sandbox-drain --plan`; follow any returned `nextCursor` with `--cursor '<value>'`. Then apply with `void platform system sandbox-drain --yes` and rerun until it reports DB-backed `complete: true`. Rerun this install command afterward to enable traffic.",
+        "The compatible candidate runtime is live in sandbox-drain maintenance mode and application traffic remains disabled. Preview bounded work with `void platform system sandbox-drain --plan`. Follow any returned `nextCursor` with `--cursor '<value>'`. Then apply with `void platform system sandbox-drain --yes` and rerun until it reports DB-backed `complete: true`. Rerun this install command afterward to enable traffic.",
         'Waiting for managed Sandbox drain',
       );
       outro(`Installation ${result.manifest.id} is safely checkpointed.`);
@@ -974,7 +974,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     );
     log.info(`API URL: ${plan.apiUrl}`);
     if (result.emailOperationId) {
-      log.info(`Shared email routing ready (operation ${result.emailOperationId}).`);
+      log.info(`Shared email routing ready. Operation: ${result.emailOperationId}.`);
     }
     const completedAuthCode = readInstallationRecoverySecrets(result.manifest)?.authBootstrapCode;
     if (result.setupPending && completedAuthCode) {

@@ -1232,10 +1232,11 @@ async function readRemoteOwnership(
 
 export function formatPlatformInstallPlan(plan: PlatformInstallPlan): string {
   const lines = [
-    `${pc.bold(`${plan.deployment.displayName} in ${plan.account.name}`)} (${plan.account.id})`,
+    `${pc.bold(`${plan.deployment.displayName} in ${plan.account.name}`)}`,
+    `${pc.bold('Account:')} ${plan.account.id}`,
     plan.deployment.application.zoneName
       ? `${pc.bold('Applications:')} *.${plan.deployment.application.baseDomain}`
-      : `${pc.bold('Applications:')} workers.dev (testing); add a domain with void platform domain set <domain>`,
+      : `${pc.bold('Applications:')} workers.dev for testing. Add a domain with void platform domain set <domain>`,
     `${pc.bold('Control plane:')} ${plan.apiUrl}`,
     `${pc.bold('Resource proxy:')} ${plan.proxyUrl}`,
     `${pc.bold('Login methods:')} ${plan.deployment.authentication.providers.join(', ')}`,

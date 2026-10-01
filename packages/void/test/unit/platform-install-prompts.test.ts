@@ -260,7 +260,7 @@ describe('interactive platform installation prompts', () => {
       ],
     });
     expect(mocks.note).toHaveBeenCalledWith(
-      expect.stringContaining('with any unused name (for example void-test-database)'),
+      expect.stringContaining('with any unused name such as void-test-database'),
       'Set up Hyperdrive first',
     );
     expect(mocks.plan).not.toHaveBeenCalled();

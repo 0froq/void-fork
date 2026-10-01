@@ -495,11 +495,14 @@ describe('platform installation planning', () => {
       );
       const bold = vi.spyOn(pc, 'bold').mockImplementation(pc.createColors(true).bold);
       try {
-        expect(formatPlatformInstallPlan(plan).split('\n').slice(0, 4)).toEqual([
-          '\u001b[1mExample in Account\u001b[22m (account)',
+        const output = formatPlatformInstallPlan(plan);
+        expect(output).not.toMatch(/[();]/);
+        expect(output.split('\n').slice(0, 5)).toEqual([
+          '\u001b[1mExample in Account\u001b[22m',
+          '\u001b[1mAccount:\u001b[22m account',
           '\u001b[1mApplications:\u001b[22m ' +
             (workersDev
-              ? 'workers.dev (testing); add a domain with void platform domain set <domain>'
+              ? 'workers.dev for testing. Add a domain with void platform domain set <domain>'
               : '*.example.app'),
           `\u001b[1mControl plane:\u001b[22m ${plan.apiUrl}`,
           `\u001b[1mResource proxy:\u001b[22m ${plan.proxyUrl}`,

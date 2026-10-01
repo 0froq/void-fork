@@ -443,13 +443,13 @@ const HELP_TREE: HelpTree = {
           { command: '--name <slug>', description: 'Installation name' },
           {
             command: '--workers-dev',
-            description: 'Use workers.dev for testing; add a domain later',
+            description: 'Use workers.dev for testing. Add a domain later.',
           },
           { command: '--display-name <name>', description: 'Human-readable platform name' },
           { command: '--account <id>', description: 'Cloudflare account id' },
           {
             command: '--application-domain <domain>',
-            description: 'Base domain for applications (zone apex is simplest)',
+            description: 'Base domain for applications',
           },
           { command: '--zone <domain>', description: 'Cloudflare zone containing the app domain' },
           {

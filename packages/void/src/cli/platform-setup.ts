@@ -28,7 +28,7 @@ export function platformSetupFieldHelp(
       return {
         placeholder: 'postgresql://user:pw@…/database',
         description:
-          'Stores platform users, projects, and deployments; use an empty hosted database, e.g. ' +
+          'Stores platform users, projects, and deployments. Use an empty hosted database, e.g. ' +
           platformSetupLink({ title: 'Neon', url: 'https://neon.com/' }) +
           '. ' +
           docs('prerequisites', 'platform-database', 'Database setup'),
@@ -36,13 +36,13 @@ export function platformSetupFieldHelp(
     case 'jwtSecret':
       return {
         description:
-          'Signs platform login tokens. Run openssl rand -base64 32; save the key in your password manager. ' +
+          'Signs platform login tokens. Run openssl rand -base64 32. Save the key in your password manager. ' +
           docs('credentials', 'signing-and-encryption-keys', 'Key setup'),
       };
     case 'projectSecretKey':
       return {
         description:
-          'Encrypts app secrets. Run openssl rand -base64 32 separately; save this key for recovery. ' +
+          'Encrypts app secrets. Run openssl rand -base64 32 separately. Save this key for recovery. ' +
           docs('credentials', 'signing-and-encryption-keys', 'Key setup'),
       };
     default:
@@ -149,8 +149,8 @@ export function platformSetupPages(plan: PlatformInstallPlan): {
           type: 'account',
         }),
       instructions: [
-        'Select Object Read & Write (the form defaults to read-only).',
-        'Keep Apply to all buckets in this account (including newly created buckets) selected.',
+        'Select Object Read & Write.',
+        'Keep Apply to all buckets in this account selected.',
         'Create the token, then copy the Access Key ID and Secret Access Key into the CLI.',
       ].join('\n'),
     },
