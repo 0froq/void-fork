@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripVTControlCharacters } from 'node:util';
 import { describe, expect, it } from 'vite-plus/test';
 import { deletedFiles, planAffectedTests, type TestFile } from '../../../../test/affected-tests.ts';
 import { changedFiles, createAffectedVcsProvider } from '../../../../test/affected-vcs.ts';
@@ -352,13 +353,14 @@ it('executes conservative integration consumers without an import edge', () => {
         '-e',
         `import { runAffected } from ${JSON.stringify(runner)}; await runAffected(${JSON.stringify(root)}, {});`,
       ],
-      { cwd: root, encoding: 'utf8', timeout: 15_000 },
+      { cwd: root, encoding: 'utf8', timeout: 15_000, env: { ...process.env, FORCE_COLOR: '1' } },
     );
     expect(result.error).toBeUndefined();
     expect(result.status, result.stdout + result.stderr).toBe(0);
-    expect(result.stdout).toContain('Selected 1/2 test files');
-    expect(result.stdout).toContain('Test Files  1 passed');
-    expect(result.stdout).toContain('Tests  1 passed');
+    const output = stripVTControlCharacters(result.stdout);
+    expect(output).toContain('Selected 1/2 test files');
+    expect(output).toContain('Test Files  1 passed');
+    expect(output).toContain('Tests  1 passed');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
