@@ -139,7 +139,7 @@ export default {
     miniflare = new Miniflare(
       convertV4MiniflareOptions({
         compatibilityDate: '2026-07-01',
-        compatibilityFlags: ['nodejs_compat'],
+        compatibilityFlags: ['nodejs_compat', 'web_socket_manual_reply_to_close'],
         durableObjects: { CHAT_WS: 'ChatWs' },
         modules: true,
         modulesRoot: output,
@@ -178,14 +178,16 @@ export default {
     const afterAuthorized = await stub.fetch('http://localhost/chat');
     expect(await afterAuthorized.json()).toEqual({ dispatches: 1 });
     const socket = authorized.webSocket!;
-    const closed = new Promise<void>((resolve) => {
-      socket.addEventListener('close', () => resolve(), { once: true });
+    const closed = new Promise<CloseEvent>((resolve) => {
+      socket.addEventListener('close', (event) => resolve(event), { once: true });
     });
     socket.accept();
     socket.close(1000, 'test complete');
     // Finish the close handshake before disposing workerd. Killing it while
     // the upgrade transport is open can emit an unhandled Windows ECONNRESET.
-    await closed;
+    const closeEvent = await closed;
+    expect(closeEvent.code).toBe(1000);
+    expect(closeEvent.reason).toBe('test complete');
   });
 
   it('continues non-upgrade requests to an HTTP route at the same path', async () => {

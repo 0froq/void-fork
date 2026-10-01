@@ -149,6 +149,9 @@ Both `defineRoom()` and `defineWebSocket()` support:
 - `onClose(ctx, details)`: receives `{ code, reason, wasClean }`
 - `onRequest(ctx)`: handles ordinary HTTP requests to the same path
 
+Void completes the WebSocket close handshake automatically. Use `onClose` for application cleanup;
+you do not need to close the socket again in this hook.
+
 Every hook receives a context with:
 
 - `ctx.id`: deterministic route instance id

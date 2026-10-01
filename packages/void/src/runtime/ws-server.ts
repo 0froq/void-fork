@@ -172,6 +172,17 @@ function getStoredConnection(webSocket: WebSocket): StoredConnection {
   };
 }
 
+function completeWebSocketClose(webSocket: WebSocket, code: number, reason: string): void {
+  if (webSocket.readyState === 3) {
+    return;
+  }
+  if ([1004, 1005, 1006, 1015].includes(code)) {
+    webSocket.close();
+  } else {
+    webSocket.close(code, reason);
+  }
+}
+
 function setStoredConnection(webSocket: WebSocket, data: StoredConnection): void {
   (
     webSocket as WebSocket & { serializeAttachment?: (value: StoredConnection) => void }
@@ -485,6 +496,7 @@ export function createWebSocketDurableObject(
       reason: string,
       wasClean: boolean,
     ): Promise<void> {
+      completeWebSocketClose(webSocket, code, reason);
       const stored = getStoredConnection(webSocket);
       const request = new Request(`https://void.local${route.pattern}`);
 
@@ -537,7 +549,9 @@ export function createWebSocketTombstoneDurableObject(
       webSocket.close(1012, 'WebSocket route removed');
     }
 
-    async webSocketClose(): Promise<void> {}
+    async webSocketClose(webSocket: WebSocket, code: number, reason: string): Promise<void> {
+      completeWebSocketClose(webSocket, code, reason);
+    }
   };
 }
 
