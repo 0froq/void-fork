@@ -3,10 +3,8 @@ import {
   buildDurableObjectUploadMigrations,
   buildLiveUploadBindings,
   buildSandboxUploadBindings,
-  buildSandboxUploadContainers,
   buildWebSocketUploadBindings,
   enrichLiveManifest,
-  enrichSandboxManifest,
   enrichWebSocketManifest,
   validateManifestShape,
 } from '../../src/routes/deploy.ts';
@@ -316,13 +314,10 @@ describe('enrichWebSocketManifest', () => {
 describe('buildDurableObjectUploadMigrations for WebSocket-only deployments', () => {
   it('returns Cloudflare upload metadata with new_tag and steps', () => {
     expect(
-      buildDurableObjectUploadMigrations(
-        [
-          { tag: 'ws-v1', newClasses: ['ChatRoom', 'LegacyRoom'] },
-          { tag: 'ws-v2', newClasses: ['PresenceRoom'] },
-        ],
-        undefined,
-      ),
+      buildDurableObjectUploadMigrations([
+        { tag: 'ws-v1', newClasses: ['ChatRoom', 'LegacyRoom'] },
+        { tag: 'ws-v2', newClasses: ['PresenceRoom'] },
+      ]),
     ).toEqual({
       new_tag: 'ws-v2',
       steps: [{ new_classes: ['ChatRoom', 'LegacyRoom'] }, { new_classes: ['PresenceRoom'] }],
@@ -330,19 +325,16 @@ describe('buildDurableObjectUploadMigrations for WebSocket-only deployments', ()
   });
 
   it('returns undefined when there are no websocket migrations', () => {
-    expect(buildDurableObjectUploadMigrations([], undefined)).toBeUndefined();
-    expect(buildDurableObjectUploadMigrations(undefined, undefined)).toBeUndefined();
+    expect(buildDurableObjectUploadMigrations([])).toBeUndefined();
+    expect(buildDurableObjectUploadMigrations(undefined)).toBeUndefined();
   });
 
   it('serializes SQLite WebSocket migrations without changing legacy steps', () => {
     expect(
-      buildDurableObjectUploadMigrations(
-        [
-          { tag: 'ws-v1', newClasses: ['LegacyRoom'] },
-          { tag: 'ws-v2', newSqliteClasses: ['ChatRoom'] },
-        ],
-        undefined,
-      ),
+      buildDurableObjectUploadMigrations([
+        { tag: 'ws-v1', newClasses: ['LegacyRoom'] },
+        { tag: 'ws-v2', newSqliteClasses: ['ChatRoom'] },
+      ]),
     ).toEqual({
       new_tag: 'ws-v2',
       steps: [{ new_classes: ['LegacyRoom'] }, { new_sqlite_classes: ['ChatRoom'] }],
@@ -405,64 +397,6 @@ describe('buildWebSocketUploadBindings', () => {
         class_name: 'WsPresenceWs',
       },
     ]);
-  });
-});
-
-describe('enrichSandboxManifest', () => {
-  it('adds a SQLite Durable Object migration for the sandbox class', () => {
-    const result = enrichSandboxManifest(
-      {
-        version: 3,
-        bindings: {},
-        sandbox: {
-          bindingName: 'SANDBOX',
-          className: 'Sandbox',
-          containerName: 'void-sandbox',
-          image: 'docker.io/cloudflare/sandbox:0.8.11',
-        },
-      },
-      null,
-      0,
-    );
-
-    expect(result.changed).toBe(true);
-    expect(result.nextVersion).toBe(1);
-    expect(result.manifest.sandbox?.migrations).toEqual([
-      { tag: 'sandbox-v1', newSqliteClasses: ['Sandbox'] },
-    ]);
-  });
-
-  it('reuses previous sandbox migrations when the class is unchanged', () => {
-    const previousManifest: DeployManifest = {
-      version: 3,
-      bindings: {},
-      sandbox: {
-        bindingName: 'SANDBOX',
-        className: 'Sandbox',
-        containerName: 'void-sandbox',
-        image: 'docker.io/cloudflare/sandbox:0.8.11',
-        migrations: [{ tag: 'sandbox-v1', newSqliteClasses: ['Sandbox'] }],
-      },
-    };
-
-    const result = enrichSandboxManifest(
-      {
-        version: 3,
-        bindings: {},
-        sandbox: {
-          bindingName: 'SANDBOX',
-          className: 'Sandbox',
-          containerName: 'void-sandbox',
-          image: 'docker.io/cloudflare/sandbox:0.8.12',
-        },
-      },
-      previousManifest,
-      1,
-    );
-
-    expect(result.changed).toBe(false);
-    expect(result.nextVersion).toBe(1);
-    expect(result.manifest.sandbox?.migrations).toEqual(previousManifest.sandbox?.migrations);
   });
 });
 
@@ -584,26 +518,14 @@ describe('buildSandboxUploadMetadata', () => {
         service: 'void-sb-project-deployment',
       },
     ]);
-    expect(buildSandboxUploadContainers(sandbox)).toBeUndefined();
-  });
-
-  it('combines websocket and sandbox migrations for Worker upload metadata', () => {
-    expect(
-      buildDurableObjectUploadMigrations(
-        [{ tag: 'ws-v1', newClasses: ['ChatRoom'] }],
-        [{ tag: 'sandbox-v2', newSqliteClasses: ['Sandbox'] }],
-      ),
-    ).toEqual({
-      new_tag: 'sandbox-v2',
-      steps: [{ new_classes: ['ChatRoom'] }, { new_sqlite_classes: ['Sandbox'] }],
-    });
   });
 
   it('combines live SQLite Durable Object migrations for Worker upload metadata', () => {
     expect(
-      buildDurableObjectUploadMigrations([{ tag: 'ws-v1', newClasses: ['ChatRoom'] }], undefined, [
-        { tag: 'live-v2', newSqliteClasses: ['VoidLiveStreamDurableObject'] },
-      ]),
+      buildDurableObjectUploadMigrations(
+        [{ tag: 'ws-v1', newClasses: ['ChatRoom'] }],
+        [{ tag: 'live-v2', newSqliteClasses: ['VoidLiveStreamDurableObject'] }],
+      ),
     ).toEqual({
       new_tag: 'live-v2',
       steps: [
@@ -630,20 +552,20 @@ describe('buildSandboxUploadMetadata', () => {
     ]);
   });
 
-  it('preserves chronological migration tag order across websocket and sandbox migrations', () => {
+  it('preserves chronological migration tag order across websocket and live migrations', () => {
     expect(
       buildDurableObjectUploadMigrations(
         [
           { tag: 'ws-v1', newClasses: ['ChatRoom'] },
           { tag: 'ws-v3', newClasses: ['PresenceRoom'] },
         ],
-        [{ tag: 'sandbox-v2', newSqliteClasses: ['Sandbox'] }],
+        [{ tag: 'live-v2', newSqliteClasses: ['VoidLiveStreamDurableObject'] }],
       ),
     ).toEqual({
       new_tag: 'ws-v3',
       steps: [
         { new_classes: ['ChatRoom'] },
-        { new_sqlite_classes: ['Sandbox'] },
+        { new_sqlite_classes: ['VoidLiveStreamDurableObject'] },
         { new_classes: ['PresenceRoom'] },
       ],
     });

@@ -144,7 +144,6 @@ import {
   type Project,
   type DeploymentStatus,
   type LiveMigrationMeta,
-  type SandboxMigrationMeta,
   type WebSocketMigrationMeta,
 } from '../types.ts';
 import { zeroTrustNotReadyMessage } from '../zero-trust/errors.ts';
@@ -1403,7 +1402,6 @@ async function assertBoundBuildStillActive(
 
 export function buildDurableObjectUploadMigrations(
   websocketMigrations: ReadonlyArray<WebSocketMigrationMeta> | undefined,
-  sandboxMigrations: ReadonlyArray<SandboxMigrationMeta> | undefined,
   liveMigrations: ReadonlyArray<LiveMigrationMeta> | undefined = undefined,
 ):
   | {
@@ -1428,17 +1426,6 @@ export function buildDurableObjectUploadMigrations(
       tag: migration.tag,
       index: steps.length,
       ...(migration.newClasses?.length ? { new_classes: migration.newClasses } : {}),
-      ...(migration.newSqliteClasses?.length
-        ? { new_sqlite_classes: migration.newSqliteClasses }
-        : {}),
-      ...(migration.deletedClasses?.length ? { deleted_classes: migration.deletedClasses } : {}),
-    });
-  }
-
-  for (const migration of sandboxMigrations ?? []) {
-    steps.push({
-      tag: migration.tag,
-      index: steps.length,
       ...(migration.newSqliteClasses?.length
         ? { new_sqlite_classes: migration.newSqliteClasses }
         : {}),
@@ -1561,12 +1548,6 @@ export function buildLiveUploadBindings(live: DeployManifest['live'] | undefined
   ];
 }
 
-export function buildSandboxUploadContainers(
-  _sandbox: DeployManifest['sandbox'] | undefined,
-): ReadonlyArray<{ class_name: string }> | undefined {
-  return undefined;
-}
-
 export function enrichWebSocketManifest(
   manifest: DeployManifest,
   previousManifest: DeployManifest | null,
@@ -1611,80 +1592,6 @@ export function enrichWebSocketManifest(
     },
     changed: true,
     nextVersion: planned.nextVersion,
-  };
-}
-
-export function enrichSandboxManifest(
-  manifest: DeployManifest,
-  previousManifest: DeployManifest | null,
-  currentVersion: number,
-): { manifest: DeployManifest; changed: boolean; nextVersion: number } {
-  if (!manifest.sandbox) {
-    return { manifest, changed: false, nextVersion: currentVersion };
-  }
-
-  const previousSandbox = previousManifest?.sandbox;
-  const previousMigrations = previousSandbox?.migrations ?? [];
-  const nextClass = manifest.sandbox.className;
-  const previousClass = previousSandbox?.className;
-
-  if (nextClass === previousClass && previousMigrations.length > 0) {
-    return {
-      manifest: {
-        ...manifest,
-        sandbox: {
-          ...manifest.sandbox,
-          migrations: previousMigrations,
-        },
-      },
-      changed: false,
-      nextVersion: currentVersion,
-    };
-  }
-
-  const existingClasses = new Set<string>();
-  if (previousClass) {
-    existingClasses.add(previousClass);
-  }
-  for (const migration of previousMigrations) {
-    for (const className of migration.newSqliteClasses ?? []) {
-      existingClasses.add(className);
-    }
-    for (const className of migration.deletedClasses ?? []) {
-      existingClasses.delete(className);
-    }
-  }
-
-  if (existingClasses.has(nextClass)) {
-    return {
-      manifest: {
-        ...manifest,
-        sandbox: {
-          ...manifest.sandbox,
-          migrations: previousMigrations,
-        },
-      },
-      changed: false,
-      nextVersion: currentVersion,
-    };
-  }
-
-  const nextVersion = currentVersion + 1;
-  const migration: SandboxMigrationMeta = {
-    tag: `sandbox-v${nextVersion}`,
-    newSqliteClasses: [nextClass],
-  };
-
-  return {
-    manifest: {
-      ...manifest,
-      sandbox: {
-        ...manifest.sandbox,
-        migrations: [...previousMigrations, migration],
-      },
-    },
-    changed: true,
-    nextVersion,
   };
 }
 
@@ -3362,20 +3269,12 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         previousManifest,
         project.websocket_version,
       );
-      const enrichedManifestResult = enrichSandboxManifest(
+      const liveManifestResult = enrichLiveManifest(
         websocketManifestResult.manifest,
         previousManifest,
         websocketManifestResult.nextVersion,
       );
-      const liveManifestResult = enrichLiveManifest(
-        enrichedManifestResult.manifest,
-        previousManifest,
-        enrichedManifestResult.nextVersion,
-      );
-      const manifestVersionChanged =
-        websocketManifestResult.changed ||
-        enrichedManifestResult.changed ||
-        liveManifestResult.changed;
+      const manifestVersionChanged = websocketManifestResult.changed || liveManifestResult.changed;
       manifest = liveManifestResult.manifest;
       if (manifest.sandbox) {
         manifest = { ...manifest, sandbox: { ...manifest.sandbox, runtime: { protocol: 2 } } };
@@ -4318,10 +4217,8 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         const assetConfig = manifest.assetConfig ?? { not_found_handling: 'none' };
         const durableObjectMigrations = buildDurableObjectUploadMigrations(
           manifest.websocket?.migrations,
-          undefined,
           manifest.live?.migrations,
         );
-        const containers = buildSandboxUploadContainers(manifest.sandbox);
         const tailServiceName = context.env.TAIL_SERVICE_NAME ?? DEFAULT_TAIL_SERVICE_NAME;
         const metadata: Record<string, unknown> = {
           main_module: manifest.workerMain ?? 'index.js',
@@ -4329,7 +4226,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           compatibility_flags: manifest.compatibilityFlags ?? ['nodejs_compat'],
           bindings: allBindings,
           ...(durableObjectMigrations ? { migrations: durableObjectMigrations } : {}),
-          ...(containers ? { containers } : {}),
           ...(completionJwt ? { assets: buildAssetMetadata(completionJwt, assetConfig) } : {}),
           observability: {
             enabled: true,
