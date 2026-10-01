@@ -580,9 +580,10 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     note(formatPlatformRuntime(runtime), 'Platform runtime');
     if (args.plan) {
       console.log(formatPlatformSetupPlan(plan));
+      outro('Plan complete. No installation changes were made.');
       console.log(
-        `\n${existing ? 'To resume this installation later:' : 'To install with these settings later:'}\n${formatPlatformInstallCommand(
-          {
+        `\n${pc.bold(pc.cyan(existing ? 'Next step: run this command to resume' : 'Next step: run this command to install'))}\n\n${pc.cyan(
+          formatPlatformInstallCommand({
             commandName: cliCommandName(),
             accountId,
             installationSlug,
@@ -601,10 +602,9 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
             runtime: args.runtime,
             ...(existing ? { resumeId: existing.id } : {}),
             yes: args.yes || process.stdin.isTTY !== true,
-          },
+          }),
         )}\n`,
       );
-      outro('No Cloudflare or local installation state was changed.');
       return;
     }
     assertPlatformOperatorCredentialCanApplyPlan(operatorCredential, plan);

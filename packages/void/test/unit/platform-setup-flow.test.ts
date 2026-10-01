@@ -1,9 +1,11 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { log } from '@clack/prompts';
+import { stripVTControlCharacters } from 'node:util';
+import { log, outro } from '@clack/prompts';
 import { createPlatformDeploymentManifest, transitionInstallation } from '@void/platform';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { pc } from '../../src/cli/output.ts';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
 import {
   PlatformCloudflareApiError,
@@ -244,7 +246,20 @@ async function interruptedInstall() {
 
 describe('platform credential onboarding', () => {
   it('prints a command to install a fresh read-only plan without saving a draft', async () => {
+    const colors = pc.createColors(true);
+    vi.spyOn(pc, 'bold').mockImplementation(colors.bold);
+    vi.spyOn(pc, 'cyan').mockImplementation(colors.cyan);
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));
+    const lastOutput = vi.mocked(console.log).mock.calls.at(-1)![0] as string;
+    expect(lastOutput).toContain(
+      colors.bold(colors.cyan('Next step: run this command to install')),
+    );
+    expect(stripVTControlCharacters(lastOutput)).toMatch(
+      /Next step: run this command to install\n\nvoid platform install /,
+    );
+    expect(vi.mocked(outro).mock.invocationCallOrder.at(-1)).toBeLessThan(
+      vi.mocked(console.log).mock.invocationCallOrder.at(-1)!,
+    );
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining(
         'void platform install --name test-setup --account account --display-name Test --workers-dev',
@@ -263,6 +278,9 @@ describe('platform credential onboarding', () => {
     );
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining(`void platform install --resume --name ${interrupted.id}`),
+    );
+    expect(console.log).toHaveBeenLastCalledWith(
+      expect.stringContaining('Next step: run this command to resume'),
     );
   });
 
@@ -868,7 +886,7 @@ describe('platform credential onboarding', () => {
   });
   it('continues from the printed command without repeating nonsecret choices', async () => {
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));
-    const output = vi.mocked(console.log).mock.calls.flat().join('\n');
+    const output = stripVTControlCharacters(vi.mocked(console.log).mock.calls.flat().join('\n'));
     const command = output
       .split('\n')
       .find((line) => /^void(?:-dev)? platform install /.test(line))!;
