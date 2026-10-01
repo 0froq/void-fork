@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import type { CloudflareAuthRunResult } from '../../src/cli/cloudflare-auth.ts';
 import { cloudflareAuthEnvironment } from '../../src/cli/cloudflare-auth.ts';
 import {
   assertPlatformOperatorCredentialCanApplyPlan,
@@ -67,7 +68,8 @@ describe('platform Cloudflare authentication', () => {
       readWranglerOAuthCredential(() => ({
         status: 0,
         stderr: '',
-        stdout: JSON.stringify({ token: 'oauth-token', type: 'oauth' }),
+        stdout: '',
+        data: { token: 'oauth-token', type: 'oauth' },
       })),
     ).resolves.toEqual({ source: 'oauth', token: 'oauth-token' });
   });
@@ -78,27 +80,28 @@ describe('platform Cloudflare authentication', () => {
     const credential = await resolvePlatformCloudflareCredential({
       interactive: true,
       runWrangler: (args) => {
-        calls.push(args.join(' '));
-        if (args[0] === 'auth' && args[1] === 'token') {
+        calls.push(args.type);
+        if (args.type === 'auth.token') {
           tokenAttempts++;
           return tokenAttempts === 1
-            ? { status: 1, stderr: 'not logged in', stdout: '' }
+            ? { status: 1, stderr: 'not logged in', stdout: '', data: '' }
             : {
                 status: 0,
                 stderr: '',
-                stdout: JSON.stringify({ token: 'browser-token', type: 'oauth' }),
+                stdout: '',
+                data: { token: 'browser-token', type: 'oauth' },
               };
         }
-        return { status: 0, stderr: '', stdout: '' };
+        return { status: 0, stderr: '', stdout: '', data: '' };
       },
     });
 
     expect(credential).toEqual({ source: 'oauth', token: 'browser-token' });
-    expect(calls).toEqual(['auth token --json', 'login', 'auth token --json']);
+    expect(calls).toEqual(['auth.token', 'auth.login', 'auth.token']);
   });
 
   it('requires an explicit environment token in non-interactive environments', async () => {
-    const runWrangler = vi.fn(() => ({ status: 1, stderr: 'not logged in', stdout: '' }));
+    const runWrangler = vi.fn(() => ({ status: 1, stderr: 'not logged in', stdout: '', data: '' }));
     await expect(
       resolvePlatformCloudflareCredential({
         interactive: false,
@@ -113,7 +116,8 @@ describe('platform Cloudflare authentication', () => {
       readWranglerOAuthCredential(() => ({
         status: 0,
         stderr: '',
-        stdout: JSON.stringify({ token: 'implicit-token', type: 'api_token' }),
+        stdout: '',
+        data: { token: 'implicit-token', type: 'api_token' },
       })),
     ).resolves.toBeNull();
   });
@@ -132,10 +136,11 @@ describe('platform Cloudflare authentication', () => {
 });
 
 describe('platform authentication during input', () => {
-  const success = { status: 0, stderr: '', stdout: '' };
+  const success: CloudflareAuthRunResult = { status: 0, stderr: '', stdout: '', data: '' };
   const oauth = {
     ...success,
-    stdout: JSON.stringify({ token: 'browser-token', type: 'oauth' }),
+    stdout: '',
+    data: { token: 'browser-token', type: 'oauth' },
   };
 
   it('shows input while the saved-login check is still pending', async () => {
@@ -147,7 +152,7 @@ describe('platform authentication during input', () => {
       runWrangler,
     });
     expect(readInput).toHaveBeenCalledOnce();
-    expect(runWrangler.mock.calls).toEqual([[['auth', 'token', '--json'], true]]);
+    expect(runWrangler.mock.calls).toEqual([[{ type: 'auth.token' }, true]]);
     check.resolve(oauth);
     await expect(result).resolves.toEqual({
       input: 'team',
@@ -173,10 +178,10 @@ describe('platform authentication during input', () => {
       input: 'team',
       credential: { source: 'oauth', token: 'browser-token' },
     });
-    expect(runWrangler.mock.calls.map(([args]) => args.join(' '))).toEqual([
-      'auth token --json',
-      'login',
-      'auth token --json',
+    expect(runWrangler.mock.calls.map(([args]) => args.type)).toEqual([
+      'auth.token',
+      'auth.login',
+      'auth.token',
     ]);
   });
 

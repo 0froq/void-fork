@@ -8,7 +8,7 @@ import { resolvePlatformCloudflareCredentialWithInput } from '../../src/cli/plat
 
 const fixture = vi.hoisted(() => ({ source: '' }));
 vi.mock('../../src/cli/preset.ts', () => ({
-  resolveWranglerArgv: () => [process.execPath, '--eval', fixture.source, '--'],
+  resolveCloudflareOperationArgv: () => [process.execPath, '--eval', fixture.source, '--'],
 }));
 
 let root: string;
@@ -28,24 +28,22 @@ describe('non-blocking platform auth processes', () => {
     vi.stubEnv('VOID_PLATFORM_RECOVERY_KEY', 'synthetic-recovery-secret');
     vi.stubEnv('DATABASE_URL', 'synthetic-database-secret');
     fixture.source = `
-      process.stdout.write(JSON.stringify({
-        args: process.argv.slice(1),
+      process.stdout.write(JSON.stringify({ operationResult: 1, data: {
+        operation: JSON.parse(process.argv[1]),
         sanitize: process.env.WRANGLER_LOG_SANITIZE,
         recovery: process.env.VOID_PLATFORM_RECOVERY_KEY,
         database: process.env.DATABASE_URL,
-      }));
+      }}));
     `;
-    const result = await runCloudflareAuthCommand(root, ['auth', 'token', '--json']);
+    const result = await runCloudflareAuthCommand(root, { type: 'auth.token' });
     expect(result.status).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({
-      args: ['auth', 'token', '--json'],
-    });
+    expect(result.data).toEqual({ operation: { type: 'auth.token' } });
     expect(result.stderr).toBe('');
   });
 
   it('preserves nonzero exit status without throwing raw subprocess output', async () => {
     fixture.source = `process.stderr.write('synthetic failure'); process.exit(7);`;
-    const result = await runCloudflareAuthCommand(root, ['auth', 'token', '--json']);
+    const result = await runCloudflareAuthCommand(root, { type: 'auth.token' });
     expect(result.status).toBe(7);
     expect(result.stderr).toBe('synthetic failure');
   });
@@ -86,8 +84,8 @@ describe('non-blocking platform auth processes', () => {
   it('cancels browser login on Ctrl+C and restores the signal listeners', async () => {
     const ready = join(root, 'login-ready');
     fixture.source = `
-      const args = process.argv.slice(1);
-      if (args[0] === 'auth') process.exit(1);
+      const operation = JSON.parse(process.argv[1]);
+      if (operation.type === 'auth.token') process.exit(1);
       require('node:fs').writeFileSync(${JSON.stringify(ready)}, String(process.pid));
       setTimeout(() => process.exit(2), 10_000);
     `;

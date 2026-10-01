@@ -1,17 +1,14 @@
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isDeepStrictEqual, stripVTControlCharacters } from 'node:util';
+import { isDeepStrictEqual } from 'node:util';
 import { join } from 'pathslash';
 import { parseRootWranglerConfig } from './config.ts';
 import { cloudflareCommandDiagnostic } from './diagnostics.ts';
 import type { CloudflareCommandResult, CloudflareCommandRunner } from './execute.ts';
+import type { CloudflareUploadResult } from './operations.ts';
 import { isWranglerSecretOnlyDraft } from './secret-draft.ts';
 
-const VERSION_ID_RE = /(?:Worker|Current) Version ID:\s*([0-9a-f]{8}-[0-9a-f-]{27})/i;
-const PREVIEW_URL_RE = /Version Preview(?: Alias)? URL:\s*(https:\/\/\S+)/i;
-const WORKERS_DEV_URL_RE = /(https:\/\/[a-z0-9.-]+\.workers\.dev(?:\/[^\s]*)?)/i;
-const CLOUDFLARE_ERROR_CODE_RE = /\[code:\s*(\d+)\]/i;
 const DURABLE_MIGRATION_VERSION_ERROR = 10211;
 
 export type CloudflareVersionMetadata =
@@ -241,7 +238,7 @@ export async function deployCloudflareVersionTriggers(options: {
   try {
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
     const deployed = await options.runWrangler(
-      ['triggers', 'deploy', '-c', configPath, '--env=', '--name', options.workerName],
+      { type: 'triggers.deploy', configPath, workerName: options.workerName },
       { capture: false },
     );
     if (!isCleanCommandExit(deployed)) {
@@ -258,7 +255,12 @@ export async function deployCloudflareVersionTriggers(options: {
       options.previousTriggerConfig,
     )) {
       const removed = await options.runWrangler(
-        ['queues', 'consumer', 'remove', queue, options.workerName, '-c', configPath, '--env='],
+        {
+          type: 'queues.consumer.remove',
+          queueName: queue,
+          workerName: options.workerName,
+          configPath,
+        },
         { capture: false },
       );
       if (!isCleanCommandExit(removed)) {
@@ -334,7 +336,7 @@ export async function stabilizeCloudflareVersionTriggers(options: {
   manageRoutes?: boolean;
   attempts?: number;
 }): Promise<CloudflareTriggerStabilization> {
-  const commonArgs = [...(options.configPath ? ['-c', options.configPath] : []), '--env='];
+  const configPath = options.configPath;
   let cleanupBaseline = mergeTriggerCleanupBaselines(
     options.previousTriggerConfig,
     options.targetTriggerConfig,
@@ -342,7 +344,7 @@ export async function stabilizeCloudflareVersionTriggers(options: {
   const attempts = Math.max(1, options.attempts ?? 4);
 
   for (let attempt = 0; attempt < attempts; attempt++) {
-    const owner = await readCurrentProductionVersion(options, commonArgs);
+    const owner = await readCurrentProductionVersion(options, configPath);
     if (owner.kind === 'failed') {
       return { ok: false, reason: 'status-failed', status: owner.status };
     }
@@ -359,7 +361,7 @@ export async function stabilizeCloudflareVersionTriggers(options: {
         ? options.targetTriggerConfig
         : options.knownTriggerConfigs?.[activeVersionId];
     if (!activeTriggerConfig && activeVersionId !== options.targetVersionId) {
-      const metadata = await readCloudflareVersionMetadata(options, commonArgs, activeVersionId);
+      const metadata = await readCloudflareVersionMetadata(options, configPath, activeVersionId);
       activeTriggerConfig = metadata?.schema === 2 ? metadata.triggerConfig : undefined;
     }
     if (!activeTriggerConfig) {
@@ -386,7 +388,7 @@ export async function stabilizeCloudflareVersionTriggers(options: {
     }
 
     cleanupBaseline = mergeTriggerCleanupBaselines(cleanupBaseline, activeTriggerConfig);
-    const after = await readCurrentProductionVersion(options, commonArgs);
+    const after = await readCurrentProductionVersion(options, configPath);
     if (after.kind === 'failed') {
       return { ok: false, reason: 'status-failed', status: after.status };
     }
@@ -824,13 +826,12 @@ export async function activateCloudflareVersion(
 async function activateCloudflareVersionWithSecretsFile(
   options: InternalCloudflareVersionActivationOptions,
 ): Promise<CloudflareVersionActivation> {
-  const configArgs = options.configPath ? ['-c', options.configPath] : [];
-  const commonArgs = [...configArgs, '--env='];
+  const configPath = options.configPath;
   if (!options.verifyUploader()) {
     return { ok: false, reason: 'uploader-changed' };
   }
   options.onProgress?.('Checking the current Worker deployment...');
-  const previous = await readCurrentProductionVersion(options, commonArgs);
+  const previous = await readCurrentProductionVersion(options, configPath);
   if (previous.kind === 'failed') {
     return { ok: false, reason: 'status-failed', status: previous.status };
   }
@@ -864,7 +865,7 @@ async function activateCloudflareVersionWithSecretsFile(
   let trustedCandidateChain = false;
   let activeSecretsPinned = false;
   if (options.expectedPreviousVersionId !== undefined || options.verifyInheritedSecrets === true) {
-    const recent = await readRecentCloudflareVersionIds(options, commonArgs);
+    const recent = await readRecentCloudflareVersionIds(options, configPath);
     if (recent === null) {
       return { ok: false, reason: 'inheritance-source-unavailable' };
     }
@@ -904,7 +905,7 @@ async function activateCloudflareVersionWithSecretsFile(
     ) {
       const replacesAllRemoteSecrets = await candidateReplacesAllRemoteSecrets(
         options,
-        commonArgs,
+        configPath,
         previous.versionId,
         latestVersionId,
       );
@@ -913,7 +914,7 @@ async function activateCloudflareVersionWithSecretsFile(
       }
       if (!replacesAllRemoteSecrets) {
         const activeSecrets = previous.versionId
-          ? await readCloudflareVersionSecretBindings(options, commonArgs, previous.versionId)
+          ? await readCloudflareVersionSecretBindings(options, configPath, previous.versionId)
           : null;
         if (
           !activeSecrets ||
@@ -943,7 +944,7 @@ async function activateCloudflareVersionWithSecretsFile(
     previousVersionId && desiredMetadata?.schema === 2
       ? await readCloudflareVersionInspection(
           options,
-          commonArgs,
+          configPath,
           previousVersionId,
           inheritanceBaseline?.map((version) => version.inspection),
         )
@@ -954,7 +955,7 @@ async function activateCloudflareVersionWithSecretsFile(
     }
     previousVersion ??= await readCloudflareVersionInspection(
       options,
-      commonArgs,
+      configPath,
       previousVersionId,
       inheritanceBaseline?.map((version) => version.inspection),
     );
@@ -1028,49 +1029,38 @@ async function activateCloudflareVersionWithSecretsFile(
     if (!activeSecretsPinned && options.pinActiveSecrets) {
       const activeSecrets = await readCloudflareVersionSecretBindings(
         options,
-        commonArgs,
+        configPath,
         previous.versionId,
       );
       if (activeSecrets?.length) {
         await options.pinActiveSecrets(previous.versionId, activeSecrets);
       }
     }
-    return bootstrapFirstDeployment({ ...options, message }, commonArgs, previous.versionId, true);
+    return bootstrapFirstDeployment({ ...options, message }, configPath, previous.versionId, true);
   }
   options.onProgress?.('Uploading the Worker and assets...');
   const upload = await Promise.resolve(
     options.runWrangler(
-      [
-        'versions',
-        'upload',
-        ...commonArgs,
-        '--name',
-        options.workerName,
-        '--message',
+      {
+        type: 'versions.upload',
+        configPath,
+        workerName: options.workerName,
         message,
-        ...(options.candidateSecretsFilePath
-          ? ['--secrets-file', options.candidateSecretsFilePath]
-          : []),
-        ...(options.assetsDirectoryOverride ? ['--assets', options.assetsDirectoryOverride] : []),
-        '--preview-alias',
-        alias,
-        '--strict',
-        '--experimental-provision=false',
-        '--experimental-auto-create=false',
-      ],
+        secretsFilePath: options.candidateSecretsFilePath,
+        assetsDirectory: options.assetsDirectoryOverride,
+        previewAlias: alias,
+      },
       { capture: true },
     ),
   );
   if (!isCleanCommandExit(upload)) {
-    const output = stripVTControlCharacters(`${upload.stdout}\n${upload.stderr}`);
-    const cloudflareErrorCode = parseCloudflareErrorCode(output);
+    const cloudflareErrorCode = upload.errorCode;
     const isBootstrapError =
-      cloudflareErrorCode === DURABLE_MIGRATION_VERSION_ERROR ||
-      // Recent Wrangler versions reject this locally, before Cloudflare can return 10211.
-      /This\s+Worker\s+has\s+a\s+pending\s+Durable\s+Object\s+migration,\s+which\s+cannot\s+be\s+applied\s+by\s+`wrangler\s+versions\s+upload`/i.test(
-        output,
-      ) ||
-      /cannot upload a new version of a worker that does not yet exist/i.test(output);
+      isCompletedCommand(upload) &&
+      (upload.failure === 'durable-migration' ||
+        upload.failure === 'not-found' ||
+        cloudflareErrorCode === DURABLE_MIGRATION_VERSION_ERROR ||
+        cloudflareErrorCode === 10007);
     if (
       !options.preserveTriggers &&
       isBootstrapError &&
@@ -1078,7 +1068,7 @@ async function activateCloudflareVersionWithSecretsFile(
         options.allowFirstDeploymentBootstrap === true ||
         (await previousIsSecretOnlyDraft()))
     ) {
-      return bootstrapFirstDeployment({ ...options, message }, commonArgs, previous.versionId);
+      return bootstrapFirstDeployment({ ...options, message }, configPath, previous.versionId);
     }
     return {
       ok: false,
@@ -1086,18 +1076,18 @@ async function activateCloudflareVersionWithSecretsFile(
       status: upload.status,
       ...commandDiagnosticFields(upload),
       ...(cloudflareErrorCode === undefined ? {} : { cloudflareErrorCode }),
-      ...(isContainersUnavailable(output) ? { containersUnavailable: true } : {}),
+      ...(isContainersUnavailable(upload) ? { containersUnavailable: true } : {}),
     };
   }
 
-  const output = `${upload.stdout}\n${upload.stderr}`;
-  const versionId = output.match(VERSION_ID_RE)?.[1];
+  const uploaded = readUploadResult(upload);
+  const versionId = uploaded?.versionId;
   if (!versionId) {
     return { ok: false, reason: 'upload-output-invalid' };
   }
   options.onProgress?.('Verifying the uploaded Worker...');
   if (inheritanceBaseline) {
-    const recent = await readRecentCloudflareVersionIds(options, commonArgs);
+    const recent = await readRecentCloudflareVersionIds(options, configPath);
     const previousLatest = inheritanceBaseline.at(-1);
     const expected = [...inheritanceBaseline.map((version) => version.id), versionId].slice(-10);
     if (recent === null) {
@@ -1138,7 +1128,7 @@ async function activateCloudflareVersionWithSecretsFile(
     }
     await options.recordVerifiedCandidate(versionId, previous.versionId);
   }
-  const reportedPreviewUrl = output.match(PREVIEW_URL_RE)?.[1];
+  const reportedPreviewUrl = uploaded?.previewUrl;
   let authenticatedWorkersDevSubdomain = reportedPreviewUrl
     ? extractWorkersDevSubdomain(reportedPreviewUrl)
     : undefined;
@@ -1152,7 +1142,7 @@ async function activateCloudflareVersionWithSecretsFile(
         options.allowFirstDeploymentBootstrap === true ||
         (await previousIsSecretOnlyDraft()))
     ) {
-      return bootstrapFirstDeployment({ ...options, message }, commonArgs, previous.versionId);
+      return bootstrapFirstDeployment({ ...options, message }, configPath, previous.versionId);
     }
     readinessUrl = desiredTriggerConfig.workers_dev
       ? workersDevReadinessUrl(options.workerName, options.workersDevSubdomain)
@@ -1181,7 +1171,7 @@ async function activateCloudflareVersionWithSecretsFile(
     }
     const stagingOwnerFailure = await verifyReadinessStagingOwner(
       options,
-      commonArgs,
+      configPath,
       previous.versionId,
       versionId,
     );
@@ -1190,12 +1180,12 @@ async function activateCloudflareVersionWithSecretsFile(
     }
     const staged = await deployVersionPercentages(
       options,
-      commonArgs,
+      configPath,
       [`${previous.versionId}@100`, `${versionId}@0`],
       message,
     );
     if (!isCleanCommandExit(staged)) {
-      const cloudflareErrorCode = parseCloudflareErrorCode(`${staged.stdout}\n${staged.stderr}`);
+      const cloudflareErrorCode = staged.errorCode;
       return {
         ok: false,
         reason: 'readiness-staging-failed',
@@ -1248,7 +1238,7 @@ async function activateCloudflareVersionWithSecretsFile(
       }
       const stagingOwnerFailure = await verifyReadinessStagingOwner(
         options,
-        commonArgs,
+        configPath,
         previous.versionId,
         versionId,
       );
@@ -1257,12 +1247,12 @@ async function activateCloudflareVersionWithSecretsFile(
       }
       const staged = await deployVersionPercentages(
         options,
-        commonArgs,
+        configPath,
         [`${previous.versionId}@100`, `${versionId}@0`],
         message,
       );
       if (!isCleanCommandExit(staged)) {
-        const cloudflareErrorCode = parseCloudflareErrorCode(`${staged.stdout}\n${staged.stderr}`);
+        const cloudflareErrorCode = staged.errorCode;
         return {
           ok: false,
           reason: 'readiness-staging-failed',
@@ -1299,7 +1289,7 @@ async function activateCloudflareVersionWithSecretsFile(
       rollback: stagedVersionOverride
         ? await restorePreviousVersion(
             options,
-            commonArgs,
+            configPath,
             previous.versionId,
             'readiness failed',
             [stagedVersionPercentages(previous.versionId, versionId)],
@@ -1316,7 +1306,7 @@ async function activateCloudflareVersionWithSecretsFile(
       rollback: stagedVersionOverride
         ? await restorePreviousVersion(
             options,
-            commonArgs,
+            configPath,
             previous.versionId,
             'uploader verification failed',
             [stagedVersionPercentages(previous.versionId, versionId)],
@@ -1327,7 +1317,7 @@ async function activateCloudflareVersionWithSecretsFile(
 
   // Readiness can take long enough for another deploy or rollback to finish. Never flatten that
   // newer operation using the stale `previous` snapshot captured before this upload began.
-  const ownerBeforeActivation = await readCurrentProductionVersion(options, commonArgs);
+  const ownerBeforeActivation = await readCurrentProductionVersion(options, configPath);
   if (ownerBeforeActivation.kind === 'failed') {
     return {
       ok: false,
@@ -1371,7 +1361,7 @@ async function activateCloudflareVersionWithSecretsFile(
   options.onProgress?.('Activating the Worker...');
   const activate = await deployVersionPercentages(
     options,
-    commonArgs,
+    configPath,
     [`${versionId}@100`],
     message,
   );
@@ -1385,7 +1375,7 @@ async function activateCloudflareVersionWithSecretsFile(
       rollback: stagedVersionOverride
         ? await restorePreviousVersion(
             options,
-            commonArgs,
+            configPath,
             previous.versionId,
             'version activation failed',
             [
@@ -1410,7 +1400,7 @@ async function activateCloudflareVersionWithSecretsFile(
     };
   }
   if (options.preserveTriggers) {
-    const owner = await readCurrentProductionVersion(options, commonArgs);
+    const owner = await readCurrentProductionVersion(options, configPath);
     if (owner.kind !== 'ok' || owner.versionId !== versionId) {
       return {
         ok: false,
@@ -1471,7 +1461,7 @@ async function activateCloudflareVersionWithSecretsFile(
         rollback: 'unsafe',
       };
     }
-    const ownerBeforeCompensation = await readCurrentProductionVersion(options, commonArgs);
+    const ownerBeforeCompensation = await readCurrentProductionVersion(options, configPath);
     if (ownerBeforeCompensation.kind !== 'ok' || ownerBeforeCompensation.versionId === null) {
       return {
         ok: false,
@@ -1511,7 +1501,7 @@ async function activateCloudflareVersionWithSecretsFile(
     }
     const rollback = await restorePreviousVersionAndTriggers(
       options,
-      commonArgs,
+      configPath,
       previous.versionId,
       'trigger activation failed',
       desiredTriggerConfig,
@@ -1569,14 +1559,14 @@ async function restorePreviousVersionAndTriggers(
     | 'publishEmptyCustomDomains'
     | 'publishEmptyCrons'
   >,
-  commonArgs: Array<string>,
+  configPath: string | undefined,
   previousVersionId: string | null,
   cause: string,
   failedTriggerConfig: CloudflareTriggerConfig,
   failedVersionId: string,
   capturedTriggerConfig?: CloudflareTriggerConfig,
 ): Promise<'succeeded' | 'failed' | 'unavailable' | 'unsafe'> {
-  const traffic = await restorePreviousVersion(options, commonArgs, previousVersionId, cause, [
+  const traffic = await restorePreviousVersion(options, configPath, previousVersionId, cause, [
     [{ versionId: failedVersionId, percentage: 100 }],
   ]);
   if (traffic !== 'succeeded' || !previousVersionId) {
@@ -1591,7 +1581,7 @@ async function restorePreviousVersionAndTriggers(
   // part of this target snapshot.
   let targetTriggerConfig = capturedTriggerConfig;
   if (!targetTriggerConfig) {
-    const metadata = await readCloudflareVersionMetadata(options, commonArgs, previousVersionId);
+    const metadata = await readCloudflareVersionMetadata(options, configPath, previousVersionId);
     if (metadata?.schema !== 2) {
       return 'unavailable';
     }
@@ -1626,10 +1616,10 @@ async function restorePreviousVersionAndTriggers(
 
 async function readCloudflareVersionMetadata(
   options: Pick<Parameters<typeof activateCloudflareVersion>[0], 'runWrangler' | 'workerName'>,
-  commonArgs: Array<string>,
+  configPath: string | undefined,
   versionId: string,
 ): Promise<CloudflareVersionMetadata | null> {
-  return (await readCloudflareVersionInspection(options, commonArgs, versionId))?.metadata ?? null;
+  return (await readCloudflareVersionInspection(options, configPath, versionId))?.metadata ?? null;
 }
 
 type CloudflareVersionInspection = Readonly<{
@@ -1639,7 +1629,7 @@ type CloudflareVersionInspection = Readonly<{
 
 async function readCloudflareVersionInspection(
   options: Pick<Parameters<typeof activateCloudflareVersion>[0], 'runWrangler' | 'workerName'>,
-  commonArgs: Array<string>,
+  configPath: string | undefined,
   versionId: string,
   knownVersions?: ReadonlyArray<unknown>,
 ): Promise<CloudflareVersionInspection | null> {
@@ -1649,13 +1639,13 @@ async function readCloudflareVersionInspection(
     let versions = knownVersions;
     if (versions === undefined) {
       const result = await options.runWrangler(
-        ['versions', 'list', ...commonArgs, '--name', options.workerName, '--json'],
+        { type: 'versions.list', configPath, workerName: options.workerName },
         { capture: true },
       );
       if (!isCleanCommandExit(result)) {
         return null;
       }
-      versions = JSON.parse(result.stdout) as Array<unknown>;
+      versions = result.data as Array<unknown>;
     }
     if (!Array.isArray(versions)) {
       return null;
@@ -1676,12 +1666,12 @@ async function readCloudflareVersionInspection(
       ) {
         const inspection = await Promise.resolve(
           options.runWrangler(
-            ['versions', 'view', versionId, ...commonArgs, '--name', options.workerName, '--json'],
+            { type: 'versions.view', versionId, configPath, workerName: options.workerName },
             { capture: true },
           ),
         );
         if (isCleanCommandExit(inspection)) {
-          const inspected: unknown = JSON.parse(inspection.stdout);
+          const inspected: unknown = inspection.data;
           if (isRecord(inspected) && inspected.id === versionId) {
             draft = inspected;
           }
@@ -1700,23 +1690,25 @@ async function readCloudflareVersionInspection(
 
 async function readRecentCloudflareVersionIds(
   options: Pick<Parameters<typeof activateCloudflareVersion>[0], 'runWrangler' | 'workerName'>,
-  commonArgs: Array<string>,
+  configPath: string | undefined,
 ): Promise<Array<RecentCloudflareVersion> | null> {
   const result = await Promise.resolve(
     options.runWrangler(
-      ['versions', 'list', ...commonArgs, '--name', options.workerName, '--json'],
+      { type: 'versions.list', configPath, workerName: options.workerName },
       { capture: true },
     ),
   );
   if (!isCleanCommandExit(result)) {
-    const output = `${result.stdout}\n${result.stderr}`;
-    if (isMissingWorkerOutput(output)) {
+    if (
+      isCompletedCommand(result) &&
+      (result.failure === 'not-found' || result.errorCode === 10007)
+    ) {
       return [];
     }
     return null;
   }
   try {
-    const versions = JSON.parse(result.stdout) as unknown;
+    const versions = result.data as unknown;
     if (
       !Array.isArray(versions) ||
       !versions.every(
@@ -1748,7 +1740,7 @@ async function candidateReplacesAllRemoteSecrets(
     Parameters<typeof activateCloudflareVersion>[0],
     'candidateSecrets' | 'runWrangler' | 'workerName'
   >,
-  commonArgs: Array<string>,
+  configPath: string | undefined,
   activeVersionId: string | null,
   latestVersionId: string | null,
 ): Promise<boolean | null> {
@@ -1757,7 +1749,7 @@ async function candidateReplacesAllRemoteSecrets(
   ] as Array<string>;
   const secretBindings: Array<Array<{ name: string; type: 'secret_key' | 'secret_text' }>> = [];
   for (const versionId of versionIds) {
-    const bindings = await readCloudflareVersionSecretBindings(options, commonArgs, versionId);
+    const bindings = await readCloudflareVersionSecretBindings(options, configPath, versionId);
     if (bindings === null) {
       return null;
     }
@@ -1774,12 +1766,12 @@ async function candidateReplacesAllRemoteSecrets(
 
 async function readCloudflareVersionSecretBindings(
   options: Pick<Parameters<typeof activateCloudflareVersion>[0], 'runWrangler' | 'workerName'>,
-  commonArgs: Array<string>,
+  configPath: string | undefined,
   versionId: string,
 ): Promise<Array<{ name: string; type: 'secret_key' | 'secret_text' }> | null> {
   const result = await Promise.resolve(
     options.runWrangler(
-      ['versions', 'view', versionId, ...commonArgs, '--name', options.workerName, '--json'],
+      { type: 'versions.view', versionId, configPath, workerName: options.workerName },
       { capture: true },
     ),
   );
@@ -1787,7 +1779,7 @@ async function readCloudflareVersionSecretBindings(
     return null;
   }
   try {
-    const version = JSON.parse(result.stdout) as unknown;
+    const version = result.data as unknown;
     if (!isRecord(version) || version.id !== versionId || !isRecord(version.resources)) {
       return null;
     }
@@ -1819,7 +1811,7 @@ async function readCloudflareVersionSecretBindings(
  */
 async function bootstrapFirstDeployment(
   options: InternalCloudflareVersionActivationOptions,
-  commonArgs: Array<string>,
+  configPath: string | undefined,
   previousVersionId: string | null,
   atomic = false,
 ): Promise<CloudflareVersionActivation> {
@@ -1827,7 +1819,7 @@ async function bootstrapFirstDeployment(
     return { ok: false, reason: 'uploader-changed' };
   }
   if (atomic) {
-    const current = await readCurrentProductionVersion(options, commonArgs);
+    const current = await readCurrentProductionVersion(options, configPath);
     if (current.kind === 'failed') {
       return { ok: false, reason: 'status-failed', status: current.status };
     }
@@ -1845,38 +1837,30 @@ async function bootstrapFirstDeployment(
   );
   const bootstrap = await Promise.resolve(
     options.runWrangler(
-      [
-        'deploy',
-        ...commonArgs,
-        '--name',
-        options.workerName,
-        '--message',
-        options.message,
-        ...(options.candidateSecretsFilePath
-          ? ['--secrets-file', options.candidateSecretsFilePath]
-          : []),
-        ...(options.assetsDirectoryOverride ? ['--assets', options.assetsDirectoryOverride] : []),
-        '--strict',
-        '--experimental-provision=false',
-        '--experimental-auto-create=false',
-        '--autoconfig=false',
-      ],
+      {
+        type: 'worker.deploy',
+        configPath,
+        workerName: options.workerName,
+        message: options.message,
+        secretsFilePath: options.candidateSecretsFilePath,
+        assetsDirectory: options.assetsDirectoryOverride,
+      },
       { capture: true },
     ),
   );
-  const output = `${bootstrap.stdout}\n${bootstrap.stderr}`;
   if (!isCleanCommandExit(bootstrap)) {
-    const cloudflareErrorCode = parseCloudflareErrorCode(output);
+    const cloudflareErrorCode = bootstrap.errorCode;
     return {
       ok: false,
       reason: atomic ? 'atomic-failed' : 'bootstrap-failed',
       status: bootstrap.status,
       ...commandDiagnosticFields(bootstrap),
       ...(cloudflareErrorCode === undefined ? {} : { cloudflareErrorCode }),
-      ...(isContainersUnavailable(output) ? { containersUnavailable: true } : {}),
+      ...(isContainersUnavailable(bootstrap) ? { containersUnavailable: true } : {}),
     };
   }
-  const versionId = output.match(VERSION_ID_RE)?.[1];
+  const published = readUploadResult(bootstrap);
+  const versionId = published?.versionId;
   const desiredMetadata = parseCloudflareVersionMessage(options.message);
   const desiredTriggerConfig =
     desiredMetadata?.schema === 2
@@ -1884,7 +1868,7 @@ async function bootstrapFirstDeployment(
       : options.configPath
         ? readCloudflareTriggerConfig(options.configPath)
         : triggerConfigFromWrangler({});
-  const reportedUrl = output.match(PREVIEW_URL_RE)?.[1] ?? output.match(WORKERS_DEV_URL_RE)?.[1];
+  const reportedUrl = published?.previewUrl ?? published?.workersDevUrl;
   const reportedOrConfiguredUrl =
     reportedUrl ??
     (desiredTriggerConfig.workers_dev
@@ -1952,9 +1936,31 @@ async function bootstrapFirstDeployment(
   };
 }
 
-function parseCloudflareErrorCode(output: string): number | undefined {
-  const value = output.match(CLOUDFLARE_ERROR_CODE_RE)?.[1];
-  return value === undefined ? undefined : Number(value);
+function readUploadResult(result: CloudflareCommandResult): CloudflareUploadResult | null {
+  const data = result.data;
+  if (
+    !isRecord(data) ||
+    typeof data.versionId !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(data.versionId)
+  ) {
+    return null;
+  }
+  if (
+    (data.previewUrl !== undefined && typeof data.previewUrl !== 'string') ||
+    (data.workersDevUrl !== undefined && typeof data.workersDevUrl !== 'string')
+  ) {
+    return null;
+  }
+  return data as CloudflareUploadResult;
+}
+
+function versionPercentages(
+  values: Array<string>,
+): Array<{ versionId: string; percentage: number }> {
+  return values.map((value) => {
+    const [versionId, percentage] = value.split('@');
+    return { versionId: versionId!, percentage: Number(percentage) };
+  });
 }
 
 function commandDiagnosticFields(result: CloudflareCommandResult): { diagnostic?: string } {
@@ -1962,42 +1968,41 @@ function commandDiagnosticFields(result: CloudflareCommandResult): { diagnostic?
   return diagnostic ? { diagnostic } : {};
 }
 
-function isMissingWorkerOutput(output: string): boolean {
+function isContainersUnavailable(result: CloudflareCommandResult): boolean {
   return (
-    parseCloudflareErrorCode(output) === 10007 ||
-    /no deployments|\bworker\b.*\b(?:does not exist|not found)\b/i.test(output)
-  );
-}
-
-/** Recognize the Containers account-entitlement failure Wrangler exposes during upload. */
-function isContainersUnavailable(output: string): boolean {
-  return (
-    (/\/containers\/me(?:\b|\?)/i.test(output) && /\b403\b/.test(output)) ||
-    /Cloudflare Containers[^\n]*(?:Workers Paid|not (?:enabled|available)|subscription)/i.test(
-      output,
-    )
+    result.failure === 'containers-unavailable' ||
+    (result.errors?.some(
+      ({ message }) =>
+        /Cloudflare Containers[^\n]*(?:Workers Paid|not (?:enabled|available)|subscription)/i.test(
+          message,
+        ) ||
+        (/\/containers\/me(?:\b|\?)/i.test(message) && /\b403\b/.test(message)),
+    ) ??
+      false)
   );
 }
 
 async function readCurrentProductionVersion(
   options: Pick<Parameters<typeof activateCloudflareVersion>[0], 'runWrangler' | 'workerName'>,
-  commonArgs: Array<string>,
+  configPath: string | undefined,
 ): Promise<CurrentProductionVersion> {
   const result = await Promise.resolve(
     options.runWrangler(
-      ['deployments', 'status', ...commonArgs, '--name', options.workerName, '--json'],
+      { type: 'deployments.status', configPath, workerName: options.workerName },
       { capture: true },
     ),
   );
   if (!isCleanCommandExit(result)) {
-    const output = `${result.stdout}\n${result.stderr}`;
-    if (isMissingWorkerOutput(output)) {
+    if (
+      isCompletedCommand(result) &&
+      (result.failure === 'not-found' || result.errorCode === 10007)
+    ) {
       return { kind: 'ok', versionId: null, versions: [] };
     }
     return { kind: 'failed', status: result.status };
   }
   try {
-    const deployment = JSON.parse(result.stdout) as ProductionDeployment;
+    const deployment = result.data as ProductionDeployment;
     const versions = (deployment.versions ?? []).map((version) => ({
       versionId: typeof version.version_id === 'string' ? version.version_id : '',
       percentage: Number(version.percentage),
@@ -2060,11 +2065,11 @@ function stagedVersionPercentages(
 
 async function verifyReadinessStagingOwner(
   options: Pick<Parameters<typeof activateCloudflareVersion>[0], 'runWrangler' | 'workerName'>,
-  commonArgs: Array<string>,
+  configPath: string | undefined,
   previousVersionId: string | null,
   versionId: string,
 ): Promise<Extract<CloudflareVersionActivation, { ok: false }> | null> {
-  const owner = await readCurrentProductionVersion(options, commonArgs);
+  const owner = await readCurrentProductionVersion(options, configPath);
   if (owner.kind === 'failed') {
     return {
       ok: false,
@@ -2223,7 +2228,7 @@ async function deployVersionPercentages(
     Parameters<typeof activateCloudflareVersion>[0],
     'runWrangler' | 'workerName' | 'preserveTriggers' | 'configPath'
   >,
-  commonArgs: Array<string>,
+  configPath: string | undefined,
   percentages: Array<string>,
   message: string,
 ): Promise<CloudflareCommandResult> {
@@ -2240,17 +2245,13 @@ async function deployVersionPercentages(
     });
   }
   return options.runWrangler(
-    [
-      'versions',
-      'deploy',
-      ...percentages,
-      ...commonArgs,
-      '--name',
-      options.workerName,
-      '--message',
+    {
+      type: 'versions.deploy',
+      versions: versionPercentages(percentages),
+      configPath,
+      workerName: options.workerName,
       message,
-      '--yes',
-    ],
+    },
     { capture: false },
   );
 }
@@ -2269,19 +2270,13 @@ export async function deployCloudflareVersionTraffic(options: {
   try {
     writeFileSync(path, JSON.stringify(config), { mode: 0o600 });
     return await options.runWrangler(
-      [
-        'versions',
-        'deploy',
-        ...options.percentages,
-        '-c',
-        path,
-        '--env=',
-        '--name',
-        options.workerName,
-        '--message',
-        options.message,
-        '--yes',
-      ],
+      {
+        type: 'versions.deploy',
+        versions: versionPercentages(options.percentages),
+        configPath: path,
+        workerName: options.workerName,
+        message: options.message,
+      },
       { capture: false },
     );
   } finally {
@@ -2294,7 +2289,7 @@ async function restorePreviousVersion(
     Parameters<typeof activateCloudflareVersion>[0],
     'runWrangler' | 'verifyUploader' | 'workerName'
   >,
-  commonArgs: Array<string>,
+  configPath: string | undefined,
   previousVersionId: string | null,
   cause: string,
   expectedOwnedTraffic: ReadonlyArray<ReadonlyArray<ProductionVersionPercentage>>,
@@ -2305,7 +2300,7 @@ async function restorePreviousVersion(
   if (!options.verifyUploader()) {
     return 'unsafe';
   }
-  const owner = await readCurrentProductionVersion(options, commonArgs);
+  const owner = await readCurrentProductionVersion(options, configPath);
   if (
     owner.kind !== 'ok' ||
     !expectedOwnedTraffic.some((expected) =>
@@ -2316,7 +2311,7 @@ async function restorePreviousVersion(
   }
   const result = await deployVersionPercentages(
     options,
-    commonArgs,
+    configPath,
     [`${previousVersionId}@100`],
     `Void automatic rollback after ${cause}.`,
   );
@@ -2381,10 +2376,17 @@ function workersDevSubdomainResult(url: string): { workersDevSubdomain?: string 
   return workersDevSubdomain ? { workersDevSubdomain } : {};
 }
 
-function isCleanCommandExit(result: CloudflareCommandResult): boolean {
+function isCompletedCommand(result: CloudflareCommandResult): boolean {
   return (
-    result.status === 0 && result.signal == null && (result.error == null || result.error === '')
+    Number.isSafeInteger(result.status) &&
+    result.status >= 0 &&
+    result.signal == null &&
+    (result.error == null || result.error === '')
   );
+}
+
+function isCleanCommandExit(result: CloudflareCommandResult): boolean {
+  return result.status === 0 && isCompletedCommand(result);
 }
 
 function defaultSleep(milliseconds: number): Promise<void> {

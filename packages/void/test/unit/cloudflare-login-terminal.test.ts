@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { log } from '@clack/prompts';
+import type { CloudflareOperation } from '@void/deploy-cloudflare';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   cloudflareAuthNeedsTerminal,
@@ -17,7 +18,7 @@ vi.mock('node:child_process', async (importOriginal) => ({
 }));
 vi.mock('../../src/cli/preset.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/cli/preset.ts')>()),
-  resolveWranglerArgv: () => [process.execPath, 'bundled-cli.js'],
+  resolveCloudflareOperationArgv: () => [process.execPath, 'bundled-cli.js'],
 }));
 
 afterEach(() => {
@@ -36,7 +37,7 @@ describe('cf browser login', () => {
           'account-id',
           'https://api.cloudflare.com/client/v4',
         );
-        return (args: ReadonlyArray<string>, capture: boolean) => run([...args], { capture });
+        return (operation: CloudflareOperation, capture: boolean) => run(operation, { capture });
       },
     ],
   ] as const)('%s shows the live login prompt', async (_, create) => {
@@ -44,17 +45,23 @@ describe('cf browser login', () => {
     vi.spyOn(log, 'info').mockImplementation(() => {});
     let reads = 0;
     vi.mocked(spawnSync).mockImplementation((_command, args, options) => {
-      const action = args?.slice(1).join(' ');
-      if (action === 'login') {
-        expect(options?.stdio).toBe('inherit');
+      const action = JSON.parse(args![1] as string).type;
+      if (action === 'auth.login') {
+        expect(
+          options?.stdio === 'inherit' ||
+            (Array.isArray(options?.stdio) && options.stdio.every((value) => value === 'inherit')),
+        ).toBe(true);
       } else {
-        expect(options?.stdio).toEqual(['ignore', 'pipe', 'pipe']);
+        expect(options?.stdio).toContain('pipe');
       }
-      const authenticated = action === 'whoami --json' && ++reads === 2;
+      const authenticated = action === 'auth.whoami' && ++reads === 2;
       return {
-        status: action === 'login' || authenticated ? 0 : 1,
+        status: action === 'auth.login' || authenticated ? 0 : 1,
         stdout: authenticated
-          ? JSON.stringify({ loggedIn: true, accounts: [{ id: 'account-id' }] })
+          ? JSON.stringify({
+              operationResult: 1,
+              data: { loggedIn: true, accounts: [{ id: 'account-id' }] },
+            })
           : '',
         stderr: '',
         signal: null,
@@ -67,21 +74,48 @@ describe('cf browser login', () => {
     ).resolves.toMatchObject({
       accounts: [{ id: 'account-id' }],
     });
-    expect(vi.mocked(spawnSync).mock.calls.map((call) => call[1]?.slice(1))).toEqual([
-      ['whoami', '--json'],
-      ['login'],
-      ['whoami', '--json'],
-    ]);
+    expect(
+      vi.mocked(spawnSync).mock.calls.map((call) => JSON.parse(call[1]![1] as string)),
+    ).toEqual([{ type: 'auth.whoami' }, { type: 'auth.login' }, { type: 'auth.whoami' }]);
+  });
+
+  it('captures and decodes logout even when the caller requests human output', async () => {
+    const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    vi.mocked(spawnSync).mockReturnValue({
+      status: 0,
+      stdout: JSON.stringify({
+        operationResult: 1,
+        data: { removed: true },
+        output: 'Session removed.\n',
+      }),
+      stderr: 'Provider note.\n',
+      signal: null,
+      pid: 1,
+      output: [],
+    });
+    const result = await createBundledCloudflareAuthRunner(process.cwd())(
+      { type: 'auth.logout' },
+      false,
+    );
+    expect(result).toMatchObject({ status: 0, data: { removed: true } });
+    expect(vi.mocked(spawnSync).mock.calls[0]?.[2]?.stdio).toEqual(['ignore', 'pipe', 'pipe']);
+    expect(stdout).toHaveBeenCalledWith('Session removed.\n');
+    expect(stderr).toHaveBeenCalledWith('Provider note.\n');
   });
 
   it('runs asynchronous login with inherited terminal and supports cancellation', async () => {
     const child = new EventEmitter();
     vi.mocked(spawn).mockReturnValue(child as ReturnType<typeof spawn>);
     const controller = new AbortController();
-    const result = runCloudflareAuthCommand(process.cwd(), ['login'], controller.signal);
+    const result = runCloudflareAuthCommand(
+      process.cwd(),
+      { type: 'auth.login' },
+      controller.signal,
+    );
     expect(spawn).toHaveBeenCalledWith(
       process.execPath,
-      ['bundled-cli.js', 'login'],
+      ['bundled-cli.js', JSON.stringify({ type: 'auth.login' })],
       expect.objectContaining({
         stdio: 'inherit',
         signal: controller.signal,
@@ -94,15 +128,15 @@ describe('cf browser login', () => {
   it('reports an asynchronous login spawn failure', async () => {
     const child = new EventEmitter();
     vi.mocked(spawn).mockReturnValue(child as ReturnType<typeof spawn>);
-    const result = runCloudflareAuthCommand(process.cwd(), ['login']);
+    const result = runCloudflareAuthCommand(process.cwd(), { type: 'auth.login' });
     child.emit('error', new Error('spawn failed'));
     child.emit('close', 0, null);
     await expect(result).resolves.toMatchObject({ status: null, error: 'spawn failed' });
   });
 
   it('only streams browser login', () => {
-    expect(cloudflareAuthNeedsTerminal(['login'])).toBe(true);
-    expect(cloudflareAuthNeedsTerminal(['whoami', '--json'])).toBe(false);
-    expect(cloudflareAuthNeedsTerminal(['auth', 'token', '--json'])).toBe(false);
+    expect(cloudflareAuthNeedsTerminal({ type: 'auth.login' })).toBe(true);
+    expect(cloudflareAuthNeedsTerminal({ type: 'auth.whoami' })).toBe(false);
+    expect(cloudflareAuthNeedsTerminal({ type: 'auth.token' })).toBe(false);
   });
 });

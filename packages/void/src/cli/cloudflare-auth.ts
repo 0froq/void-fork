@@ -1,5 +1,10 @@
 import { execFile, spawn, spawnSync } from 'node:child_process';
-import { resolveWranglerArgv } from './preset.ts';
+import type { CloudflareOperation } from '@void/deploy-cloudflare';
+import {
+  encodeCloudflareOperation,
+  decodeCloudflareOperationResult,
+} from './cloudflare-process.ts';
+import { resolveCloudflareOperationArgv } from './preset.ts';
 
 export type CloudflareAccount = Readonly<{
   id: string;
@@ -8,6 +13,7 @@ export type CloudflareAccount = Readonly<{
 
 export type CloudflareAuthRunResult = Readonly<{
   status: number | null;
+  data?: unknown;
   stderr: string;
   stdout: string;
   signal?: NodeJS.Signals | null;
@@ -15,7 +21,7 @@ export type CloudflareAuthRunResult = Readonly<{
 }>;
 
 export type CloudflareAuthRunner = (
-  args: ReadonlyArray<string>,
+  operation: CloudflareOperation,
   capture: boolean,
 ) => CloudflareAuthRunResult | Promise<CloudflareAuthRunResult>;
 
@@ -38,7 +44,7 @@ export type EnsureCloudflareAuthenticationOptions = Readonly<{
   /** Require whoami JSON to contain at least one account (account onboarding). */
   requireAccounts?: boolean;
   runWrangler: CloudflareAuthRunner;
-  whoamiArgs?: ReadonlyArray<string>;
+  configPath?: string;
 }>;
 
 export class CloudflareAuthenticationError extends Error {
@@ -78,27 +84,28 @@ export async function ensureCloudflareAuthentication(
     return { accounts: [] };
   }
   const run = async (
-    args: ReadonlyArray<string>,
+    operation: CloudflareOperation,
     capture: boolean,
   ): Promise<CloudflareAuthRunResult> => {
     if (options.beforeRun && !options.beforeRun()) {
       throw new CloudflareAuthenticationError('', 'uploader-changed');
     }
-    return await options.runWrangler(args, capture);
+    return await options.runWrangler(operation, capture);
   };
-  const whoamiArgs = ['whoami', '--json', ...(options.whoamiArgs ?? [])];
+  const whoami: CloudflareOperation = {
+    type: 'auth.whoami',
+    ...(options.configPath ? { configPath: options.configPath } : {}),
+  };
   const readSession = async (): Promise<CloudflareAuthSession | null> => {
-    const result = await run(whoamiArgs, true);
+    const result = await run(whoami, true);
     if (!isCleanExit(result)) {
       return null;
     }
-    const session = parseCloudflareAuthSession(result.stdout);
+    const session = parseCloudflareAuthSession(result.data);
     if (options.requireAccounts) {
       return session && session.accounts.length > 0 ? session : null;
     }
-    // Credentialed deploy commands only need Wrangler's clean exit. Keeping
-    // account parsing optional also tolerates older Wrangler JSON shapes.
-    return session ?? (options.forceLogin ? null : { accounts: [] });
+    return session;
   };
 
   const existing = options.forceLogin ? null : await readSession();
@@ -114,7 +121,7 @@ export async function ensureCloudflareAuthentication(
     );
   }
 
-  const login = await run(['login'], false);
+  const login = await run({ type: 'auth.login' }, false);
   if (!isCleanExit(login)) {
     throw new CloudflareAuthenticationError(
       'Cloudflare browser sign-in did not complete. Run `void cloudflare login` to try again.',
@@ -142,13 +149,7 @@ export function cloudflareCredentialOverrides(
   return [...tokens, ...(key && email ? [key, email] : [])];
 }
 
-export function parseCloudflareAuthSession(stdout: string): CloudflareAuthSession | null {
-  let value: unknown;
-  try {
-    value = JSON.parse(stdout.trim());
-  } catch {
-    return null;
-  }
+export function parseCloudflareAuthSession(value: unknown): CloudflareAuthSession | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
   }
@@ -182,46 +183,58 @@ export function parseCloudflareAuthSession(stdout: string): CloudflareAuthSessio
 }
 
 export function createBundledCloudflareAuthRunner(root: string): CloudflareAuthRunner {
-  const [command, ...prefix] = resolveWranglerArgv(root);
-  return (args, capture) => {
-    const env = cloudflareAuthCommandEnvironment(args);
+  const [command, ...prefix] = resolveCloudflareOperationArgv(root);
+  return (operation, capture) => {
+    const args = encodeCloudflareOperation(operation);
+    const env = cloudflareAuthCommandEnvironment(operation);
+    const streaming = cloudflareAuthNeedsTerminal(operation);
     const result = spawnSync(command!, [...prefix, ...args], {
       cwd: root,
       encoding: 'utf8',
       env,
       maxBuffer: 10 * 1024 * 1024,
       shell: false,
-      stdio: cloudflareAuthNeedsTerminal(args)
-        ? 'inherit'
-        : capture
-          ? ['ignore', 'pipe', 'pipe']
-          : 'inherit',
+      stdio: streaming ? 'inherit' : ['ignore', 'pipe', 'pipe'],
       timeout: 10 * 60 * 1000,
       windowsHide: true,
     });
-    return {
+    const raw = {
       status: result.status,
-      stderr: capture ? result.stderr || '' : '',
-      stdout: capture ? result.stdout || '' : '',
+      stderr: streaming ? '' : result.stderr || '',
+      stdout: streaming ? '' : result.stdout || '',
       signal: result.signal,
       error: result.error?.message,
     };
+    if (streaming) {
+      return raw;
+    }
+    const decoded = decodeCloudflareOperationResult(raw);
+    if (!capture) {
+      if (decoded.stdout) {
+        process.stdout.write(decoded.stdout);
+      }
+      if (decoded.stderr) {
+        process.stderr.write(decoded.stderr);
+      }
+    }
+    return decoded;
   };
 }
 
 /** Run a captured auth command without blocking terminal input or exposing credentials. */
 export function runCloudflareAuthCommand(
   root: string,
-  args: ReadonlyArray<string>,
+  operation: CloudflareOperation,
   signal?: AbortSignal,
 ): Promise<CloudflareAuthRunResult> {
-  const [command, ...prefix] = resolveWranglerArgv(root);
-  if (cloudflareAuthNeedsTerminal(args)) {
+  const [command, ...prefix] = resolveCloudflareOperationArgv(root);
+  const args = encodeCloudflareOperation(operation);
+  if (cloudflareAuthNeedsTerminal(operation)) {
     // cf can prompt or print a device code while the browser login is active.
     return new Promise((resolve) => {
       const child = spawn(command!, [...prefix, ...args], {
         cwd: root,
-        env: cloudflareAuthCommandEnvironment(args),
+        env: cloudflareAuthCommandEnvironment(operation),
         shell: false,
         signal,
         stdio: 'inherit',
@@ -243,7 +256,7 @@ export function runCloudflareAuthCommand(
       {
         cwd: root,
         encoding: 'utf8',
-        env: cloudflareAuthCommandEnvironment(args),
+        env: cloudflareAuthCommandEnvironment(operation),
         maxBuffer: 10 * 1024 * 1024,
         shell: false,
         signal,
@@ -251,13 +264,15 @@ export function runCloudflareAuthCommand(
         windowsHide: true,
       },
       (error, stdout, stderr) => {
-        resolve({
-          status: error ? (typeof error.code === 'number' ? error.code : null) : 0,
-          stderr,
-          stdout,
-          signal: error?.signal,
-          error: error?.message,
-        });
+        resolve(
+          decodeCloudflareOperationResult({
+            status: error ? (typeof error.code === 'number' ? error.code : null) : 0,
+            stderr,
+            stdout,
+            signal: error?.signal,
+            error: error?.message,
+          }),
+        );
       },
     );
     child.stdin?.end();
@@ -265,16 +280,16 @@ export function runCloudflareAuthCommand(
 }
 
 export function cloudflareAuthCommandEnvironment(
-  args: ReadonlyArray<string>,
+  operation: CloudflareOperation,
   source: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  void args;
+  void operation;
   return cloudflareAuthEnvironment(source);
 }
 
 /** Browser login must display cf's prompts before it completes. */
-export function cloudflareAuthNeedsTerminal(args: ReadonlyArray<string>): boolean {
-  return args[0] === 'login';
+export function cloudflareAuthNeedsTerminal(operation: CloudflareOperation): boolean {
+  return operation.type === 'auth.login';
 }
 
 export function cloudflareAuthEnvironment(

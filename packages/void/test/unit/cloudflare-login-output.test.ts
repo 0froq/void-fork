@@ -4,6 +4,7 @@ import {
   cloudflareDeviceCode,
   printCloudflareLoginPrompt,
 } from '../../src/cli/cloudflare-login-output.ts';
+import { encodeCloudflareOperation } from '../../src/cli/cloudflare-process.ts';
 
 it('extracts the device code from cf output, including streamed and colored output', () => {
   expect(cloudflareDeviceCode('and enter the code:\n\n  a1B2c3D4\n')).toBe('a1B2c3D4');
@@ -54,12 +55,24 @@ child.spawn = () => {
 syncBuiltinESMExports();
 `,
     );
-    const entry = join(import.meta.dirname, '..', '..', 'src', 'cli', 'cf-compat.ts');
+    const entry = join(
+      import.meta.dirname,
+      '..',
+      '..',
+      'src',
+      'cli',
+      'cloudflare-operation-process.ts',
+    );
     const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
       (resolve) => {
         execFile(
           process.execPath,
-          ['--import', pathToFileURL(preload).href, entry, 'login'],
+          [
+            '--import',
+            pathToFileURL(preload).href,
+            entry,
+            ...encodeCloudflareOperation({ type: 'auth.login' }),
+          ],
           {
             cwd: directory,
             encoding: 'utf8',

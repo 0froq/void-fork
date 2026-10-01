@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { CloudflareOperation } from '@void/deploy-cloudflare';
 import {
   encodeCloudflareVersionMessage,
   parseCloudflareVersionMessage,
@@ -124,15 +125,16 @@ async function attemptReuse(input: {
       throw new Error(`Unexpected Cloudflare API read: ${path}`);
     });
     let statusReads = 0;
-    const runner = async (args: ReadonlyArray<string>) => {
-      calls.push(args.slice(0, 2).join(' '));
+    const runner = async (args: CloudflareOperation) => {
+      calls.push(args.type);
       input.onCommand?.(calls.at(-1)!);
-      if (args[0] === 'deployments' && args[1] === 'status') {
+      if (args.type === 'deployments.status') {
         statusReads++;
         return {
           status: 0,
           stderr: '',
-          stdout: JSON.stringify({
+          stdout: '',
+          data: {
             versions: [
               {
                 percentage: 100,
@@ -143,39 +145,41 @@ async function attemptReuse(input: {
                     : VERSION,
               },
             ],
-          }),
+          },
         };
       }
-      if (args[0] === 'versions' && args[1] === 'view') {
+      if (args.type === 'versions.view') {
         return {
           status: 0,
           stderr: '',
-          stdout: JSON.stringify(version),
+          stdout: '',
+          data: version,
         };
       }
-      if (args[0] === 'deployments' && args[1] === 'list') {
+      if (args.type === 'deployments.list') {
         return {
           status: 0,
           stderr: '',
-          stdout: JSON.stringify([deployment]),
+          stdout: '',
+          data: [deployment],
         };
       }
-      if (args[0] === 'triggers' && args[1] === 'deploy') {
-        return { status: input.triggerFailure ? 1 : 0, stderr: '', stdout: '' };
+      if (args.type === 'triggers.deploy') {
+        return { status: input.triggerFailure ? 1 : 0, stderr: '', stdout: '', data: '' };
       }
-      if (args[0] === 'versions' && args[1] === 'upload') {
+      if (args.type === 'versions.upload') {
         if (input.mutateScriptAtUpload) {
           writeFileSync(main, 'export default { fetch() { return new Response("changed"); } };');
-          const uploadConfig = JSON.parse(
-            readFileSync(args[args.indexOf('--config') + 1]!, 'utf8'),
-          ) as { main: string };
+          const uploadConfig = JSON.parse(readFileSync(args.configPath!, 'utf8')) as {
+            main: string;
+          };
           uploadedScript = readFileSync(uploadConfig.main, 'utf8');
-          const metadata = parseCloudflareVersionMessage(args[args.indexOf('--message') + 1]);
+          const metadata = parseCloudflareVersionMessage(args.message);
           uploadedHash = metadata?.schema === 2 ? (metadata.contentHash ?? null) : null;
         }
-        return { status: 1, stderr: 'upload reached', stdout: '' };
+        return { status: 1, stderr: 'upload reached', stdout: '', data: '' };
       }
-      throw new Error(`Unexpected command: ${args.join(' ')}`);
+      throw new Error(`Unexpected command: ${args.type}`);
     };
     const operation = deployPlatformWorker(desiredConfig, input.secrets ?? null, {
       apiBaseUrl: 'https://api.cloudflare.com/client/v4',
@@ -225,8 +229,8 @@ it('reconciles traffic without uploading an identical active Worker version', as
   const run = await attemptReuse({});
   expect(run.error).toBeNull();
   expect(run.value).toBeNull();
-  expect(run.calls).not.toContain('versions upload');
-  expect(run.calls).toContain('triggers deploy');
+  expect(run.calls).not.toContain('versions.upload');
+  expect(run.calls).toContain('triggers.deploy');
   expect(run.onTrafficPublished).toHaveBeenCalledOnce();
 });
 
@@ -235,8 +239,8 @@ it.each([{ directApi: false }, { directApi: true }])(
   async ({ directApi }) => {
     const run = await attemptReuse({ directApi, reuseMatchingVersion: false });
     expect(String(run.error)).toContain('upload reached');
-    expect(run.calls).toContain('versions upload');
-    expect(run.calls).not.toContain('triggers deploy');
+    expect(run.calls).toContain('versions.upload');
+    expect(run.calls).not.toContain('triggers.deploy');
     expect(run.onTrafficPublished).not.toHaveBeenCalled();
   },
 );
@@ -244,7 +248,7 @@ it.each([{ directApi: false }, { directApi: true }])(
 it('uses direct Cloudflare reads for a verified matching version', async () => {
   const run = await attemptReuse({ directApi: true });
   expect(run.error).toBeNull();
-  expect(run.calls).toEqual(['triggers deploy']);
+  expect(run.calls).toEqual(['triggers.deploy']);
   expect(run.readCloudflare.mock.calls.map(([path]) => String(path).split('/').at(-1))).toEqual([
     'deployments',
     VERSION,
@@ -281,7 +285,7 @@ it('waits for the preceding Worker before changing reused Worker traffic', async
   expect(commands).toEqual([]);
   release();
   expect((await result).error).toBeNull();
-  expect(commands).toContain('triggers deploy');
+  expect(commands).toContain('triggers.deploy');
 });
 
 it('waits for the upload batch before changing reused Worker traffic', async () => {
@@ -306,13 +310,13 @@ it('waits for the upload batch before changing reused Worker traffic', async () 
   expect(commands).toEqual([]);
   release();
   expect((await result).error).toBeNull();
-  expect(commands).toContain('triggers deploy');
+  expect(commands).toContain('triggers.deploy');
 });
 
 it('uses direct reads while preparing a changed Worker upload', async () => {
   const run = await attemptReuse({ changeConfig: true, directApi: true });
   expect(String(run.error)).toContain('upload reached');
-  expect(run.calls).toEqual(['versions upload']);
+  expect(run.calls).toEqual(['versions.upload']);
   expect(run.readCloudflare).toHaveBeenCalled();
 });
 
@@ -330,7 +334,7 @@ it('releases an upload slot when the upload fails', async () => {
     onCommand: (command) => events.push(command),
   });
   expect(String(run.error)).toContain('upload reached');
-  expect(events).toEqual(['acquired', 'versions upload', 'failed']);
+  expect(events).toEqual(['acquired', 'versions.upload', 'failed']);
 });
 
 it('falls back to cf reads when the direct API is unavailable', async () => {
@@ -340,15 +344,15 @@ it('falls back to cf reads when the direct API is unavailable', async () => {
     directReadFailure: true,
   });
   expect(String(run.error)).toContain('upload reached');
-  expect(run.calls).toContain('deployments status');
-  expect(run.calls).toContain('versions view');
-  expect(run.calls).toContain('versions upload');
+  expect(run.calls).toContain('deployments.status');
+  expect(run.calls).toContain('versions.view');
+  expect(run.calls).toContain('versions.upload');
 });
 
 it('skips trigger publication only after live traffic matches the reused version', async () => {
   const run = await attemptReuse({ directApi: true, liveTriggers: true });
   expect(run.error).toBeNull();
-  expect(run.calls).not.toContain('triggers deploy');
+  expect(run.calls).not.toContain('triggers.deploy');
   expect(run.onTrafficPublished).toHaveBeenCalledOnce();
 });
 
@@ -359,7 +363,7 @@ it('closes the routing gate if deployment lineage changes after live trigger pro
     directProofDeploymentDrift: true,
   });
   expect(String(run.error)).toContain('changed deployment lineage during trigger verification');
-  expect(run.calls).not.toContain('triggers deploy');
+  expect(run.calls).not.toContain('triggers.deploy');
   expect(run.onUnsafeTraffic).toHaveBeenCalledOnce();
   expect(run.retainNewWorker).toHaveBeenCalledOnce();
 });
@@ -367,13 +371,13 @@ it('closes the routing gate if deployment lineage changes after live trigger pro
 it('refuses reuse when direct Cloudflare reads observe a deployment change', async () => {
   const run = await attemptReuse({ directApi: true, directDeploymentDrift: true });
   expect(String(run.error)).toContain('changed concurrently');
-  expect(run.calls).not.toContain('versions upload');
+  expect(run.calls).not.toContain('versions.upload');
 });
 
 it('closes the routing gate when a direct read detects a deployment change after triggers', async () => {
   const run = await attemptReuse({ directApi: true, directLateDeploymentDrift: true });
   expect(String(run.error)).toContain('traffic reconciliation failed');
-  expect(run.calls).not.toContain('versions upload');
+  expect(run.calls).not.toContain('versions.upload');
   expect(run.onUnsafeTraffic).toHaveBeenCalledOnce();
   expect(run.retainNewWorker).toHaveBeenCalledOnce();
 });
@@ -387,7 +391,7 @@ it.each([
 ])('uploads when the active version does not prove identical input: %j', async (input) => {
   const run = await attemptReuse(input);
   expect(String(run.error)).toContain('upload reached');
-  expect(run.calls).toContain('versions upload');
+  expect(run.calls).toContain('versions.upload');
 });
 
 it('uploads copied artifact bytes matching the version annotation when source files change', async () => {
@@ -400,7 +404,7 @@ it('uploads copied artifact bytes matching the version annotation when source fi
 it('fails closed when the active version changes during inspection', async () => {
   const run = await attemptReuse({ versionDrift: true });
   expect(String(run.error)).toContain('changed concurrently');
-  expect(run.calls).not.toContain('versions upload');
+  expect(run.calls).not.toContain('versions.upload');
 });
 
 it.each([{ triggerFailure: true }, { lateVersionDrift: true }])(
@@ -408,7 +412,7 @@ it.each([{ triggerFailure: true }, { lateVersionDrift: true }])(
   async (input) => {
     const run = await attemptReuse(input);
     expect(String(run.error)).toContain('traffic reconciliation failed');
-    expect(run.calls).not.toContain('versions upload');
+    expect(run.calls).not.toContain('versions.upload');
     expect(run.onUnsafeTraffic).toHaveBeenCalledOnce();
     expect(run.retainNewWorker).toHaveBeenCalledOnce();
   },

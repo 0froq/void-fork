@@ -1,4 +1,10 @@
+import type { CloudflareOperation, CloudflareProviderError } from './operations.ts';
 export type CloudflareCommandResult = {
+  /** Structured provider response. stdout is diagnostics only. */
+  data?: unknown;
+  errorCode?: number;
+  failure?: 'not-found' | 'durable-migration' | 'containers-unavailable';
+  errors?: Array<CloudflareProviderError>;
   stdout: string;
   stderr: string;
   status: number;
@@ -7,7 +13,7 @@ export type CloudflareCommandResult = {
 };
 
 export type CloudflareCommandRunner = (
-  args: Array<string>,
+  operation: CloudflareOperation,
   options: { capture: boolean },
 ) => CloudflareCommandResult | Promise<CloudflareCommandResult>;
 
@@ -28,14 +34,7 @@ export async function executeCloudflareDeploy(options: {
 
   const result = await Promise.resolve(
     options.runWrangler(
-      [
-        'deploy',
-        ...(options.configPath ? ['-c', options.configPath] : []),
-        '--env=',
-        '--experimental-provision=false',
-        '--experimental-auto-create=false',
-        '--autoconfig=false',
-      ],
+      { type: 'worker.deploy', ...(options.configPath ? { configPath: options.configPath } : {}) },
       { capture: false },
     ),
   );

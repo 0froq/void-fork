@@ -6,7 +6,7 @@ import {
   resolveAssetRoutingPolicy,
   workerOwnsHtmlRouting,
 } from '../../src/asset-routing.ts';
-import { compileAssetFallbackHelper } from '../../src/router/compile.ts';
+import { createAssetFallback } from '../../src/runtime/routing-worker.ts';
 
 // `not_found_handling: 'none'` → asset binding 404s on unmatched paths,
 // worker (run_worker_first) owns HTML responses.
@@ -492,17 +492,16 @@ describe('generated serveWithAssets — routing.notFound end to end', () => {
   ): Promise<Response> {
     const policy = resolveAssetRoutingPolicy(inputs);
     const handling = policy.assetConfig.not_found_handling;
-    const source = compileAssetFallbackHelper('assets', policy.workerSpaFallback, handling);
-    const mod = (await import(
-      `data:text/javascript,${encodeURIComponent(`${source}\nexport { serveWithAssets };`)}`
-    )) as {
-      serveWithAssets: (req: Request, env: unknown, res: Response) => Promise<Response>;
-    };
+    const serveWithAssets = createAssetFallback({
+      assetsDir: 'assets',
+      serveSpaFallback: policy.workerSpaFallback,
+      notFound: handling,
+    });
     const accept = opts?.accept === undefined ? 'text/html' : opts.accept;
     const request = new Request(`https://app.test${opts?.path ?? '/deep/link'}`, {
       headers: accept === null ? {} : { accept },
     });
-    return await mod.serveWithAssets(
+    return await serveWithAssets(
       request,
       { ASSETS: makeAssets(handling, opts) },
       opts?.workerResponse?.() ?? new Response('worker 404', { status: 404 }),

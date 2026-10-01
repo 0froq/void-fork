@@ -17,13 +17,18 @@ import { createRequire } from 'node:module';
 import { resolve as resolvePosixPath } from 'node:path/posix';
 import { resolve as resolveWindowsPath } from 'node:path/win32';
 import { types as utilTypes } from 'node:util';
+import type { CloudflareOperation } from '@void/deploy-cloudflare';
 import { parse, type ParseError } from 'jsonc-parser';
 import { basename, dirname, join, normalize, resolve } from 'pathslash';
 import lockfile from 'proper-lockfile';
 import { MATERIALIZED_CLOUDFLARE_FILE, persistCloudflareConfig } from '../cloudflare-config.ts';
 import { voidLog, voidWarn } from '../log.ts';
 import { scanWranglerDotenvKeys } from '../shared/dotenv.ts';
-import { resolveWranglerArgv } from './preset.ts';
+import {
+  encodeCloudflareOperation,
+  decodeCloudflareOperationResult,
+} from './cloudflare-process.ts';
+import { resolveCloudflareOperationArgv } from './preset.ts';
 import {
   assertNoDuplicateMembers,
   readProvisionedBindingEntry,
@@ -143,6 +148,9 @@ export function checkCloudflareProvisionDrift(
  * "success".
  */
 export type RunWranglerResult = {
+  data?: unknown;
+  errorCode?: number;
+  failure?: 'not-found' | 'durable-migration' | 'containers-unavailable';
   stdout: string;
   stderr: string;
   status: number;
@@ -155,23 +163,12 @@ export type RunWranglerResult = {
   error?: string | null;
 };
 
-/**
- * Seam over shelling out to the project's `wrangler`. The default implementation
- * ({@link createDefaultRunWrangler}) wraps `spawnSync` with `shell: false`; unit
- * tests inject a stub so no real wrangler runs.
- *
- * `args` is the wrangler ARGV after the launcher — one array element per token,
- * e.g. `['d1', 'list', '--json']` or
- * `['hyperdrive', 'create', name, '--connection-string=' + conn, ...]`. Every
- * untrusted value (resource name, connection string, config path) is its OWN
- * array element and is passed literally to the process (no shell), so shell
- * metacharacters (`&`, `$`, `;`, spaces) can never split, inject, or drop args.
- */
+/** Typed provider operations; public targets use argv JSON and secrets use stdin. */
 /**
  * The transport context threaded into EVERY wrangler invocation (default AND
  * injected). Its `accountId` is the ONE reconciled effective account this whole
  * provision is pinned to: the default runner uses it to pin the spawned wrangler's
- * env (`CLOUDFLARE_ACCOUNT_ID` + the top-level `--env=` on every argv), and an
+ * env (`CLOUDFLARE_ACCOUNT_ID`), and an
  * injected seam MUST bind its own transport to the SAME account (so it can never
  * query account B while the config pins A and write a same-name B result into A).
  */
@@ -186,7 +183,7 @@ export interface WranglerCallContext {
    */
   apiBaseUrl?: string;
   cwd?: string;
-  captureJson?: boolean;
+  input?: string;
   /** Keep borrowed OAuth bearer values out of Wrangler's on-disk logs. */
   suppressLogs?: boolean;
 }
@@ -201,7 +198,7 @@ export interface WranglerCallContext {
  * — `Promise.resolve` at the choke point wraps them transparently.
  */
 export type RunWrangler = (
-  args: Array<string>,
+  args: CloudflareOperation,
   opts: WranglerCallContext,
 ) => RunWranglerResult | Promise<RunWranglerResult>;
 
@@ -259,8 +256,8 @@ export interface ProvisionResult {
 }
 
 type PinnedRunWrangler = (
-  args: Array<string>,
-  callOpts?: { cwd?: string; captureJson?: boolean; suppressLogs?: boolean },
+  args: CloudflareOperation,
+  callOpts?: { cwd?: string; suppressLogs?: boolean; input?: string },
 ) => Promise<RunWranglerResult>;
 
 type ProvisionConfigWriter = (
@@ -1302,11 +1299,10 @@ function armRetentionWatchdog(lock: ProvisionLock, info: QuarantineInfo): void {
 }
 
 /**
- * Default `runWrangler`: resolves the project-local wrangler as an ARGV launcher
- * via Task 2's {@link resolveWranglerArgv} and runs it with `spawn` and
- * `shell: false`, so every argument is passed literally (no shell parsing → no
- * injection). Captures stdout (for `--json` parsing) and stderr (for
- * error/collision detection). Never called in unit tests — those inject a stub.
+ * Default provider runner: launches the isolated typed operation entry through
+ * {@link resolveCloudflareOperationArgv} with `shell: false`. Public request fields
+ * travel as literal JSON argv; secrets travel through stdin. Captured stdout carries
+ * the structured result envelope, while stderr carries provider diagnostics.
  *
  * ASYNC (returns a Promise). `spawn` + `await` (vs. the old blocking
  * `spawnSync`) keeps the Node event loop free while wrangler runs, so
@@ -1320,7 +1316,7 @@ export function createDefaultRunWrangler(
   options?: {
     /** Only immutable platform Worker version uploads may share the process with another upload. */
     parallelWorkerUpload?: boolean;
-    /** Test seam — the argv launcher. Defaults to the real wrangler CLI entry. */
+    /** Test seam — the argv launcher. Defaults to the typed operation entry. */
     launcher?: Array<string>;
     /** Test seam — the per-command timeout. Defaults to {@link COMMAND_TIMEOUT_MS}. */
     timeoutMs?: number;
@@ -1348,11 +1344,10 @@ export function createDefaultRunWrangler(
     onSpawnedChild?: (child: ChildProcess) => void;
   },
 ): RunWrangler {
-  // `resolveWranglerArgv` now yields wrangler's REAL CLI entry
-  // (`wrangler-dist/cli.js`), NOT the `bin.wrangler` wrapper, so a SIGKILL from the
-  // timeout below hits the real process (the wrapper could neither relay the kill nor
-  // be trusted to report the exit code — see `resolveWranglerArgv`).
-  const launcher = options?.launcher ?? resolveWranglerArgv(root);
+  // The operation entry executes provider work in this process group. Killing the
+  // group reaches the entry and any provider subprocess, and exit provenance is
+  // retained independently of the structured result envelope.
+  const launcher = options?.launcher ?? resolveCloudflareOperationArgv(root);
   const timeoutMs = options?.timeoutMs ?? COMMAND_TIMEOUT_MS;
   const confirmGraceMs = options?.confirmKillGraceMs ?? CONFIRM_KILL_GRACE_MS;
   const killProcessGroup =
@@ -1370,7 +1365,7 @@ export function createDefaultRunWrangler(
   return (args, opts) =>
     new Promise<RunWranglerResult>((resolvePromise, rejectPromise) => {
       const parallelWorkerUpload =
-        options?.parallelWorkerUpload === true && args[0] === 'versions' && args[1] === 'upload';
+        options?.parallelWorkerUpload === true && args.type === 'versions.upload';
       // Once a fatal-signal teardown has begun, this process is
       // terminating: REJECT new wrangler work outright BEFORE spawning (fail fast — no
       // child spawned means nothing to confirm), never join the teardown late with a
@@ -1397,7 +1392,7 @@ export function createDefaultRunWrangler(
         );
         return;
       }
-      const child = spawn(command, [...prefix, ...args], {
+      const child = spawn(command, [...prefix, ...encodeCloudflareOperation(args)], {
         cwd: opts.cwd ?? root,
         shell: false,
         // Pin the account + API base PER CALL from the transport context, so the
@@ -1408,7 +1403,7 @@ export function createDefaultRunWrangler(
           ...provisionEnv({ accountId: opts.accountId, apiBaseUrl: opts.apiBaseUrl }),
           ...(opts.suppressLogs ? { WRANGLER_WRITE_LOGS: 'false' } : {}),
         },
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: [opts.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
         windowsHide: true,
         detached: !isWindows,
       });
@@ -1559,7 +1554,7 @@ export function createDefaultRunWrangler(
         settled = true;
         clearTimeout(commandTimer);
         deregisterSelf();
-        resolvePromise(result);
+        resolvePromise(decodeCloudflareOperationResult(result));
       };
 
       // Settle by REJECTING with a quarantine error: the child could not be confirmed
@@ -1704,7 +1699,7 @@ export function createDefaultRunWrangler(
       // ran, so there is nothing to confirm dead, and `close` may never follow). Every
       // POST-spawn `error` routes through the ONE bounded termination-confirmation →
       // quarantine machine like any other outcome.
-      child.on('error', (error: Error) => {
+      const handleProcessError = (error: Error): void => {
         if (!spawned && typeof child.pid !== 'number') {
           finish(normalizeRunWranglerResult({ stdout, stderr, status: null, signal: null, error }));
           return;
@@ -1745,7 +1740,9 @@ export function createDefaultRunWrangler(
             }),
           `a post-spawn child error (${error.message}; the group was SIGKILLed)`,
         );
-      });
+      };
+      child.on('error', handleProcessError);
+      child.stdin?.on('error', handleProcessError);
       child.on('close', (code, signal) => {
         closed = true;
         if (timedOut || postSpawnError !== undefined) {
@@ -1796,6 +1793,9 @@ export function createDefaultRunWrangler(
       // registration can exist by the time this runs.
       registerRunner(registrant, parallelWorkerUpload);
       options?.onSpawnedChild?.(child);
+      if (opts.input !== undefined) {
+        child.stdin?.end(opts.input);
+      }
     });
 }
 
@@ -1867,7 +1867,7 @@ function isCleanSuccess(result: RunWranglerResult): boolean {
  * classified for a resource-specific not-found signal.
  */
 function isCleanFailure(result: RunWranglerResult): boolean {
-  return !isHardFailure(result) && typeof result.status === 'number' && result.status !== 0;
+  return !isHardFailure(result) && Number.isSafeInteger(result.status) && result.status > 0;
 }
 
 /**
@@ -2889,32 +2889,11 @@ export async function acquireProvisionLock(
  * like "absent", minting a duplicate). Used everywhere an empty list must mean
  * "authoritatively absent" and garbage must NOT be coerced to "absent".
  */
-function parseJsonArrayStrict(stdout: string): Array<unknown> | undefined {
-  const value = parseJsonLoose(stdout);
+function parseJsonArrayStrict(value: unknown): Array<unknown> | undefined {
   return Array.isArray(value) ? value : undefined;
 }
-
-/** Parse a wrangler `--json` stdout into an object, tolerating noise/failure. */
-function parseJsonObject(stdout: string): Record<string, unknown> | undefined {
-  const value = parseJsonLoose(stdout);
+function parseJsonObject(value: unknown): Record<string, unknown> | undefined {
   return isRecord(value) ? value : undefined;
-}
-
-/**
- * wrangler may print human banners before the JSON payload; slice from the
- * first `{`/`[` so a leading banner does not break `JSON.parse`.
- */
-function parseJsonLoose(stdout: string): unknown {
-  const trimmed = stdout.trim();
-  const start = trimmed.search(/[[{]/);
-  if (start === -1) {
-    return undefined;
-  }
-  try {
-    return JSON.parse(trimmed.slice(start));
-  } catch {
-    return undefined;
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -2968,18 +2947,13 @@ function readRootConfig(configPath: string): Record<string, unknown> {
 // The three helpers below are the SINGLE decision points every resource path
 // routes through, so no sibling path can drift into a per-path bug again:
 //   1. assertDiscoverySucceeded — a discovery/list/info result is only trusted
-//      when it exited cleanly (numeric status 0). Called BEFORE any stdout parse.
-//   2. validateResourceList     — a `--json` list is rejected WHOLE if ANY member
+//      when it exited cleanly (numeric status 0). Called BEFORE inspecting data.
+//   2. validateResourceList     — a structured list is rejected WHOLE if ANY member
 //      is malformed (never silently filtered — a malformed member could BE the
 //      target and look "absent", minting a duplicate).
 //   3. isConfirmedAbsent        — a NON-zero `<res> info`-by-name probe means
-//      "absent" (→ create) ONLY on wrangler's EXACT, name-aware not-found signal;
+//      "absent" (→ create) ONLY on the structured provider not-found classification;
 //      a signal/spawn failure or any other nonzero is NEVER absence.
-
-/** Escape a string for literal embedding in a `RegExp`. */
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 /**
  * FAIL-CLOSED gate over a discovery/list/info result. Throws (no create) unless
@@ -2987,7 +2961,7 @@ function escapeRegExp(value: string): string {
  * {@link normalizeRunWranglerResult} already folds a signal-killed child or a
  * spawn error into a non-zero status, a single numeric check here rejects ALL of
  * nonzero-exit / SIGTERM / spawn-error / non-numeric status. MUST be called
- * BEFORE parsing stdout, so a failed result can never be parsed as "absent".
+ * BEFORE reading provider data, so failed discovery never implies absence.
  */
 function assertDiscoverySucceeded(result: RunWranglerResult, label: string): void {
   if (!isCleanSuccess(result)) {
@@ -3190,8 +3164,7 @@ function extractKvMatches(
 
 /** True when a `d1 create` failure means the name is already taken (code 7502). */
 function isAlreadyExistsError(result: RunWranglerResult): boolean {
-  const text = `${result.stdout}\n${result.stderr}`;
-  return text.includes('7502') || /already exists/i.test(text);
+  return result.errorCode === 7502;
 }
 
 /**
@@ -3203,66 +3176,25 @@ function isAlreadyExistsError(result: RunWranglerResult): boolean {
  * GENERIC "not found" (e.g. `Account not found`) is NEVER treated as absence,
  * which would mint a duplicate resource.
  */
-function isConfirmedAbsent(result: RunWranglerResult, kind: 'r2' | 'queue', name: string): boolean {
-  // Provenance rule: only a CLEAN non-zero exit may be classified. A signal-killed
-  // or unspawnable probe is a HARD failure — its buffered text (which may contain a
-  // not-found line printed just before the kill) is NOT proof of absence, so we
-  // refuse to authorize a create on it.
-  if (!isCleanFailure(result)) {
-    return false;
-  }
-  const text = `${result.stdout}\n${result.stderr}`;
-  switch (kind) {
-    case 'r2':
-      // CF API error code 10006 is the exact code wrangler treats as "bucket absent"
-      // (its `getR2Bucket`/`isConnectedToExistingResource` branch on `err.code === 10006`).
-      // wrangler renders an `APIError` as `${message} [code: ${err.code}]` (its `renderError`
-      // in wrangler 4.131), so a genuine 10006 ALWAYS surfaces as the STRUCTURED token
-      // `[code: 10006]` in the error output. We require that bracketed token — NOT a bare
-      // `10006` anywhere in output: a bucket NAME that merely contains those digits (e.g.
-      // `archive-10006-prod`) inside an unrelated auth/service/network failure would falsely
-      // read as absence and authorize a duplicating create. Only the structured code counts.
-      return /\[code:\s*10006\]/.test(text);
-    case 'queue':
-      // wrangler's `getQueue` throws exactly `Queue "<name>" does not exist`.
-      // Match ONLY that message for THIS queue name — a generic `not found` /
-      // `no such` / `Account not found` must NOT be read as queue absence.
-      return new RegExp(`Queue\\s+"${escapeRegExp(name)}"\\s+does not exist`, 'i').test(text);
-  }
+function isConfirmedAbsent(
+  result: RunWranglerResult,
+  kind: 'r2' | 'queue',
+  _name: string,
+): boolean {
+  return (
+    isCleanFailure(result) &&
+    (kind === 'r2' ? result.errorCode === 10006 : result.failure === 'not-found')
+  );
 }
 
-/**
- * A `wrangler queues info <name>` result POSITIVELY confirms THIS queue does NOT
- * exist in the account. Narrow, queue-only view of {@link isConfirmedAbsent}, shared
- * with the deploy orchestrator's pre-build queue probe (`cli/deploy.ts`) so both call
- * sites classify the SAME wrangler output the SAME way. Only the exact, name-aware
- * `Queue "<name>" does not exist` on a clean non-zero exit returns `true`; every other
- * outcome (success, signal/spawn failure, auth or network error, generic "not found")
- * returns `false` and is left for the caller to treat as inconclusive.
- */
+/** Only a completed, typed not-found response confirms queue absence. */
 export function isQueueConfirmedAbsent(result: RunWranglerResult, name: string): boolean {
   return isConfirmedAbsent(result, 'queue', name);
 }
 
-/**
- * A `wrangler queues info <name>` result POSITIVELY confirms THIS queue
- * exists. Queues write NO config, so a create cannot be verified by re-reading the
- * config (the D1/KV/R2/Hyperdrive backstop). And wrangler's `bin.wrangler` wrapper
- * maps a signal-killed inner CLI to `process.exit(0)` (`bin/wrangler.js`:
- * `code === null → exit(0)`), so a KILLED probe/create can surface a clean exit 0
- * with empty/partial output. A bare clean 0 is therefore NOT proof the queue exists.
- * We require BOTH a clean success (numeric exit 0, no signal/spawn error — the
- * provenance rule) AND the output to name THIS exact queue: wrangler 4.131's
- * `queues info` prints `Queue Name: <queue_name>` for the queue it fetched by name
- * (account-unique), so an exact `Queue Name: <name>` line is the positive signal.
- * Used for BOTH the reuse probe and the post-create verify probe.
- */
+/** Reuse and post-create verification require clean success and the exact returned name. */
 function queueInfoConfirmsExists(result: RunWranglerResult, name: string): boolean {
-  if (!isCleanSuccess(result)) {
-    return false;
-  }
-  const text = `${result.stdout}\n${result.stderr}`;
-  return new RegExp(`^Queue Name:\\s+${escapeRegExp(name)}\\s*$`, 'm').test(text);
+  return isCleanSuccess(result) && isRecord(result.data) && result.data.name === name;
 }
 
 /**
@@ -3465,26 +3397,6 @@ export function assertValidResourceName(kind: ResourceNameKind, name: string): v
         `wrangler. A ${grammar.label} name must ${grammar.rule}. Rename the resource and retry.`,
     );
   }
-}
-
-/**
- * The trailing flags EVERY provisioner wrangler invocation MUST carry, built
- * ONCE so no call site can forget them:
- *   - `-c <configPath>` pins the ONE resolved config (no split-brain reads/writes);
- *   - `--env=` (an explicit EMPTY environment) FORCES wrangler onto the top-level
- *     config environment. wrangler 4.131 selects its config env as
- *     `args.env ?? getCloudflareEnv()`; passing an explicit empty `args.env`
- *     short-circuits the `??` so a project `.env`/`.env.local` that sets
- *     `CLOUDFLARE_ENV` (reloaded into `process.env` on every wrangler command)
- *     can NEVER reselect a named `env.*` block — whose `account_id`/bindings could
- *     differ from the single account this provision resolved, patched, and pinned.
- *     `--env=` is wrangler's own documented sentinel for "use the top-level
- *     environment" (it prints exactly this guidance when multiple env blocks exist).
- * Discovery/create AND `--update-config` therefore all operate on the SAME
- * top-level config/account.
- */
-function wranglerConfigArgs(configPath: string): Array<string> {
-  return ['-c', configPath, '--env='];
 }
 
 /**
@@ -4200,14 +4112,9 @@ async function reconcileD1(
       // Discovery must SUCCEED (gate) before its stdout is parsed, then the whole
       // list is strictly validated — a nonzero/SIGTERM/spawn-error or a malformed
       // member never parses as "absent" and mints a duplicate D1.
-      const listResult = await runWrangler(
-        ['d1', 'list', '--json', ...wranglerConfigArgs(configPath)],
-        {
-          captureJson: true,
-        },
-      );
+      const listResult = await runWrangler({ type: 'd1.list', configPath }, {});
       assertDiscoverySucceeded(listResult, 'wrangler d1 list');
-      const rawList = parseJsonArrayStrict(listResult.stdout);
+      const rawList = parseJsonArrayStrict(listResult.data);
       if (!rawList) {
         throw new Error(
           `provision: "wrangler d1 list --json" did not return a JSON array; cannot verify whether ` +
@@ -4262,15 +4169,7 @@ async function reconcileD1(
         assertD1MigrationsDirApplied(res, binding, configPath);
         resources.push({ kind: 'd1', binding, name, action: 'adopted', id: existing.id });
       } else {
-        const created = await runWrangler([
-          'd1',
-          'create',
-          name,
-          '--binding',
-          binding,
-          '--update-config',
-          ...wranglerConfigArgs(configPath),
-        ]);
+        const created = await runWrangler({ type: 'd1.create', name: name, binding, configPath });
         if (isCleanSuccess(created)) {
           // wrangler wrote database_id/database_name via --update-config; VERIFY the
           // real id landed (postcondition), then fill the migrations_dir it does
@@ -4296,14 +4195,11 @@ async function reconcileD1(
           // TOCTOU: created between our list and create (clean non-zero, code 7502).
           // Capture the id via `d1 info` — which must SUCCEED (gate) and POSITIVELY
           // identify THIS database (EXACT name match) before we adopt its id.
-          const infoResult = await runWrangler(
-            ['d1', 'info', name, '--json', ...wranglerConfigArgs(configPath)],
-            { captureJson: true },
-          );
+          const infoResult = await runWrangler({ type: 'd1.info', name: name, configPath }, {});
           assertDiscoverySucceeded(infoResult, `wrangler d1 info ${name}`);
           // SAME strict normalizer as the list path — must POSITIVELY identify THIS
           // database by an exact name match with an unambiguous id.
-          const info = normalizeD1(parseJsonObject(infoResult.stdout), name);
+          const info = normalizeD1(parseJsonObject(infoResult.data), name);
           if (info.kind !== 'match') {
             throw new Error(
               `provision: "wrangler d1 create ${name}" reported the database already exists, ` +
@@ -4344,20 +4240,8 @@ async function reconcileD1(
     } else {
       let token = opts?.apiToken ?? process.env.CLOUDFLARE_API_TOKEN;
       if (!token) {
-        const auth = await runWrangler(
-          ['auth', 'token', '--json', ...wranglerConfigArgs(configPath)],
-          { captureJson: true, suppressLogs: true },
-        );
-        const start = auth.stdout.indexOf('{');
-        const end = auth.stdout.lastIndexOf('}');
-        let parsed: { type?: unknown; token?: unknown } | undefined;
-        if (isCleanSuccess(auth) && start >= 0 && end > start) {
-          try {
-            parsed = JSON.parse(auth.stdout.slice(start, end + 1)) as typeof parsed;
-          } catch {
-            // A malformed response is handled by the missing-token error below.
-          }
-        }
+        const auth = await runWrangler({ type: 'auth.token', configPath }, { suppressLogs: true });
+        const parsed = isCleanSuccess(auth) && isRecord(auth.data) ? auth.data : undefined;
         if (
           (parsed?.type === 'oauth' || parsed?.type === 'api_token') &&
           typeof parsed.token === 'string'
@@ -4398,14 +4282,9 @@ async function reconcileKv(
     // throw), return a real JSON array, and have EVERY member well-formed (a
     // malformed member — which could BE the target — fails closed rather than being
     // filtered to a false "absent" that mints a duplicate namespace).
-    const listResult = await runWrangler(
-      ['kv', 'namespace', 'list', ...wranglerConfigArgs(configPath)],
-      {
-        captureJson: true,
-      },
-    );
+    const listResult = await runWrangler({ type: 'kv.namespace.list', configPath }, {});
     assertDiscoverySucceeded(listResult, 'wrangler kv namespace list');
-    const rawList = parseJsonArrayStrict(listResult.stdout);
+    const rawList = parseJsonArrayStrict(listResult.data);
     if (!rawList) {
       throw new Error(
         `provision: "wrangler kv namespace list" did not return a JSON array; cannot verify whether ` +
@@ -4436,16 +4315,12 @@ async function reconcileKv(
       write({ kv: { binding, id: chosen.id } });
       resources.push({ kind: 'kv', binding, name: title, action: 'adopted', id: chosen.id });
     } else {
-      const created = await runWrangler([
-        'kv',
-        'namespace',
-        'create',
-        title,
-        '--binding',
+      const created = await runWrangler({
+        type: 'kv.namespace.create',
+        name: title,
         binding,
-        '--update-config',
-        ...wranglerConfigArgs(configPath),
-      ]);
+        configPath,
+      });
       if (!isCleanSuccess(created)) {
         throw new Error(
           `provision: "wrangler kv namespace create ${title}" failed: ${created.stderr || created.stdout}`,
@@ -4509,16 +4384,13 @@ async function reconcileR2(
     } else {
       // `wrangler r2 bucket list` is a human table, not JSON. Bucket names ARE
       // account-unique, so probe the single bucket by name.
-      const info = await runWrangler(
-        ['r2', 'bucket', 'info', bucketName, '--json', ...wranglerConfigArgs(configPath)],
-        { captureJson: true },
-      );
+      const info = await runWrangler({ type: 'r2.bucket.info', name: bucketName, configPath }, {});
       if (isCleanSuccess(info)) {
         // A clean exit 0 is not enough to adopt — the success payload must
         // POSITIVELY identify the requested bucket (its `name`) before we write the
         // entry, else a mismatched/garbled 0-exit payload could bind the wrong
         // bucket. (A signal-killed probe is NOT a clean success — see the rule.)
-        const payload = parseJsonObject(info.stdout);
+        const payload = parseJsonObject(info.data);
         if (!payload || payload.name !== bucketName) {
           throw new Error(
             `provision: "wrangler r2 bucket info ${bucketName} --json" exited 0 but did not identify ` +
@@ -4533,16 +4405,12 @@ async function reconcileR2(
       } else if (isConfirmedAbsent(info, 'r2', bucketName)) {
         // CONFIRMED not-found (clean non-zero + exact signal) → create.
         // `--update-config` upserts by binding.
-        const created = await runWrangler([
-          'r2',
-          'bucket',
-          'create',
-          bucketName,
-          '--binding',
+        const created = await runWrangler({
+          type: 'r2.bucket.create',
+          name: bucketName,
           binding,
-          '--update-config',
-          ...wranglerConfigArgs(configPath),
-        ]);
+          configPath,
+        });
         if (!isCleanSuccess(created)) {
           throw new Error(
             `provision: "wrangler r2 bucket create ${bucketName}" failed: ${created.stderr || created.stdout}`,
@@ -4572,10 +4440,10 @@ async function reconcileR2(
         // instead — the same positive identification the adopt path uses.
         if (bucketName === R2_BUCKET_NAME_PLACEHOLDER) {
           const verify = await runWrangler(
-            ['r2', 'bucket', 'info', bucketName, '--json', ...wranglerConfigArgs(configPath)],
-            { captureJson: true },
+            { type: 'r2.bucket.info', name: bucketName, configPath },
+            {},
           );
-          const payload = isCleanSuccess(verify) ? parseJsonObject(verify.stdout) : undefined;
+          const payload = isCleanSuccess(verify) ? parseJsonObject(verify.data) : undefined;
           if (!payload || payload.name !== bucketName) {
             throw new Error(
               `provision: "wrangler r2 bucket create ${bucketName}" reported success but a ` +
@@ -4711,16 +4579,10 @@ async function reconcileHyperdrive(
         );
       } else {
         // Confirmed absent + connection string present → create.
-        const created = await runWrangler([
-          'hyperdrive',
-          'create',
-          name,
-          `--connection-string=${connectionString}`,
-          '--binding',
-          binding,
-          '--update-config',
-          ...wranglerConfigArgs(configPath),
-        ]);
+        const created = await runWrangler(
+          { type: 'hyperdrive.create', name: name, binding, configPath },
+          { input: connectionString },
+        );
         if (!isCleanSuccess(created)) {
           throw new Error(
             `provision: "wrangler hyperdrive create ${name}" failed: ${created.stderr || created.stdout}`,
@@ -4759,7 +4621,7 @@ async function reconcileQueues(
   // queue RESOURCE exists — binding the producers/consumers into the config is
   // app-class-aware and belongs to Task 6.
   for (const name of desired.queues) {
-    const info = await runWrangler(['queues', 'info', name, ...wranglerConfigArgs(configPath)]);
+    const info = await runWrangler({ type: 'queues.info', name: name, configPath });
     // "Exists → reuse" ONLY when the probe POSITIVELY names THIS queue. A bare
     // clean 0 is NOT trusted: the bin wrapper can mask a signal-killed inner CLI as
     // exit 0 with empty output, which a plain `isCleanSuccess` would misread as
@@ -4779,12 +4641,7 @@ async function reconcileQueues(
           `${info.stderr || info.stdout || 'no output'}`,
       );
     }
-    const created = await runWrangler([
-      'queues',
-      'create',
-      name,
-      ...wranglerConfigArgs(configPath),
-    ]);
+    const created = await runWrangler({ type: 'queues.create', name: name, configPath });
     if (!isCleanSuccess(created)) {
       throw new Error(
         `provision: "wrangler queues create ${name}" failed: ${created.stderr || created.stdout}`,
@@ -4795,7 +4652,7 @@ async function reconcileQueues(
     // signal-killed inner CLI as exit 0, creating nothing). RE-RUN the SAME positive
     // `queues info` probe and only record `created` if it now confirms THIS queue;
     // otherwise fail closed (a killed create self-heals on the next run's probe).
-    const verify = await runWrangler(['queues', 'info', name, ...wranglerConfigArgs(configPath)]);
+    const verify = await runWrangler({ type: 'queues.info', name: name, configPath });
     if (!queueInfoConfirmsExists(verify, name)) {
       throw new Error(
         `provision: "wrangler queues create ${name}" reported success but "wrangler queues info ` +
@@ -5065,8 +4922,8 @@ async function provisionCloudflareResourcesLocked(
   // Promise, and every call site `await`s it. Awaiting yields to the event loop, so a
   // real (slow) wrangler call never blocks the lock heartbeat.
   const runWrangler = (
-    args: Array<string>,
-    callOpts?: { cwd?: string; captureJson?: boolean; suppressLogs?: boolean },
+    args: CloudflareOperation,
+    callOpts?: { cwd?: string; suppressLogs?: boolean; input?: string },
   ): Promise<RunWranglerResult> =>
     Promise.resolve(
       selectedRunWrangler(args, {

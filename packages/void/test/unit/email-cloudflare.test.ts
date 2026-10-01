@@ -1,3 +1,4 @@
+import type { CloudflareOperation } from '@void/deploy-cloudflare';
 import { describe, expect, it } from 'vite-plus/test';
 import {
   applyEmailSetup,
@@ -14,7 +15,6 @@ import {
   renderEmailChecklist,
   subdomainDashboardFallback,
   SENDING_FREE_PLAN_HINT,
-  wranglerApiErrorCode,
   type EmailCloudflareInputs,
   type EmailDns,
   type EmailPreflight,
@@ -28,20 +28,19 @@ import { compileEmailPattern } from '../../src/router/email.ts';
 function whoamiResult(): EmailWranglerRunResult {
   return {
     status: 0,
-    stdout: JSON.stringify({
+    stdout: '',
+    data: {
       loggedIn: true,
       authType: 'OAuth Token',
       email: 'dev@example.com',
       accounts: [{ id: ACCOUNT, name: 'Acme' }],
       tokenPermissions: ['account:read', 'email_routing:write', 'email_sending:write'],
-    }),
+    },
     stderr: '',
   };
 }
 
-const emptyRules = JSON.stringify([
-  { enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] },
-]);
+const emptyRules = [{ enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] }];
 
 function routingRules(
   options: {
@@ -52,8 +51,8 @@ function routingRules(
     catchAllWorker?: string;
     extra?: Array<unknown>;
   } = {},
-): string {
-  return JSON.stringify([
+): Array<unknown> {
+  return [
     {
       id: '1a2b3c',
       name: 'support',
@@ -78,7 +77,7 @@ function routingRules(
       matchers: [{ type: 'all' }],
       actions: [{ type: 'worker', value: [options.catchAllWorker ?? 'acme-support'] }],
     },
-  ]);
+  ];
 }
 
 const BETA_WARNING =
@@ -92,33 +91,22 @@ function routingSettings(
 ): EmailWranglerRunResult {
   return {
     status: 0,
-    stdout: JSON.stringify({ name, enabled: enabled, status, tag: tag }),
+    stdout: '',
+    data: { name, enabled: enabled, status, tag: tag },
     stderr: BETA_WARNING,
   };
 }
 
-function zoneNotFound(name: string): EmailWranglerRunResult {
-  return {
-    status: 1,
-    stdout: '\n ⛅️ wrangler 4.131.0\n────────────────────\n\n',
-    stderr: `${BETA_WARNING}\n\n\u001b[31m✘ \u001b[41;31m[\u001b[41;97mERROR\u001b[41;31m]\u001b[0m \u001b[1mCould not find zone for \`${name}\`. Make sure the domain exists in your account.\u001b[0m\n`,
-  };
+function zoneNotFound(_name: string): EmailWranglerRunResult {
+  return { status: 0, stdout: '', stderr: '', data: null };
 }
 
-function sendingNotFound(name: string): EmailWranglerRunResult {
-  return {
-    status: 1,
-    stdout: '\n ⛅️ wrangler 4.131.0\n────────────────────\n\n',
-    stderr: `${BETA_WARNING}\n\n\u001b[31m✘ \u001b[41;31m[\u001b[41;97mERROR\u001b[41;31m]\u001b[0m \u001b[1mNo sending subdomain found for \`${name}\`. Run \`wrangler email sending list ${name}\` to see configured subdomains.\u001b[0m\n`,
-  };
+function sendingNotFound(_name: string): EmailWranglerRunResult {
+  return { status: 0, stdout: '', stderr: '', data: null };
 }
 
 function apiFailure(code: number, resource: string): EmailWranglerRunResult {
-  return {
-    status: 1,
-    stdout: '',
-    stderr: `${BETA_WARNING}\n\u001b[31m✘ \u001b[41;31m[\u001b[41;97mERROR\u001b[41;31m]\u001b[0m \u001b[1mA request to the Cloudflare API (${resource}) failed.\u001b[0m\n\n  something went wrong [code: ${code}]\n`,
-  };
+  return { status: 1, stdout: '', stderr: `Provider failure: ${resource}`, errorCode: code };
 }
 
 // ── Scan builders ────────────────────────────────────────────────────────────────
@@ -139,7 +127,20 @@ const ZONE_ID = '5b66f5cb84fd7dcfdd0170515e622181';
 const ACCOUNT = 'f721b8e5f721b8e5f721b8e5f721b8e5';
 const BEARER = 'cfoa-SECRET-BEARER-TOKEN-0123456789';
 
-type Call = { args: Array<string>; capture: boolean };
+type Call = { args: Array<string>; operation: CloudflareOperation; capture: boolean };
+
+function operationWords(operation: CloudflareOperation): Array<string> {
+  if (operation.type === 'auth.whoami') {
+    return ['whoami', '--json'];
+  }
+  if (operation.type === 'auth.token') {
+    return ['auth', 'token', '--json'];
+  }
+  if ('domain' in operation) {
+    return [...operation.type.split('.'), operation.domain];
+  }
+  throw new Error(`Unexpected operation: ${operation.type}`);
+}
 type FetchCall = {
   url: string;
   method: string;
@@ -178,8 +179,9 @@ function fakeRunner(
   table: Record<string, EmailWranglerRunResult | (() => EmailWranglerRunResult)>,
   calls: Array<Call>,
 ): EmailCloudflareInputs['runWrangler'] {
-  return (args, opts) => {
-    calls.push({ args: [...args], capture: opts.capture });
+  return (operation, opts) => {
+    const args = operationWords(operation);
+    calls.push({ args, operation, capture: opts.capture });
     const key = args.join(' ');
     const hit = table[key];
     if (!hit) {
@@ -267,7 +269,7 @@ function transcriptInputs(
     'whoami --json': whoami,
     'email routing settings mail.acme.com': zoneNotFound('mail.acme.com'),
     'email routing settings acme.com': routingSettings('acme.com', true, 'ready', ZONE_ID),
-    'email routing rules list acme.com': { status: 0, stdout: emptyRules, stderr: '' },
+    'email routing rules list acme.com': { status: 0, stdout: '', data: emptyRules, stderr: '' },
     'email sending settings mail.acme.com': sendingNotFound('mail.acme.com'),
     ...overrides.runnerTable,
   };
@@ -389,19 +391,21 @@ describe('emailFromDomain', () => {
 describe('structured email results', () => {
   it('reads routing and sending settings', () => {
     const value = { name: 'acme.com', enabled: true, status: 'ready', tag: ZONE_ID };
-    expect(readRoutingSettings(JSON.stringify(value))).toEqual(value);
-    expect(readSendingSettings(JSON.stringify(value))).toEqual({
+    expect(readRoutingSettings(value)).toEqual(value);
+    expect(readSendingSettings(value)).toEqual({
       name: 'acme.com',
       enabled: true,
       tag: ZONE_ID,
     });
-    expect(
-      readSendingSettings(JSON.stringify({ name: 'acme.com', enabled: false, id: ZONE_ID })),
-    ).toEqual({ name: 'acme.com', enabled: false, tag: ZONE_ID });
+    expect(readSendingSettings({ name: 'acme.com', enabled: false, id: ZONE_ID })).toEqual({
+      name: 'acme.com',
+      enabled: false,
+      tag: ZONE_ID,
+    });
   });
 
   it('reads empty rules and disabled catch-all', () => {
-    expect(readRoutingRules('[]')).toEqual({ rules: [], catchAll: null });
+    expect(readRoutingRules([])).toEqual({ rules: [], catchAll: null });
     expect(readRoutingRules(emptyRules)).toEqual({
       rules: [],
       catchAll: { enabled: false, actions: ['drop'] },
@@ -456,7 +460,7 @@ describe('structured email results', () => {
       ],
     ].map((value) => ({ value })),
   )('fails closed on malformed or unsupported rules $value', ({ value }) => {
-    expect(readRoutingRules(JSON.stringify(value))).toBeNull();
+    expect(readRoutingRules(value)).toBeNull();
   });
 
   it('fails closed on malformed JSON and settings', () => {
@@ -464,31 +468,24 @@ describe('structured email results', () => {
     expect(readRoutingRules('not json')).toBeNull();
     expect(readSendingSettings('not json')).toBeNull();
     expect(
-      readRoutingSettings(
-        JSON.stringify({ name: 'acme.com', enabled: 'true', status: 'ready', tag: ZONE_ID }),
-      ),
+      readRoutingSettings({ name: 'acme.com', enabled: 'true', status: 'ready', tag: ZONE_ID }),
     ).toBeNull();
-    expect(
-      readSendingSettings(JSON.stringify({ name: 'acme.com', enabled: true, tag: 'invalid' })),
-    ).toBeNull();
+    expect(readSendingSettings({ name: 'acme.com', enabled: true, tag: 'invalid' })).toBeNull();
     expect(parseWhoamiJson('not json')).toBeNull();
+    expect(parseWhoamiJson({ loggedIn: true, tokenPermissions: 'email_routing:write' })).toBeNull();
+    expect(parseWhoamiJson({ loggedIn: true, accounts: 'invalid' })).toBeNull();
   });
 
   it('reads session scopes and API error codes', () => {
-    expect(parseWhoamiJson(whoamiResult().stdout)?.tokenPermissions).toContain(
-      'email_routing:write',
-    );
-    expect(wranglerApiErrorCode(apiFailure(2040, '/zones/x/email/sending/subdomains').stderr)).toBe(
-      2040,
-    );
-    expect(wranglerApiErrorCode('plain failure')).toBeNull();
+    expect(parseWhoamiJson(whoamiResult().data)?.tokenPermissions).toContain('email_routing:write');
+    expect(apiFailure(2040, '/zones/x/email/sending/subdomains').errorCode).toBe(2040);
   });
 });
 
 // ── Preflight ────────────────────────────────────────────────────────────────────
 
 describe('preflightEmail', () => {
-  it('first deploy on a subdomain: every row pending, no blocker, exact read-only argv', async () => {
+  it('first deploy on a subdomain: every row pending, no blocker, exact read-only provider operations', async () => {
     const { inputs, calls, fetchCalls } = transcriptInputs();
     const pre = await preflightEmail(inputs);
 
@@ -534,23 +531,19 @@ describe('preflightEmail', () => {
     ]);
   });
 
-  it('appends the deploy runner args (`-c <cfg> --env=`) to every wrangler call', async () => {
-    const suffix = ['-c', 'wrangler.jsonc', '--env='];
+  it('pins every provider operation to the deploy config', async () => {
     const base = transcriptInputs();
-    const seen: Array<Array<string>> = [];
+    const seen: Array<CloudflareOperation> = [];
     const { inputs } = transcriptInputs({
-      wranglerArgs: suffix,
-      // The base table keys on the bare argv; strip the suffix before delegating.
-      runWrangler: (args, opts) => {
-        seen.push([...args]);
-        return base.inputs.runWrangler(args.slice(0, -suffix.length), opts);
+      configPath: 'wrangler.jsonc',
+      runWrangler: (operation, opts) => {
+        seen.push(operation);
+        return base.inputs.runWrangler(operation, opts);
       },
     });
     await preflightEmail(inputs);
     expect(seen).toHaveLength(5);
-    for (const args of seen) {
-      expect(args.slice(-suffix.length)).toEqual(suffix);
-    }
+    expect(seen.every((operation) => operation.configPath === 'wrangler.jsonc')).toBe(true);
   });
 
   it('second deploy, everything set up: ready, zero changes', async () => {
@@ -558,16 +551,18 @@ describe('preflightEmail', () => {
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout: routingRules({ supportDomain: 'mail.acme.com' }),
+          stdout: '',
+          data: routingRules({ supportDomain: 'mail.acme.com' }),
           stderr: BETA_WARNING,
         },
         'email sending settings mail.acme.com': {
           status: 0,
-          stdout: JSON.stringify({
+          stdout: '',
+          data: {
             name: 'mail.acme.com',
             enabled: true,
             tag: '19af4fdbee924a92916afea0de5a8fdd',
-          }),
+          },
           stderr: BETA_WARNING,
         },
       },
@@ -609,7 +604,7 @@ describe('preflightEmail', () => {
       runnerTable?: Record<string, EmailWranglerRunResult | (() => EmailWranglerRunResult)>;
       calls?: Array<Call>;
       fetchCalls?: Array<FetchCall>;
-      rules?: string;
+      rules?: Array<unknown>;
     } = {},
   ) {
     const { rules, runnerTable, ...rest } = overrides;
@@ -617,16 +612,18 @@ describe('preflightEmail', () => {
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout: rules ?? routingRules({ supportDomain: 'mail.acme.com' }),
+          stdout: '',
+          data: rules ?? routingRules({ supportDomain: 'mail.acme.com' }),
           stderr: BETA_WARNING,
         },
         'email sending settings mail.acme.com': {
           status: 0,
-          stdout: JSON.stringify({
+          stdout: '',
+          data: {
             name: 'mail.acme.com',
             enabled: true,
             tag: '19af4fdbee924a92916afea0de5a8fdd',
-          }),
+          },
           stderr: BETA_WARNING,
         },
         ...runnerTable,
@@ -657,12 +654,13 @@ describe('preflightEmail', () => {
       runnerTable: {
         'whoami --json': {
           status: 0,
-          stdout: JSON.stringify({
+          stdout: '',
+          data: {
             loggedIn: true,
             authType: 'User API Token',
             email: 'dev@example.com',
             accounts: [{ id: ACCOUNT, name: 'Acme' }],
-          }),
+          },
           stderr: '',
         },
       },
@@ -691,7 +689,8 @@ describe('preflightEmail', () => {
       runnerTable: {
         'whoami --json': {
           status: 0,
-          stdout: JSON.stringify({ loggedIn: true, authType: 'Account API Token' }),
+          stdout: '',
+          data: { loggedIn: true, authType: 'Account API Token' },
           stderr: '',
         },
         'email routing settings mail.acme.com': apiFailure(10000, '/zones'),
@@ -717,7 +716,8 @@ describe('preflightEmail', () => {
       runnerTable: {
         'whoami --json': {
           status: 0,
-          stdout: JSON.stringify({ loggedIn: true, authType: 'Global API Key' }),
+          stdout: '',
+          data: { loggedIn: true, authType: 'Global API Key' },
           stderr: '',
         },
       },
@@ -732,7 +732,7 @@ describe('preflightEmail', () => {
     // Right after `void email setup`, before the first deploy: the array is committed, the
     // rule is absent. Apply has nothing to do; the deploy creates the rule.
     const { inputs } = readyAccount({
-      rules: { status: 0, stdout: emptyRules, stderr: '' }.stdout,
+      rules: { status: 0, stdout: '', data: emptyRules, stderr: '' }.data,
     });
     const pre = await preflightEmail(inputs);
     expect(pre.rules.state).toBe('pending');
@@ -875,12 +875,12 @@ describe('preflightEmail', () => {
   });
 
   it('blocks on a session without the email scopes (`void cloudflare logout`, then `login`)', async () => {
-    const who = JSON.parse(whoamiResult().stdout) as { tokenPermissions: Array<string> };
+    const who = structuredClone(whoamiResult().data) as { tokenPermissions: Array<string> };
     who.tokenPermissions = who.tokenPermissions.filter((s) => !s.startsWith('email_'));
     const calls: Array<Call> = [];
     const { inputs } = transcriptInputs({
       calls,
-      runnerTable: { 'whoami --json': { status: 0, stdout: JSON.stringify(who), stderr: '' } },
+      runnerTable: { 'whoami --json': { status: 0, stdout: '', data: who, stderr: '' } },
     });
     const pre = await preflightEmail(inputs);
     expect(pre.session.state).toBe('missing-scopes');
@@ -899,27 +899,28 @@ describe('preflightEmail', () => {
     // from `void email setup` / `status`, and through `formatCloudflareUserMessage` on the
     // deploy path, where a `wrangler …` command would render as "the underlying Cloudflare
     // operation" — no guidance at all.
-    const who = JSON.parse(whoamiResult().stdout) as { tokenPermissions: Array<string> };
+    const who = structuredClone(whoamiResult().data) as { tokenPermissions: Array<string> };
     who.tokenPermissions = who.tokenPermissions.filter((s) => !s.startsWith('email_'));
     const sessions: Array<{
       state: EmailPreflight['session']['state'];
       whoami: EmailWranglerRunResult;
     }> = [
-      { state: 'unknown', whoami: { status: 1, stdout: '', stderr: '✘ [ERROR] boom\n' } },
-      { state: 'unknown', whoami: { status: 0, stdout: 'not json', stderr: '' } },
+      { state: 'unknown', whoami: { status: 1, stdout: '', data: '', stderr: '✘ [ERROR] boom\n' } },
+      { state: 'unknown', whoami: { status: 0, stdout: '', data: 'not json', stderr: '' } },
       {
         state: 'not-logged-in',
-        whoami: { status: 0, stdout: JSON.stringify({ loggedIn: false }), stderr: '' },
+        whoami: { status: 0, stdout: '', data: { loggedIn: false }, stderr: '' },
       },
       {
         state: 'api-key',
         whoami: {
           status: 0,
-          stdout: JSON.stringify({ loggedIn: true, authType: 'Global API Key' }),
+          stdout: '',
+          data: { loggedIn: true, authType: 'Global API Key' },
           stderr: '',
         },
       },
-      { state: 'missing-scopes', whoami: { status: 0, stdout: JSON.stringify(who), stderr: '' } },
+      { state: 'missing-scopes', whoami: { status: 0, stdout: '', data: who, stderr: '' } },
     ];
     for (const session of sessions) {
       const { inputs } = transcriptInputs({ runnerTable: { 'whoami --json': session.whoami } });
@@ -957,7 +958,7 @@ describe('preflightEmail', () => {
   it('blocks when not logged in', async () => {
     const { inputs } = transcriptInputs({
       runnerTable: {
-        'whoami --json': { status: 0, stdout: JSON.stringify({ loggedIn: false }), stderr: '' },
+        'whoami --json': { status: 0, stdout: '', data: { loggedIn: false }, stderr: '' },
       },
     });
     const pre = await preflightEmail(inputs);
@@ -1071,7 +1072,8 @@ describe('preflightEmail', () => {
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout: routingRules({ supportDomain: 'mail.acme.com', salesDomain: 'mail.acme.com' }),
+          stdout: '',
+          data: routingRules({ supportDomain: 'mail.acme.com', salesDomain: 'mail.acme.com' }),
           stderr: BETA_WARNING,
         },
       },
@@ -1155,7 +1157,8 @@ describe('preflightEmail', () => {
         ...base.runnerTable,
         'email routing rules list acme.com': {
           status: 0,
-          stdout: routingRules({ catchAllWorker: 'other-worker' }),
+          stdout: '',
+          data: routingRules({ catchAllWorker: 'other-worker' }),
           stderr: BETA_WARNING,
         },
       },
@@ -1172,7 +1175,8 @@ describe('preflightEmail', () => {
         ...base.runnerTable,
         'email routing rules list acme.com': {
           status: 0,
-          stdout: routingRules(),
+          stdout: '',
+          data: routingRules(),
           stderr: BETA_WARNING,
         },
       },
@@ -1265,7 +1269,8 @@ describe('preflightEmail', () => {
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout: '{broken json',
+          stdout: '',
+          data: '{broken json',
           stderr: '',
         },
       },
@@ -1296,7 +1301,8 @@ describe('preflightEmail', () => {
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout: routingRules({ supportDomain: 'mail.acme.com' }),
+          stdout: '',
+          data: routingRules({ supportDomain: 'mail.acme.com' }),
           stderr: BETA_WARNING,
         },
       },
@@ -1403,14 +1409,14 @@ describe('preflightEmail', () => {
 
 describe('renderEmailChecklist', () => {
   it('renders the 0078 transcript block for the first subdomain deploy', async () => {
-    const who = JSON.parse(whoamiResult().stdout) as {
+    const who = structuredClone(whoamiResult().data) as {
       email: string;
       accounts: Array<{ id: string; name: string }>;
     };
     who.email = 'dev@acme.com';
     who.accounts = [{ id: ACCOUNT, name: 'Acme' }];
     const { inputs } = transcriptInputs({
-      runnerTable: { 'whoami --json': { status: 0, stdout: JSON.stringify(who), stderr: '' } },
+      runnerTable: { 'whoami --json': { status: 0, stdout: '', data: who, stderr: '' } },
     });
     const pre = await preflightEmail(inputs);
     expect(renderEmailChecklist(pre)).toBe(
@@ -1455,13 +1461,14 @@ const ROUTING_PATCH = `PATCH /zones/${ZONE_ID}/email/routing`;
 function sendingEnabled(name: string): EmailWranglerRunResult {
   return {
     status: 0,
-    stdout: `Email Sending enabled for ${name} (enabled: true)\n`,
+    stdout: '',
+    data: { name, enabled: true },
     stderr: BETA_WARNING,
   };
 }
 
 describe('applyEmailSetup', () => {
-  it('happy subdomain path: exact argv + exact REST calls, bearer in Authorization and nowhere else', async () => {
+  it('happy subdomain path: exact provider operations + exact REST calls, bearer in Authorization and nowhere else', async () => {
     const calls: Array<Call> = [];
     const fetchCalls: Array<FetchCall> = [];
     const { inputs } = transcriptInputs({
@@ -1579,7 +1586,8 @@ describe('applyEmailSetup', () => {
         'email sending settings acme.com': sendingNotFound('acme.com'),
         'email routing enable acme.com': {
           status: 0,
-          stdout: 'Email Routing enabled for acme.com (status: ready)\n',
+          stdout: '',
+          data: { name: 'acme.com', enabled: true },
           stderr: BETA_WARNING,
         },
         'email sending enable acme.com': sendingEnabled('acme.com'),
@@ -1815,7 +1823,8 @@ describe('applyEmailSetup', () => {
         runnerTable: {
           'email routing rules list acme.com': {
             status: 0,
-            stdout: routingRules({ supportDomain: 'mail.acme.com' }),
+            stdout: '',
+            data: routingRules({ supportDomain: 'mail.acme.com' }),
             stderr: BETA_WARNING,
           },
         },
@@ -1871,16 +1880,18 @@ describe('applyEmailSetup', () => {
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout: routingRules({ supportDomain: 'mail.acme.com' }),
+          stdout: '',
+          data: routingRules({ supportDomain: 'mail.acme.com' }),
           stderr: BETA_WARNING,
         },
         'email sending settings mail.acme.com': {
           status: 0,
-          stdout: JSON.stringify({
+          stdout: '',
+          data: {
             name: 'mail.acme.com',
             enabled: true,
             tag: '19af4fdbee924a92916afea0de5a8fdd',
-          }),
+          },
           stderr: BETA_WARNING,
         },
       },

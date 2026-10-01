@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { CloudflareOperation } from '@void/deploy-cloudflare';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   computeInvalidEmittedKeys,
@@ -61,29 +62,26 @@ afterEach(() => {
   }
 });
 
-// A stub `RunSecretList` seam that records its argv and returns a fixed result.
+// A stub that records the typed provider operation and returns a fixed result.
 function stubRunner(result: SecretListRunResult): {
-  run: (args: Array<string>) => SecretListRunResult;
-  calls: Array<Array<string>>;
+  run: (operation: CloudflareOperation) => SecretListRunResult;
+  calls: Array<CloudflareOperation>;
 } {
-  const calls: Array<Array<string>> = [];
+  const calls: Array<CloudflareOperation> = [];
   return {
     calls,
-    run: (args: Array<string>) => {
-      calls.push(args);
+    run: (operation: CloudflareOperation) => {
+      calls.push(operation);
       return result;
     },
   };
 }
 
-// The stdout `wrangler secret list --format=json` prints for a given name set.
+// Structured provider data for a given secret name set.
 function okList(names: Array<string>): SecretListRunResult {
   return {
-    stdout: JSON.stringify(
-      names.map((name) => ({ name, type: 'secret_text' })),
-      null,
-      '  ',
-    ),
+    stdout: '',
+    data: names.map((name) => ({ name, type: 'secret_text' })),
     stderr: '',
     status: 0,
   };
@@ -448,7 +446,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
     expect(envError.message).toContain('void secret put');
   });
 
-  it('a required key ABSENT locally but PRESENT as a remote secret is discharged (passes, pinned argv)', async () => {
+  it('a required key ABSENT locally but PRESENT as a remote secret is discharged using the pinned operation', async () => {
     const root = createTempProject({ withEnvTs: false });
     const configPath = writeConfig(root, { name: 'app', account_id: 'acct-1' });
     const ctx = deriveSelfHostEnvContextFromVars({}, requiredStripe);
@@ -462,8 +460,8 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
     });
 
     expect(result).toEqual({ hasSchema: true, remoteSecretNames: ['STRIPE_KEY'] });
-    // The exact wrangler invocation: subcommand, pinned JSON format, pinned config, pinned empty env.
-    expect(calls).toEqual([['secret', 'list', '--format=json', '-c', configPath, '--env=']]);
+    // The provider operation is pinned to the project's config.
+    expect(calls).toEqual([{ type: 'secret.list', configPath }]);
   });
 
   it('a required key PRESENT-and-EMPTY in the emitted vars fails CLOSED before any wrangler spawn', async () => {
@@ -661,8 +659,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
   // --- first-deploy (worker-not-found) surfaces a structured, actionable error ---
 
   describe('first-deploy worker-not-found', () => {
-    // The EXACT UserError wrangler 4.131 emits from `secret list` when the worker
-    // does not exist yet — the full fixed block rethrown after isWorkerNotFoundError.
+    // Historical diagnostic prose is intentionally insufficient for classification.
     const WORKER_NOT_FOUND_STDERR =
       'Worker "app" not found.\n\n' +
       'If this is a new Worker, run `wrangler deploy` first to create it.\n' +
@@ -678,7 +675,12 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
           requiredKeys: ['FOO', 'API_TOKEN'],
         },
       );
-      const { run } = stubRunner({ stdout: '', stderr: WORKER_NOT_FOUND_STDERR, status: 1 });
+      const { run } = stubRunner({
+        stdout: '',
+        stderr: WORKER_NOT_FOUND_STDERR,
+        status: 1,
+        errorCode: 10007,
+      });
 
       const error = await dischargeSelfHostEnvContext(ctx, {
         root,
@@ -698,6 +700,58 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
       // Still a fail-closed list error at heart (subclass).
       expect(error).toBeInstanceOf(SelfHostSecretListError);
     });
+
+    it('diagnostic prose cannot authorize a first deploy', async () => {
+      const root = createTempProject({ withEnvTs: false });
+      const ctx = deriveSelfHostEnvContextFromVars({}, requiredStripe);
+      const { run } = stubRunner({ stdout: '', stderr: WORKER_NOT_FOUND_STDERR, status: 1 });
+      const error = await dischargeSelfHostEnvContext(ctx, {
+        root,
+        configPath: CONFIG_PATH,
+        runWrangler: run,
+      }).catch((error) => error);
+      expect(error).toBeInstanceOf(SelfHostSecretListError);
+      expect(error).not.toBeInstanceOf(SelfHostFirstDeployError);
+      expect(error.reason).toBe('nonzero-exit');
+    });
+
+    it.each([{ errorCode: 10007 }, { errorCode: 10090 }, { failure: 'not-found' as const }])(
+      'classifies structured missing-Worker results: %j',
+      async (result) => {
+        const root = createTempProject({ withEnvTs: false });
+        const ctx = deriveSelfHostEnvContextFromVars({}, requiredStripe);
+        const { run } = stubRunner({ stdout: '', stderr: '', status: 1, ...result });
+        const error = await dischargeSelfHostEnvContext(ctx, {
+          root,
+          configPath: CONFIG_PATH,
+          runWrangler: run,
+        }).catch((error) => error);
+        expect(error).toBeInstanceOf(SelfHostFirstDeployError);
+        expect(error.missingKeys).toEqual(['STRIPE_KEY']);
+      },
+    );
+
+    it.each([null, NaN, Infinity, -1])(
+      'does not infer a first deploy from invalid exit status %s',
+      async (status) => {
+        const root = createTempProject({ withEnvTs: false });
+        const ctx = deriveSelfHostEnvContextFromVars({}, requiredStripe);
+        // Deliberately malformed injected results must not imply resource absence.
+        const { run } = stubRunner({
+          stdout: '',
+          stderr: '',
+          status: status as number,
+          errorCode: 10007,
+        });
+        const error = await dischargeSelfHostEnvContext(ctx, {
+          root,
+          configPath: CONFIG_PATH,
+          runWrangler: run,
+        }).catch((error) => error);
+        expect(error).toBeInstanceOf(SelfHostSecretListError);
+        expect(error).not.toBeInstanceOf(SelfHostFirstDeployError);
+      },
+    );
 
     it('a generic nonzero exit (auth/network) stays a GENERIC list failure, not first-deploy', async () => {
       const root = createTempProject({ withEnvTs: false });
@@ -764,6 +818,8 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
         stderr: '',
         status: 0,
         signal: 'SIGKILL',
+        errorCode: 10007,
+        failure: 'not-found',
       });
       expect(error.reason).toBe('signal');
       expect(error.detail.signal).toBe('SIGKILL');
@@ -776,12 +832,14 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
         stderr: '',
         status: 0,
         error: 'spawn ENOENT',
+        errorCode: 10007,
+        failure: 'not-found',
       });
       expect(error.reason).toBe('spawn-error');
       expect(error.message).not.toContain('spawn ENOENT');
     });
 
-    it('unparseable stdout is a hard failure', async () => {
+    it('missing structured data is a hard failure', async () => {
       const error = await expectSecretListError({
         stdout: 'not json at all',
         stderr: '',
@@ -791,12 +849,13 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
     });
 
     it('a non-array JSON payload is a hard failure', async () => {
-      await expectSecretListError({ stdout: '{"secrets":[]}', stderr: '', status: 0 });
+      await expectSecretListError({ stdout: '', data: { secrets: [] }, stderr: '', status: 0 });
     });
 
     it('ANY malformed list member fails the whole list (fail closed)', async () => {
       await expectSecretListError({
-        stdout: JSON.stringify([{ name: 'STRIPE_KEY' }, { oops: true }]),
+        stdout: '',
+        data: [{ name: 'STRIPE_KEY' }, { oops: true }],
         stderr: '',
         status: 0,
       });
@@ -804,7 +863,8 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
 
     it('a non-string name is a malformed member', async () => {
       await expectSecretListError({
-        stdout: JSON.stringify([{ name: 123 }]),
+        stdout: '',
+        data: [{ name: 123 }],
         stderr: '',
         status: 0,
       });
@@ -913,7 +973,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
       },
     );
 
-    it('first-deploy classification STILL fires from the (internal-only) output, sentinel-free', async () => {
+    it('first-deploy classification uses the provider code and keeps diagnostics sentinel-free', async () => {
       const root = createTempProject({ withEnvTs: false });
       const ctx = deriveSelfHostEnvContextFromVars(
         {},
@@ -923,8 +983,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
           requiredKeys: ['FOO', 'API_TOKEN'],
         },
       );
-      // The worker-not-found signal AND a sentinel share the child's stderr: the
-      // signal must be read (classification), the sentinel must not leak.
+      // The provider code classifies absence; arbitrary stderr must never leak.
       const { run } = stubRunner({
         stdout: '',
         stderr:
@@ -932,6 +991,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
           'If this is a new Worker, run `wrangler deploy` first to create it.\n' +
           "Otherwise, check that the Worker name is correct and you're logged into the right account.",
         status: 1,
+        errorCode: 10007,
       });
 
       const error = (await dischargeSelfHostEnvContext(ctx, {
@@ -969,7 +1029,9 @@ describe('createDefaultSecretListRunner — async spawn with fail-closed provena
     const script = writeScript(
       root,
       'ok.mjs',
-      `process.stdout.write(JSON.stringify([{ name: 'FOO', type: 'secret_text' }]));\n` +
+      `const operation = JSON.parse(process.argv[2]);\n` +
+        `if (operation.type !== 'secret.list' || operation.configPath !== ${JSON.stringify(CONFIG_PATH)}) process.exit(9);\n` +
+        `process.stdout.write(JSON.stringify({ operationResult: 1, data: [{ name: 'FOO', type: 'secret_text' }] }));\n` +
         `process.stderr.write('note');\n`,
     );
     const run = createDefaultSecretListRunner(root, {
@@ -977,12 +1039,13 @@ describe('createDefaultSecretListRunner — async spawn with fail-closed provena
       timeoutMs: 30_000,
     });
 
-    const result = await run(['secret', 'list', '--format=json', '-c', CONFIG_PATH, '--env=']);
+    const result = await run({ type: 'secret.list', configPath: CONFIG_PATH });
 
     expect(result.status).toBe(0);
     expect(result.signal ?? null).toBeNull();
     expect(result.error ?? null).toBeNull();
-    expect(JSON.parse(result.stdout)).toEqual([{ name: 'FOO', type: 'secret_text' }]);
+    expect(result.data).toEqual([{ name: 'FOO', type: 'secret_text' }]);
+    expect(result.stdout).toBe('');
     expect(result.stderr).toBe('note');
   });
 
@@ -994,7 +1057,7 @@ describe('createDefaultSecretListRunner — async spawn with fail-closed provena
       timeoutMs: 30_000,
     });
 
-    const result = await run(['secret', 'list']);
+    const result = await run({ type: 'secret.list' });
 
     expect(result.status).toBe(3);
   });
@@ -1007,7 +1070,7 @@ describe('createDefaultSecretListRunner — async spawn with fail-closed provena
       timeoutMs: 300,
     });
 
-    const result = await run(['secret', 'list']);
+    const result = await run({ type: 'secret.list' });
 
     expect(result.signal).toBe('SIGKILL');
     expect(result.status).not.toBe(0);
@@ -1021,7 +1084,7 @@ describe('createDefaultSecretListRunner — async spawn with fail-closed provena
       timeoutMs: 5_000,
     });
 
-    const result = await run(['secret', 'list']);
+    const result = await run({ type: 'secret.list' });
 
     expect(result.error).toBeTruthy();
     expect(result.status).not.toBe(0);
@@ -1086,12 +1149,12 @@ describe('createDefaultSecretListRunner — async spawn with fail-closed provena
     const script = writeScript(
       root,
       'env.mjs',
-      `process.stdout.write(JSON.stringify({\n` +
+      `process.stdout.write(JSON.stringify({operationResult:1,data:{\n` +
         `  account: process.env.CLOUDFLARE_ACCOUNT_ID ?? null,\n` +
         `  accessId: process.env.CF_ACCESS_CLIENT_ID ?? null,\n` +
         `  accessSecret: process.env.CF_ACCESS_CLIENT_SECRET ?? null,\n` +
         `  sanitize: process.env.WRANGLER_LOG_SANITIZE ?? null,\n` +
-        `}));\n`,
+        `}}));\n`,
     );
     vi.stubEnv('CF_ACCESS_CLIENT_ID', 'service-token-id');
     vi.stubEnv('CF_ACCESS_CLIENT_SECRET', 'service-token-secret');
@@ -1102,10 +1165,10 @@ describe('createDefaultSecretListRunner — async spawn with fail-closed provena
         timeoutMs: 30_000,
       });
 
-      const result = await run(['secret', 'list']);
+      const result = await run({ type: 'secret.list' });
 
       expect(result.status).toBe(0);
-      expect(JSON.parse(result.stdout)).toEqual({
+      expect(result.data).toEqual({
         account: 'acct-123',
         accessId: null,
         accessSecret: null,

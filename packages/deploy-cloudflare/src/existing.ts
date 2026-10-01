@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { parseRootWranglerConfig } from './config.ts';
 import type { CloudflareCommandRunner } from './execute.ts';
+import type { CloudflareOperation } from './operations.ts';
 import { isWranglerSecretOnlyDraft } from './secret-draft.ts';
 
 export type ExistingCloudflareWorker = {
@@ -55,14 +56,21 @@ async function readCloudflareWorker(
   options: ExistingCloudflareWorkerOptions,
   allowMissing: boolean,
 ): Promise<CloudflareWorkerInspection | null> {
-  const target = ['-c', options.configPath, '--env=', '--name', options.workerName];
+  const target = { configPath: options.configPath, workerName: options.workerName };
   const read = async (
-    args: Array<string>,
+    operation: CloudflareOperation,
     missingIsNull = false,
   ): Promise<Record<string, unknown> | null> => {
-    const result = await options.runWrangler([...args, ...target, '--json'], { capture: true });
+    const result = await options.runWrangler(operation, { capture: true });
     if (result.status !== 0 || result.signal || result.error) {
-      if (missingIsNull && isMissingWorkerOutput(`${result.stdout}\n${result.stderr}`)) {
+      if (
+        missingIsNull &&
+        Number.isSafeInteger(result.status) &&
+        result.status >= 0 &&
+        result.signal == null &&
+        (result.error == null || result.error === '') &&
+        (result.failure === 'not-found' || result.errorCode === 10007)
+      ) {
         return null;
       }
       throw new CloudflareWorkerInspectionError(
@@ -70,7 +78,7 @@ async function readCloudflareWorker(
       );
     }
     try {
-      const value: unknown = JSON.parse(result.stdout);
+      const value: unknown = result.data;
       if (record(value)) {
         return value;
       }
@@ -81,7 +89,7 @@ async function readCloudflareWorker(
   };
   const deployment = options.versionId
     ? { versions: [{ version_id: options.versionId, percentage: 100 }] }
-    : await read(['deployments', 'status'], allowMissing);
+    : await read({ type: 'deployments.status', ...target }, allowMissing);
   if (deployment === null) {
     return null;
   }
@@ -101,7 +109,7 @@ async function readCloudflareWorker(
     );
   }
   const versionId = versions[0].version_id;
-  const version = await read(['versions', 'view', versionId]);
+  const version = await read({ type: 'versions.view', versionId, ...target });
   if (version === null) {
     throw new Error('Cloudflare did not return the existing Worker configuration.');
   }
@@ -116,7 +124,9 @@ async function readCloudflareWorker(
   ) {
     throw new Error('Cloudflare did not return the existing Worker configuration.');
   }
-  const after = options.versionId ? deployment : await read(['deployments', 'status']);
+  const after = options.versionId
+    ? deployment
+    : await read({ type: 'deployments.status', ...target });
   if (after === null || !isDeepStrictEqual(deployment.versions, after.versions)) {
     throw new Error(
       'Cloudflare production changed while linking. Retry from the current deployment.',
@@ -202,13 +212,13 @@ export async function readCloudflareWorkerMigrationTag(
 async function readCloudflareApiAuthentication(
   runWrangler: CloudflareCommandRunner,
 ): Promise<Record<string, string>> {
-  const result = await runWrangler(['auth', 'token', '--json'], { capture: true });
+  const result = await runWrangler({ type: 'auth.token' }, { capture: true });
   if (result.status !== 0 || result.signal || result.error) {
     throw new Error('Could not read the authenticated Cloudflare session.');
   }
   let value: unknown;
   try {
-    value = JSON.parse(result.stdout);
+    value = result.data;
   } catch {
     throw new Error('Cloudflare returned an invalid authentication response.');
   }
@@ -389,13 +399,6 @@ function declarativeClassesMatch(
     }
     return record(current) && current.type === 'durable-object' && current.storage === storage;
   });
-}
-
-function isMissingWorkerOutput(output: string): boolean {
-  return (
-    /\[code:\s*10007\]/i.test(output) ||
-    /no deployments|\bworker\b.*\b(?:does not exist|not found)\b/i.test(output)
-  );
 }
 
 export function assertCloudflareBindingsPreserved(

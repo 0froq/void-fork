@@ -1179,7 +1179,7 @@ async function runEmailCloudflareCommandInConfig(
         ? (rootConfig.vars as Record<string, unknown>)
         : null,
     configConflicts: findEmailConfigConflicts(rootConfig),
-    wranglerArgs: ['-c', wranglerConfigPath, '--env='],
+    configPath: wranglerConfigPath,
     apiBaseUrl,
     runWrangler,
     getSessionBearer,

@@ -13,6 +13,7 @@
 - Code defines current behavior; public docs may intentionally omit paused
   features. Distinguish implemented code from shipped behavior and verified
   release status. Read package scripts before documenting their scope.
+- Keep the bundled matching platform payload when it supports the existing installation workflow. Propose a packaging split only with a concrete user or maintenance benefit.
 - Trace existing contracts before proposing replacements. `void.config.ts`
   already owns authored configuration and `void.lock.json` owns generated
   resource state; prioritize a replacement only after demonstrating its payoff.

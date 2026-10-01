@@ -1,6 +1,6 @@
-import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import type { CloudflareOperation } from '@void/deploy-cloudflare';
 import {
   encodeCloudflareVersionMessage,
   deployCloudflareVersionTraffic,
@@ -16,7 +16,7 @@ import {
 import { join } from 'pathslash';
 import { materializeCloudflareConfig, persistCloudflareConfig } from '../cloudflare-config.ts';
 import { scanWranglerDotenvKeys } from '../shared/dotenv.ts';
-import { resolveWranglerArgv } from './preset.ts';
+import { createCloudflareProcessRunner } from './cloudflare-process.ts';
 import {
   assertNoTransportRedirectInProjectDotenv,
   deleteEnvVarCaseAware,
@@ -37,10 +37,13 @@ export type CloudflareOperationResult = {
   stderr: string;
   signal?: NodeJS.Signals | null;
   error?: string | null;
+  data?: unknown;
+  errorCode?: number;
+  failure?: 'not-found' | 'durable-migration' | 'containers-unavailable';
 };
 
 export type CloudflareOperationRunner = (
-  args: Array<string>,
+  args: CloudflareOperation,
   options: { capture: boolean; input?: string },
 ) => CloudflareOperationResult | Promise<CloudflareOperationResult>;
 
@@ -119,8 +122,12 @@ export function resolveCloudflareOperationContext(
 export async function listCloudflareSecrets(
   context: CloudflareOperationContext,
 ): Promise<Array<string>> {
-  const result = await run(context, ['secret', 'list', ...targetArgs(context), '--format', 'json']);
-  const parsed = parseJson(result.stdout, 'Cloudflare secret list');
+  const result = await run(context, {
+    type: 'secret.list',
+    configPath: context.configPath,
+    workerName: context.workerName,
+  });
+  const parsed = parseJson(result.data, 'Cloudflare secret list');
   if (!Array.isArray(parsed)) {
     throw new Error('Cloudflare secret list returned an unexpected response.');
   }
@@ -141,7 +148,16 @@ export async function putCloudflareSecret(
   name: string,
   value: string,
 ): Promise<void> {
-  await run(context, ['secret', 'put', name, ...targetArgs(context)], { input: value });
+  await run(
+    context,
+    {
+      type: 'secret.put',
+      name: name,
+      configPath: context.configPath,
+      workerName: context.workerName,
+    },
+    { input: value },
+  );
 }
 
 export async function syncCloudflareSecrets(
@@ -149,16 +165,25 @@ export async function syncCloudflareSecrets(
   secrets: ReadonlyArray<{ name: string; value: string }>,
 ): Promise<void> {
   const values = Object.fromEntries(secrets.map(({ name, value }) => [name, value]));
-  await run(context, ['secret', 'bulk', ...targetArgs(context)], {
-    input: `${JSON.stringify(values)}\n`,
-  });
+  await run(
+    context,
+    { type: 'secret.bulk', configPath: context.configPath, workerName: context.workerName },
+    {
+      input: `${JSON.stringify(values)}\n`,
+    },
+  );
 }
 
 export async function deleteCloudflareSecret(
   context: CloudflareOperationContext,
   name: string,
 ): Promise<void> {
-  await run(context, ['secret', 'delete', name, ...targetArgs(context)]);
+  await run(context, {
+    type: 'secret.delete',
+    name: name,
+    configPath: context.configPath,
+    workerName: context.workerName,
+  });
 }
 
 export function resolveCloudflareD1Context(
@@ -204,19 +229,13 @@ export async function executeCloudflareD1Sql(
   context: CloudflareD1Context,
   sql: string,
 ): Promise<Array<Record<string, unknown>>> {
-  const result = await run(context.operation, [
-    'd1',
-    'execute',
-    context.migrateToken,
-    '--remote',
-    '--command',
-    sql,
-    '--json',
-    '-c',
-    context.operation.configPath,
-    '--env=',
-  ]);
-  const parsed = parseJson(result.stdout, 'Cloudflare D1 execute');
+  const result = await run(context.operation, {
+    type: 'd1.execute',
+    database: context.migrateToken,
+    sql: sql,
+    configPath: context.operation.configPath,
+  });
+  const parsed = parseJson(result.data, 'Cloudflare D1 execute');
   if (!Array.isArray(parsed)) {
     throw new Error('Cloudflare D1 execute returned an unexpected response.');
   }
@@ -258,16 +277,11 @@ export async function readCloudflareD1Migrations(
 export async function applyCloudflareD1Migrations(context: CloudflareD1Context): Promise<void> {
   await run(
     context.operation,
-    [
-      'd1',
-      'migrations',
-      'apply',
-      context.migrateToken,
-      '--remote',
-      '-c',
-      context.operation.configPath,
-      '--env=',
-    ],
+    {
+      type: 'd1.migrations.apply',
+      database: context.migrateToken,
+      configPath: context.operation.configPath,
+    },
     { capture: false },
   );
 }
@@ -276,12 +290,24 @@ export async function readCloudflareWorkerStatus(
   context: CloudflareOperationContext,
 ): Promise<CloudflareWorkerStatus> {
   const [deployment, deployments, versions] = await Promise.all([
-    run(context, ['deployments', 'status', ...targetArgs(context), '--json']),
-    run(context, ['deployments', 'list', ...targetArgs(context), '--json']),
-    run(context, ['versions', 'list', ...targetArgs(context), '--json']),
+    run(context, {
+      type: 'deployments.status',
+      configPath: context.configPath,
+      workerName: context.workerName,
+    }),
+    run(context, {
+      type: 'deployments.list',
+      configPath: context.configPath,
+      workerName: context.workerName,
+    }),
+    run(context, {
+      type: 'versions.list',
+      configPath: context.configPath,
+      workerName: context.workerName,
+    }),
   ]);
-  const activeVersionId = parseActiveVersionId(deployment.stdout);
-  const deployedVersionIds = parseCloudflareDeployedVersionIds(deployments.stdout);
+  const activeVersionId = parseActiveVersionId(deployment.data);
+  const deployedVersionIds = parseCloudflareDeployedVersionIds(deployments.data);
   if (activeVersionId && !deployedVersionIds.includes(activeVersionId)) {
     deployedVersionIds.push(activeVersionId);
   }
@@ -289,12 +315,12 @@ export async function readCloudflareWorkerStatus(
     workerName: context.workerName,
     activeVersionId,
     deployedVersionIds,
-    versions: parseCloudflareVersions(versions.stdout),
+    versions: parseCloudflareVersions(versions.data),
   };
 }
 
 /** Return only versions that Cloudflare records as members of a production deployment. */
-export function parseCloudflareDeployedVersionIds(value: string): Array<string> {
+export function parseCloudflareDeployedVersionIds(value: unknown): Array<string> {
   const parsed = parseJson(value, 'Cloudflare deployment list');
   if (!Array.isArray(parsed)) {
     throw new Error('Cloudflare deployment list returned an unexpected response.');
@@ -331,7 +357,7 @@ export function parseCloudflareDeployedVersionIds(value: string): Array<string> 
   return [...ids];
 }
 
-export function parseCloudflareVersions(value: string): Array<CloudflareWorkerVersion> {
+export function parseCloudflareVersions(value: unknown): Array<CloudflareWorkerVersion> {
   const parsed = parseJson(value, 'Cloudflare version list');
   if (!Array.isArray(parsed)) {
     throw new Error('Cloudflare version list returned an unexpected response.');
@@ -359,7 +385,7 @@ export function parseCloudflareVersions(value: string): Array<CloudflareWorkerVe
   });
 }
 
-export function parseActiveVersionId(value: string): string | null {
+export function parseActiveVersionId(value: unknown): string | null {
   const parsed = parseJson(value, 'Cloudflare deployment status');
   if (typeof parsed !== 'object' || parsed === null) {
     throw new Error('Cloudflare deployment status returned an unexpected response.');
@@ -443,15 +469,13 @@ export async function activateCloudflareExistingVersion(
   }
   await run(
     context,
-    [
-      'versions',
-      'deploy',
-      `${target.id}@100`,
-      ...targetArgs(context),
-      '--message',
-      message,
-      '--yes',
-    ],
+    {
+      type: 'versions.deploy',
+      versions: [{ versionId: target.id, percentage: 100 }],
+      configPath: context.configPath,
+      workerName: context.workerName,
+      message: message,
+    },
     { capture: false },
   );
   const knownTriggerConfigs: Record<string, typeof targetTriggerConfig> = {
@@ -524,15 +548,13 @@ export async function activateCloudflareExistingVersion(
   try {
     await run(
       context,
-      [
-        'versions',
-        'deploy',
-        `${current.id}@100`,
-        ...targetArgs(context),
-        '--message',
-        `Void automatic rollback after trigger synchronization failed.`,
-        '--yes',
-      ],
+      {
+        type: 'versions.deploy',
+        versions: [{ versionId: current.id, percentage: 100 }],
+        configPath: context.configPath,
+        workerName: context.workerName,
+        message: `Void automatic rollback after trigger synchronization failed.`,
+      },
       { capture: false },
     );
     const restoredTriggers = await stabilizeCloudflareVersionTriggers({
@@ -570,33 +592,30 @@ export async function activateCloudflareExistingVersion(
 async function readActiveCloudflareVersionId(
   context: CloudflareOperationContext,
 ): Promise<string | null> {
-  const result = await run(context, ['deployments', 'status', ...targetArgs(context), '--json']);
-  return parseActiveVersionId(result.stdout);
+  const result = await run(context, {
+    type: 'deployments.status',
+    configPath: context.configPath,
+    workerName: context.workerName,
+  });
+  return parseActiveVersionId(result.data);
 }
 
 export async function tailCloudflareWorker(
   context: CloudflareOperationContext,
   options: { filter?: string; versionId?: string; status?: 'error' },
 ): Promise<void> {
-  const args = [
-    'tail',
-    context.workerName,
-    '-c',
-    context.configPath,
-    '--env=',
-    '--format',
-    'pretty',
-  ];
-  if (options.filter) {
-    args.push('--search', options.filter);
-  }
-  if (options.versionId) {
-    args.push('--version-id', options.versionId);
-  }
-  if (options.status) {
-    args.push('--status', options.status);
-  }
-  await run(context, args, { capture: false });
+  await run(
+    context,
+    {
+      type: 'tail',
+      workerName: context.workerName,
+      configPath: context.configPath,
+      search: options.filter,
+      versionId: options.versionId,
+      status: options.status,
+    },
+    { capture: false },
+  );
 }
 
 export function listCloudflareDomains(root: string): Array<WranglerCustomDomain> {
@@ -627,7 +646,7 @@ export async function changeCloudflareDomain(
     writeDomainTriggerConfig(context, before.configPath, triggerConfigPath);
     await run(
       context,
-      ['triggers', 'deploy', '-c', triggerConfigPath, '--env=', '--name', context.workerName],
+      { type: 'triggers.deploy', configPath: triggerConfigPath, workerName: context.workerName },
       { capture: false },
     );
   };
@@ -668,7 +687,11 @@ export async function changeCloudflareDomain(
 export async function publishEmptyCloudflareCustomDomainSet(
   context: CloudflareOperationContext,
 ): Promise<void> {
-  await run(context, ['triggers', 'clear-domains', ...targetArgs(context)]);
+  await run(context, {
+    type: 'triggers.clear-domains',
+    configPath: context.configPath,
+    workerName: context.workerName,
+  });
 }
 
 /** Adapt the direct empty-domain API call to the deployment package's result contract. */
@@ -691,7 +714,11 @@ export function createCloudflareEmptyCronPublisher(
 ): () => Promise<CloudflareOperationResult> {
   return async () => {
     try {
-      return await run(context, ['triggers', 'clear-crons', ...targetArgs(context)]);
+      return await run(context, {
+        type: 'triggers.clear-crons',
+        configPath: context.configPath,
+        workerName: context.workerName,
+      });
     } catch (error) {
       return { status: 1, stdout: '', stderr: errorMessage(error), error: errorMessage(error) };
     }
@@ -729,13 +756,9 @@ function writeDomainTriggerConfig(
   writeFileSync(triggerConfigPath, `${JSON.stringify(config, null, 2)}\n`);
 }
 
-function targetArgs(context: CloudflareOperationContext): Array<string> {
-  return ['-c', context.configPath, '--env=', '--name', context.workerName];
-}
-
 async function run(
   context: CloudflareOperationContext,
-  args: Array<string>,
+  args: CloudflareOperation,
   options?: { capture?: boolean; input?: string },
 ): Promise<CloudflareOperationResult> {
   const result = await Promise.resolve(
@@ -750,9 +773,7 @@ async function run(
     (result.error !== undefined && result.error !== null && result.error !== '')
   ) {
     const detail = result.stderr.trim() || result.stdout.trim() || result.error || 'unknown error';
-    throw new Error(
-      `Cloudflare command failed (${args.slice(0, 2).join(' ')}, exit ${result.status}): ${detail}`,
-    );
+    throw new Error(`Cloudflare command failed (${args.type}, exit ${result.status}): ${detail}`);
   }
   return result;
 }
@@ -762,35 +783,16 @@ function createCloudflareOperationRunner(
   accountId: string,
   apiBaseUrl: string,
 ): CloudflareOperationRunner {
-  const [command, ...prefix] = resolveWranglerArgv(root);
-  return (args, options) => {
-    const env = provisionEnv({ accountId, apiBaseUrl });
-    deleteEnvVarCaseAware(env, 'WRANGLER_CI_OVERRIDE_NAME');
-    if (!options.capture) {
-      env.WRANGLER_LOG = 'none';
-    }
-    const result = spawnSync(command, [...prefix, ...args], {
-      cwd: root,
-      env,
-      shell: false,
-      windowsHide: true,
-      encoding: 'utf-8',
-      input: options.input,
-      stdio:
-        options.input !== undefined
-          ? ['pipe', options.capture ? 'pipe' : 'inherit', options.capture ? 'pipe' : 'inherit']
-          : options.capture
-            ? ['ignore', 'pipe', 'pipe']
-            : 'inherit',
-    });
-    return {
-      status: typeof result.status === 'number' ? result.status : 1,
-      stdout: result.stdout ?? '',
-      stderr: result.stderr ?? '',
-      signal: result.signal ?? null,
-      error: result.error?.message ?? null,
-    };
-  };
+  return createCloudflareProcessRunner({
+    root,
+    accountId,
+    apiBaseUrl,
+    env: () => {
+      const env = provisionEnv({ accountId, apiBaseUrl });
+      deleteEnvVarCaseAware(env, 'WRANGLER_CI_OVERRIDE_NAME');
+      return env;
+    },
+  });
 }
 
 function discoverRootWranglerConfig(root: string): string {
@@ -822,12 +824,11 @@ function assertNoOperationConfigOverride(root: string): void {
   }
 }
 
-function parseJson(value: string, label: string): unknown {
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    throw new Error(`${label} did not return valid JSON.`);
+function parseJson(value: unknown, label: string): unknown {
+  if (value === undefined) {
+    throw new Error(label + ' did not return structured data.');
   }
+  return value;
 }
 
 function errorMessage(error: unknown): string {

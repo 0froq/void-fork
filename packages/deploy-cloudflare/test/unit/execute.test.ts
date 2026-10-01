@@ -8,16 +8,7 @@ describe('executeCloudflareDeploy', () => {
     await expect(
       executeCloudflareDeploy({ runWrangler, verifyUploader: () => true }),
     ).resolves.toEqual({ ok: true });
-    expect(runWrangler).toHaveBeenCalledWith(
-      [
-        'deploy',
-        '--env=',
-        '--experimental-provision=false',
-        '--experimental-auto-create=false',
-        '--autoconfig=false',
-      ],
-      { capture: false },
-    );
+    expect(runWrangler).toHaveBeenCalledWith({ type: 'worker.deploy' }, { capture: false });
   });
 
   it('does not invoke Wrangler when its uploader changed', async () => {
@@ -39,15 +30,7 @@ describe('executeCloudflareDeploy', () => {
     });
 
     expect(runWrangler).toHaveBeenCalledWith(
-      [
-        'deploy',
-        '-c',
-        '/app/wrangler.jsonc',
-        '--env=',
-        '--experimental-provision=false',
-        '--experimental-auto-create=false',
-        '--autoconfig=false',
-      ],
+      { type: 'worker.deploy', configPath: '/app/wrangler.jsonc' },
       { capture: false },
     );
   });

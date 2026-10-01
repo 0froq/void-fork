@@ -50,6 +50,8 @@ import {
   assertExistingCloudflareConfig,
   assertCloudflareBindingsPreserved,
   type ExistingCloudflareWorker,
+  type CloudflareCommandResult,
+  type CloudflareOperation,
   type ApprovedCloudflareKvBinding,
 } from '@void/deploy-cloudflare';
 import { createDeployArtifact, createDeployUploadPayload } from '@void/deploy-core';
@@ -132,7 +134,6 @@ import {
 import {
   CloudflareAuthenticationError,
   cloudflareCredentialOverrides,
-  cloudflareAuthNeedsTerminal,
   ensureCloudflareAuthentication,
   parseCloudflareAuthSession,
 } from './cloudflare-auth.ts';
@@ -158,6 +159,7 @@ import {
   createCloudflareEmptyCronPublisher,
   createCloudflareEmptyDomainPublisher,
 } from './cloudflare-operations.ts';
+import { createCloudflareProcessRunner } from './cloudflare-process.ts';
 import {
   rememberCloudflareWorkersDevSubdomain,
   resolveCloudflareWorkersDevSubdomain,
@@ -235,7 +237,7 @@ import {
   FRAMEWORK_PRESETS,
   formatProjectCommand,
   resolveProjectCommand,
-  resolveWranglerArgv,
+  resolveCloudflareOperationArgv,
   type StaticPreset,
   type FrameworkPreset,
 } from './preset.ts';
@@ -1248,13 +1250,13 @@ export function reconstructExpectedDurableObjectState(
  * chunks from its own `__dirname` (the proxy workers, the experimental-config module), so the
  * whole directory is the trust surface, not just the entry file. Content hash of the bytes, NOT
  * mtime. Resolves the SAME entry {@link createDeployWranglerRunner} spawns (via
- * {@link resolveWranglerArgv}, whose launcher's LAST argv element is the JS entry). Returns
+ * {@link resolveCloudflareOperationArgv}, whose launcher's LAST argv element is the JS entry). Returns
  * `undefined` when the entry cannot be resolved or a file cannot be read, so the caller FAILS
  * CLOSED — it never deploys a binary it could not verify. The resolver is injectable for tests.
  */
 export function hashWranglerUploader(
   root: string,
-  resolveArgv: (root: string) => Array<string> = resolveWranglerArgv,
+  resolveArgv: (root: string) => Array<string> = resolveCloudflareOperationArgv,
 ): string | undefined {
   let entry: string | undefined;
   try {
@@ -2406,37 +2408,10 @@ export function verifyGeneratedDeployConfig(
 }
 
 /** Result of one orchestrator-owned wrangler invocation (whoami/migrate/deploy). */
-export type DeployWranglerRunResult = {
-  status: number;
-  stdout: string;
-  stderr: string;
-  /** Non-null ONLY when the child was killed by a signal — a HARD failure. */
-  signal?: NodeJS.Signals | null;
-  /** Spawn-error message when the child could not start — a HARD failure. */
-  error?: string | null;
-};
-
-/**
- * Injectable seam over the orchestrator's OWN wrangler calls (`whoami`,
- * `d1 migrations apply`, `deploy`). `capture:true` pipes stdout/stderr (so
- * `whoami --json` can be classified); `capture:false` inherits the terminal
- * (migrate/deploy stream their own progress + URL). Unit tests inject a stub so
- * no real wrangler runs. Mirrors the provisioner's `RunWrangler` structured
- * provenance so a signal-killed / unspawnable child is never read as success.
- */
+export type DeployWranglerRunResult = CloudflareCommandResult;
 export type DeployWranglerRun = (
-  args: Array<string>,
-  opts: {
-    capture: boolean;
-    /** Piped to the child's stdin (e.g. a secret value for `wrangler secret put`). */
-    input?: string;
-    /**
-     * Extra env pins layered OVER the deploy child env for this one spawn (e.g.
-     * `WRANGLER_WRITE_LOGS=false` for `auth token`). Never a credential — the runner's own
-     * env already carries the wrangler auth.
-     */
-    env?: Record<string, string>;
-  },
+  operation: CloudflareOperation,
+  opts: { capture: boolean; input?: string; env?: Record<string, string> },
 ) => DeployWranglerRunResult | Promise<DeployWranglerRunResult>;
 
 /**
@@ -3739,54 +3714,19 @@ export async function checkWranglerMigrationApplySet(
   return { ok: true };
 }
 
-/**
- * Default {@link DeployWranglerRun}: spawns the project-local wrangler REAL CLI
- * (via {@link resolveWranglerArgv}, shell-free) with ONE pinned transport in the
- * child env (via {@link deployChildEnv} — reused provisioner scrub/pin: CF Access +
- * every transport selector incl. `CLOUDFLARE_ENV` + the deploy config-override vars
- * scrubbed, one account + API base pinned), so `whoami`/`migrate`/`deploy` can never
- * consult a different ambient account or endpoint. Noninteractive output is captured so Void
- * controls the terminal; browser login still inherits stdio. `opts.env` layers one more pin
- * over the child env for a single spawn (`auth token` gets
- * `WRANGLER_WRITE_LOGS=false`, see {@link runWranglerAuthToken}).
- */
+/** Run typed provider operations in the pinned account and API context. */
 export function createDeployWranglerRunner(
   root: string,
   accountId: string | undefined,
   apiBaseUrl: string,
 ): DeployWranglerRun {
-  const launcher = resolveWranglerArgv(root);
-  const [command, ...prefix] = launcher;
-  return (args, opts) => {
-    const childEnv = deployChildEnv(accountId, apiBaseUrl);
-    const interactiveLogin = cloudflareAuthNeedsTerminal(args);
-    if (!opts.capture || interactiveLogin) {
-      childEnv.WRANGLER_LOG = 'none';
-    }
-    if (opts.env) {
-      Object.assign(childEnv, opts.env);
-    }
-    const result = spawnSync(command as string, [...prefix, ...args], {
-      cwd: root,
-      stdio: interactiveLogin
-        ? 'inherit'
-        : opts.input === undefined
-          ? ['ignore', 'pipe', 'pipe']
-          : ['pipe', 'pipe', 'pipe'],
-      input: opts.input,
-      encoding: 'utf-8',
-      env: childEnv,
-      shell: false,
-      windowsHide: true,
-    });
-    return {
-      status: typeof result.status === 'number' ? result.status : 1,
-      stdout: result.stdout ?? '',
-      stderr: result.stderr ?? '',
-      signal: result.signal ?? null,
-      error: result.error ? result.error.message : null,
-    };
-  };
+  const runner = createCloudflareProcessRunner({
+    root,
+    accountId,
+    apiBaseUrl,
+    env: () => deployChildEnv(accountId, apiBaseUrl),
+  });
+  return (operation, opts) => runner(operation, opts);
 }
 
 /** Retry an existing-Worker read only when a fresh identity check proves the session is gone. */
@@ -3806,12 +3746,15 @@ async function prepareExistingCloudflareDeployWithAuth(
         'uploader-changed',
       );
     }
-    const whoamiArgs = [...existingWranglerConfigArgs(options.configPath), '--env='];
-    const identity = await options.runWrangler(['whoami', '--json', ...whoamiArgs], {
-      capture: true,
-    });
+    const configPath = existsSync(options.configPath) ? options.configPath : undefined;
+    const identity = await options.runWrangler(
+      { type: 'auth.whoami', configPath },
+      {
+        capture: true,
+      },
+    );
     const session = isCleanWranglerExit(identity)
-      ? parseCloudflareAuthSession(identity.stdout)
+      ? parseCloudflareAuthSession(identity.data)
       : null;
     const wrongAccount =
       session !== null &&
@@ -3823,7 +3766,7 @@ async function prepareExistingCloudflareDeployWithAuth(
     }
     let loggedOut = false;
     try {
-      loggedOut = (JSON.parse(identity.stdout) as { loggedIn?: unknown }).loggedIn === false;
+      loggedOut = (identity.data as { loggedIn?: unknown } | undefined)?.loggedIn === false;
     } catch {
       /* The auth command may have failed before producing JSON. */
     }
@@ -3860,8 +3803,8 @@ async function prepareExistingCloudflareDeployWithAuth(
       forceLogin: true,
       requireAccounts: true,
       beforeRun,
-      runWrangler: (args, capture) => options.runWrangler([...args], { capture }),
-      whoamiArgs,
+      runWrangler: (operation, capture) => options.runWrangler(operation, { capture }),
+      configPath,
     });
     if (!authenticated.accounts.some((account) => account.id === options.accountId)) {
       throw new Error(
@@ -3888,8 +3831,8 @@ async function chooseCloudflareDeployAccount(options: {
   const session = await ensureCloudflareAuthentication({
     beforeRun: options.beforeWranglerRun,
     requireAccounts: true,
-    runWrangler: (args, capture) => options.runWrangler([...args], { capture }),
-    whoamiArgs: [...existingWranglerConfigArgs(options.configPath), '--env='],
+    runWrangler: (operation, capture) => options.runWrangler(operation, { capture }),
+    configPath: existsSync(options.configPath) ? options.configPath : undefined,
   });
   const accounts = session.accounts;
   let account = accounts[0]!;
@@ -3954,10 +3897,13 @@ export async function runWranglerAuthToken(
   let result: DeployWranglerRunResult;
   try {
     result = await Promise.resolve(
-      runWrangler(['auth', 'token', '--json', '-c', configPath, '--env='], {
-        capture: true,
-        env: { WRANGLER_WRITE_LOGS: 'false' },
-      }),
+      runWrangler(
+        { type: 'auth.token', configPath },
+        {
+          capture: true,
+          env: { WRANGLER_WRITE_LOGS: 'false' },
+        },
+      ),
     );
   } catch {
     return null;
@@ -3965,18 +3911,7 @@ export async function runWranglerAuthToken(
   if (!isCleanWranglerExit(result)) {
     return null;
   }
-  // `--json` suppresses the banner, so stdout is the object alone; tolerate surrounding noise.
-  const start = result.stdout.indexOf('{');
-  const end = result.stdout.lastIndexOf('}');
-  if (start === -1 || end <= start) {
-    return null;
-  }
-  let parsed: { type?: unknown; token?: unknown } | null;
-  try {
-    parsed = JSON.parse(result.stdout.slice(start, end + 1)) as typeof parsed;
-  } catch {
-    return null;
-  }
+  const parsed = result.data as { type?: unknown; token?: unknown } | null | undefined;
   // An `api_key` session answers `{ key, email }` — there is no single bearer to borrow.
   const type = parsed?.type;
   const token = parsed?.token;
@@ -4100,7 +4035,7 @@ async function runCloudflareEmailStep(
         : undefined,
     configConflicts: findEmailConfigConflicts(rootConfig),
     // The SAME `-c`/`--env=` context every other credentialed wrangler run gets.
-    wranglerArgs: ['-c', input.configPath, '--env='],
+    configPath: input.configPath,
     apiBaseUrl: input.apiBaseUrl,
     runWrangler: input.runWrangler,
     getSessionBearer: () => runWranglerAuthToken(input.runWrangler, input.configPath),
@@ -4409,7 +4344,12 @@ export async function ensureCloudflareAuthSecret(options: {
   try {
     put = await Promise.resolve(
       options.runWrangler(
-        ['secret', 'put', BETTER_AUTH_SECRET_NAME, '-c', options.configPath, '--env='],
+        {
+          type: 'secret.put',
+          name: BETTER_AUTH_SECRET_NAME,
+          configPath: options.configPath,
+          workerName: options.workerName,
+        },
         { capture: true, input: `${secret}\n` },
       ),
     );
@@ -4552,7 +4492,7 @@ async function applyAndVerifyRemoteD1Migrations(
     // 9a. Apply.
     const migrate = await Promise.resolve(
       runWrangler(
-        ['d1', 'migrations', 'apply', d1MigrateToken, '--remote', '-c', configPath, '--env='],
+        { type: 'd1.migrations.apply', database: d1MigrateToken, configPath },
         { capture: false },
       ),
     );
@@ -4565,22 +4505,14 @@ async function applyAndVerifyRemoteD1Migrations(
       return false;
     }
 
-    // 9b. Verify NO migrations remain pending on remote. `d1 migrations apply` EXITS 0 when
-    // its confirmation is DECLINED (interactive) — a no-op that reads as success — and prints
-    // no machine-readable applied set. `d1 migrations list --remote` queries the remote
-    // `d1_migrations` table and prints "Migrations to be applied:" when any remain, else the
-    // affirmative "No migrations to apply!". Both emit at wrangler's `log` level, which the
-    // child env PINS (`WRANGLER_LOG=log`), so an ambient reduced level can never suppress
-    // them. Reject on the pending marker, REQUIRE the affirmative sentinel, and reject any
-    // empty/unrecognized output rather than trust an absent marker.
-    // Re-verify the uploader before this distinct credentialed run too (defense in depth — the
-    // pre-build baseline is the constant reference for every spawn).
+    // Read the structured pending set after apply; a clean apply exit alone does not prove
+    // the schema is current. Recheck integrity before this separate credentialed read.
     if (!assertUploaderStillPinned()) {
       return false;
     }
     const migrateList = await Promise.resolve(
       runWrangler(
-        ['d1', 'migrations', 'list', d1MigrateToken, '--remote', '-c', configPath, '--env='],
+        { type: 'd1.migrations.list', database: d1MigrateToken, configPath },
         { capture: true },
       ),
     );
@@ -4592,25 +4524,25 @@ async function applyAndVerifyRemoteD1Migrations(
       );
       return false;
     }
-    if (migrateList.stdout.includes('Migrations to be applied:')) {
+    const migrationState = migrateList.data as { pending?: unknown } | undefined;
+    if (Array.isArray(migrationState?.pending) && migrationState.pending.length > 0) {
       log.error(
         [
           `deploy: remote D1 still has UNAPPLIED migrations for "${d1MigrateToken}" after apply.`,
-          '`wrangler d1 migrations apply` exits 0 even when its confirmation is declined, so',
-          'the schema may be un-migrated while the code that needs it is about to deploy.',
-          'Re-run and confirm the migration (or apply it non-interactively), then rerun.',
+          'The schema is not current for this deployment. Fix or apply the pending migrations, then retry.',
         ].join('\n'),
       );
       return false;
     }
-    if (!migrateList.stdout.includes('No migrations to apply!')) {
+    if (
+      !Array.isArray(migrationState?.pending) ||
+      !migrationState.pending.every((name) => typeof name === 'string')
+    ) {
       log.error(
         [
           `deploy: could not confirm the remote migration state for "${d1MigrateToken}".`,
-          '`wrangler d1 migrations list` printed neither the "no migrations to apply" nor the',
-          '"migrations to be applied" marker (WRANGLER_LOG is pinned so they are never',
-          'suppressed) — refusing to deploy against an unverified schema. Rerun once wrangler',
-          'can reach your account.',
+          'Cloudflare returned an invalid pending migration set. Refusing to deploy against an unverified schema.',
+          'Retry once the database migration state can be read.',
         ].join('\n'),
       );
       return false;
@@ -5108,8 +5040,8 @@ export async function runCloudflareDeploy(
     await ensureCloudflareAuthentication({
       acceptApiToken: true,
       beforeRun: assertUploaderStillPinned,
-      runWrangler: (args, capture) => runWrangler([...args], { capture }),
-      whoamiArgs: [...existingWranglerConfigArgs(configPath), '--env='],
+      runWrangler: (operation, capture) => runWrangler(operation, { capture }),
+      configPath: existsSync(configPath) ? configPath : undefined,
     });
   } catch (error) {
     if (error instanceof CloudflareAuthenticationError && error.reason === 'uploader-changed') {
@@ -5232,7 +5164,7 @@ export async function runCloudflareDeploy(
     }
     const containers = await Promise.resolve(
       runWrangler(
-        ['containers', 'list', '--json', ...existingWranglerConfigArgs(configPath), '--env='],
+        { type: 'containers.list', configPath: existsSync(configPath) ? configPath : undefined },
         { capture: true },
       ),
     );
@@ -5401,7 +5333,7 @@ export async function runCloudflareDeploy(
     const absentQueues: Array<string> = [];
     for (const name of desired.queues) {
       const info = await Promise.resolve(
-        runWrangler(['queues', 'info', name, '-c', configPath, '--env='], { capture: true }),
+        runWrangler({ type: 'queues.info', name, configPath }, { capture: true }),
       );
       if (provisionModule.isQueueConfirmedAbsent(info, name)) {
         absentQueues.push(name);
@@ -6220,11 +6152,6 @@ export function discoverRootWranglerConfig(root: string): string {
   return materializeCloudflareConfig(root);
 }
 
-/** Avoid making Wrangler open a config path that Void has not created yet. */
-function existingWranglerConfigArgs(configPath: string): Array<string> {
-  return existsSync(configPath) ? ['-c', configPath] : [];
-}
-
 async function reportCloudflareActivationFailure(
   cliLog: CliLogger,
   message: string,
@@ -6650,8 +6577,8 @@ async function runCloudflareStaticDeploy(
     await ensureCloudflareAuthentication({
       acceptApiToken: true,
       beforeRun: uploaderIsPinned,
-      runWrangler: (args, capture) => runWrangler([...args], { capture }),
-      whoamiArgs: [...existingWranglerConfigArgs(configPath), '--env='],
+      runWrangler: (operation, capture) => runWrangler(operation, { capture }),
+      configPath: existsSync(configPath) ? configPath : undefined,
     });
   } catch (error) {
     if (error instanceof CloudflareAuthenticationError && error.reason === 'uploader-changed') {

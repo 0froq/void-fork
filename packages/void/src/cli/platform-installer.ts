@@ -27,6 +27,7 @@ import {
   readCloudflareTriggerConfig,
   stabilizeCloudflareVersionTriggers,
   type CloudflareCommandResult,
+  type CloudflareOperation,
   type CloudflareCommandRunner,
   type CloudflareTriggerConfig,
 } from '@void/deploy-cloudflare';
@@ -122,7 +123,7 @@ import {
   readPlatformProjectZeroTrustStateConnection,
   type PlatformProjectZeroTrustState,
 } from './platform-zero-trust-uninstall.ts';
-import { resolveWranglerArgv } from './preset.ts';
+import { resolveCloudflareOperationArgv } from './preset.ts';
 import { createDefaultRunWrangler, resolvePinnedApiBaseUrl } from './provision.ts';
 
 export const REMOTE_INSTALLATION_MANIFEST_KEY: string = PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY;
@@ -1280,14 +1281,18 @@ export async function installPlatform(
   }
   const now = dependencies.now ?? (() => new Date().toISOString());
   const cloudflareApiBaseUrl = dependencies.client.apiBaseUrl ?? resolvePinnedApiBaseUrl();
-  const runPinnedPlatformWrangler: typeof runPlatformWrangler = (args, accountId, cwd, capture) =>
-    runPlatformWranglerAtApiBase(args, accountId, cwd, capture, cloudflareApiBaseUrl);
-  const runParallelPinnedPlatformWrangler: typeof runPlatformWrangler = (
-    args,
+  const runPinnedPlatformWrangler: typeof runPlatformWrangler = (
+    operation,
     accountId,
     cwd,
     capture,
-  ) => runPlatformWranglerAtApiBase(args, accountId, cwd, capture, cloudflareApiBaseUrl, true);
+  ) => runPlatformWranglerAtApiBase(operation, accountId, cwd, capture, cloudflareApiBaseUrl);
+  const runParallelPinnedPlatformWrangler: typeof runPlatformWrangler = (
+    operation,
+    accountId,
+    cwd,
+    capture,
+  ) => runPlatformWranglerAtApiBase(operation, accountId, cwd, capture, cloudflareApiBaseUrl, true);
   const resolvedRuntime = dependencies.runtime ?? resolvePlatformRuntime();
   const runtimeDirectory = resolvedRuntime.directory;
   const runtime = resolvedRuntime.manifest;
@@ -4395,13 +4400,14 @@ function platformWorkerUploaderHash(): string | null {
     return cachedPlatformUploaderHash;
   }
   try {
-    const launcher = resolveWranglerArgv(process.cwd())[1];
+    const launcher = resolveCloudflareOperationArgv(process.cwd())[1];
     if (!launcher) {
       return (cachedPlatformUploaderHash = null);
     }
     const digest = createHash('sha256');
     digest.update('platform-uploader:v1\0');
     digest.update(process.version);
+    digest.update(readFileSync(launcher));
     digest.update(readFileSync(resolve(dirname(launcher), '..', '..', 'package.json')));
     const cfDirectory = dirname(fileURLToPath(import.meta.resolve('cf/package.json')));
     digest.update(readFileSync(join(cfDirectory, 'package.json')));
@@ -4555,9 +4561,9 @@ function platformWorkerApiReadRunner(
   fallback: typeof runPlatformWrangler,
 ): typeof runPlatformWrangler {
   const base = `/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(workerName)}`;
-  return async (args, account, cwd, capture) => {
+  return async (operation, account, cwd, capture) => {
     try {
-      if (args[0] === 'deployments' && (args[1] === 'status' || args[1] === 'list')) {
+      if (operation.type === 'deployments.status' || operation.type === 'deployments.list') {
         const response = await readCloudflare(`${base}/deployments`);
         const deployments =
           response && typeof response === 'object' && !Array.isArray(response)
@@ -4569,20 +4575,23 @@ function platformWorkerApiReadRunner(
           );
         }
         return {
-          status: args[1] === 'status' && deployments.length === 0 ? 1 : 0,
+          status: operation.type === 'deployments.status' && deployments.length === 0 ? 1 : 0,
           stderr: '',
-          stdout: JSON.stringify(args[1] === 'status' ? deployments[0] : deployments),
+          stdout: '',
+          data: operation.type === 'deployments.status' ? deployments[0] : deployments,
         };
       }
-      if (args[0] === 'versions' && args[1] === 'view' && args[2]) {
-        const version = await readCloudflare(`${base}/versions/${encodeURIComponent(args[2])}`);
-        return { status: 0, stderr: '', stdout: JSON.stringify(version) };
+      if (operation.type === 'versions.view') {
+        const version = await readCloudflare(
+          `${base}/versions/${encodeURIComponent(operation.versionId)}`,
+        );
+        return { status: 0, stderr: '', stdout: '', data: version };
       }
     } catch {
-      // An API read error is not evidence of ownership or deployment lineage.
-      // Run the established cf command for the same check.
+      // A failed read is not evidence of ownership or deployment lineage.
+      // Keep the same provider check through the scoped operation runner.
     }
-    return fallback(args, account, cwd, capture);
+    return fallback(operation, account, cwd, capture);
   };
 }
 
@@ -4844,30 +4853,24 @@ export async function deployPlatformWorker(
       };
       writeFileSync(configPath, `${JSON.stringify(uploadConfig, null, 2)}\n`, { mode: 0o600 });
     }
-    const argv = [
-      ...(options.workerExisted ? ['versions', 'upload'] : ['deploy']),
-      '--config',
+    const operation: CloudflareOperation = {
+      type: options.workerExisted ? 'versions.upload' : 'worker.deploy',
       configPath,
-      '--strict',
-      '--experimental-provision=false',
-      '--experimental-auto-create=false',
-      ...(!options.workerExisted ? ['--autoconfig=false'] : []),
-      '--message',
-      encodeCloudflareVersionMessage([], nextTriggers, uploadedContentHash ?? undefined),
-    ];
+      message: encodeCloudflareVersionMessage([], nextTriggers, uploadedContentHash ?? undefined),
+    };
     if (secrets) {
       const secretsPath = join(directory, 'secrets.json');
       writeFileSync(secretsPath, JSON.stringify(secrets), { mode: 0o600 });
-      argv.push('--secrets-file', secretsPath);
+      operation.secretsFilePath = secretsPath;
     }
     const releaseUploadSlot = await options.acquireUploadSlot?.();
     let uploaded: CloudflareCommandResult;
     let uploadError: unknown;
     try {
       uploaded = options.workerExisted
-        ? await options.runner(argv, accountId, directory, true)
+        ? await options.runner(operation, accountId, directory, true)
         : await runPlatformWranglerForConditionalCreate(
-            argv,
+            operation,
             accountId,
             directory,
             true,
@@ -4884,9 +4887,8 @@ export async function deployPlatformWorker(
     } finally {
       releaseUploadSlot?.(uploadError);
     }
-    uploadedVersionId = parseUploadedPlatformWorkerVersion(
-      `${uploaded.stdout}\n${uploaded.stderr}`,
-    );
+    const uploadData = uploaded.data as { versionId?: unknown } | undefined;
+    uploadedVersionId = typeof uploadData?.versionId === 'string' ? uploadData.versionId : null;
     if (!options.workerExisted) {
       activatedVersionId = uploadedVersionId;
     }
@@ -4915,16 +4917,12 @@ export async function deployPlatformWorker(
       }
       activatedVersionId = uploadedVersionId;
       const activated = await options.runner(
-        [
-          'versions',
-          'deploy',
-          `${uploadedVersionId}@100`,
-          '--config',
+        {
+          type: 'versions.deploy',
           configPath,
-          '--message',
-          `Void platform activation ${uploadedVersionId}`,
-          '--yes',
-        ],
+          versions: [{ versionId: uploadedVersionId, percentage: 100 }],
+          message: `Void platform activation ${uploadedVersionId}`,
+        },
         accountId,
         directory,
         true,
@@ -5265,22 +5263,22 @@ function platformWorkerCommandRunner(
   cwd: string,
   runner: typeof runPlatformWrangler,
 ): CloudflareCommandRunner {
-  return (args, options) => runner(args, accountId, cwd, options.capture);
+  return (operation, options) => runner(operation, accountId, cwd, options.capture);
 }
 
 export async function runPlatformWrangler(
-  args: ReadonlyArray<string>,
+  operation: CloudflareOperation,
   accountId: string,
   cwd: string,
   capture: boolean,
 ): Promise<CloudflareCommandResult> {
-  return runPlatformWranglerAtApiBase(args, accountId, cwd, capture);
+  return runPlatformWranglerAtApiBase(operation, accountId, cwd, capture);
 }
 
 const PLATFORM_WRANGLER_TIMEOUT_MS = 10 * 60 * 1000;
 
 async function runPlatformWranglerAtApiBase(
-  args: ReadonlyArray<string>,
+  operation: CloudflareOperation,
   accountId: string,
   cwd: string,
   capture: boolean,
@@ -5289,23 +5287,18 @@ async function runPlatformWranglerAtApiBase(
 ): Promise<CloudflareCommandResult> {
   const startedAt = performance.now();
   const runner = createDefaultRunWrangler(process.cwd(), {
-    launcher: resolveWranglerArgv(process.cwd()),
+    launcher: resolveCloudflareOperationArgv(process.cwd()),
     parallelWorkerUpload,
     timeoutMs: PLATFORM_WRANGLER_TIMEOUT_MS,
   });
-  const result = await runner([...args], {
+  const result = await runner(operation, {
     accountId,
     apiBaseUrl,
-    captureJson: capture,
     cwd,
   });
   if (process.env.VOID_PLATFORM_TIMINGS === '1') {
-    const operation =
-      args[0] === 'versions' || args[0] === 'deployments'
-        ? `${args[0]} ${args[1] ?? ''}`
-        : (args[0] ?? 'unknown');
     process.stderr.write(
-      `[platform timing] wrangler ${operation} ${(performance.now() - startedAt).toFixed(0)} ms\n`,
+      `[platform timing] Cloudflare ${operation.type} ${(performance.now() - startedAt).toFixed(0)} ms\n`,
     );
   }
   const stdout = result.stdout || '';
@@ -5320,11 +5313,7 @@ async function runPlatformWranglerAtApiBase(
       process.stderr.write(stderr);
     }
   }
-  return {
-    status: result.status,
-    stderr,
-    stdout,
-  };
+  return { ...result, stderr, stdout };
 }
 
 type ConditionalWorkerCreateState = {
@@ -5552,7 +5541,7 @@ export async function withConditionalPlatformWorkerCreate<T>(
 }
 
 async function runPlatformWranglerForConditionalCreate(
-  args: ReadonlyArray<string>,
+  operation: CloudflareOperation,
   accountId: string,
   cwd: string,
   capture: boolean,
@@ -5562,7 +5551,7 @@ async function runPlatformWranglerForConditionalCreate(
   return withConditionalPlatformWorkerCreate(
     accountId,
     workerName,
-    (apiBaseUrl) => runPlatformWranglerAtApiBase(args, accountId, cwd, capture, apiBaseUrl),
+    (apiBaseUrl) => runPlatformWranglerAtApiBase(operation, accountId, cwd, capture, apiBaseUrl),
     upstreamApiBaseUrl,
   );
 }
@@ -5574,7 +5563,7 @@ async function readActivePlatformWorkerVersion(
   runner: typeof runPlatformWrangler = runPlatformWrangler,
 ): Promise<string | null> {
   const result = await runner(
-    ['deployments', 'status', '--config', configPath, '--name', workerName, '--json'],
+    { type: 'deployments.status', configPath, workerName },
     accountId,
     process.cwd(),
     true,
@@ -5582,12 +5571,7 @@ async function readActivePlatformWorkerVersion(
   if (result.status !== 0) {
     assertCleanPlatformWrangler(result, `read active version for ${workerName}`);
   }
-  let value: unknown;
-  try {
-    value = JSON.parse(result.stdout);
-  } catch {
-    throw new Error(`platform: Wrangler returned malformed deployment status for ${workerName}.`);
-  }
+  const value = result.data;
   if (
     !value ||
     typeof value !== 'object' ||
@@ -5622,7 +5606,7 @@ export async function readPlatformWorkerDeployments(
   runner: typeof runPlatformWrangler = runPlatformWrangler,
 ): Promise<ReadonlyArray<PlatformWorkerDeployment>> {
   const result = await runner(
-    ['deployments', 'list', '--config', configPath, '--name', workerName, '--json'],
+    { type: 'deployments.list', configPath, workerName },
     accountId,
     process.cwd(),
     true,
@@ -5630,12 +5614,7 @@ export async function readPlatformWorkerDeployments(
   if (result.status !== 0) {
     assertCleanPlatformWrangler(result, `read deployment lineage for ${workerName}`);
   }
-  let value: unknown;
-  try {
-    value = JSON.parse(result.stdout);
-  } catch {
-    throw new Error(`platform: Wrangler returned malformed deployment history for ${workerName}.`);
-  }
+  const value = result.data;
   if (!Array.isArray(value)) {
     throw new Error(`platform: Wrangler returned malformed deployment history for ${workerName}.`);
   }
@@ -5743,16 +5722,15 @@ export async function restorePlatformWorkerDeployment(input: {
     );
   }
   const restored = await input.runner(
-    [
-      'versions',
-      'deploy',
-      ...restorationVersions.map((version) => `${version.versionId}@${version.percentage}`),
-      '--config',
-      input.configPath,
-      '--message',
-      `Void platform restoration ${input.restoration.id}`,
-      '--yes',
-    ],
+    {
+      type: 'versions.deploy',
+      configPath: input.configPath,
+      versions: restorationVersions.map((version) => ({
+        versionId: version.versionId,
+        percentage: version.percentage,
+      })),
+      message: `Void platform restoration ${input.restoration.id}`,
+    },
     input.accountId,
     input.directory,
     true,
@@ -5913,18 +5891,13 @@ async function readPlatformWorkerVersionSnapshot(
   validateCurrentVersion?: () => Promise<void>,
 ): Promise<Awaited<ReturnType<typeof readActivePlatformWorkerSnapshot>>> {
   const result = await runner(
-    ['versions', 'view', versionId, '--config', configPath, '--name', workerName, '--json'],
+    { type: 'versions.view', versionId, configPath, workerName },
     accountId,
     process.cwd(),
     true,
   );
   assertCleanPlatformWrangler(result, `read rollback metadata for ${workerName}`);
-  let value: unknown;
-  try {
-    value = JSON.parse(result.stdout);
-  } catch {
-    throw new Error(`platform: Wrangler returned malformed version metadata for ${workerName}.`);
-  }
+  const value = result.data;
   if (!value || typeof value !== 'object') {
     throw new Error(`platform: Wrangler returned malformed version metadata for ${workerName}.`);
   }
@@ -5994,12 +5967,8 @@ export function withoutCompletedPlatformWorkerMigrations(
   return result;
 }
 
-function parseUploadedPlatformWorkerVersion(output: string): string | null {
-  return /(?:Worker|Current) Version ID:\s*([0-9a-f]{8}-[0-9a-f-]{27})/i.exec(output)?.[1] ?? null;
-}
-
 function assertCleanPlatformWrangler(result: CloudflareCommandResult, operation: string): void {
-  if (result.status !== 0) {
+  if (result.status !== 0 || result.signal || result.error) {
     throw new Error(
       `platform: Wrangler failed to ${operation} (${result.stderr.trim() || `exit ${result.status}`}).`,
     );

@@ -12,6 +12,10 @@ import {
   activateCloudflareVersion,
   deployCloudflareVersionTriggers,
 } from '../../../deploy-cloudflare/src/version.ts';
+import {
+  operationFixture,
+  operationFixtureRequest,
+} from '../../../deploy-cloudflare/test/operation-fixture.ts';
 import { prepareCfBuildOutput } from '../../src/cli/cf-build-output.ts';
 import { uploadPinnedCloudflareVersion } from '../../src/cli/cf-version-api.ts';
 import {
@@ -86,7 +90,7 @@ it('preserves real cf provider codes so a missing Worker can reach its first upl
     });
     const missing = JSON.parse(stdout);
     expect(missing.status).toBe(1);
-    expect(missing.stderr).toContain('[code: 10007]');
+    expect(missing.errorCode).toBe(10007);
     expect(requests).toEqual([
       '/client/v4/accounts/test-account/workers/scripts/missing-worker/deployments',
     ]);
@@ -96,12 +100,12 @@ it('preserves real cf provider codes so a missing Worker can reach its first upl
       message: 'review',
       verifyUploader: () => true,
       verifyInheritedSecrets: true,
-      runWrangler: (args) => {
+      runWrangler: operationFixture((args) => {
         operations.push(args.slice(0, 2).join(' '));
         return args[1] === 'upload'
           ? { status: 1, stdout: '', stderr: 'Test stopped before uploading.' }
           : missing;
-      },
+      }),
     });
     expect(result).toMatchObject({ ok: false, reason: 'upload-failed' });
     expect(operations).toEqual(['deployments status', 'versions list', 'versions upload']);
@@ -454,6 +458,56 @@ it('captures noninteractive cf output when Void owns the terminal', async () => 
   expect(result.stdout).toContain(pinnedCfVersion);
 });
 
+it('does not classify buffered provider codes from an interrupted real cf process', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'void-cf-interrupted-command-'));
+  roots.push(root);
+  const preload = join(root, 'interrupt.cjs');
+  writeFileSync(
+    preload,
+    `process.stderr.write('synthetic provider failure [10007]\\n', () => process.kill(process.pid, 'SIGTERM'));\n` +
+      `setInterval(() => {}, 1 << 30);\n`,
+  );
+  const command = createCfCommand({
+    accountId: 'test-account',
+    apiBaseUrl: 'https://api.cloudflare.com/client/v4',
+    verifyUploader: () => true,
+    env: () => ({
+      PATH: process.env.PATH,
+      NODE_OPTIONS: `--require ${JSON.stringify(preload)}`,
+      CI: 'true',
+    }),
+  });
+  const result = await command(['--version'], { cwd: root, capture: true });
+  expect(result.status).toBe(1);
+  expect(result.signal).toBe('SIGTERM');
+  expect(result.stderr).toContain('[10007]');
+  expect(result.errorCode).toBeUndefined();
+  expect(result.errors).toBeUndefined();
+});
+
+it('preserves interruption provenance before interpreting an empty cf deployment list', async () => {
+  const prepared = await output();
+  try {
+    const run = createCfVersionRunner({
+      output: prepared,
+      workerName: 'site',
+      runCf: async () => ({
+        status: 0,
+        signal: 'SIGTERM',
+        stdout: '',
+        stderr: '',
+        data: { deployments: [] },
+      }),
+      verifyResources: async () => ({ status: 0, stdout: '', stderr: '' }),
+    });
+    const result = await run({ type: 'deployments.status', workerName: 'site' }, { capture: true });
+    expect(result.signal).toBe('SIGTERM');
+    expect(result.errorCode).toBeUndefined();
+  } finally {
+    prepared.dispose();
+  }
+});
+
 it('uses the configured HTTP proxy for direct cf activation reads', async () => {
   const root = mkdtempSync(join(tmpdir(), 'void-cf-proxy-read-'));
   roots.push(root);
@@ -593,17 +647,22 @@ it('preserves activation metadata and sorts cf version history for the existing 
       },
     });
     const common = ['-c', 'generated.json', '--env=', '--name', 'void-test'];
-    const deployment = await runner(['deployments', 'status', ...common, '--json'], {
-      capture: true,
-    });
-    expect(JSON.parse(deployment.stdout)).toEqual({
+    const deployment = await runner(
+      operationFixtureRequest(['deployments', 'status', ...common, '--json']),
+      {
+        capture: true,
+      },
+    );
+    expect(deployment.data).toEqual({
       versions: [{ version_id: 'one', percentage: 100 }],
     });
-    const versions = await runner(['versions', 'list', ...common, '--json'], { capture: true });
-    expect(JSON.parse(versions.stdout).map((item: { id: string }) => item.id)).toEqual([
-      'one',
-      'two',
-    ]);
+    const versions = await runner(
+      operationFixtureRequest(['versions', 'list', ...common, '--json']),
+      { capture: true },
+    );
+    expect((versions.data as Array<{ id: string }>).map((item: { id: string }) => item.id)).toEqual(
+      ['one', 'two'],
+    );
     expect(calls.at(-1)).toEqual([
       'workers',
       'versions',
@@ -616,7 +675,7 @@ it('preserves activation metadata and sorts cf version history for the existing 
       '1',
     ]);
     await runner(
-      [
+      operationFixtureRequest([
         'versions',
         'upload',
         ...common,
@@ -625,7 +684,7 @@ it('preserves activation metadata and sorts cf version history for the existing 
         '--preview-alias',
         'void-ready',
         '--strict',
-      ],
+      ]),
       { capture: true },
     );
     expect(calls.at(-1)).toEqual([
@@ -639,7 +698,7 @@ it('preserves activation metadata and sorts cf version history for the existing 
       'void-ready',
     ]);
     await runner(
-      [
+      operationFixtureRequest([
         'versions',
         'deploy',
         '00000000-0000-0000-0000-000000000001@100',
@@ -647,7 +706,7 @@ it('preserves activation metadata and sorts cf version history for the existing 
         '--message',
         'void:metadata',
         '--yes',
-      ],
+      ]),
       { capture: false },
     );
     const deployArgs = calls.at(-1)!;
@@ -687,10 +746,13 @@ it.each(['newest-first', 'oldest-first'] as const)(
           };
         },
       });
-      const result = await runner(['versions', 'list', '--name', 'void-test'], { capture: true });
-      expect(JSON.parse(result.stdout).map((item: { number: number }) => item.number)).toEqual(
-        Array.from({ length: 10 }, (_, index) => index + 16),
+      const result = await runner(
+        operationFixtureRequest(['versions', 'list', '--name', 'void-test']),
+        { capture: true },
       );
+      expect(
+        (result.data as Array<{ number: number }>).map((item: { number: number }) => item.number),
+      ).toEqual(Array.from({ length: 10 }, (_, index) => index + 16));
       expect(pages).toEqual(order === 'newest-first' ? [1, 2] : [1, 2, 3]);
     } finally {
       prepared.dispose();
@@ -724,7 +786,15 @@ it('applies the immutable trigger snapshot through a private cf output copy', as
       },
     });
     const result = await runner(
-      ['triggers', 'deploy', '-c', triggerConfig, '--env=', '--name', 'void-test'],
+      operationFixtureRequest([
+        'triggers',
+        'deploy',
+        '-c',
+        triggerConfig,
+        '--env=',
+        '--name',
+        'void-test',
+      ]),
       { capture: false },
     );
     expect(result.status).toBe(0);
@@ -850,19 +920,22 @@ it('uses cf for Queue triggers, consumer cleanup, and version binding reads', as
         return { status: 0, stdout: '', stderr: '' };
       },
     });
-    const invalid = await runner(['versions', 'deploy', 'invalid@100', '--name', 'void-test'], {
-      capture: true,
-    });
+    const invalid = await runner(
+      operationFixtureRequest(['versions', 'deploy', 'invalid@100', '--name', 'void-test']),
+      {
+        capture: true,
+      },
+    );
     expect(invalid.status).toBe(1);
     const triggerArgs = ['triggers', 'deploy', '-c', triggerConfig, '--name', 'void-test'];
-    expect((await runner(triggerArgs, { capture: false })).status).toBe(0);
+    expect((await runner(operationFixtureRequest(triggerArgs), { capture: false })).status).toBe(0);
     const removeArgs = ['queues', 'consumer', 'remove', 'jobs', 'void-test'];
-    expect((await runner(removeArgs, { capture: false })).status).toBe(0);
+    expect((await runner(operationFixtureRequest(removeArgs), { capture: false })).status).toBe(0);
     const viewArgs = ['versions', 'view', 'version-id', '--name', 'void-test'];
-    const version = await runner(viewArgs, { capture: true });
-    expect(JSON.parse(version.stdout).resources.bindings).toEqual([
-      { name: 'SECRET', type: 'secret_text' },
-    ]);
+    const version = await runner(operationFixtureRequest(viewArgs), { capture: true });
+    expect(
+      (version.data as { resources: { bindings: Array<unknown> } }).resources.bindings,
+    ).toEqual([{ name: 'SECRET', type: 'secret_text' }]);
     expect(calls).toContainEqual(['workers', 'triggers', 'deploy', '--prebuilt']);
     expect(calls).toContainEqual([
       'queues',
@@ -894,12 +967,20 @@ it('accepts only the staged static assets directory already sealed into prebuilt
     });
     const common = ['--name', 'void-test', '--assets'];
     expect(
-      (await runner(['versions', 'upload', ...common, '/staged/assets'], { capture: true })).status,
+      (
+        await runner(operationFixtureRequest(['versions', 'upload', ...common, '/staged/assets']), {
+          capture: true,
+        })
+      ).status,
     ).toBe(0);
     expect(calls.at(-1)?.slice(0, 4)).toEqual(['workers', 'versions', 'create', '--prebuilt']);
-    expect((await runner(['deploy', ...common, '/wrong/assets'], { capture: true })).status).toBe(
-      1,
-    );
+    expect(
+      (
+        await runner(operationFixtureRequest(['deploy', ...common, '/wrong/assets']), {
+          capture: true,
+        })
+      ).status,
+    ).toBe(1);
     expect(calls).toHaveLength(1);
   } finally {
     prepared.dispose();
@@ -926,7 +1007,11 @@ it.each(['r2', 'queue'] as const)(
       configPath: join(roots.at(-1)!, 'dist', 'ssr', 'wrangler.json'),
       runCf,
       verifyCompatibilityRunner: () => true,
-      runWrangler: async () => ({ status: 1, stdout: '', stderr: 'Queue not found.' }),
+      runWrangler: operationFixture(async () => ({
+        status: 1,
+        stdout: '',
+        stderr: 'Queue not found.',
+      })),
     });
     try {
       const runner = createCfVersionRunner({
@@ -936,14 +1021,34 @@ it.each(['r2', 'queue'] as const)(
         verifyResources: verifier,
       });
       expect(
-        (await runner(['versions', 'upload', '--name', 'void-test'], { capture: true })).status,
-      ).toBe(1);
-      expect((await runner(['deploy', '--name', 'void-test'], { capture: true })).status).toBe(1);
-      expect(
         (
-          await runner(['triggers', 'deploy', '-c', triggerConfig, '--name', 'void-test'], {
+          await runner(operationFixtureRequest(['versions', 'upload', '--name', 'void-test']), {
             capture: true,
           })
+        ).status,
+      ).toBe(1);
+      expect(
+        (
+          await runner(operationFixtureRequest(['deploy', '--name', 'void-test']), {
+            capture: true,
+          })
+        ).status,
+      ).toBe(1);
+      expect(
+        (
+          await runner(
+            operationFixtureRequest([
+              'triggers',
+              'deploy',
+              '-c',
+              triggerConfig,
+              '--name',
+              'void-test',
+            ]),
+            {
+              capture: true,
+            },
+          )
         ).status,
       ).toBe(1);
       expect(cfCalls.every((args) => args[0] === 'r2' && args[1] === 'buckets')).toBe(true);
@@ -979,14 +1084,18 @@ it('uploads when existing R2 and Queue bindings are verified by exact identity',
         configPath: join(roots.at(-1)!, 'dist', 'ssr', 'wrangler.json'),
         runCf,
         verifyCompatibilityRunner: () => true,
-        runWrangler: async (args) => {
+        runWrangler: operationFixture(async (args) => {
           queueCalls.push(args);
           return { status: 0, stdout: 'Queue Name: jobs\n', stderr: '' };
-        },
+        }),
       }),
     });
     expect(
-      (await runner(['versions', 'upload', '--name', 'void-test'], { capture: true })).status,
+      (
+        await runner(operationFixtureRequest(['versions', 'upload', '--name', 'void-test']), {
+          capture: true,
+        })
+      ).status,
     ).toBe(0);
     expect(cfCalls).toEqual([
       ['r2', 'buckets', 'get', 'bucket', '--cf-r2-jurisdiction', 'eu'],

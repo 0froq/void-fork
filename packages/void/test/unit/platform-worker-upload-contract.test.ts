@@ -6,8 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { toSlash } from 'pathslash';
 import { expect, it } from 'vite-plus/test';
+import { encodeCloudflareOperation } from '../../src/cli/cloudflare-process.ts';
 import { withConditionalPlatformWorkerCreate } from '../../src/cli/platform-installer.ts';
-import { resolveWranglerArgv } from '../../src/cli/preset.ts';
+import { resolveCloudflareOperationArgv } from '../../src/cli/preset.ts';
 
 it('accepts the bundled uploader query while preserving the create-only precondition', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'void-worker-upload-contract-'));
@@ -58,7 +59,7 @@ it('accepts the bundled uploader query while preserving the create-only precondi
         no_bundle: true,
       }),
     );
-    const [command, ...prefix] = resolveWranglerArgv(process.cwd());
+    const [command, ...prefix] = resolveCloudflareOperationArgv(process.cwd());
     let output = '';
     const failure = await withConditionalPlatformWorkerCreate(
       'account',
@@ -69,13 +70,7 @@ it('accepts the bundled uploader query while preserving the create-only precondi
             command!,
             [
               ...prefix,
-              'deploy',
-              '--config',
-              config,
-              '--strict',
-              '--experimental-provision=false',
-              '--experimental-auto-create=false',
-              '--autoconfig=false',
+              ...encodeCloudflareOperation({ type: 'worker.deploy', configPath: config }),
             ],
             {
               cwd: directory,
@@ -220,7 +215,7 @@ it.each([false, true])(
           assets: { directory: toSlash(join(directory, 'public')) },
         }),
       );
-      const [command, ...prefix] = resolveWranglerArgv(process.cwd());
+      const [command, ...prefix] = resolveCloudflareOperationArgv(process.cwd());
       let output = '';
       const failure = await withConditionalPlatformWorkerCreate(
         'account',
@@ -231,13 +226,7 @@ it.each([false, true])(
               command!,
               [
                 ...prefix,
-                'deploy',
-                '--config',
-                config,
-                '--strict',
-                '--experimental-provision=false',
-                '--experimental-auto-create=false',
-                '--autoconfig=false',
+                ...encodeCloudflareOperation({ type: 'worker.deploy', configPath: config }),
               ],
               {
                 cwd: directory,

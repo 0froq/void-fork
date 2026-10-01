@@ -49,6 +49,7 @@
  * developer to `void email setup`. Failed commands retain their API error codes.
  */
 
+import type { CloudflareOperation, CloudflareCommandResult } from '@void/deploy-cloudflare';
 import type { EmailHandlersScan } from '../router/email.ts';
 import { findBindingNameOwner } from './wrangler.ts';
 
@@ -89,23 +90,11 @@ export const SENDING_FREE_PLAN_HINT =
 
 // ── Injected seams ─────────────────────────────────────────────────────────────
 
-/** Mirrors the deploy runner's structured result (`DeployWranglerRunResult`). */
-export type EmailWranglerRunResult = {
-  status: number;
-  stdout: string;
-  stderr: string;
-  /** Non-null ONLY when the child was killed by a signal — a HARD failure. */
-  signal?: NodeJS.Signals | null;
-  /** Spawn-error message when the child could not start — a HARD failure. */
-  error?: string | null;
-};
+/** Provider results are structured at the subprocess boundary. */
+export type EmailWranglerRunResult = CloudflareCommandResult;
 
-/**
- * Seam over void's pinned wrangler — structurally the deploy orchestrator's
- * `DeployWranglerRun`, declared here so this module never imports `deploy.ts`.
- */
 export type EmailWranglerRun = (
-  args: Array<string>,
+  operation: CloudflareOperation,
   opts: { capture: boolean },
 ) => EmailWranglerRunResult | Promise<EmailWranglerRunResult>;
 
@@ -144,8 +133,8 @@ export interface EmailCloudflareInputs {
   configConflicts?: Array<string>;
   /** Number of source files calling `sendEmail()` — shown in the header line only. */
   sendEmailFiles?: number;
-  /** Extra argv appended to every wrangler call (the deploy passes `-c <cfg> --env=`). */
-  wranglerArgs?: Array<string>;
+  /** The pinned project config used for provider operations. */
+  configPath?: string;
   apiBaseUrl?: string;
   runWrangler: EmailWranglerRun;
   getSessionBearer: () => Promise<string | null>;
@@ -309,25 +298,28 @@ export interface WhoamiJson {
   tokenPermissions?: Array<string>;
 }
 
-export function parseWhoamiJson(stdout: string): WhoamiJson | null {
-  // The JSON is the whole of stdout for `--json`; tolerate a leading banner anyway.
-  const start = stdout.indexOf('{');
-  if (start < 0) {
+export function parseWhoamiJson(data: unknown): WhoamiJson | null {
+  if (!isRecord(data) || typeof data.loggedIn !== 'boolean') {
     return null;
   }
-  try {
-    const parsed = JSON.parse(stdout.slice(start)) as unknown;
-    if (
-      !parsed ||
-      typeof parsed !== 'object' ||
-      typeof (parsed as WhoamiJson).loggedIn !== 'boolean'
-    ) {
-      return null;
-    }
-    return parsed as WhoamiJson;
-  } catch {
+  if (
+    data.tokenPermissions !== undefined &&
+    (!Array.isArray(data.tokenPermissions) ||
+      data.tokenPermissions.some((scope) => typeof scope !== 'string'))
+  ) {
     return null;
   }
+  if (
+    data.accounts !== undefined &&
+    (!Array.isArray(data.accounts) ||
+      data.accounts.some(
+        (account) =>
+          !isRecord(account) || typeof account.id !== 'string' || typeof account.name !== 'string',
+      ))
+  ) {
+    return null;
+  }
+  return data as unknown as WhoamiJson;
 }
 
 export interface RoutingSettings {
@@ -356,20 +348,11 @@ export interface SendingSettings {
   tag: string;
 }
 
-function readJson(stdout: string): unknown {
-  try {
-    return JSON.parse(stdout);
-  } catch {
-    return null;
-  }
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-export function readRoutingSettings(stdout: string): RoutingSettings | null {
-  const data = readJson(stdout);
+export function readRoutingSettings(data: unknown): RoutingSettings | null {
   return isRecord(data) &&
     typeof data.name === 'string' &&
     data.name.length > 0 &&
@@ -382,8 +365,7 @@ export function readRoutingSettings(stdout: string): RoutingSettings | null {
     : null;
 }
 
-export function readRoutingRules(stdout: string): RoutingRules | null {
-  const data = readJson(stdout);
+export function readRoutingRules(data: unknown): RoutingRules | null {
   if (!Array.isArray(data)) {
     return null;
   }
@@ -462,8 +444,7 @@ export function readRoutingRules(stdout: string): RoutingRules | null {
   return { rules, catchAll };
 }
 
-export function readSendingSettings(stdout: string): SendingSettings | null {
-  const data = readJson(stdout);
+export function readSendingSettings(data: unknown): SendingSettings | null {
   if (!isRecord(data)) {
     return null;
   }
@@ -477,20 +458,9 @@ export function readSendingSettings(stdout: string): SendingSettings | null {
     : null;
 }
 
-/** wrangler renders an `APIError` note as `<message> [code: <n>]`; extract the code. */
-export function wranglerApiErrorCode(text: string): number | null {
-  const match = /\[code:\s*(\d+)\]/.exec(stripAnsi(text));
-  return match ? Number(match[1]) : null;
+function providerErrorCode(result: EmailWranglerRunResult): number | null {
+  return result.errorCode ?? result.errors?.find((error) => error.code !== undefined)?.code ?? null;
 }
-
-const ANSI_SGR_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
-
-function stripAnsi(text: string): string {
-  return text.replace(ANSI_SGR_RE, '');
-}
-
-const ZONE_NOT_FOUND_RE = /Could not find (?:a )?zone for `([^`]+)`/;
-const SENDING_NOT_FOUND_RE = /No sending subdomain found for `([^`]+)`/;
 
 function isHardFailure(result: EmailWranglerRunResult): boolean {
   return Boolean(result.signal) || Boolean(result.error);
@@ -648,9 +618,11 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
     );
   }
   const apiBaseUrl = inputs.apiBaseUrl ?? CLOUDFLARE_API_BASE_URL;
-  const extra = inputs.wranglerArgs ?? [];
-  const run = async (args: Array<string>): Promise<EmailWranglerRunResult> =>
-    inputs.runWrangler([...args, ...extra], { capture: true });
+  const run = async (operation: CloudflareOperation): Promise<EmailWranglerRunResult> =>
+    inputs.runWrangler(
+      { ...operation, ...(inputs.configPath ? { configPath: inputs.configPath } : {}) },
+      { capture: true },
+    );
 
   const usageHandlers = [
     ...inputs.handlers.addresses.map((d) => `email/${d.filePath}`),
@@ -707,8 +679,8 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
   //    scope and Global API Key branches) says what to clear first: `void cloudflare
   //    logout`, or the CLOUDFLARE_API_KEY pair, which wrangler prefers over both an OAuth
   //    session and CLOUDFLARE_API_TOKEN.
-  const whoami = await run(['whoami', '--json']);
-  const who = isHardFailure(whoami) || whoami.status !== 0 ? null : parseWhoamiJson(whoami.stdout);
+  const whoami = await run({ type: 'auth.whoami' });
+  const who = isHardFailure(whoami) || whoami.status !== 0 ? null : parseWhoamiJson(whoami.data);
   if (!who) {
     // `whoami --json` failed or printed no session.
     pre.session.state = 'unknown';
@@ -756,19 +728,19 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
   let settingsMiss = false;
   if (pre.session.state === 'ok') {
     for (const candidate of zoneCandidates(domain)) {
-      const result = await run(['email', 'routing', 'settings', candidate]);
+      const result = await run({ type: 'email.routing.settings', domain: candidate });
       if (isHardFailure(result)) {
         settingsMiss = true;
         break;
       }
+      if (result.status === 0 && result.data === null) {
+        continue;
+      }
       if (result.status !== 0) {
-        if (ZONE_NOT_FOUND_RE.test(stripAnsi(result.stderr))) {
-          continue;
-        }
         settingsMiss = true;
         break;
       }
-      settings = readRoutingSettings(result.stdout);
+      settings = readRoutingSettings(result.data);
       if (!settings) {
         settingsMiss = true;
       }
@@ -951,11 +923,11 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
 
   // 6. Derivation, then rules: mine / foreign / absent per derived address.
   pre.derived = deriveAddresses(inputs.handlers, domain, mode);
-  const rulesResult = await run(['email', 'routing', 'rules', 'list', apex]);
+  const rulesResult = await run({ type: 'email.routing.rules.list', domain: apex });
   const rules =
     isHardFailure(rulesResult) || rulesResult.status !== 0
       ? null
-      : readRoutingRules(rulesResult.stdout);
+      : readRoutingRules(rulesResult.data);
   if (!rules) {
     pre.rules.state = 'unknown';
     block(
@@ -1002,14 +974,14 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
   pre.addresses = pre.derived.addresses.filter((a) => !foreign.has(a));
 
   // 7. Sending. Not-found is a clean "not onboarded"; anything else unparsable is unknown.
-  const sendingResult = await run(['email', 'sending', 'settings', domain]);
+  const sendingResult = await run({ type: 'email.sending.settings', domain });
   if (isHardFailure(sendingResult)) {
     pre.sending.state = 'unknown';
-  } else if (sendingResult.status === 0) {
-    const parsed = readSendingSettings(sendingResult.stdout);
-    pre.sending.state = parsed ? (parsed.enabled ? 'ready' : 'pending') : 'unknown';
-  } else if (SENDING_NOT_FOUND_RE.test(stripAnsi(sendingResult.stderr))) {
+  } else if (sendingResult.status === 0 && sendingResult.data === null) {
     pre.sending.state = 'pending';
+  } else if (sendingResult.status === 0) {
+    const parsed = readSendingSettings(sendingResult.data);
+    pre.sending.state = parsed ? (parsed.enabled ? 'ready' : 'pending') : 'unknown';
   } else {
     pre.sending.state = 'unknown';
   }
@@ -1438,9 +1410,11 @@ export async function applyEmailSetup(
   }
   const apex = pre.apex;
   const apiBaseUrl = inputs.apiBaseUrl ?? CLOUDFLARE_API_BASE_URL;
-  const extra = inputs.wranglerArgs ?? [];
-  const run = async (args: Array<string>): Promise<EmailWranglerRunResult> =>
-    inputs.runWrangler([...args, ...extra], { capture: true });
+  const run = async (operation: CloudflareOperation): Promise<EmailWranglerRunResult> =>
+    inputs.runWrangler(
+      { ...operation, ...(inputs.configPath ? { configPath: inputs.configPath } : {}) },
+      { capture: true },
+    );
 
   // The bearer is borrowed lazily, once, and dropped at the end of this function.
   let bearer: string | null | undefined;
@@ -1494,12 +1468,12 @@ export async function applyEmailSetup(
   const apexRoutingOff = pre.mode === 'subdomain' && pre.routing.enabled !== true;
   if (!result.routingReady) {
     if (pre.mode === 'apex') {
-      const enable = await run(['email', 'routing', 'enable', apex]);
+      const enable = await run({ type: 'email.routing.enable', domain: apex });
       if (!isHardFailure(enable) && enable.status === 0) {
         result.routingReady = true;
         lines.push(`  ✔ routing   ${apex} enabled`);
       } else {
-        const code = wranglerApiErrorCode(enable.stderr);
+        const code = providerErrorCode(enable);
         lines.push(
           `  ✘ routing   could not enable Email Routing on ${apex}${code ? ` [code: ${code}]${CF_EMAIL_ERROR_CODES[code] ? ` — ${CF_EMAIL_ERROR_CODES[code]}` : ''}` : ''}`,
         );
@@ -1567,8 +1541,8 @@ export async function applyEmailSetup(
       lines.push(`  ! sending   ${b.message}`);
     }
   } else if (!result.sendingReady) {
-    const enable = await run(['email', 'sending', 'enable', pre.domain]);
-    const code = isHardFailure(enable) ? null : wranglerApiErrorCode(enable.stderr);
+    const enable = await run({ type: 'email.sending.enable', domain: pre.domain });
+    const code = isHardFailure(enable) ? null : providerErrorCode(enable);
     if (!isHardFailure(enable) && (enable.status === 0 || code === 2040)) {
       result.sendingReady = true;
       lines.push(`  ✔ sending   ${pre.domain} onboarded`);

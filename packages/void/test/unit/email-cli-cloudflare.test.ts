@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { log } from '@clack/prompts';
+import type { CloudflareOperation } from '@void/deploy-cloudflare';
 import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
@@ -21,20 +22,19 @@ import { runEmailCloudflareCommand, runEmailCommand } from '../../src/cli/email.
 function whoamiResult(): EmailWranglerRunResult {
   return {
     status: 0,
-    stdout: JSON.stringify({
+    stdout: '',
+    data: {
       loggedIn: true,
       authType: 'OAuth Token',
       email: 'dev@example.com',
       accounts: [{ id: ACCOUNT, name: 'Acme' }],
       tokenPermissions: ['account:read', 'email_routing:write', 'email_sending:write'],
-    }),
+    },
     stderr: '',
   };
 }
 
-const emptyRules = JSON.stringify([
-  { enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] },
-]);
+const emptyRules = [{ enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] }];
 
 const ZONE_ID = '5b66f5cb84fd7dcfdd0170515e622181';
 const ACCOUNT = 'f721b8e5f721b8e5f721b8e5f721b8e5';
@@ -44,37 +44,49 @@ const BETA_WARNING = '▲ [WARNING] 🚧 `wrangler email x` is an open beta comm
 function routingSettings(name: string, status: string, enabled = true): EmailWranglerRunResult {
   return {
     status: 0,
-    stdout: JSON.stringify({ name, enabled: enabled, status, tag: ZONE_ID }),
+    stdout: '',
+    data: { name, enabled: enabled, status, tag: ZONE_ID },
     stderr: BETA_WARNING,
   };
 }
 
-function zoneNotFound(name: string): EmailWranglerRunResult {
-  return {
-    status: 1,
-    stdout: '',
-    stderr: `${BETA_WARNING}✘ [ERROR] Could not find zone for \`${name}\`. Make sure the domain exists in your account.\n`,
-  };
+function zoneNotFound(_name: string): EmailWranglerRunResult {
+  return { status: 0, stdout: '', stderr: '', data: null };
 }
 
-function sendingNotFound(name: string): EmailWranglerRunResult {
-  return {
-    status: 1,
-    stdout: '',
-    stderr: `${BETA_WARNING}✘ [ERROR] No sending subdomain found for \`${name}\`.\n`,
-  };
+function sendingNotFound(_name: string): EmailWranglerRunResult {
+  return { status: 0, stdout: '', stderr: '', data: null };
 }
 
 function sendingEnabled(name: string): EmailWranglerRunResult {
-  return { status: 0, stdout: `Email Sending enabled for ${name} (enabled: true)\n`, stderr: '' };
+  return {
+    status: 0,
+    stdout: '',
+    data: { name, enabled: true },
+    stderr: '',
+  };
 }
 
-type Call = { args: Array<string>; capture: boolean };
+type Call = { args: Array<string>; operation: CloudflareOperation; capture: boolean };
+
+function operationWords(operation: CloudflareOperation): Array<string> {
+  if (operation.type === 'auth.whoami') {
+    return ['whoami', '--json'];
+  }
+  if (operation.type === 'auth.token') {
+    return ['auth', 'token', '--json'];
+  }
+  if ('domain' in operation) {
+    return [...operation.type.split('.'), operation.domain];
+  }
+  throw new Error(`Unexpected operation: ${operation.type}`);
+}
 type FetchCall = { url: string; method: string; headers: Record<string, string>; body?: string };
 
 function fakeRunner(table: Record<string, EmailWranglerRunResult>, calls: Array<Call>) {
-  return (args: Array<string>, opts: { capture: boolean }): EmailWranglerRunResult => {
-    calls.push({ args: [...args], capture: opts.capture });
+  return (operation: CloudflareOperation, opts: { capture: boolean }): EmailWranglerRunResult => {
+    const args = operationWords(operation);
+    calls.push({ args, operation, capture: opts.capture });
     // Key the table on command words; config context is asserted separately.
     const configIndex = args.indexOf('-c');
     const envIndex = args.indexOf('--env=');
@@ -220,7 +232,7 @@ function transcriptDeps(
     'whoami --json': whoamiResult(),
     'email routing settings mail.acme.com': zoneNotFound('mail.acme.com'),
     'email routing settings acme.com': routingSettings('acme.com', 'ready'),
-    'email routing rules list acme.com': { status: 0, stdout: emptyRules, stderr: '' },
+    'email routing rules list acme.com': { status: 0, stdout: '', data: emptyRules, stderr: '' },
     'email sending settings mail.acme.com': sendingNotFound('mail.acme.com'),
     ...extra.runnerTable,
   };
@@ -287,7 +299,8 @@ function freeAfterSetup(extra: { runnerTable?: Record<string, EmailWranglerRunRe
     runnerTable: {
       'email routing rules list acme.com': {
         status: 0,
-        stdout: JSON.stringify([
+        stdout: '',
+        data: [
           {
             id: '1a2b3c',
             name: 'support',
@@ -296,7 +309,7 @@ function freeAfterSetup(extra: { runnerTable?: Record<string, EmailWranglerRunRe
             actions: [{ type: 'worker', value: ['acme-support'] }],
           },
           { enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] },
-        ]),
+        ],
         stderr: BETA_WARNING,
       },
       ...extra.runnerTable,
@@ -314,11 +327,13 @@ const RETRY_PROMPT =
 const sendingRefused: EmailWranglerRunResult = {
   status: 1,
   stdout: '',
+  data: '',
   stderr: `${BETA_WARNING}✘ [ERROR] A request to the Cloudflare API (/zones/${ZONE_ID}/email/sending/subdomains) failed.\n\n  something went wrong [code: 10105]\n`,
+  errorCode: 10105,
 };
 
 describe('void email setup --platform cloudflare', () => {
-  it('first run: checklist, one confirm, exact argv + REST calls, wrangler.jsonc written', async () => {
+  it('first run: checklist, one confirm, exact provider operations + REST calls, wrangler.jsonc written', async () => {
     const root = makeProject();
     roots.push(root);
     const configPath = join(root, 'wrangler.jsonc');
@@ -345,16 +360,17 @@ describe('void email setup --platform cloudflare', () => {
     expect(code).toBe(0);
     expect(confirms).toEqual(['Set up email on mail.acme.com?']);
 
-    // Every wrangler child carries the deploy's config pin; the writes come after the reads.
+    // Every provider operation carries the deploy's config pin; the writes come after the reads.
     expect(calls.map((c) => c.args)).toEqual([
-      ['whoami', '--json', '-c', toSlash(configPath), '--env='],
-      ['email', 'routing', 'settings', 'mail.acme.com', '-c', toSlash(configPath), '--env='],
-      ['email', 'routing', 'settings', 'acme.com', '-c', toSlash(configPath), '--env='],
-      ['email', 'routing', 'rules', 'list', 'acme.com', '-c', toSlash(configPath), '--env='],
-      ['email', 'sending', 'settings', 'mail.acme.com', '-c', toSlash(configPath), '--env='],
-      ['email', 'sending', 'enable', 'mail.acme.com', '-c', toSlash(configPath), '--env='],
+      ['whoami', '--json'],
+      ['email', 'routing', 'settings', 'mail.acme.com'],
+      ['email', 'routing', 'settings', 'acme.com'],
+      ['email', 'routing', 'rules', 'list', 'acme.com'],
+      ['email', 'sending', 'settings', 'mail.acme.com'],
+      ['email', 'sending', 'enable', 'mail.acme.com'],
     ]);
     expect(calls.every((c) => c.capture)).toBe(true);
+    expect(calls.every((c) => c.operation.configPath === toSlash(configPath))).toBe(true);
     expect(fetchCalls.map((c) => `${c.method} ${c.url.slice(c.url.indexOf('/zones'))}`)).toEqual([
       'GET /zones?name=acme.com',
       `GET /zones/${ZONE_ID}/email/routing`,
@@ -438,10 +454,10 @@ describe('void email setup --platform cloudflare', () => {
   it('a session without the email scopes: the ✘ row says `void cloudflare logout`, then `login` — exit 1, no prompt', async () => {
     const root = makeProject();
     roots.push(root);
-    const who = JSON.parse(whoamiResult().stdout) as { tokenPermissions: Array<string> };
+    const who = structuredClone(whoamiResult().data) as { tokenPermissions: Array<string> };
     who.tokenPermissions = who.tokenPermissions.filter((s) => !s.startsWith('email_'));
     const { deps, calls, fetchCalls, printed } = transcriptDeps({
-      runnerTable: { 'whoami --json': { status: 0, stdout: JSON.stringify(who), stderr: '' } },
+      runnerTable: { 'whoami --json': { status: 0, stdout: '', data: who, stderr: '' } },
     });
     const confirm = vi.fn(async () => true);
 
@@ -520,7 +536,8 @@ describe('void email setup --platform cloudflare', () => {
         'email sending settings acme.com': sendingNotFound('acme.com'),
         'email routing enable acme.com': {
           status: 0,
-          stdout: 'Email Routing enabled for acme.com (status: ready)\n',
+          stdout: '',
+          data: { name: 'acme.com', enabled: true },
           stderr: BETA_WARNING,
         },
         'email sending enable acme.com': sendingEnabled('acme.com'),
@@ -580,7 +597,9 @@ describe('void email setup --platform cloudflare', () => {
         'email sending enable mail.acme.com': {
           status: 1,
           stdout: '',
+          data: '',
           stderr: `${BETA_WARNING}✘ [ERROR] A request to the Cloudflare API (/zones/${ZONE_ID}/email/sending/subdomains) failed.\n\n  something went wrong [code: 10105]\n`,
+          errorCode: 10105,
         },
       },
       fetchTable: {
@@ -743,7 +762,8 @@ describe('void email setup --platform cloudflare', () => {
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout: JSON.stringify([
+          stdout: '',
+          data: [
             {
               id: '1a2b3c',
               name: 'support',
@@ -752,12 +772,13 @@ describe('void email setup --platform cloudflare', () => {
               actions: [{ type: 'worker', value: ['acme-support'] }],
             },
             { enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] },
-          ]),
+          ],
           stderr: BETA_WARNING,
         },
         'email sending settings mail.acme.com': {
           status: 0,
-          stdout: JSON.stringify({ name: 'mail.acme.com', enabled: true, tag: ZONE_ID }),
+          stdout: '',
+          data: { name: 'mail.acme.com', enabled: true, tag: ZONE_ID },
           stderr: BETA_WARNING,
         },
       },
@@ -832,7 +853,8 @@ describe('void email status --platform cloudflare', () => {
       runnerTable: {
         'auth token --json': {
           status: 0,
-          stdout: JSON.stringify({ type: 'oauth', token: BEARER }),
+          stdout: '',
+          data: { type: 'oauth', token: BEARER },
           stderr: '',
         },
       },
@@ -840,15 +862,13 @@ describe('void email status --platform cloudflare', () => {
     const { getSessionBearer: _injectedBearer, ...defaultBearerDeps } = deps;
     const runWrangler = defaultBearerDeps.runWrangler!;
     const temporaryConfigPaths: Array<string> = [];
-    defaultBearerDeps.runWrangler = (args, options) => {
-      const configIndex = args.indexOf('-c');
-      expect(configIndex).toBeGreaterThanOrEqual(0);
-      const temporaryConfigPath = args[configIndex + 1] as string;
+    defaultBearerDeps.runWrangler = (operation, options) => {
+      const temporaryConfigPath = operation.configPath as string;
       temporaryConfigPaths.push(temporaryConfigPath);
       expect(temporaryConfigPath).not.toBe(parentConfigPath);
       expect(temporaryConfigPath).not.toBe(configPath);
       expect(readFileSync(temporaryConfigPath, 'utf8')).toBe('{}\n');
-      return runWrangler(args, options);
+      return runWrangler(operation, options);
     };
     const savedAccountId = process.env.CLOUDFLARE_ACCOUNT_ID;
     process.env.CLOUDFLARE_ACCOUNT_ID = ACCOUNT;
@@ -863,16 +883,13 @@ describe('void email status --platform cloudflare', () => {
       expect(temporaryConfigPaths.length).toBeGreaterThan(0);
       expect(new Set(temporaryConfigPaths).size).toBe(1);
       expect(existsSync(temporaryConfigPaths[0] as string)).toBe(false);
-      expect(calls.every((call) => call.args.includes('-c'))).toBe(true);
-      expect(calls.every((call) => call.args.at(-1) === '--env=')).toBe(true);
-      expect(calls.find((call) => call.args[0] === 'auth')?.args).toEqual([
-        'auth',
-        'token',
-        '--json',
-        '-c',
-        temporaryConfigPaths[0],
-        '--env=',
-      ]);
+      expect(calls.every((call) => call.operation.configPath === temporaryConfigPaths[0])).toBe(
+        true,
+      );
+      expect(calls.find((call) => call.operation.type === 'auth.token')?.operation).toEqual({
+        type: 'auth.token',
+        configPath: temporaryConfigPaths[0],
+      });
     } finally {
       if (savedAccountId === undefined) {
         delete process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -955,7 +972,8 @@ describe('void email status --platform cloudflare', () => {
       runnerTable: {
         'email sending settings mail.acme.com': {
           status: 0,
-          stdout: JSON.stringify({ name: 'mail.acme.com', enabled: true, tag: ZONE_ID }),
+          stdout: '',
+          data: { name: 'mail.acme.com', enabled: true, tag: ZONE_ID },
           stderr: BETA_WARNING,
         },
       },
@@ -990,16 +1008,18 @@ describe('void email status --platform cloudflare', () => {
       runnerTable: {
         'whoami --json': {
           status: 0,
-          stdout: JSON.stringify({
+          stdout: '',
+          data: {
             loggedIn: true,
             authType: 'User API Token',
             accounts: [{ id: ACCOUNT, name: 'Acme' }],
-          }),
+          },
           stderr: '',
         },
         'email routing rules list acme.com': {
           status: 0,
-          stdout: JSON.stringify([
+          stdout: '',
+          data: [
             {
               id: '1a2b3c',
               name: 'support',
@@ -1008,12 +1028,13 @@ describe('void email status --platform cloudflare', () => {
               actions: [{ type: 'worker', value: ['acme-support'] }],
             },
             { enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] },
-          ]),
+          ],
           stderr: BETA_WARNING,
         },
         'email sending settings mail.acme.com': {
           status: 0,
-          stdout: JSON.stringify({ name: 'mail.acme.com', enabled: true, tag: ZONE_ID }),
+          stdout: '',
+          data: { name: 'mail.acme.com', enabled: true, tag: ZONE_ID },
           stderr: BETA_WARNING,
         },
       },
@@ -1035,7 +1056,7 @@ describe('void email status --platform cloudflare', () => {
     roots.push(root);
     const { deps, calls } = transcriptDeps({
       runnerTable: {
-        'whoami --json': { status: 0, stdout: JSON.stringify({ loggedIn: false }), stderr: '' },
+        'whoami --json': { status: 0, stdout: '', data: { loggedIn: false }, stderr: '' },
       },
     });
     // The default block printer is clack's `log.message`, straight from the renderer — this
@@ -1073,7 +1094,8 @@ describe('void email status --platform cloudflare', () => {
       runnerTable: {
         'email routing rules list acme.com': {
           status: 0,
-          stdout: JSON.stringify([
+          stdout: '',
+          data: [
             {
               id: '1a2b3c',
               name: 'support',
@@ -1082,12 +1104,13 @@ describe('void email status --platform cloudflare', () => {
               actions: [{ type: 'worker', value: ['acme-support'] }],
             },
             { enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] },
-          ]),
+          ],
           stderr: BETA_WARNING,
         },
         'email sending settings mail.acme.com': {
           status: 0,
-          stdout: JSON.stringify({ name: 'mail.acme.com', enabled: true, tag: ZONE_ID }),
+          stdout: '',
+          data: { name: 'mail.acme.com', enabled: true, tag: ZONE_ID },
           stderr: BETA_WARNING,
         },
       },

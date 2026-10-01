@@ -194,12 +194,12 @@ function shellQuoteExecutable(value: string): string {
 }
 
 /** Resolve the bundled cf transport without consulting project dependencies. */
-export function resolveWranglerArgv(_root: string): Array<string> {
+export function resolveCloudflareOperationArgv(_root: string): Array<string> {
   const directory = dirname(fileURLToPath(import.meta.url));
   const entry = [
-    join(directory, 'cf-compat.ts'),
-    join(directory, 'cf-compat.mjs'),
-    join(directory, 'cli', 'cf-compat.mjs'),
+    join(directory, 'cloudflare-operation-process.ts'),
+    join(directory, 'cloudflare-operation-process.mjs'),
+    join(directory, 'cli', 'cloudflare-operation-process.mjs'),
   ].find((candidate) => existsSync(candidate));
   if (!entry) {
     throw new Error(

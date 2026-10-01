@@ -7,7 +7,7 @@ vi.mock('../../src/cli/provision.ts', async (importOriginal) => ({
   createDefaultRunWrangler: () => mocks.run,
 }));
 vi.mock('../../src/cli/preset.ts', () => ({
-  resolveWranglerArgv: () => ['unused-test-launcher'],
+  resolveCloudflareOperationArgv: () => ['unused-test-launcher'],
 }));
 
 afterEach(() => {
@@ -27,7 +27,7 @@ it.each([true, false])(
     const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
 
     await expect(
-      runPlatformWrangler(['triggers', 'deploy'], 'account', '/test', capture),
+      runPlatformWrangler({ type: 'triggers.deploy' }, 'account', '/test', capture),
     ).resolves.toEqual(result);
     expect(stdout).not.toHaveBeenCalled();
     expect(stderr).not.toHaveBeenCalled();
@@ -43,7 +43,7 @@ it.each([1, null])(
     const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
 
     await expect(
-      runPlatformWrangler(['triggers', 'deploy'], 'account', '/test', false),
+      runPlatformWrangler({ type: 'triggers.deploy' }, 'account', '/test', false),
     ).resolves.toEqual(result);
     expect(stdout).toHaveBeenCalledExactlyOnceWith(result.stdout);
     expect(stderr).toHaveBeenCalledExactlyOnceWith(result.stderr);
@@ -57,7 +57,7 @@ it('returns captured failure diagnostics without printing JSON inspection output
   const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
 
   await expect(
-    runPlatformWrangler(['deployments', 'list', '--json'], 'account', '/test', true),
+    runPlatformWrangler({ type: 'deployments.list' }, 'account', '/test', true),
   ).resolves.toEqual(result);
   expect(stdout).not.toHaveBeenCalled();
   expect(stderr).not.toHaveBeenCalled();

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { connect } from 'node:net';
@@ -7,7 +7,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { expect, it } from 'vite-plus/test';
-import { resolveWranglerArgv } from '../../src/cli/preset.ts';
+import {
+  decodeCloudflareOperationResult,
+  encodeCloudflareOperation,
+} from '../../src/cli/cloudflare-process.ts';
+import { resolveCloudflareOperationArgv } from '../../src/cli/preset.ts';
 
 it.each([200, 503])(
   'reports HTTP %i without loading the build toolchain when domain cleanup returns non-JSON',
@@ -39,7 +43,7 @@ registerHooks({
         configPath,
         JSON.stringify({ name: 'test-worker', account_id: 'test-account' }),
       );
-      const [command, ...prefix] = resolveWranglerArgv(directory);
+      const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
       const output = await new Promise<{ status: number; stderr: string }>((resolve) => {
         execFile(
           command!,
@@ -47,12 +51,11 @@ registerHooks({
             '--import',
             pathToFileURL(preload).href,
             ...prefix,
-            'triggers',
-            'clear-domains',
-            '-c',
-            configPath,
-            '--name',
-            'test-worker',
+            ...encodeCloudflareOperation({
+              type: 'triggers.clear-domains',
+              configPath,
+              workerName: 'test-worker',
+            }),
           ],
           {
             cwd: directory,
@@ -121,11 +124,18 @@ it.each(['clear-crons', 'clear-domains'])(
         configPath,
         JSON.stringify({ name: 'test-worker', account_id: 'test-account' }),
       );
-      const [command, ...prefix] = resolveWranglerArgv(directory);
+      const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
       const output = await new Promise<{ status: number; stderr: string }>((resolve) => {
         execFile(
           command!,
-          [...prefix, 'triggers', operation, '-c', configPath, '--name', 'test-worker'],
+          [
+            ...prefix,
+            ...encodeCloudflareOperation({
+              type: `triggers.${operation}` as 'triggers.clear-crons' | 'triggers.clear-domains',
+              configPath,
+              workerName: 'test-worker',
+            }),
+          ],
           {
             cwd: directory,
             encoding: 'utf8',
@@ -217,7 +227,14 @@ child.spawnSync = (_binary, args, options) => {
 syncBuiltinESMExports();
 `,
       );
-      const entry = join(import.meta.dirname, '..', '..', 'src', 'cli', 'cf-compat.ts');
+      const entry = join(
+        import.meta.dirname,
+        '..',
+        '..',
+        'src',
+        'cli',
+        'cloudflare-operation-process.ts',
+      );
       const output = await new Promise<{ status: number; stderr: string }>((resolve) => {
         execFile(
           process.execPath,
@@ -225,12 +242,11 @@ syncBuiltinESMExports();
             '--import',
             pathToFileURL(preload).href,
             entry,
-            'triggers',
-            operation,
-            '-c',
-            configPath,
-            '--name',
-            'test-worker',
+            ...encodeCloudflareOperation({
+              type: `triggers.${operation}` as 'triggers.clear-crons' | 'triggers.clear-domains',
+              configPath,
+              workerName: 'test-worker',
+            }),
           ],
           {
             cwd: directory,
@@ -286,12 +302,12 @@ syncBuiltinESMExports();
 it('reports an absent cf session as authentication failure', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'void-cf-no-auth-'));
   try {
-    const [command, ...prefix] = resolveWranglerArgv(directory);
+    const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
     const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
       (resolve) => {
         execFile(
           command!,
-          [...prefix, 'whoami', '--json'],
+          [...prefix, ...encodeCloudflareOperation({ type: 'auth.whoami' })],
           {
             cwd: directory,
             encoding: 'utf8',
@@ -313,7 +329,7 @@ it('reports an absent cf session as authentication failure', async () => {
     );
     expect(output.status, output.stdout).toBe(1);
     if (output.stdout) {
-      expect(JSON.parse(output.stdout)).toEqual({ loggedIn: false });
+      expect(JSON.parse(output.stdout).data).toEqual({ loggedIn: false });
       expect(output.stderr).toContain('authentication is required');
     } else {
       // cf may fail before returning JSON when the host has no keyring backend.
@@ -354,12 +370,12 @@ it('discovers KV namespaces beyond the first cf API page', async () => {
   try {
     const configPath = join(directory, 'wrangler.json');
     writeFileSync(configPath, JSON.stringify({ account_id: 'test-account' }));
-    const [command, ...prefix] = resolveWranglerArgv(directory);
+    const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
     const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
       (resolve) => {
         execFile(
           command!,
-          [...prefix, 'kv', 'namespace', 'list', '-c', configPath, '--env=', '--json'],
+          [...prefix, ...encodeCloudflareOperation({ type: 'kv.namespace.list', configPath })],
           {
             cwd: directory,
             encoding: 'utf8',
@@ -379,7 +395,7 @@ it('discovers KV namespaces beyond the first cf API page', async () => {
       },
     );
     expect(output.status, output.stderr).toBe(0);
-    expect(JSON.parse(output.stdout)).toEqual([...namespaces, target]);
+    expect(JSON.parse(output.stdout).data).toEqual([...namespaces, target]);
     expect(requestedPages).toEqual([1, 2]);
   } finally {
     await new Promise<void>((resolve) => {
@@ -415,12 +431,19 @@ it('finds existing Queues beyond the first cf API page', async () => {
   try {
     const configPath = join(directory, 'wrangler.json');
     writeFileSync(configPath, JSON.stringify({ account_id: 'test-account' }));
-    const [command, ...prefix] = resolveWranglerArgv(directory);
+    const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
     const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
       (resolve) => {
         execFile(
           command!,
-          [...prefix, 'queues', 'info', 'existing-void-queue', '-c', configPath],
+          [
+            ...prefix,
+            ...encodeCloudflareOperation({
+              type: 'queues.info',
+              name: 'existing-void-queue',
+              configPath,
+            }),
+          ],
           {
             cwd: directory,
             encoding: 'utf8',
@@ -440,7 +463,7 @@ it('finds existing Queues beyond the first cf API page', async () => {
       },
     );
     expect(output.status, output.stderr).toBe(0);
-    expect(output.stdout).toContain('Queue Name: existing-void-queue');
+    expect(JSON.parse(output.stdout).data).toMatchObject({ name: 'existing-void-queue' });
     expect(requestedPages).toEqual([1, 2]);
   } finally {
     await new Promise<void>((resolve) => {
@@ -489,23 +512,19 @@ it('uses pinned cf despite a project-local CLI and preserves D1 results and the 
         d1_databases: [{ binding: 'DB', database_id: 'test-database' }],
       }),
     );
-    const [command, ...prefix] = resolveWranglerArgv(directory);
+    const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
     const output = await new Promise<{ status: number | null; stdout: string; stderr: string }>(
       (resolve) => {
         execFile(
           command!,
           [
             ...prefix,
-            'd1',
-            'execute',
-            'DB',
-            '--remote',
-            '--command',
-            'SELECT name FROM d1_migrations',
-            '--json',
-            '-c',
-            configPath,
-            '--env=',
+            ...encodeCloudflareOperation({
+              type: 'd1.execute',
+              database: 'DB',
+              sql: 'SELECT name FROM d1_migrations',
+              configPath,
+            }),
           ],
           {
             cwd: directory,
@@ -528,7 +547,7 @@ it('uses pinned cf despite a project-local CLI and preserves D1 results and the 
       },
     );
     expect(output.status, output.stderr).toBe(0);
-    expect(JSON.parse(output.stdout)).toEqual([
+    expect(JSON.parse(output.stdout).data).toEqual([
       { results: [{ name: '0001_setup.sql' }], success: true, meta: {} },
     ]);
     expect(requests).toEqual([
@@ -595,11 +614,19 @@ it('uses the configured HTTP proxy for cf resource requests', async () => {
         d1_databases: [{ binding: 'DB', database_id: 'test-database' }],
       }),
     );
-    const [command, ...prefix] = resolveWranglerArgv(directory);
+    const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
     const output = await new Promise<{ status: number; stderr: string }>((resolve) => {
       execFile(
         command!,
-        [...prefix, 'd1', 'execute', 'DB', '--command', 'SELECT 1', '-c', configPath],
+        [
+          ...prefix,
+          ...encodeCloudflareOperation({
+            type: 'd1.execute',
+            database: 'DB',
+            sql: 'SELECT 1',
+            configPath,
+          }),
+        ],
         {
           cwd: directory,
           timeout: 20_000,
@@ -660,11 +687,11 @@ it('stops a prebuilt platform upload before cf can create a missing R2 bucket', 
         r2_buckets: [{ binding: 'ASSETS', bucket_name: 'missing-bucket' }],
       }),
     );
-    const [command, ...prefix] = resolveWranglerArgv(directory);
+    const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
     const output = await new Promise<{ status: number; stderr: string }>((resolve) => {
       execFile(
         command!,
-        [...prefix, 'versions', 'upload', '-c', configPath],
+        [...prefix, ...encodeCloudflareOperation({ type: 'versions.upload', configPath })],
         {
           cwd: directory,
           timeout: 20_000,
@@ -736,12 +763,29 @@ it('allows a prebuilt platform upload when named resources already exist', async
         dispatch_namespaces: [{ binding: 'DISPATCH', namespace: 'existing-namespace' }],
       }),
     );
-    const [command, ...prefix] = resolveWranglerArgv(directory);
+    const preload = join(directory, 'mock-version-upload.mjs');
+    writeFileSync(
+      preload,
+      `import child from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+const actualSpawnSync=child.spawnSync;
+child.spawnSync = (binary, args, options) => {
+  if(args.slice(1,4).join(' ') !== 'workers versions create') return actualSpawnSync(binary,args,options);
+  return { status:0, stdout:JSON.stringify({id:'11111111-1111-4111-8111-111111111111'}), stderr:'' };
+};
+syncBuiltinESMExports();`,
+    );
+    const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
     const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
       (resolve) => {
         execFile(
           command!,
-          [...prefix, 'versions', 'upload', '-c', configPath, '--dry-run'],
+          [
+            '--import',
+            pathToFileURL(preload).href,
+            ...prefix,
+            ...encodeCloudflareOperation({ type: 'versions.upload', configPath }),
+          ],
           {
             cwd: directory,
             timeout: 20_000,
@@ -761,7 +805,9 @@ it('allows a prebuilt platform upload when named resources already exist', async
       },
     );
     expect(output.status, output.stderr).toBe(0);
-    expect(output.stdout).toContain('Dry run complete');
+    expect(JSON.parse(output.stdout).data).toEqual({
+      versionId: '11111111-1111-4111-8111-111111111111',
+    });
     expect(requests).toEqual([
       'GET /client/v4/accounts/test-account/r2/buckets/existing-bucket',
       'GET /client/v4/accounts/test-account/workers/dispatch/namespaces/existing-namespace',
@@ -838,7 +884,14 @@ child.spawnSync = () => ({ status: 0, stdout: JSON.stringify({ id: '${versionId}
 syncBuiltinESMExports();
 `,
     );
-    const entry = join(import.meta.dirname, '..', '..', 'src', 'cli', 'cf-compat.ts');
+    const entry = join(
+      import.meta.dirname,
+      '..',
+      '..',
+      'src',
+      'cli',
+      'cloudflare-operation-process.ts',
+    );
     const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
       (resolve) => {
         execFile(
@@ -847,11 +900,7 @@ syncBuiltinESMExports();
             '--import',
             pathToFileURL(preload).href,
             entry,
-            'versions',
-            'view',
-            versionId,
-            '-c',
-            configPath,
+            ...encodeCloudflareOperation({ type: 'versions.view', versionId, configPath }),
           ],
           {
             cwd: directory,
@@ -872,7 +921,7 @@ syncBuiltinESMExports();
       },
     );
     expect(output.status, output.stderr).toBe(0);
-    expect(JSON.parse(output.stdout).resources.bindings).toEqual([]);
+    expect(JSON.parse(output.stdout).data.resources.bindings).toEqual([]);
     expect(proxied).toBe(1);
     expect(inspected).toBe(1);
   } finally {
@@ -891,7 +940,7 @@ syncBuiltinESMExports();
 
 it.each([
   {
-    operation: ['routing', 'settings', 'acme.com'],
+    operation: { type: 'email.routing.settings' as const, domain: 'acme.com' },
     commands: [
       {
         command: ['email-routing', 'settings', 'get', '--zone', 'acme.com'],
@@ -911,7 +960,7 @@ it.each([
     },
   },
   {
-    operation: ['sending', 'settings', 'mail.acme.com'],
+    operation: { type: 'email.sending.settings' as const, domain: 'mail.acme.com' },
     commands: [
       {
         command: ['email-routing', 'settings', 'get', '--zone', 'mail.acme.com'],
@@ -935,19 +984,19 @@ it.each([
     expected: { name: 'mail.acme.com', enabled: true, id: '22222222222222222222222222222222' },
   },
   {
-    operation: ['routing', 'rules', 'list', 'acme.com'],
+    operation: { type: 'email.routing.rules.list' as const, domain: 'acme.com' },
     commands: [
       {
         command: [
           'email-routing',
           'rules',
           'list-account',
-          '--zone',
-          'acme.com',
           '--page',
           '1',
           '--per-page',
           '100',
+          '--zone',
+          'acme.com',
         ],
         data: Array.from({ length: 100 }, (_, index) => ({
           id: `rule-${index}`,
@@ -962,12 +1011,12 @@ it.each([
           'email-routing',
           'rules',
           'list-account',
-          '--zone',
-          'acme.com',
           '--page',
           '2',
           '--per-page',
           '100',
+          '--zone',
+          'acme.com',
         ],
         data: [{ enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] }],
       },
@@ -998,12 +1047,19 @@ child.spawnSync = (_executable, args) => {
 syncBuiltinESMExports();
 `,
     );
-    const entry = join(import.meta.dirname, '..', '..', 'src', 'cli', 'cf-compat.ts');
+    const entry = join(
+      import.meta.dirname,
+      '..',
+      '..',
+      'src',
+      'cli',
+      'cloudflare-operation-process.ts',
+    );
     const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
       (resolve) => {
         execFile(
           process.execPath,
-          ['--import', pathToFileURL(preload).href, entry, 'email', ...operation],
+          ['--import', pathToFileURL(preload).href, entry, ...encodeCloudflareOperation(operation)],
           {
             cwd: directory,
             encoding: 'utf8',
@@ -1021,7 +1077,7 @@ syncBuiltinESMExports();
       },
     );
     expect(output.status, output.stderr).toBe(0);
-    expect(JSON.parse(output.stdout)).toEqual(
+    expect(JSON.parse(output.stdout).data).toEqual(
       'expected' in example
         ? example.expected
         : commands.flatMap<unknown>((command) => command.data ?? []),
@@ -1029,6 +1085,194 @@ syncBuiltinESMExports();
     expect(JSON.parse(readFileSync(callsPath, 'utf8'))).toEqual(
       commands.map((command) => command.command),
     );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it.each([
+  { label: 'malformed JSON', request: '{', extra: [] },
+  { label: 'null request', request: 'null', extra: [] },
+  { label: 'array request', request: '[]', extra: [] },
+  { label: 'missing operation type', request: '{}', extra: [] },
+  { label: 'unknown operation', request: JSON.stringify({ type: 'unknown.operation' }), extra: [] },
+  { label: 'legacy command words', request: 'd1', extra: ['list'] },
+  {
+    label: 'trailing command arguments',
+    request: JSON.stringify({ type: 'd1.list' }),
+    extra: ['--json'],
+  },
+])('rejects $label before invoking the provider', async ({ request, extra }) => {
+  const directory = mkdtempSync(join(tmpdir(), 'void-operation-protocol-'));
+  const capture = join(directory, 'provider-ran');
+  try {
+    const preload = join(directory, 'mock-provider.mjs');
+    writeFileSync(
+      preload,
+      `import child from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+child.spawnSync = () => {
+  writeFileSync(${JSON.stringify(capture)}, 'invoked');
+  return {status:0,stdout:'[]',stderr:''};
+};
+syncBuiltinESMExports();`,
+    );
+    const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
+    const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
+      (resolve) => {
+        execFile(
+          command!,
+          ['--import', pathToFileURL(preload).href, ...prefix, request, ...extra],
+          {
+            cwd: directory,
+            encoding: 'utf8',
+            timeout: 10_000,
+            env: {
+              PATH: process.env.PATH,
+              CI: 'true',
+              CLOUDFLARE_API_TOKEN: 'synthetic-token',
+              CLOUDFLARE_ACCOUNT_ID: 'test-account',
+            },
+          },
+          (error, stdout, stderr) => resolve({ status: error ? 1 : 0, stdout, stderr }),
+        );
+      },
+    );
+    expect(output.status, output.stderr).toBe(1);
+    expect(existsSync(capture)).toBe(false);
+    expect(JSON.parse(output.stdout)).toMatchObject({
+      operationResult: 1,
+      errors: expect.any(Array),
+    });
+    expect(output.stdout + output.stderr).not.toContain('synthetic-token');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it.each([
+  { label: 'signal', code: 10006, signal: 'SIGTERM', spawnError: false },
+  { label: 'spawn error', code: 10007, signal: null, spawnError: true },
+  { label: 'missing exit status', code: 10006, signal: null, spawnError: false },
+])('preserves an inner provider $label without authorizing resource absence', async (example) => {
+  const directory = mkdtempSync(join(tmpdir(), 'void-operation-provider-failure-'));
+  try {
+    const preload = join(directory, 'failed-provider.mjs');
+    writeFileSync(
+      preload,
+      `import child from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+child.spawnSync = () => ({
+  status: null,
+  signal: ${JSON.stringify(example.signal)},
+  error: ${example.spawnError ? "new Error('Synthetic provider spawn failure.')" : 'undefined'},
+  stdout: '[]',
+  stderr: '[${example.code}] Resource does not exist.'
+});
+syncBuiltinESMExports();`,
+    );
+    const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
+    const operation =
+      example.code === 10007
+        ? { type: 'secret.list' as const, workerName: 'test-worker' }
+        : { type: 'r2.bucket.info' as const, name: 'test-bucket' };
+    const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
+      (resolve) => {
+        execFile(
+          command!,
+          [
+            '--import',
+            pathToFileURL(preload).href,
+            ...prefix,
+            ...encodeCloudflareOperation(operation),
+          ],
+          {
+            cwd: directory,
+            encoding: 'utf8',
+            timeout: 10_000,
+            env: {
+              PATH: process.env.PATH,
+              SYSTEMROOT: process.env.SYSTEMROOT,
+              WINDIR: process.env.WINDIR,
+              CI: 'true',
+              CLOUDFLARE_API_TOKEN: 'synthetic-token',
+              CLOUDFLARE_ACCOUNT_ID: 'test-account',
+            },
+          },
+          (error, stdout, stderr) => resolve({ status: error ? 1 : 0, stdout, stderr }),
+        );
+      },
+    );
+    expect(output.status).toBe(1);
+    expect(output.stderr).toContain(`[code: ${example.code}]`);
+    const envelope = JSON.parse(output.stdout);
+    expect(envelope.operationResult).toBe(1);
+    expect(envelope.errorCode).toBeUndefined();
+    expect(envelope.failure).toBeUndefined();
+    expect(envelope.errors[0].code).toBeUndefined();
+    const decoded = decodeCloudflareOperationResult({ ...output, signal: null, error: null });
+    expect(decoded.status).toBe(1);
+    expect(decoded.data).toBeUndefined();
+    expect(decoded.errorCode).toBeUndefined();
+    expect(decoded.failure).toBeUndefined();
+    if (example.signal) {
+      expect(decoded.signal).toBe(example.signal);
+    } else {
+      expect(decoded.error).toContain(
+        example.spawnError
+          ? 'Synthetic provider spawn failure.'
+          : 'Cloudflare CLI did not report an exit status.',
+      );
+    }
+    expect(output.stdout + output.stderr).not.toContain('synthetic-token');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it('rejects a changed tail target before any provider request', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'void-tail-target-'));
+  try {
+    const configPath = join(directory, 'wrangler.jsonc');
+    writeFileSync(
+      configPath,
+      JSON.stringify({ name: 'changed-worker', account_id: 'test-account' }),
+    );
+    const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
+    const output = await new Promise<{ status: number; stdout: string; stderr: string }>(
+      (resolve) => {
+        execFile(
+          command!,
+          [
+            ...prefix,
+            ...encodeCloudflareOperation({
+              type: 'tail',
+              workerName: 'original-worker',
+              configPath,
+            }),
+          ],
+          {
+            cwd: directory,
+            encoding: 'utf8',
+            timeout: 20_000,
+            env: {
+              PATH: process.env.PATH,
+              SYSTEMROOT: process.env.SYSTEMROOT,
+              WINDIR: process.env.WINDIR,
+              CLOUDFLARE_API_TOKEN: 'synthetic-token',
+              CLOUDFLARE_ACCOUNT_ID: 'test-account',
+              CLOUDFLARE_API_BASE_URL: 'http://127.0.0.1:1/client/v4',
+            },
+          },
+          (error, stdout, stderr) =>
+            resolve({ status: error ? Number(error.code) || 1 : 0, stdout, stderr }),
+        );
+      },
+    );
+    expect(output.status).toBe(1);
+    expect(output.stderr).toContain('tail target is not pinned');
+    expect(output.stdout).toBe('');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

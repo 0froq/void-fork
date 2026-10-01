@@ -149,8 +149,8 @@ export default defineConfig({
       // child (via import.meta.url) to derive the env-insensitive schema facts (server and
       // required-secret names) under a scrubbed env — a stable dist filename for the spawn.
       'src/cli/env-schema-probe.ts',
-      // Private Cloudflare command transport, spawned by deployment orchestrators.
-      'src/cli/cf-compat.ts',
+      // Private typed Cloudflare transport, spawned by deployment orchestrators.
+      'src/cli/cloudflare-operation-process.ts',
     ],
     format: 'esm',
     dts: true,

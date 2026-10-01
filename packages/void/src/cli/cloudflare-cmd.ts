@@ -19,10 +19,10 @@ export async function runCloudflareCommand(root: string, args: CloudflareArgs): 
       return;
     }
     case 'status': {
-      const result = await runWrangler(['whoami', '--json'], true);
+      const result = await runWrangler({ type: 'auth.whoami' }, true);
       const session =
         result.status === 0 && !result.signal && !result.error
-          ? parseCloudflareAuthSession(result.stdout)
+          ? parseCloudflareAuthSession(result.data)
           : null;
       if (!session) {
         throw new Error('Not signed in to Cloudflare. Run `void cloudflare login`.');
@@ -31,7 +31,7 @@ export async function runCloudflareCommand(root: string, args: CloudflareArgs): 
       return;
     }
     case 'logout': {
-      const result = await runWrangler(['logout'], true);
+      const result = await runWrangler({ type: 'auth.logout' }, true);
       if (result.status !== 0) {
         throw new Error('Could not remove the local Cloudflare browser session.');
       }

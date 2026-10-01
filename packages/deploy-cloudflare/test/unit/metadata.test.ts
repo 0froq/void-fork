@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vite-plus/test';
 import { createCloudflareMetadataRunner } from '../../src/metadata.ts';
+import type { CloudflareOperation } from '../../src/operations.ts';
 
-const suffix = ['-c', 'wrangler.json', '--env=', '--name', 'worker', '--json'];
-const statusArgs = ['deployments', 'status', ...suffix];
+const suffix = { configPath: 'wrangler.json', workerName: 'worker' };
+const statusArgs: CloudflareOperation = { type: 'deployments.status', ...suffix };
 const capture = { capture: true };
 const fallbackResult = { status: 7, stdout: '', stderr: 'fallback result' };
 const success = (result: unknown) => Response.json({ success: true, result });
@@ -37,8 +38,8 @@ describe('Cloudflare metadata transport', () => {
         .mockResolvedValueOnce(success({ deployments: [first] }))
         .mockResolvedValueOnce(success({ deployments: [second] })),
     );
-    expect(JSON.parse((await run(statusArgs, capture)).stdout)).toEqual(first);
-    expect(JSON.parse((await run(statusArgs, capture)).stdout)).toEqual(second);
+    expect((await run(statusArgs, capture)).data).toEqual(first);
+    expect((await run(statusArgs, capture)).data).toEqual(second);
     expect(getToken).toHaveBeenCalledOnce();
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(fetcher).toHaveBeenCalledWith(
@@ -61,8 +62,8 @@ describe('Cloudflare metadata transport', () => {
     const { run, fetcher } = setup(
       vi.fn<typeof fetch>().mockResolvedValue(success({ items: [...versions].reverse() })),
     );
-    const result = await run(['versions', 'list', ...suffix], capture);
-    expect(JSON.parse(result.stdout)).toEqual(versions.slice(-10));
+    const result = await run({ type: 'versions.list', ...suffix }, capture);
+    expect(result.data).toEqual(versions.slice(-10));
     expect(fetcher.mock.calls[0]?.[0]).toContain('/versions?deployable=true');
   });
 
@@ -75,7 +76,7 @@ describe('Cloudflare metadata transport', () => {
         .mockResolvedValueOnce(success(version))
         .mockResolvedValueOnce(success({ deployments: [] })),
     );
-    expect(JSON.parse((await run(['versions', 'view', id, ...suffix], capture)).stdout)).toEqual(
+    expect((await run({ type: 'versions.view', versionId: id, ...suffix }, capture)).data).toEqual(
       version,
     );
     expect(await run(statusArgs, capture)).toMatchObject({
@@ -84,16 +85,15 @@ describe('Cloudflare metadata transport', () => {
     });
   });
 
-  it.each([
-    ['versions', 'upload', ...suffix],
-    ['versions', 'deploy', ...suffix],
-    [...statusArgs, '--unexpected'],
-    ['deployments', 'status', '-c', 'another.json', '--env=', '--name', 'worker', '--json'],
-    ['deployments', 'status', '-c', 'wrangler.json', '--env=', '--name', 'other', '--json'],
-  ])('leaves unsupported argv with the pinned runner: %j', async (...args) => {
+  it.each<CloudflareOperation>([
+    { type: 'versions.upload', ...suffix },
+    { type: 'versions.deploy', versions: [], ...suffix },
+    { type: 'deployments.status', configPath: 'another.json', workerName: 'worker' },
+    { type: 'deployments.status', configPath: 'wrangler.json', workerName: 'other' },
+  ])('leaves writes and other targets with the pinned runner: %j', async (operation) => {
     const { run, runWrangler, getToken, fetcher } = setup();
-    expect(await run(args, capture)).toBe(fallbackResult);
-    expect(runWrangler).toHaveBeenCalledWith(args, capture);
+    expect(await run(operation, capture)).toBe(fallbackResult);
+    expect(runWrangler).toHaveBeenCalledWith(operation, capture);
     expect(getToken).not.toHaveBeenCalled();
     expect(fetcher).not.toHaveBeenCalled();
   });

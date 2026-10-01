@@ -4,6 +4,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { CloudflareOperation } from '@void/deploy-cloudflare';
 import { encodeCloudflareVersionMessage } from '@void/deploy-cloudflare';
 import {
   createApplicationRoutes,
@@ -1645,19 +1646,19 @@ describe('platform installer', () => {
         versions: [{ percentage: 100, version_id: 'version-ours' }],
       },
     ];
-    const commands: Array<ReadonlyArray<string>> = [];
+    const commands: Array<CloudflareOperation> = [];
     const deployments = await readPlatformWorkerDeployments(
       '/tmp/wrangler.json',
       'account',
       'void-api',
       async (args) => {
         commands.push(args);
-        return { status: 0, stderr: '', stdout: JSON.stringify(history) };
+        return { status: 0, stderr: '', stdout: '', data: history };
       },
     );
 
     expect(commands).toEqual([
-      ['deployments', 'list', '--config', '/tmp/wrangler.json', '--name', 'void-api', '--json'],
+      { type: 'deployments.list', configPath: '/tmp/wrangler.json', workerName: 'void-api' },
     ]);
     expect(deployments.map((deployment) => deployment.id)).toEqual([
       'deployment-enabled',
@@ -1675,14 +1676,15 @@ describe('platform installer', () => {
       async () => ({
         status: 0,
         stderr: '',
-        stdout: JSON.stringify([
+        stdout: '',
+        data: [
           ...history,
           {
             created_on: '2026-09-15T01:03:00.000Z',
             id: 'deployment-racer',
             versions: [{ percentage: 100, version_id: 'version-racer' }],
           },
-        ]),
+        ],
       }),
     );
     expect(
@@ -1704,7 +1706,7 @@ describe('platform installer', () => {
       id: 'deployment-ours',
       versions: [{ percentage: 100, version_id: 'version-ours' }],
     };
-    const commands: Array<ReadonlyArray<string>> = [];
+    const commands: Array<CloudflareOperation> = [];
     let restored = false;
     await restorePlatformWorkerDeployment({
       accountId: 'account',
@@ -1721,47 +1723,44 @@ describe('platform installer', () => {
       },
       runner: async (args) => {
         commands.push(args);
-        if (args[0] === 'versions') {
+        if (args.type === 'versions.deploy') {
           restored = true;
-          return { status: 0, stderr: '', stdout: '' };
+          return { status: 0, stderr: '', stdout: '', data: '' };
         }
         return {
           status: 0,
           stderr: '',
-          stdout: JSON.stringify(
-            restored
-              ? [
-                  previous,
-                  ours,
-                  {
-                    ...previous,
-                    created_on: '2026-09-15T01:02:00.000Z',
-                    id: 'deployment-restored',
-                  },
-                ]
-              : [previous, ours],
-          ),
+          stdout: '',
+          data: restored
+            ? [
+                previous,
+                ours,
+                {
+                  ...previous,
+                  created_on: '2026-09-15T01:02:00.000Z',
+                  id: 'deployment-restored',
+                },
+              ]
+            : [previous, ours],
         };
       },
       workerName: 'void-api',
     });
 
-    expect(commands[1]).toEqual([
-      'versions',
-      'deploy',
-      'version-a@25',
-      'version-b@75',
-      '--config',
-      '/tmp/wrangler.json',
-      '--message',
-      'Void platform restoration deployment-intervening',
-      '--yes',
-    ]);
-    expect(commands.some((args) => args.includes('delete'))).toBe(false);
+    expect(commands[1]).toEqual({
+      type: 'versions.deploy',
+      configPath: '/tmp/wrangler.json',
+      versions: [
+        { versionId: 'version-a', percentage: 25 },
+        { versionId: 'version-b', percentage: 75 },
+      ],
+      message: 'Void platform restoration deployment-intervening',
+    });
+    expect(commands.some((args) => args.type.endsWith('.delete'))).toBe(false);
   });
 
   it('does not restore over a known newer deployment', async () => {
-    const commands: Array<ReadonlyArray<string>> = [];
+    const commands: Array<CloudflareOperation> = [];
     await expect(
       restorePlatformWorkerDeployment({
         accountId: 'account',
@@ -1778,7 +1777,8 @@ describe('platform installer', () => {
           return {
             status: 0,
             stderr: '',
-            stdout: JSON.stringify([
+            stdout: '',
+            data: [
               {
                 created_on: '2026-09-15T01:00:00.000Z',
                 id: 'deployment-intervening',
@@ -1794,14 +1794,14 @@ describe('platform installer', () => {
                 id: 'deployment-newer',
                 versions: [{ percentage: 100, version_id: 'version-newer' }],
               },
-            ]),
+            ],
           };
         },
         workerName: 'void-api',
       }),
     ).rejects.toThrow('refusing to overwrite the newer deployment');
     expect(commands).toHaveLength(1);
-    expect(commands[0]?.slice(0, 2)).toEqual(['deployments', 'list']);
+    expect(commands[0]?.type).toEqual('deployments.list');
   });
 
   it('stops when restoration is superseded without attempting another mutation', async () => {
@@ -1815,7 +1815,7 @@ describe('platform installer', () => {
       id: 'deployment-ours',
       versions: [{ percentage: 100, version_id: 'version-ours' }],
     };
-    const commands: Array<ReadonlyArray<string>> = [];
+    const commands: Array<CloudflareOperation> = [];
     let activationAttempted = false;
     await expect(
       restorePlatformWorkerDeployment({
@@ -1830,34 +1830,33 @@ describe('platform installer', () => {
         },
         runner: async (args) => {
           commands.push(args);
-          if (args[0] === 'versions') {
+          if (args.type === 'versions.deploy') {
             activationAttempted = true;
-            return { status: 0, stderr: '', stdout: '' };
+            return { status: 0, stderr: '', stdout: '', data: '' };
           }
           return {
             status: 0,
             stderr: '',
-            stdout: JSON.stringify(
-              activationAttempted
-                ? [
-                    previous,
-                    ours,
-                    {
-                      created_on: '2026-09-15T01:02:00.000Z',
-                      id: 'deployment-newer',
-                      versions: [{ percentage: 100, version_id: 'version-newer' }],
-                    },
-                  ]
-                : [previous, ours],
-            ),
+            stdout: '',
+            data: activationAttempted
+              ? [
+                  previous,
+                  ours,
+                  {
+                    created_on: '2026-09-15T01:02:00.000Z',
+                    id: 'deployment-newer',
+                    versions: [{ percentage: 100, version_id: 'version-newer' }],
+                  },
+                ]
+              : [previous, ours],
           };
         },
         workerName: 'void-api',
       }),
     ).rejects.toThrow('restoration was superseded');
 
-    expect(commands.filter((args) => args[0] === 'versions')).toHaveLength(1);
-    expect(commands.some((args) => args.includes('delete'))).toBe(false);
+    expect(commands.filter((args) => args.type === 'versions.deploy')).toHaveLength(1);
+    expect(commands.some((args) => args.type.endsWith('.delete'))).toBe(false);
   });
 
   it('binds an existing Worker snapshot to its immutable ownership marker', async () => {
@@ -1871,13 +1870,14 @@ describe('platform installer', () => {
       workers_dev: true,
       workflows: [],
     };
-    const runner = async (args: ReadonlyArray<string>) => ({
+    const runner = async (args: CloudflareOperation) => ({
       status: 0,
       stderr: '',
-      stdout:
-        args[0] === 'deployments'
-          ? JSON.stringify({ versions: [{ percentage: 100, version_id: versionId }] })
-          : JSON.stringify({
+      stdout: '',
+      data:
+        args.type === 'deployments.status'
+          ? { versions: [{ percentage: 100, version_id: versionId }] }
+          : {
               annotations: {
                 'workers/message': encodeCloudflareVersionMessage([], triggerConfig),
               },
@@ -1885,7 +1885,7 @@ describe('platform installer', () => {
               resources: {
                 bindings: [{ name: 'PLATFORM_OWNERSHIP_MARKER', type: 'plain_text', text: marker }],
               },
-            }),
+            },
     });
 
     await expect(
@@ -1960,17 +1960,18 @@ describe('platform installer', () => {
       '11111111-1111-4111-8111-111111111111',
       '22222222-2222-4222-8222-222222222222',
     ];
-    const runner = async (args: ReadonlyArray<string>) => ({
+    const runner = async (args: CloudflareOperation) => ({
       status: 0,
       stderr: '',
-      stdout:
-        args[0] === 'deployments'
-          ? JSON.stringify({ versions: [{ percentage: 100, version_id: versions.shift() }] })
-          : JSON.stringify({
+      stdout: '',
+      data:
+        args.type === 'deployments.status'
+          ? { versions: [{ percentage: 100, version_id: versions.shift() }] }
+          : {
               resources: {
                 bindings: [{ name: 'PLATFORM_OWNERSHIP_MARKER', type: 'plain_text', text: 'ours' }],
               },
-            }),
+            },
     });
 
     await expect(

@@ -18,13 +18,6 @@ export function createCloudflareMetadataRunner(options: {
   env?: Readonly<Record<string, string | undefined>>;
 }): CloudflareCommandRunner {
   let tokenPromise: Promise<string | null> | undefined;
-  const common = [
-    ...(options.configPath ? ['-c', options.configPath] : []),
-    '--env=',
-    '--name',
-    options.workerName,
-    '--json',
-  ];
   const prefix = `${options.apiBaseUrl.replace(/\/$/, '')}/accounts/${encodeURIComponent(options.accountId)}/workers/scripts/${encodeURIComponent(options.workerName)}`;
   const fetcher = options.fetch ?? globalThis.fetch;
   const proxyEnv = options.env ?? process.env;
@@ -37,42 +30,34 @@ export function createCloudflareMetadataRunner(options: {
     stderr: 'Cloudflare uploader integrity check failed.',
     error: 'uploader-changed',
   };
-  const fallback: CloudflareCommandRunner = (args, runOptions) =>
-    options.verifyUploader() ? options.runWrangler(args, runOptions) : refused;
-  return async (args, runOptions) => {
+  const fallback: CloudflareCommandRunner = (operation, runOptions) =>
+    options.verifyUploader() ? options.runWrangler(operation, runOptions) : refused;
+  return async (operation, runOptions) => {
     let kind: 'deployment' | 'versions' | 'version' | undefined;
     let resource: string | undefined;
-    let rest: Array<string> = [];
-    if (args[0] === 'deployments' && args[1] === 'status') {
+    if (operation.type === 'deployments.status') {
       kind = 'deployment';
       resource = '/deployments';
-      rest = args.slice(2);
-    } else if (args[0] === 'versions' && args[1] === 'list') {
+    } else if (operation.type === 'versions.list') {
       kind = 'versions';
       resource = '/versions?deployable=true';
-      rest = args.slice(2);
-    } else if (
-      args[0] === 'versions' &&
-      args[1] === 'view' &&
-      /^[0-9a-f-]{36}$/i.test(args[2] ?? '')
-    ) {
+    } else if (operation.type === 'versions.view' && /^[0-9a-f-]{36}$/i.test(operation.versionId)) {
       kind = 'version';
-      resource = `/versions/${encodeURIComponent(args[2]!)}`;
-      rest = args.slice(3);
+      resource = '/versions/' + encodeURIComponent(operation.versionId);
     }
-    // Never reinterpret extra flags, another target/config, or a write command.
     if (
       !kind ||
       !runOptions.capture ||
-      rest.length !== common.length ||
-      rest.some((value, i) => value !== common[i])
+      !('workerName' in operation) ||
+      operation.workerName !== options.workerName ||
+      operation.configPath !== options.configPath
     ) {
-      return fallback(args, runOptions);
+      return fallback(operation, runOptions);
     }
     // Node's global fetch does not reliably honor both upper- and lower-case
     // proxy variables. Keep the CLI transport in charge of proxy routing.
     if (requiresProxyTransport) {
-      return fallback(args, runOptions);
+      return fallback(operation, runOptions);
     }
     let response: Response | undefined;
     try {
@@ -101,14 +86,15 @@ export function createCloudflareMetadataRunner(options: {
                   status: 1,
                   stdout: '',
                   stderr: `The Worker ${options.workerName} has no deployments.`,
+                  errorCode: 10007,
                 };
               }
               if (record(latest) && Array.isArray(latest.versions)) {
-                return { status: 0, stdout: JSON.stringify(latest), stderr: '' };
+                return { status: 0, stdout: '', data: latest, stderr: '' };
               }
             }
-            if (kind === 'version' && result.id === args[2]) {
-              return { status: 0, stdout: JSON.stringify(result), stderr: '' };
+            if (operation.type === 'versions.view' && result.id === operation.versionId) {
+              return { status: 0, stdout: '', data: result, stderr: '' };
             }
             if (kind === 'versions' && Array.isArray(result.items)) {
               const items: Array<unknown> = result.items;
@@ -124,7 +110,7 @@ export function createCloudflareMetadataRunner(options: {
                 const sorted = (items as Array<{ metadata: { created_on: string } }>)
                   .sort((a, b) => a.metadata.created_on.localeCompare(b.metadata.created_on))
                   .slice(-10);
-                return { status: 0, stdout: JSON.stringify(sorted), stderr: '' };
+                return { status: 0, stdout: '', data: sorted, stderr: '' };
               }
             }
           }
@@ -139,7 +125,7 @@ export function createCloudflareMetadataRunner(options: {
         await response.body?.cancel().catch(() => {});
       }
     }
-    return fallback(args, runOptions);
+    return fallback(operation, runOptions);
   };
 }
 

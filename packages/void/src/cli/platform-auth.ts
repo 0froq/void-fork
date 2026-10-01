@@ -85,9 +85,9 @@ export async function resolvePlatformCloudflareCredentialWithInput<T>(
       return { input, credential: result.credential };
     }
 
-    const login = await runWrangler(['login'], false);
+    const login = await runWrangler({ type: 'auth.login' }, false);
     assertNotCancelled();
-    if (login.status !== 0) {
+    if (login.status !== 0 || login.signal || login.error) {
       throw new Error('platform: Cloudflare browser login did not complete.');
     }
     const credential = await readWranglerOAuthCredential(runWrangler);
@@ -125,13 +125,18 @@ async function readExistingCredential(
 export async function readWranglerOAuthCredential(
   runWrangler: CloudflareAuthRunner = (args) => runCloudflareAuthCommand(process.cwd(), args),
 ): Promise<PlatformCloudflareCredential | null> {
-  const result = await runWrangler(['auth', 'token', '--json'], true);
-  if (result.status !== 0) {
+  const result = await runWrangler({ type: 'auth.token' }, true);
+  if (result.status !== 0 || result.signal || result.error) {
     return null;
   }
   try {
-    const parsed = JSON.parse(result.stdout) as { token?: unknown; type?: unknown };
-    if (parsed.type !== 'oauth' || typeof parsed.token !== 'string' || !parsed.token.trim()) {
+    const parsed = result.data as { token?: unknown; type?: unknown } | undefined;
+    if (
+      !parsed ||
+      parsed.type !== 'oauth' ||
+      typeof parsed.token !== 'string' ||
+      !parsed.token.trim()
+    ) {
       return null;
     }
     return { source: 'oauth', token: parsed.token.trim() };

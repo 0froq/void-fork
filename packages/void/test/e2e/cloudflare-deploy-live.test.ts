@@ -1,7 +1,12 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { CloudflareOperation } from '@void/deploy-cloudflare';
 import spawn from 'cross-spawn';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
+import {
+  encodeCloudflareOperation,
+  decodeCloudflareOperationResult,
+} from '../../src/cli/cloudflare-process.ts';
 
 // ---------------------------------------------------------------------------------------------
 // Gated live-account e2e for the `void deploy --platform cloudflare` path.
@@ -53,7 +58,7 @@ const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const PACKAGE_ROOT = join(ROOT, 'packages', 'void');
 const CLI_ENTRY = join(PACKAGE_ROOT, 'dist', 'cli', 'cli.mjs');
 const CF_BIN = join(PACKAGE_ROOT, 'node_modules', 'cf', 'bin', 'cf');
-const CF_COMPAT_ENTRY = join(PACKAGE_ROOT, 'dist', 'cli', 'cf-compat.mjs');
+const OPERATION_ENTRY = join(PACKAGE_ROOT, 'dist', 'cli', 'cloudflare-operation-process.mjs');
 // Bound each deploy subprocess BELOW the enclosing vitest timeout. `spawn.sync` blocks the test
 // worker's event loop, so a hung CLI/cf call would keep vitest's own timer from firing AND keep
 // `afterAll` from running — leaking the worker/D1/KV. On timeout, spawnSync returns a null status,
@@ -160,10 +165,11 @@ function cloudEnv(): NodeJS.ProcessEnv {
 let cfDeadline = Number.POSITIVE_INFINITY;
 
 /** Best-effort pinned cf invocation for setup and teardown. */
-function cf(
-  args: Array<string>,
-  compatibility = false,
-): { status: number; stdout: string; output: string } {
+function cf(args: Array<string> | CloudflareOperation): {
+  status: number;
+  stdout: string;
+  output: string;
+} {
   // Shrink this call's timeout to the time left in the hook's aggregate budget, so a run of stalled
   // calls can't collectively overrun the hook (spawn.sync blocks the loop, so vitest can't interrupt).
   // Once the budget is spent, skip the call as a failed one rather than launching a doomed spawn — the
@@ -173,26 +179,42 @@ function cf(
     return {
       status: 1,
       stdout: '',
-      output: `cf ${args.join(' ')} skipped — hook Cloudflare time budget exhausted`,
+      output: `cf ${Array.isArray(args) ? args.join(' ') : args.type} skipped — hook Cloudflare time budget exhausted`,
     };
   }
-  const res = spawn.sync(process.execPath, [compatibility ? CF_COMPAT_ENTRY : CF_BIN, ...args], {
-    cwd: APP,
-    encoding: 'utf8',
-    maxBuffer: 10 * 1024 * 1024,
-    env: { ...cloudEnv(), CF_DELEGATION: '1' },
-    // Bound each call so a stalled CF request can't block the event loop and freeze teardown
-    // (see CF_TIMEOUT_MS). On timeout, status is null → `?? 1` makes it a non-zero (failed) call,
-    // which every caller already handles: the ownership gate fails closed, teardown records a failure.
-    timeout: Math.min(CF_TIMEOUT_MS, remaining),
-  });
-  const stdout = res.stdout ?? '';
-  const stderr = res.stderr ?? '';
+  const res = spawn.sync(
+    process.execPath,
+    Array.isArray(args) ? [CF_BIN, ...args] : [OPERATION_ENTRY, ...encodeCloudflareOperation(args)],
+    {
+      cwd: APP,
+      encoding: 'utf8',
+      maxBuffer: 10 * 1024 * 1024,
+      env: { ...cloudEnv(), CF_DELEGATION: '1' },
+      // Bound each call so a stalled CF request can't block the event loop and freeze teardown
+      // (see CF_TIMEOUT_MS). On timeout, status is null → `?? 1` makes it a non-zero (failed) call,
+      // which every caller already handles: the ownership gate fails closed, teardown records a failure.
+      timeout: Math.min(CF_TIMEOUT_MS, remaining),
+    },
+  );
+  const decoded = Array.isArray(args)
+    ? res
+    : decodeCloudflareOperationResult({
+        status: res.status,
+        stdout: res.stdout ?? '',
+        stderr: res.stderr ?? '',
+        signal: res.signal,
+        error: res.error?.message,
+      });
+  const stdout =
+    'data' in decoded && decoded.data !== undefined
+      ? JSON.stringify(decoded.data)
+      : (decoded.stdout ?? '');
+  const stderr = decoded.stderr ?? '';
   // `output` (stdout+stderr) is for human-facing error text only. JSON parsing must read `stdout`
   // ALONE: cf can print notices/warnings to stderr on a status-0 list, and any non-JSON
   // trailing the payload would make JSON.parse throw — breaking the ownership gate / teardown.
   return {
-    status: res.status ?? 1,
+    status: decoded.status ?? 1,
     stdout,
     output: `${stdout}${stderr}${res.error ? `\n${res.error}` : ''}`,
   };
@@ -396,7 +418,7 @@ describe('void deploy --platform cloudflare (live account)', () => {
     // D1 — `d1 info <name>` exits nonzero BOTH when the database is absent and when the call errors,
     // so it cannot fail closed. List every database instead: a successful JSON list that omits the
     // name proves it is free; a list failure or non-JSON body is ambiguous → collision.
-    const d1List = cf(['d1', 'list', '--json'], true);
+    const d1List = cf({ type: 'd1.list' });
     if (d1List.status !== 0) {
       collisions.push(`d1 database ${D1_NAME} (could not list databases to rule out a collision)`);
     } else {
@@ -412,7 +434,7 @@ describe('void deploy --platform cloudflare (live account)', () => {
       }
     }
 
-    const kvList = cf(['kv', 'namespace', 'list'], true);
+    const kvList = cf({ type: 'kv.namespace.list' });
     if (kvList.status !== 0) {
       collisions.push(
         `kv namespace ${KV_TITLE} (could not list namespaces to rule out a collision)`,
@@ -498,7 +520,7 @@ describe('void deploy --platform cloudflare (live account)', () => {
       }
       // D1 — created in beforeAll; delete when the account still lists it by EXACT name. A list
       // failure cannot confirm the database is gone, so it is recorded (fail closed).
-      const d1List = cf(['d1', 'list', '--json'], true);
+      const d1List = cf({ type: 'd1.list' });
       if (d1List.status !== 0) {
         failures.push(`d1 list (exit ${d1List.status})\n${d1List.output.trim()}`);
       } else {
@@ -519,7 +541,7 @@ describe('void deploy --platform cloudflare (live account)', () => {
       // KV delete needs the namespace id — resolve it from the account's namespace list by EXACT
       // title. Matching by exact title (not `endsWith`) avoids selecting an unrelated namespace that
       // merely shares the suffix. A namespace absent from the list is already gone (skip).
-      const list = cf(['kv', 'namespace', 'list'], true);
+      const list = cf({ type: 'kv.namespace.list' });
       if (list.status !== 0) {
         failures.push(`kv namespace list (exit ${list.status})\n${list.output.trim()}`);
       } else {

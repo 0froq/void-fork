@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { expect, it } from 'vite-plus/test';
+import { encodeCloudflareOperation } from '../../src/cli/cloudflare-process.ts';
 
 it('passes the validated custom D1 migration pattern to cf', () => {
   const directory = mkdtempSync(join(tmpdir(), 'void-cf-d1-pattern-test-'));
@@ -36,19 +37,25 @@ child.spawnSync = (_binary, args) => {
 syncBuiltinESMExports();
 `,
     );
-    const entry = join(import.meta.dirname, '..', '..', 'src', 'cli', 'cf-compat.ts');
+    const entry = join(
+      import.meta.dirname,
+      '..',
+      '..',
+      'src',
+      'cli',
+      'cloudflare-operation-process.ts',
+    );
     const result = spawnSync(
       process.execPath,
       [
         '--import',
         pathToFileURL(preload).href,
         entry,
-        'd1',
-        'migrations',
-        'list',
-        'DB',
-        '-c',
-        config,
+        ...encodeCloudflareOperation({
+          type: 'd1.migrations.list',
+          database: 'DB',
+          configPath: config,
+        }),
       ],
       {
         env: { ...process.env, VOID_TEST_CF_CAPTURE: capture },

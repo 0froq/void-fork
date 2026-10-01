@@ -9,7 +9,7 @@ import {
   formatProjectCommand,
   hasBackendFiles,
   resolveProjectCommand,
-  resolveWranglerArgv,
+  resolveCloudflareOperationArgv,
 } from '../../src/cli/preset.ts';
 
 const TMP = join(import.meta.dirname, '.tmp-preset');
@@ -405,9 +405,9 @@ describe('resolveProjectCommand with Wrangler', () => {
 describe('Cloudflare command transport', () => {
   it('resolves Void’s bundled cf adapter independently of an app-installed Wrangler', () => {
     const root = setupProject({ pkg: { dependencies: { wrangler: '^3.0.0' } } });
-    const argv = resolveWranglerArgv(root);
+    const argv = resolveCloudflareOperationArgv(root);
     expect(argv[0]).toBe(process.execPath);
-    expect(argv[1].replace(/\\/g, '/')).toMatch(/\/cf-compat\.ts$/);
+    expect(argv[1].replace(/\\/g, '/')).toMatch(/\/cloudflare-operation-process\.ts$/);
     expect(argv[1]).not.toContain(root);
   });
 });

@@ -29,7 +29,14 @@ import {
   updateWranglerCustomDomain,
 } from '../../src/cli/wrangler.ts';
 
-const ok = (stdout = '') => ({ status: 0, stdout, stderr: '', signal: null, error: null });
+const ok = (data?: unknown) => ({
+  status: 0,
+  data,
+  stdout: '',
+  stderr: '',
+  signal: null,
+  error: null,
+});
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
@@ -69,16 +76,16 @@ describe('Cloudflare operational parsing', () => {
     const root = project();
     let active = 'new';
     const runner = vi.fn<CloudflareOperationRunner>((args) => {
-      if (args[0] === 'deployments') {
-        return ok(JSON.stringify({ versions: [{ version_id: active, percentage: 100 }] }));
+      if (args.type === 'deployments.status') {
+        return ok({ versions: [{ version_id: active, percentage: 100 }] });
       }
-      if (args[0] === 'versions' && args[1] === 'deploy') {
-        const config = JSON.parse(readFileSync(args[args.indexOf('-c') + 1]!, 'utf8'));
+      if (args.type === 'versions.deploy') {
+        const config = JSON.parse(readFileSync(args.configPath!, 'utf8'));
         expect(config).toEqual({ account_id: 'account-1', name: 'my-worker' });
         active = 'original';
         return ok();
       }
-      throw new Error(`Unexpected mutation ${args.join(' ')}`);
+      throw new Error(`Unexpected mutation ${args.type}`);
     });
     await activateCloudflareExistingVersion(
       { ...context(runner), configPath: join(root, 'wrangler.jsonc') },
@@ -92,16 +99,16 @@ describe('Cloudflare operational parsing', () => {
     const root = project();
     let active = 'new-outside-list';
     const runner = vi.fn<CloudflareOperationRunner>((args) => {
-      if (args[0] === 'deployments') {
-        return ok(JSON.stringify({ versions: [{ version_id: active, percentage: 100 }] }));
+      if (args.type === 'deployments.status') {
+        return ok({ versions: [{ version_id: active, percentage: 100 }] });
       }
-      if (args[0] === 'versions' && args[1] === 'deploy') {
-        const config = JSON.parse(readFileSync(args[args.indexOf('-c') + 1]!, 'utf8'));
+      if (args.type === 'versions.deploy') {
+        const config = JSON.parse(readFileSync(args.configPath!, 'utf8'));
         expect(config).toEqual({ account_id: 'account-1', name: 'my-worker' });
         active = 'target';
         return ok();
       }
-      throw new Error(`Unexpected mutation ${args.join(' ')}`);
+      throw new Error(`Unexpected mutation ${args.type}`);
     });
     const triggerConfig = {
       workers_dev: true,
@@ -122,41 +129,35 @@ describe('Cloudflare operational parsing', () => {
       undefined,
     );
     expect(active).toBe('target');
-    expect(runner.mock.calls.some(([args]) => args[0] === 'triggers')).toBe(false);
+    expect(runner.mock.calls.some(([args]) => args.type.startsWith('triggers.'))).toBe(false);
   });
   it('reads active traffic and Void migration metadata', () => {
     expect(
-      parseActiveVersionId(
-        JSON.stringify({
-          versions: [
-            { version_id: 'canary', percentage: 10 },
-            { version_id: 'active', percentage: 100 },
-          ],
-        }),
-      ),
+      parseActiveVersionId({
+        versions: [
+          { version_id: 'canary', percentage: 10 },
+          { version_id: 'active', percentage: 100 },
+        ],
+      }),
     ).toBe('active');
     expect(
-      parseActiveVersionId(
-        JSON.stringify({
-          versions: [
-            { version_id: 'stable', percentage: 90 },
-            { version_id: 'canary', percentage: 10 },
-          ],
-        }),
-      ),
+      parseActiveVersionId({
+        versions: [
+          { version_id: 'stable', percentage: 90 },
+          { version_id: 'canary', percentage: 10 },
+        ],
+      }),
     ).toBeNull();
     expect(
-      parseCloudflareVersions(
-        JSON.stringify([
-          {
-            id: 'version-1',
-            metadata: { created_on: '2026-09-11T00:00:00.000Z' },
-            annotations: {
-              'workers/message': 'void:{"schema":1,"migrations":["0000_init.sql"]}',
-            },
+      parseCloudflareVersions([
+        {
+          id: 'version-1',
+          metadata: { created_on: '2026-09-11T00:00:00.000Z' },
+          annotations: {
+            'workers/message': 'void:{"schema":1,"migrations":["0000_init.sql"]}',
           },
-        ]),
-      ),
+        },
+      ]),
     ).toEqual([
       {
         id: 'version-1',
@@ -167,52 +168,53 @@ describe('Cloudflare operational parsing', () => {
     ]);
   });
 
-  it('fails closed on malformed Wrangler JSON', () => {
-    expect(() => parseCloudflareVersions('{}')).toThrow('unexpected response');
-    expect(() => parseActiveVersionId('{')).toThrow('did not return valid JSON');
+  it('fails closed on malformed structured responses and rejects legacy JSON strings', () => {
+    expect(() => parseCloudflareVersions(JSON.stringify([{ id: 'legacy' }]))).toThrow(
+      'unexpected response',
+    );
+    expect(() => parseCloudflareVersions({})).toThrow('unexpected response');
+    expect(() => parseActiveVersionId(undefined)).toThrow('did not return structured data');
   });
 
   it('accepts only versions recorded in deployment history as rollback candidates', () => {
     expect(
-      parseCloudflareDeployedVersionIds(
-        JSON.stringify([
-          { versions: [{ version_id: 'v1', percentage: 100 }] },
-          {
-            versions: [
-              { version_id: 'v2', percentage: 100 },
-              { version_id: 'failed-readiness', percentage: 0 },
-            ],
-          },
-        ]),
-      ),
+      parseCloudflareDeployedVersionIds([
+        { versions: [{ version_id: 'v1', percentage: 100 }] },
+        {
+          versions: [
+            { version_id: 'v2', percentage: 100 },
+            { version_id: 'failed-readiness', percentage: 0 },
+          ],
+        },
+      ]),
     ).toEqual(['v1', 'v2']);
-    expect(() => parseCloudflareDeployedVersionIds('[{"versions":[{}]}]')).toThrow('malformed');
-    expect(() => parseCloudflareDeployedVersionIds('[{"versions":[{"version_id":"v3"}]}]')).toThrow(
+    expect(() => parseCloudflareDeployedVersionIds([{ versions: [{}] }])).toThrow('malformed');
+    expect(() => parseCloudflareDeployedVersionIds([{ versions: [{ version_id: 'v3' }] }])).toThrow(
       'malformed',
     );
   });
 });
 
 describe('Cloudflare secret operations', () => {
+  it('uses structured provider data even when diagnostics contain other JSON', async () => {
+    const runner = vi.fn<CloudflareOperationRunner>().mockReturnValue({
+      ...ok([{ name: 'ACTUAL' }]),
+      stdout: JSON.stringify([{ name: 'DIAGNOSTIC_ONLY' }]),
+    });
+    await expect(listCloudflareSecrets(context(runner))).resolves.toEqual(['ACTUAL']);
+    expect(runner).toHaveBeenCalledExactlyOnceWith(
+      { type: 'secret.list', configPath: '/app/wrangler.jsonc', workerName: 'my-worker' },
+      { capture: true, input: undefined },
+    );
+  });
+
   it('lists only secret names and sorts them', async () => {
     const runner = vi
       .fn<CloudflareOperationRunner>()
-      .mockReturnValue(
-        ok(JSON.stringify([{ name: 'ZED', type: 'secret_text' }, { name: 'ALPHA' }])),
-      );
+      .mockReturnValue(ok([{ name: 'ZED', type: 'secret_text' }, { name: 'ALPHA' }]));
     await expect(listCloudflareSecrets(context(runner))).resolves.toEqual(['ALPHA', 'ZED']);
     expect(runner).toHaveBeenCalledWith(
-      [
-        'secret',
-        'list',
-        '-c',
-        '/app/wrangler.jsonc',
-        '--env=',
-        '--name',
-        'my-worker',
-        '--format',
-        'json',
-      ],
+      { type: 'secret.list', configPath: '/app/wrangler.jsonc', workerName: 'my-worker' },
       { capture: true, input: undefined },
     );
   });
@@ -226,35 +228,49 @@ describe('Cloudflare secret operations', () => {
       { name: 'TWO', value: 'second' },
     ]);
     const putCall = runner.mock.calls[0];
-    expect(putCall[0]).not.toContain('super-secret');
+    expect(putCall[0]).toEqual({
+      type: 'secret.put',
+      name: 'API_KEY',
+      configPath: '/app/wrangler.jsonc',
+      workerName: 'my-worker',
+    });
+    expect(JSON.stringify(putCall[0])).not.toContain('super-secret');
     expect(putCall[1].input).toBe('super-secret');
     const bulkCall = runner.mock.calls[1];
-    expect(bulkCall[0]).not.toContain('first');
+    expect(bulkCall[0]).toEqual({
+      type: 'secret.bulk',
+      configPath: '/app/wrangler.jsonc',
+      workerName: 'my-worker',
+    });
+    expect(JSON.stringify(bulkCall[0])).not.toContain('first');
     expect(JSON.parse(bulkCall[1].input!)).toEqual({ ONE: 'first', TWO: 'second' });
   });
 
   it('uses Wrangler delete only after the user invokes delete', async () => {
     const runner = vi.fn<CloudflareOperationRunner>().mockReturnValue(ok());
     await deleteCloudflareSecret(context(runner), 'OLD_KEY');
-    expect(runner.mock.calls[0][0].slice(0, 3)).toEqual(['secret', 'delete', 'OLD_KEY']);
+    expect(runner.mock.calls[0][0]).toEqual({
+      type: 'secret.delete',
+      name: 'OLD_KEY',
+      configPath: '/app/wrangler.jsonc',
+      workerName: 'my-worker',
+    });
   });
 });
 
 describe('Cloudflare version operations', () => {
   it('reads deployment status and recent versions', async () => {
     const runner = vi.fn<CloudflareOperationRunner>((args) => {
-      if (args[0] === 'deployments' && args[1] === 'status') {
-        return ok(JSON.stringify({ versions: [{ version_id: 'v2', percentage: 100 }] }));
+      if (args.type === 'deployments.status') {
+        return ok({ versions: [{ version_id: 'v2', percentage: 100 }] });
       }
-      if (args[0] === 'deployments' && args[1] === 'list') {
-        return ok(JSON.stringify([{ versions: [{ version_id: 'v1', percentage: 100 }] }]));
+      if (args.type === 'deployments.list') {
+        return ok([{ versions: [{ version_id: 'v1', percentage: 100 }] }]);
       }
-      return ok(
-        JSON.stringify([
-          { id: 'v1', metadata: {}, annotations: {} },
-          { id: 'v2', metadata: {}, annotations: {} },
-        ]),
-      );
+      return ok([
+        { id: 'v1', metadata: {}, annotations: {} },
+        { id: 'v2', metadata: {}, annotations: {} },
+      ]);
     });
     const status = await readCloudflareWorkerStatus(context(runner));
     expect(status.activeVersionId).toBe('v2');
@@ -265,10 +281,10 @@ describe('Cloudflare version operations', () => {
   it('activates the selected version and restores its versioned triggers', async () => {
     let activeVersionId = 'v2';
     const runner = vi.fn<CloudflareOperationRunner>((args) => {
-      if (args[0] === 'deployments') {
-        return ok(JSON.stringify({ versions: [{ version_id: activeVersionId, percentage: 100 }] }));
+      if (args.type === 'deployments.status') {
+        return ok({ versions: [{ version_id: activeVersionId, percentage: 100 }] });
       }
-      if (args[0] === 'versions' && args[1] === 'deploy') {
+      if (args.type === 'versions.deploy') {
         activeVersionId = 'v1';
       }
       return ok();
@@ -296,26 +312,32 @@ describe('Cloudflare version operations', () => {
         metadata: { schema: 2, migrations: [], triggerConfig },
       },
     );
-    const activation = runner.mock.calls.find(([args]) => args.includes('v1@100'))!;
-    expect(activation[0]).toContain(
+    const activation = runner.mock.calls.find(
+      ([args]) =>
+        args.type === 'versions.deploy' &&
+        args.versions.some((version) => version.versionId === 'v1' && version.percentage === 100),
+    )!;
+    expect(activation[0].type === 'versions.deploy' ? activation[0].message : undefined).toBe(
       'void:{"schema":2,"migrations":["0000_init.sql"],"triggerConfig":{"workers_dev":true,"preview_urls":true,"routes":[],"crons":["0 * * * *"],"queueConsumers":[],"workflows":[]}}',
     );
-    expect(
-      runner.mock.calls.some(([args]) => args.slice(0, 2).join(' ') === 'triggers deploy'),
-    ).toBe(true);
+    expect(runner.mock.calls.some(([args]) => args.type === 'triggers.deploy')).toBe(true);
   });
 
   it('restores the active version and triggers when rollback trigger sync fails', async () => {
     let triggerCalls = 0;
     let activeVersionId = 'v2';
     const runner = vi.fn<CloudflareOperationRunner>((args) => {
-      if (args[0] === 'deployments') {
-        return ok(JSON.stringify({ versions: [{ version_id: activeVersionId, percentage: 100 }] }));
+      if (args.type === 'deployments.status') {
+        return ok({ versions: [{ version_id: activeVersionId, percentage: 100 }] });
       }
-      if (args[0] === 'versions' && args[1] === 'deploy') {
-        activeVersionId = args.includes('v1@100') ? 'v1' : 'v2';
+      if (args.type === 'versions.deploy') {
+        activeVersionId =
+          args.type === 'versions.deploy' &&
+          args.versions.some((version) => version.versionId === 'v1' && version.percentage === 100)
+            ? 'v1'
+            : 'v2';
       }
-      if (args[0] === 'triggers' && ++triggerCalls === 1) {
+      if (args.type.startsWith('triggers.') && ++triggerCalls === 1) {
         return { ...ok(), status: 1, stderr: 'partial trigger failure' };
       }
       return ok();
@@ -346,13 +368,17 @@ describe('Cloudflare version operations', () => {
         },
       ),
     ).rejects.toThrow(/traffic and triggers were restored to v2/);
-    expect(runner.mock.calls.some(([args]) => args.includes('v2@100'))).toBe(true);
     expect(
-      runner.mock.calls.filter(([args]) => args[0] === 'triggers' && args[1] === 'deploy'),
-    ).toHaveLength(2);
-    expect(
-      runner.mock.calls.filter(([args]) => args[0] === 'triggers' && args[1] === 'clear-crons'),
-    ).toHaveLength(1);
+      runner.mock.calls.some(
+        ([args]) =>
+          args.type === 'versions.deploy' &&
+          args.versions.some((version) => version.versionId === 'v2' && version.percentage === 100),
+      ),
+    ).toBe(true);
+    expect(runner.mock.calls.filter(([args]) => args.type === 'triggers.deploy')).toHaveLength(2);
+    expect(runner.mock.calls.filter(([args]) => args.type === 'triggers.clear-crons')).toHaveLength(
+      1,
+    );
   });
 
   it('repairs triggers for a concurrent rollback that supersedes activation', async () => {
@@ -369,35 +395,32 @@ describe('Cloudflare version operations', () => {
       workflows: [],
     });
     const runner = vi.fn<CloudflareOperationRunner>(async (args) => {
-      if (args[0] === 'deployments') {
-        return ok(JSON.stringify({ versions: [{ version_id: activeVersionId, percentage: 100 }] }));
+      if (args.type === 'deployments.status') {
+        return ok({ versions: [{ version_id: activeVersionId, percentage: 100 }] });
       }
-      if (args[0] === 'versions' && args[1] === 'deploy') {
+      if (args.type === 'versions.deploy') {
         activeVersionId = 'v1';
         activationStarted.resolve(undefined);
         return activation.promise;
       }
-      if (args[0] === 'versions' && args[1] === 'list') {
-        return ok(
-          JSON.stringify([
-            {
-              id: 'v2',
-              annotations: {
-                'workers/message': encodeCloudflareVersionMessage([], configFor('v2')),
-              },
+      if (args.type === 'versions.list') {
+        return ok([
+          {
+            id: 'v2',
+            annotations: {
+              'workers/message': encodeCloudflareVersionMessage([], configFor('v2')),
             },
-          ]),
-        );
+          },
+        ]);
       }
-      if (args[0] === 'triggers') {
-        const configIndex = args.indexOf('-c');
-        appliedTriggerConfig = JSON.parse(readFileSync(args[configIndex + 1]!, 'utf8')) as Record<
+      if (args.type.startsWith('triggers.')) {
+        appliedTriggerConfig = JSON.parse(readFileSync(args.configPath!, 'utf8')) as Record<
           string,
           unknown
         >;
         return ok();
       }
-      throw new Error(`Unexpected command: ${args.join(' ')}`);
+      throw new Error(`Unexpected command: ${args.type}`);
     });
 
     const pending = activateCloudflareExistingVersion(
@@ -439,26 +462,24 @@ describe('Cloudflare version operations', () => {
       workflows: [],
     });
     const runner = vi.fn<CloudflareOperationRunner>(async (args) => {
-      if (args[0] === 'deployments') {
-        return ok(JSON.stringify({ versions: [{ version_id: activeVersionId, percentage: 100 }] }));
+      if (args.type === 'deployments.status') {
+        return ok({ versions: [{ version_id: activeVersionId, percentage: 100 }] });
       }
-      if (args[0] === 'versions' && args[1] === 'deploy') {
+      if (args.type === 'versions.deploy') {
         activeVersionId = 'v1';
         return ok();
       }
-      if (args[0] === 'versions' && args[1] === 'list') {
-        return ok(
-          JSON.stringify([
-            {
-              id: 'v2',
-              annotations: {
-                'workers/message': encodeCloudflareVersionMessage([], configFor('v2')),
-              },
+      if (args.type === 'versions.list') {
+        return ok([
+          {
+            id: 'v2',
+            annotations: {
+              'workers/message': encodeCloudflareVersionMessage([], configFor('v2')),
             },
-          ]),
-        );
+          },
+        ]);
       }
-      if (args[0] === 'triggers') {
+      if (args.type.startsWith('triggers.')) {
         triggerCalls++;
         if (triggerCalls === 1) {
           triggerStarted.resolve(undefined);
@@ -466,7 +487,7 @@ describe('Cloudflare version operations', () => {
         }
         return ok();
       }
-      throw new Error(`Unexpected command: ${args.join(' ')}`);
+      throw new Error(`Unexpected command: ${args.type}`);
     });
 
     const pending = activateCloudflareExistingVersion(
@@ -491,9 +512,7 @@ describe('Cloudflare version operations', () => {
     await expect(pending).rejects.toThrow(
       /superseded by v2.*restored the active version's triggers/,
     );
-    expect(
-      runner.mock.calls.filter(([args]) => args[0] === 'versions' && args[1] === 'deploy'),
-    ).toHaveLength(1);
+    expect(runner.mock.calls.filter(([args]) => args.type === 'versions.deploy')).toHaveLength(1);
   });
 
   it('maps search, version, and error filters to a live tail', async () => {
@@ -504,21 +523,14 @@ describe('Cloudflare version operations', () => {
       status: 'error',
     });
     expect(runner.mock.calls[0]).toEqual([
-      [
-        'tail',
-        'my-worker',
-        '-c',
-        '/app/wrangler.jsonc',
-        '--env=',
-        '--format',
-        'pretty',
-        '--search',
-        'socket',
-        '--version-id',
-        'v1',
-        '--status',
-        'error',
-      ],
+      {
+        type: 'tail',
+        workerName: 'my-worker',
+        configPath: '/app/wrangler.jsonc',
+        search: 'socket',
+        versionId: 'v1',
+        status: 'error',
+      },
       { capture: false, input: undefined },
     ]);
   });
@@ -539,7 +551,7 @@ describe('Cloudflare D1 operations', () => {
 }\n`);
     const runner = vi
       .fn<CloudflareOperationRunner>()
-      .mockReturnValue(ok(JSON.stringify([{ success: true, results: [{ id: 1, name: 'Ada' }] }])));
+      .mockReturnValue(ok([{ success: true, results: [{ id: 1, name: 'Ada' }] }]));
     const ctx = resolveCloudflareD1Context(root, 'DATA', runner);
     expect(ctx).toMatchObject({
       binding: 'DATA',
@@ -550,19 +562,19 @@ describe('Cloudflare D1 operations', () => {
     await expect(executeCloudflareD1Sql(ctx, 'select * from users')).resolves.toEqual([
       { id: 1, name: 'Ada' },
     ]);
-    expect(runner.mock.calls[0][0]).toContain('--remote');
-    expect(runner.mock.calls[0][0]).toContain('--json');
+    expect(runner.mock.calls[0][0]).toEqual({
+      type: 'd1.execute',
+      database: 'my-data',
+      sql: 'select * from users',
+      configPath: join(root, 'wrangler.jsonc').replaceAll('\\', '/'),
+    });
   });
 
   it('reads applied migration names from a custom tracking table', async () => {
     const runner = vi
       .fn<CloudflareOperationRunner>()
       .mockReturnValue(
-        ok(
-          JSON.stringify([
-            { success: true, results: [{ name: '0000_init.sql' }, { name: '0001_more.sql' }] },
-          ]),
-        ),
+        ok([{ success: true, results: [{ name: '0000_init.sql' }, { name: '0001_more.sql' }] }]),
       );
     const ctx = {
       operation: context(runner),
@@ -575,7 +587,11 @@ describe('Cloudflare D1 operations', () => {
       '0000_init.sql',
       '0001_more.sql',
     ]);
-    expect(runner.mock.calls[0][0]).toContain('SELECT name FROM "custom""table" ORDER BY name');
+    expect(runner.mock.calls[0][0]).toMatchObject({
+      type: 'd1.execute',
+      database: 'db-name',
+      sql: 'SELECT name FROM "custom""table" ORDER BY name',
+    });
   });
 
   it('applies migrations through the exact configured D1 target', async () => {
@@ -588,7 +604,7 @@ describe('Cloudflare D1 operations', () => {
       migrationsTable: 'd1_migrations',
     });
     expect(runner.mock.calls[0]).toEqual([
-      ['d1', 'migrations', 'apply', 'db-name', '--remote', '-c', '/app/wrangler.jsonc', '--env='],
+      { type: 'd1.migrations.apply', database: 'db-name', configPath: '/app/wrangler.jsonc' },
       { capture: false, input: undefined },
     ]);
   });
@@ -642,8 +658,7 @@ describe('Cloudflare custom domains', () => {
 }\n`);
     let deployedConfig: Record<string, unknown> | undefined;
     const runner = vi.fn<CloudflareOperationRunner>((args) => {
-      const configIndex = args.indexOf('-c');
-      deployedConfig = JSON.parse(readFileSync(args[configIndex + 1]!, 'utf-8')) as Record<
+      deployedConfig = JSON.parse(readFileSync(args.configPath!, 'utf-8')) as Record<
         string,
         unknown
       >;
@@ -728,15 +743,11 @@ describe('Cloudflare custom domains', () => {
       .mockResolvedValue({ status: 0, stdout: '', stderr: '' });
     await changeCloudflareDomain(root, 'app.example.com', 'delete', runner);
     expect(runner).toHaveBeenCalledWith(
-      [
-        'triggers',
-        'clear-domains',
-        '-c',
-        join(root, 'wrangler.jsonc').replaceAll('\\', '/'),
-        '--env=',
-        '--name',
-        'my-worker',
-      ],
+      {
+        type: 'triggers.clear-domains',
+        configPath: join(root, 'wrangler.jsonc').replaceAll('\\', '/'),
+        workerName: 'my-worker',
+      },
       expect.objectContaining({ capture: true }),
     );
   });
@@ -763,8 +774,8 @@ describe('Cloudflare custom domains', () => {
 
     expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toBe(before);
     expect(runner).toHaveBeenCalledTimes(2);
-    expect(runner.mock.calls[0]?.[0].slice(0, 2)).toEqual(['triggers', 'clear-domains']);
-    expect(runner.mock.calls[1]?.[0].slice(0, 2)).toEqual(['triggers', 'deploy']);
+    expect(runner.mock.calls[0]?.[0].type).toEqual('triggers.clear-domains');
+    expect(runner.mock.calls[1]?.[0].type).toEqual('triggers.deploy');
   });
 
   it('lists configured domains without an account mutation', () => {

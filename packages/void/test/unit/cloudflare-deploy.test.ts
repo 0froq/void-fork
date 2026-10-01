@@ -9,6 +9,10 @@ import {
 import { toSlash } from 'pathslash';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { activateCloudflareVersion as activateCloudflareVersionPrimitive } from '../../../deploy-cloudflare/src/index.ts';
+import {
+  operationFixture,
+  operationFixtureRequest,
+} from '../../../deploy-cloudflare/test/operation-fixture.ts';
 import { readCloudflareLink } from '../../src/cli/cloudflare-link.ts';
 import {
   assertMigrationsProduceAuthSchema,
@@ -419,11 +423,11 @@ function harness(overrides: Partial<CloudflareDeployDeps> = {}): {
   const trace: Array<string> = [];
   const wranglerArgs: Array<Array<string>> = [];
   const exitCalls: Array<number> = [];
-  const runWrangler: DeployWranglerRun = (args) => {
+  const runWrangler: DeployWranglerRun = operationFixture((args) => {
     wranglerArgs.push(args);
     trace.push(`wrangler:${args[0]}`);
     if (args[0] === 'whoami') {
-      return { ...cleanExit, stdout: '{"loggedIn":true}' };
+      return { ...cleanExit, stdout: '{"loggedIn":true,"accounts":[]}' };
     }
     // `d1 migrations list` (the post-apply pending verify) must print wrangler's affirmative
     // "no pending" sentinel under the pinned WRANGLER_LOG=log, else the B3 check fails closed.
@@ -431,7 +435,7 @@ function harness(overrides: Partial<CloudflareDeployDeps> = {}): {
       return { ...cleanExit, stdout: '✅ No migrations to apply!\n' };
     }
     return cleanExit;
-  };
+  });
   const deps: CloudflareDeployDeps = {
     exit: (code: number) => {
       exitCalls.push(code);
@@ -454,7 +458,7 @@ function harness(overrides: Partial<CloudflareDeployDeps> = {}): {
       }
       const result = await Promise.resolve(
         options.runWrangler(
-          [
+          operationFixtureRequest([
             'deploy',
             ...(options.configPath ? ['-c', options.configPath] : []),
             ...(options.assetsDirectoryOverride
@@ -464,7 +468,7 @@ function harness(overrides: Partial<CloudflareDeployDeps> = {}): {
             '--experimental-provision=false',
             '--experimental-auto-create=false',
             '--autoconfig=false',
-          ],
+          ]),
           { capture: false },
         ),
       );
@@ -609,7 +613,7 @@ describe('existing Cloudflare site handoff', () => {
     const { deps, wranglerArgs } = harness({ readExistingWorker });
     const originalRunner = deps.runWrangler!;
     let whoamiCalls = 0;
-    deps.runWrangler = (args, options) => {
+    deps.runWrangler = operationFixture((args, options) => {
       if (args[0] === 'whoami') {
         whoamiCalls++;
         return whoamiCalls === 1
@@ -622,8 +626,8 @@ describe('existing Cloudflare site handoff', () => {
         wranglerArgs.push(args);
         return cleanExit;
       }
-      return originalRunner(args, options);
-    };
+      return originalRunner(operationFixtureRequest(args), options);
+    });
     return { deps, readExistingWorker, wranglerArgs, getWhoamiCalls: () => whoamiCalls };
   }
   it('signs in inside a TTY deploy and retries the existing Worker read once', async () => {
@@ -665,7 +669,7 @@ describe('existing Cloudflare site handoff', () => {
     const root = site();
     const { deps, readExistingWorker, wranglerArgs } = workerReadFailureHarness();
     const originalRunner = deps.runWrangler!;
-    deps.runWrangler = (args, options) =>
+    deps.runWrangler = operationFixture((args, options) =>
       args[0] === 'whoami'
         ? {
             ...cleanExit,
@@ -673,7 +677,8 @@ describe('existing Cloudflare site handoff', () => {
             stdout: '{"loggedIn":false}',
             stderr: 'Cloudflare authentication is required.',
           }
-        : originalRunner(args, options);
+        : originalRunner(operationFixtureRequest(args), options),
+    );
     vi.stubEnv('CLOUDFLARE_API_TOKEN', 'synthetic-invalid-token');
     try {
       await expect(
@@ -705,10 +710,11 @@ describe('existing Cloudflare site handoff', () => {
     const root = site();
     const { deps, readExistingWorker, wranglerArgs } = workerReadFailureHarness();
     const originalRunner = deps.runWrangler!;
-    deps.runWrangler = (args, options) =>
+    deps.runWrangler = operationFixture((args, options) =>
       args[0] === 'whoami'
         ? { ...cleanExit, stdout: '{"loggedIn":true,"accounts":[{"id":"personal"}]}' }
-        : originalRunner(args, options);
+        : originalRunner(operationFixtureRequest(args), options),
+    );
     await expect(
       withTerminal(true, () =>
         runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
@@ -1374,13 +1380,13 @@ describe('ensureCloudflareAuthSecret', () => {
       configPath: join(root, 'wrangler.jsonc'),
       accountId: 'acc123',
       workerName: 'authapp',
-      runWrangler: (args) => {
+      runWrangler: operationFixture((args) => {
         calls.push(args);
         return {
           ...cleanExit,
           stdout: JSON.stringify([{ name: 'BETTER_AUTH_SECRET', type: 'secret_text' }]),
         };
-      },
+      }),
     });
 
     expect(result).toEqual({ created: false });
@@ -1407,7 +1413,7 @@ describe('ensureCloudflareAuthSecret', () => {
       configPath: join(root, 'wrangler.jsonc'),
       accountId: 'acc123',
       workerName: 'authapp',
-      runWrangler: (args, opts) => {
+      runWrangler: operationFixture((args, opts) => {
         calls.push({ args, opts });
         if (args[1] === 'list') {
           listCount++;
@@ -1417,7 +1423,7 @@ describe('ensureCloudflareAuthSecret', () => {
           };
         }
         return cleanExit;
-      },
+      }),
     });
 
     expect(result).toEqual({ created: true });
@@ -1440,7 +1446,7 @@ describe('ensureCloudflareAuthSecret', () => {
       configPath: join(root, 'wrangler.jsonc'),
       accountId: 'acc123',
       workerName: 'authapp',
-      runWrangler: (args) => {
+      runWrangler: operationFixture((args) => {
         call++;
         if (call === 1) {
           return {
@@ -1457,7 +1463,7 @@ describe('ensureCloudflareAuthSecret', () => {
           return { ...cleanExit, stdout: JSON.stringify([{ name: 'BETTER_AUTH_SECRET' }]) };
         }
         return cleanExit;
-      },
+      }),
     });
 
     expect(result).toMatchObject({ created: true, workerWasMissing: true });
@@ -1473,13 +1479,13 @@ describe('ensureCloudflareAuthSecret', () => {
       configPath: join(root, 'wrangler.jsonc'),
       accountId: 'acc123',
       workerName: 'authapp',
-      runWrangler: (args, opts) => {
+      runWrangler: operationFixture((args, opts) => {
         if (args[1] === 'list') {
           return { ...cleanExit, stdout: '[]' };
         }
         generated = opts.input?.trim() ?? '';
         return { ...cleanExit, status: 1, stderr: `unsafe diagnostic ${generated}` };
-      },
+      }),
     });
 
     await expect(promise).rejects.toMatchObject({ reason: 'put-failed' });
@@ -1494,7 +1500,9 @@ describe('ensureCloudflareAuthSecret', () => {
         configPath: join(root, 'wrangler.jsonc'),
         accountId: 'acc123',
         workerName: 'authapp',
-        runWrangler: (args) => (args[1] === 'list' ? { ...cleanExit, stdout: '[]' } : cleanExit),
+        runWrangler: operationFixture((args) =>
+          args[1] === 'list' ? { ...cleanExit, stdout: '[]' } : cleanExit,
+        ),
       }),
     ).rejects.toMatchObject({ reason: 'verification-failed' });
   });
@@ -2180,10 +2188,10 @@ describe('computeDesiredCloudflareResources — provisioned resources are never 
 
     const calls: Array<Array<string>> = [];
     const result = await provisionCloudflareResources(root, configPath, desired, {
-      runWrangler: (args) => {
+      runWrangler: operationFixture((args) => {
         calls.push(args);
         return { stdout: '', stderr: '', status: 0 };
-      },
+      }),
       enableD1ReadReplication: async () => {},
       log: { info: () => {}, warn: () => {} },
     });
@@ -2929,13 +2937,13 @@ describe('runCloudflareDeploy — preflight', () => {
   it('exits when wrangler is unauthenticated (whoami --json nonzero)', async () => {
     const root = d1Project(PROVISIONED_D1);
     const { deps, trace, exitCalls } = harness({
-      runWrangler: (args) => {
+      runWrangler: operationFixture((args) => {
         trace.push(`wrangler:${args[0]}`);
         if (args[0] === 'whoami') {
           return { status: 1, stdout: '{"loggedIn":false}', stderr: '', signal: null, error: null };
         }
         return cleanExit;
-      },
+      }),
     });
     await expect(
       runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
@@ -3016,16 +3024,16 @@ describe('runCloudflareDeploy — preflight', () => {
       errors.push(String(message));
     });
     const { deps, trace, exitCalls } = harness({
-      runWrangler: (args) => {
+      runWrangler: operationFixture((args) => {
         trace.push(`wrangler:${args[0]}`);
         if (args[0] === 'whoami') {
-          return { ...cleanExit, stdout: '{"loggedIn":true}' };
+          return { ...cleanExit, stdout: '{"loggedIn":true,"accounts":[]}' };
         }
         if (args[0] === 'containers') {
           return { ...cleanExit, status: 1, stderr: 'HTTP 403' };
         }
         return cleanExit;
-      },
+      }),
     });
 
     try {
@@ -3087,7 +3095,7 @@ describe('runCloudflareDeploy — preflight', () => {
     try {
       const root = d1Project({ ...PROVISIONED_D1, account_id: undefined });
       const { deps, exitCalls, wranglerArgs } = harness({
-        runWrangler: (args) => {
+        runWrangler: operationFixture((args) => {
           wranglerArgs.push([...args]);
           if (args[0] === 'whoami') {
             return {
@@ -3099,7 +3107,7 @@ describe('runCloudflareDeploy — preflight', () => {
             };
           }
           return cleanExit;
-        },
+        }),
       });
 
       await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
@@ -3389,10 +3397,10 @@ describe('runCloudflareDeploy — secrets gate', () => {
     const next = '22222222-2222-4222-8222-222222222222';
     let active = current;
     const commands: Array<Array<string>> = [];
-    const runWrangler: DeployWranglerRun = (args) => {
+    const runWrangler: DeployWranglerRun = operationFixture((args) => {
       commands.push(args);
       if (args[0] === 'whoami') {
-        return { ...cleanExit, stdout: '{"loggedIn":true}' };
+        return { ...cleanExit, stdout: '{"loggedIn":true,"accounts":[]}' };
       }
       if (args[0] === 'deployments') {
         return {
@@ -3436,7 +3444,7 @@ describe('runCloudflareDeploy — secrets gate', () => {
         };
       }
       return cleanExit;
-    };
+    });
     let explicitBootstrapProof: boolean | undefined;
     const { deps } = harness({
       runWrangler,
@@ -3641,10 +3649,10 @@ describe('runCloudflareDeploy — pre-build queue existence probe', () => {
   ): ReturnType<typeof harness> {
     const h = harness(overrides);
     const base = h.deps.runWrangler as DeployWranglerRun;
-    h.deps.runWrangler = (args, opts) => {
-      const passthrough = base(args, opts);
+    h.deps.runWrangler = operationFixture((args, opts) => {
+      const passthrough = base(operationFixtureRequest(args), opts);
       return args[0] === 'queues' && args[1] === 'info' ? probe(args[2] as string) : passthrough;
-    };
+    });
     return h;
   }
 
@@ -6523,14 +6531,14 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       hashWranglerUploader: () => (tampered ? 'tampered' : 'clean'),
       // whoami is the last step before provision; flip the bundle as it returns so the assert
       // immediately before the provision call catches it.
-      runWrangler: (args) => {
+      runWrangler: operationFixture((args) => {
         trace.push(`wrangler:${args[0]}`);
         if (args[0] === 'whoami') {
           tampered = true;
-          return { ...cleanExit, stdout: '{"loggedIn":true}' };
+          return { ...cleanExit, stdout: '{"loggedIn":true,"accounts":[]}' };
         }
         return cleanExit;
-      },
+      }),
     });
     await expect(
       runCloudflareDeploy(root, { platform: 'cloudflare', provision: true }, silentCliLog, deps),
@@ -6708,11 +6716,11 @@ describe('runCloudflareDeploy — config laundering by a build-adjacent probe', 
   ) =>
     dischargeSelfHostEnvContext(ctx, {
       ...opts,
-      runWrangler: () => ({
+      runWrangler: operationFixture(() => ({
         stdout: JSON.stringify([{ name: 'STRIPE_KEY', type: 'secret_text' }]),
         stderr: '',
         status: 0,
-      }),
+      })),
     })) as CloudflareDeployDeps['dischargeSelfHostEnv'];
 
   it('fails closed BEFORE deploy when the post-build probe rewrites the pinned worker name', async () => {
@@ -8469,17 +8477,17 @@ describe('runCloudflareDeploy — remote migration gates', () => {
     const root = d1Project(PROVISIONED_D1, INIT_MIGRATION);
     const localTrace: Array<string> = [];
     const { deps, exitCalls } = harness({
-      runWrangler: (args) => {
+      runWrangler: operationFixture((args) => {
         localTrace.push(`wrangler:${args[0]}:${args[2] ?? ''}`);
         if (args[0] === 'whoami') {
-          return { ...cleanExit, stdout: '{"loggedIn":true}' };
+          return { ...cleanExit, stdout: '{"loggedIn":true,"accounts":[]}' };
         }
         // `apply` exits 0 (a declined no-op); `list` still reports pending.
         if (args[0] === 'd1' && args[2] === 'list') {
           return { ...cleanExit, stdout: 'Migrations to be applied:\n0000_init' };
         }
         return cleanExit;
-      },
+      }),
       runBuild: () => {
         localTrace.push('build');
       },
@@ -8499,15 +8507,15 @@ describe('runCloudflareDeploy — remote migration gates', () => {
     const root = d1Project(PROVISIONED_D1, INIT_MIGRATION);
     const localTrace: Array<string> = [];
     const { deps, exitCalls } = harness({
-      runWrangler: (args) => {
+      runWrangler: operationFixture((args) => {
         localTrace.push(`wrangler:${args[0]}:${args[2] ?? ''}`);
         if (args[0] === 'whoami') {
-          return { ...cleanExit, stdout: '{"loggedIn":true}' };
+          return { ...cleanExit, stdout: '{"loggedIn":true,"accounts":[]}' };
         }
         // Both `apply` and `list` exit 0 with EMPTY stdout — the failure mode when an
         // ambient WRANGLER_LOG suppressed the sentinel. Require the affirmative marker.
         return cleanExit;
-      },
+      }),
       runBuild: () => {
         localTrace.push('build');
       },
@@ -10001,7 +10009,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
       'email sending enable mail.acme.com': { ...cleanExit, stderr: BETA_WARNING },
       ...overrides,
     };
-    return (args, opts) => {
+    return operationFixture((args, opts) => {
       spawns.push({ args: [...args], opts: { ...opts } });
       trace.push(`wrangler:${args.slice(0, 2).join(' ')}`);
       const bare: Array<string> = [];
@@ -10023,7 +10031,7 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
         return { ...cleanExit, stdout: '✅ No migrations to apply!\n' };
       }
       return cleanExit;
-    };
+    });
   }
 
   type FetchCall = { method: string; path: string; body: string | undefined; auth: string };
@@ -10435,7 +10443,12 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
       runner: {
         'whoami --json': {
           ...cleanExit,
-          stdout: JSON.stringify({ loggedIn: true, email: 'dev@acme.com', tokenPermissions: [] }),
+          stdout: JSON.stringify({
+            loggedIn: true,
+            accounts: [],
+            email: 'dev@acme.com',
+            tokenPermissions: [],
+          }),
         },
       },
     });
@@ -10874,11 +10887,11 @@ describe('runCloudflareDeploy — Mode B email step (3b-ii)', () => {
       runner: { ...readyRows.runner, 'email routing rules list acme.com': forwardedBilling },
     });
     const inner = deps.runWrangler!;
-    deps.runWrangler = (args, opts) => {
-      if (args[0] === 'deploy') {
+    deps.runWrangler = (operation, opts) => {
+      if (operation.type === 'worker.deploy') {
         atDeploy.push(readRootConfig(root).addresses);
       }
-      return inner(args, opts);
+      return inner(operation, opts);
     };
     const output = captureOutput();
     try {
@@ -11155,10 +11168,10 @@ describe('runWranglerAuthToken — the session-bearer bridge, on its own', () =>
   type AuthCall = { args: Array<string>; opts: { capture: boolean; env?: Record<string, string> } };
   const bridge = (result: DeployWranglerRunResult | (() => never)) => {
     const calls: Array<AuthCall> = [];
-    const run: DeployWranglerRun = (args, opts) => {
+    const run: DeployWranglerRun = operationFixture((args, opts) => {
       calls.push({ args: [...args], opts });
       return typeof result === 'function' ? result() : result;
-    };
+    });
     return { calls, token: runWranglerAuthToken(run, '/p/wrangler.jsonc') };
   };
 

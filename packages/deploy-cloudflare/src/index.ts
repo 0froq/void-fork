@@ -52,3 +52,9 @@ export {
   type CloudflareVersionMetadata,
 } from './version.ts';
 export { createCloudflareMetadataRunner } from './metadata.ts';
+
+export type {
+  CloudflareOperation,
+  CloudflareUploadResult,
+  CloudflareProviderError,
+} from './operations.ts';

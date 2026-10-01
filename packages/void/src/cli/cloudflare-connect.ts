@@ -50,7 +50,7 @@ export async function connectCloudflare(
     interactive,
     requireAccounts: true,
     runWrangler: createBundledCloudflareAuthRunner(root),
-    whoamiArgs: existingConfigPath ? ['-c', existingConfigPath] : [],
+    configPath: existingConfigPath,
   });
   let account = accounts.find((entry) => entry.id === pinnedAccount);
   if (pinnedAccount && !account) {

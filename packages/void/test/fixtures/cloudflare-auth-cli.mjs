@@ -3,19 +3,19 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 const filename = 'auth-fixture.json';
 const state = JSON.parse(readFileSync(filename, 'utf8'));
-const args = process.argv.slice(2);
-state.commands.push(args);
+const operation = JSON.parse(process.argv[2]);
+state.commands.push(operation);
 state.credentialStores ??= [];
 state.credentialStores.push(process.env.CLOUDFLARE_AUTH_USE_KEYRING ?? 'default');
 const finish = (value, status = 0) => {
   writeFileSync(filename, JSON.stringify(state));
   if (value !== undefined) {
-    process.stdout.write(JSON.stringify(value));
+    process.stdout.write(JSON.stringify({ operationResult: 1, data: value }));
   }
   process.exit(status);
 };
 
-if (args[0] === 'whoami') {
+if (operation.type === 'auth.whoami') {
   if (state.badWhoami) {
     finish('invalid whoami output');
   }
@@ -29,14 +29,14 @@ if (args[0] === 'whoami') {
   }
   finish(state.session ?? { loggedIn: false }, state.session ? 0 : 1);
 }
-if (args[0] === 'login') {
+if (operation.type === 'auth.login') {
   if (state.failLogin) {
     finish(undefined, 1);
   }
   state.session = state.nextLogin;
   finish(undefined);
 }
-if (args[0] === 'logout') {
+if (operation.type === 'auth.logout') {
   delete state.session;
   finish(undefined);
 }

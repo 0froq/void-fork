@@ -11,7 +11,7 @@ import { runCloudflareCommand } from '../../src/cli/cloudflare-cmd.ts';
 
 const fixture = vi.hoisted(() => ({ cli: '' }));
 vi.mock('../../src/cli/preset.ts', () => ({
-  resolveWranglerArgv: () => [process.execPath, fixture.cli],
+  resolveCloudflareOperationArgv: () => [process.execPath, fixture.cli],
 }));
 const oldSession = {
   loggedIn: true,
@@ -28,7 +28,7 @@ const newSession = {
 type State = {
   session?: typeof oldSession;
   nextLogin: typeof newSession;
-  commands: Array<Array<string>>;
+  commands: Array<{ type: string; configPath?: string }>;
   credentialStores?: Array<string>;
   failLogin?: boolean;
   badWhoami?: boolean;
@@ -146,7 +146,7 @@ describe('Cloudflare session switching through the bundled CLI runner', () => {
           runWrangler: createBundledCloudflareAuthRunner(root),
         });
       }
-      expect(read().commands.some((args) => args[0] === 'login')).toBe(false);
+      expect(read().commands.some((args) => args.type === 'auth.login')).toBe(false);
       expect(read().session).toEqual(oldSession);
     },
   );

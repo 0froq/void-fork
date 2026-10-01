@@ -10,6 +10,7 @@
  */
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import type { CloudflareOperation } from '@void/deploy-cloudflare';
 import { parse as parseJsonc, type ParseError } from 'jsonc-parser';
 import { dirname, join, resolve } from 'pathslash';
 import { findEnvFile } from '../codegen/env-types.ts';
@@ -19,8 +20,12 @@ import type { EnvValidationReport } from '../runtime/env-public.ts';
 import { findLegacyEnvFiles, isClientEnvKey, loadLocalEnv } from '../shared/env.ts';
 import type { StandardSchemaV1 } from '../standard-schema.ts';
 import type { PlatformClient } from './client.ts';
+import {
+  encodeCloudflareOperation,
+  decodeCloudflareOperationResult,
+} from './cloudflare-process.ts';
 import { readGeneratedWranglerConfigFile } from './generated-wrangler-config.ts';
-import { resolveWranglerArgv } from './preset.ts';
+import { resolveCloudflareOperationArgv } from './preset.ts';
 
 type EnvPublicModule = {
   _getRegisteredSchema(): Record<string, StandardSchemaV1<unknown, unknown>> | null;
@@ -234,6 +239,9 @@ export type VarSource = { kind: 'emitted' };
  * "no secrets exist" — only `status === 0` with clean provenance may be parsed.
  */
 export type SecretListRunResult = {
+  data?: unknown;
+  errorCode?: number;
+  failure?: 'not-found' | 'durable-migration' | 'containers-unavailable';
   stdout: string;
   stderr: string;
   status: number;
@@ -250,7 +258,7 @@ export type SecretListRunResult = {
  * and no network runs. Sync stubs are fine — the caller `Promise.resolve`s.
  */
 export type RunSecretList = (
-  args: Array<string>,
+  args: CloudflareOperation,
 ) => SecretListRunResult | Promise<SecretListRunResult>;
 
 /**
@@ -1052,63 +1060,9 @@ function firstDeployMessage(missingKeys: Array<string>): string {
   ].join('\n');
 }
 
-/**
- * The exact `wrangler secret list` argv. Verified against the wrangler 4.131.0
- * bundle (`wrangler-dist/cli.js`, `secretListCommand`):
- *   - `secret list` accepts `--format` with choices `json`/`pretty`; `json` is
- *     the default AND suppresses the banner (`printBanner` is format==='pretty'),
- *     printing `JSON.stringify(secrets, null, '  ')` — an array of secret
- *     objects (each with a string `name`, per `fetchSecrets` →
- *     `GET /accounts/{id}/workers/scripts/{name}/secrets`). Pinned explicitly
- *     so a future default change can't silently switch us to `pretty`.
- *   - the worker name resolves from the config's `name` (`getLegacyScriptName`:
- *     `args.name ?? config.name` — we pass no `--name`, the pinned config is
- *     the single source of truth).
- *   - `-c <configPath>` (global `--config` alias) pins the ONE resolved config;
- *     `--env=` (explicit EMPTY environment) forces the top-level config env so
- *     a project dotenv exporting `CLOUDFLARE_ENV` can never reselect a named
- *     `env.*` block — same rationale as the provisioner's wranglerConfigArgs.
- */
-function secretListArgs(configPath: string): Array<string> {
-  return ['secret', 'list', '--format=json', '-c', configPath, '--env='];
-}
-
-/**
- * wrangler 4.131's `secret list` worker-not-found signal. When the worker has
- * never been deployed, `fetchSecrets` throws the API worker-not-found error and
- * `secretListCommand.handler` — ONLY when `isWorkerNotFoundError(e)` is true
- * (`e.code === 10007` WORKER_NOT_FOUND or `10090`
- * WORKER_LEGACY_ENVIRONMENT_NOT_FOUND, per wrangler-dist/cli.js) — rethrows a
- * `UserError` with this exact fixed diagnostic block:
- *
- *   Worker "<name>"[ (env: <env>)] not found.
- *
- *   If this is a new Worker, run `wrangler deploy` first to create it.
- *   Otherwise, check that the Worker name is correct and you're logged into the right account.
- *
- * The API code itself is caught and never printed, so the child's stderr
- * carries this MESSAGE, not `10007`/`10090`. Matching only the bare lead-in
- * `If this is a new Worker` misclassifies any unrelated status-1
- * diagnostic that merely contains that fragment. So we require the COMPLETE
- * structured block — the `… not found.` lead AND both fixed sentences of the
- * guidance — after normalizing whitespace (wrangler may wrap/indent the
- * multi-line UserError when it prints). The block carries no secret content, so
- * it survives `WRANGLER_LOG_SANITIZE=true`; the combined output is inspected
- * INTERNALLY only and never copied into any thrown error.
- */
-function isWorkerNotFoundOutput(output: string): boolean {
-  // Collapse whitespace runs so wrapped/indented multi-line printing still
-  // matches the fixed sentences below.
-  const normalized = output.replace(/\s+/g, ' ');
-  return (
-    /Worker ".*?"(?: \(env: [^)]*\))? not found\./.test(normalized) &&
-    (normalized.includes('[code: 10007]') ||
-      normalized.includes('[code: 10090]') ||
-      (normalized.includes('If this is a new Worker, run `wrangler deploy` first to create it.') &&
-        normalized.includes(
-          "Otherwise, check that the Worker name is correct and you're logged into the right account.",
-        )))
-  );
+/** Select the generated top-level Worker config for structured secret discovery. */
+function secretListOperation(configPath: string): CloudflareOperation {
+  return { type: 'secret.list', configPath };
 }
 
 /**
@@ -1117,7 +1071,7 @@ function isWorkerNotFoundOutput(output: string): boolean {
  * `result.stdout`, a spawn-error string, or a rejection message — those are
  * unconstrained (the child inherits `process.env`) and could embed an env
  * value. Where wrangler's own diagnostics would help, the message tells the
- * user to re-run wrangler themselves rather than echoing its output here.
+ * user to retry through Void rather than echoing its output here.
  */
 function secretListFailureMessage(
   reason: SecretListRunFailureReason,
@@ -1163,14 +1117,13 @@ function secretListError(
  * is never interpreted as "no secrets exist" — that would let a deploy proceed
  * with required secrets actually missing on the worker.
  *
- * A nonzero exit whose output carries wrangler's worker-not-found signal is a
+ * A completed failure with a typed missing-Worker code is a
  * DISTINCT, structured {@link SelfHostFirstDeployError} carrying the still
- * unsatisfied required `missingKeys` + `wrangler secret put` bootstrap guidance,
+ * unsatisfied required `missingKeys` + `void secret put` bootstrap guidance,
  * instead of the generic "list exited nonzero" dead end.
  *
  * Raw child output (stderr/stdout, spawn-error text, rejection messages)
- * is used ONLY internally: for worker-not-found classification the combined
- * output is matched to a boolean that never leaves this function. Every THROWN
+ * does not participate in missing-Worker classification. Every THROWN
  * error carries only a structural {@link SecretListFailureReason} code and safe
  * scalars (exit code / signal name), so no env value the child may have echoed
  * can reach the error's message, fields, or JSON — even under `VOID_ENV_UNMASK`.
@@ -1182,7 +1135,7 @@ async function fetchSelfHostSecretNames(
 ): Promise<Array<string>> {
   let result: SecretListRunResult;
   try {
-    result = await Promise.resolve(run(secretListArgs(configPath)));
+    result = await Promise.resolve(run(secretListOperation(configPath)));
   } catch {
     // The runner threw — the child produced no usable result. The rejection
     // message is unconstrained (could embed a value), so it is DROPPED; only
@@ -1199,24 +1152,17 @@ async function fetchSelfHostSecretNames(
   }
   if (typeof result.status !== 'number' || result.status !== 0) {
     const exitCode = typeof result.status === 'number' ? result.status : undefined;
-    // A not-yet-deployed worker: classify from the child's combined output
-    // INTERNALLY (the match result is a boolean that never leaves), then surface
-    // the missing key names + bootstrap guidance rather than the circular
-    // "deploy first" list failure. Only a clean nonzero exit reaches here
-    // (signal/spawn-error handled above), exactly how wrangler's worker-not-found
-    // UserError surfaces. The output itself is NOT copied into the thrown error.
-    if (isWorkerNotFoundOutput(`${result.stdout}\n${result.stderr}`)) {
+    // Only a completed provider failure may identify a missing Worker.
+    if (
+      Number.isSafeInteger(result.status) &&
+      result.status! > 0 &&
+      ([10007, 10090].includes(result.errorCode ?? 0) || result.failure === 'not-found')
+    ) {
       throw new SelfHostFirstDeployError(firstDeployMessage(missingKeys), missingKeys, exitCode);
     }
     throw secretListError('nonzero-exit', { exitCode });
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(result.stdout);
-  } catch {
-    // The unparseable stdout is NOT echoed (it could embed a value).
-    throw secretListError('malformed-output');
-  }
+  const parsed = result.data;
   if (!Array.isArray(parsed)) {
     throw secretListError('malformed-output');
   }
@@ -1276,7 +1222,7 @@ const SECRET_LIST_TIMEOUT_MS = 120_000;
 /**
  * Default {@link RunSecretList}: resolves wrangler's REAL CLI entry
  * (`wrangler-dist/cli.js`, not the signal-swallowing `bin` wrapper) via
- * {@link resolveWranglerArgv} and spawns it ASYNC with `shell: false`, so every
+ * {@link resolveCloudflareOperationArgv} and spawns it ASYNC with `shell: false`, so every
  * argv element is passed literally (no shell → no metacharacter injection) and
  * the event loop stays free. A hard timeout SIGKILLs a hung child; the result
  * carries `{status, signal, error}` provenance so the caller fails closed on
@@ -1299,12 +1245,12 @@ export function createDefaultSecretListRunner(
     timeoutMs?: number;
   },
 ): RunSecretList {
-  const launcher = options?.launcher ?? resolveWranglerArgv(root);
+  const launcher = options?.launcher ?? resolveCloudflareOperationArgv(root);
   const timeoutMs = options?.timeoutMs ?? SECRET_LIST_TIMEOUT_MS;
   const [command, ...prefix] = launcher;
   return (args) =>
     new Promise<SecretListRunResult>((resolvePromise) => {
-      const child = spawn(command as string, [...prefix, ...args], {
+      const child = spawn(command as string, [...prefix, ...encodeCloudflareOperation(args)], {
         cwd: root,
         shell: false,
         env: secretListEnv(options?.accountId),
@@ -1331,7 +1277,7 @@ export function createDefaultSecretListRunner(
         settled = true;
         clearTimeout(commandTimer);
         clearTimeout(killFallbackTimer);
-        resolvePromise(result);
+        resolvePromise(decodeCloudflareOperationResult(result));
       };
       const timeoutNote = `env: wrangler secret list exceeded the ${timeoutMs}ms timeout`;
       // REFERENCED timers (no unref): the outcome must keep the event loop

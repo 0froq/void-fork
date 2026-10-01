@@ -334,9 +334,20 @@ function wranglerWhoamiResult(accounts: Array<{ id: string; name: string }>): {
 } {
   return {
     status: 0,
-    stdout: JSON.stringify({ loggedIn: true, accounts }),
+    stdout: JSON.stringify({ operationResult: 1, data: { loggedIn: true, accounts, scopes: [] } }),
     stderr: '',
   };
+}
+
+function cloudflareOperationType(args: unknown): string | undefined {
+  if (!Array.isArray(args)) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(args.at(-1)).type;
+  } catch {
+    return undefined;
+  }
 }
 
 afterEach(() => {
@@ -2897,7 +2908,7 @@ export default config;
       writeExistingAstroProject(root);
       selectCloudflareDuringInit();
       mockSpawnSync.mockImplementation((_command, args) =>
-        Array.isArray(args) && args.includes('whoami')
+        cloudflareOperationType(args) === 'auth.whoami'
           ? { status: 1, stdout: '', stderr: 'Not authenticated' }
           : { status: 0, stdout: '', stderr: '' },
       );
@@ -2927,16 +2938,16 @@ export default config;
       expect(mockSpawnSync).toHaveBeenCalledWith(
         process.execPath,
         expect.arrayContaining([
-          'whoami',
-          '--json',
-          '-c',
-          toSlash(join(root, '.void-wrangler.jsonc')),
+          JSON.stringify({
+            type: 'auth.whoami',
+            configPath: toSlash(join(root, '.void-wrangler.jsonc')),
+          }),
         ]),
         expect.objectContaining({ cwd: root, stdio: ['ignore', 'pipe', 'pipe'] }),
       );
       expect(mockSpawnSync).toHaveBeenCalledWith(
         process.execPath,
-        expect.arrayContaining(['login']),
+        expect.arrayContaining([JSON.stringify({ type: 'auth.login' })]),
         expect.objectContaining({ cwd: root, stdio: 'inherit' }),
       );
       expect(mockNote).toHaveBeenCalledWith(
@@ -2963,7 +2974,7 @@ export default config;
       );
       selectCloudflareDuringInit();
       mockSpawnSync.mockImplementation((_command, args) =>
-        Array.isArray(args) && args.includes('whoami')
+        cloudflareOperationType(args) === 'auth.whoami'
           ? wranglerWhoamiResult([{ id: 'account-1', name: 'My account' }])
           : { status: 0, stdout: '', stderr: '' },
       );
@@ -2980,7 +2991,7 @@ export default config;
       expect(wrangler).toContain('"account_id": "account-1"');
       expect(mockSpawnSync).not.toHaveBeenCalledWith(
         process.execPath,
-        expect.arrayContaining(['login']),
+        expect.arrayContaining([JSON.stringify({ type: 'auth.login' })]),
         expect.anything(),
       );
       expect(mockSelect).not.toHaveBeenCalledWith(
@@ -2998,7 +3009,7 @@ export default config;
       selectCloudflareDuringInit('account-2');
       let whoamiCalls = 0;
       mockSpawnSync.mockImplementation((_command, args) => {
-        if (Array.isArray(args) && args.includes('whoami')) {
+        if (cloudflareOperationType(args) === 'auth.whoami') {
           whoamiCalls++;
           return whoamiCalls === 1
             ? { status: 1, stdout: '', stderr: 'Not authenticated' }
@@ -3015,7 +3026,7 @@ export default config;
       expect(whoamiCalls).toBe(2);
       expect(mockSpawnSync).toHaveBeenCalledWith(
         process.execPath,
-        expect.arrayContaining(['login']),
+        expect.arrayContaining([JSON.stringify({ type: 'auth.login' })]),
         expect.objectContaining({ cwd: root, stdio: 'inherit' }),
       );
       const accountPrompt = mockSelect.mock.calls.find(
@@ -3048,7 +3059,7 @@ export default config;
       );
       selectCloudflareDuringInit('account-1');
       mockSpawnSync.mockImplementation((_command, args) =>
-        Array.isArray(args) && args.includes('whoami')
+        cloudflareOperationType(args) === 'auth.whoami'
           ? wranglerWhoamiResult([
               { id: 'account-1', name: 'First account' },
               { id: 'account-2', name: 'Second account' },
@@ -3078,9 +3089,9 @@ export default config;
       writeExistingAstroProject(root);
       selectCloudflareDuringInit();
       mockSpawnSync.mockImplementation((_command, args) =>
-        Array.isArray(args) && args.includes('login')
+        cloudflareOperationType(args) === 'auth.login'
           ? { status: 1, stdout: '', stderr: 'Login failed' }
-          : Array.isArray(args) && args.includes('whoami')
+          : cloudflareOperationType(args) === 'auth.whoami'
             ? { status: 1, stdout: '', stderr: 'Not authenticated' }
             : { status: 0, stdout: '', stderr: '' },
       );
@@ -3093,7 +3104,7 @@ export default config;
       });
       expect(
         mockSpawnSync.mock.calls.filter(
-          ([, args]) => Array.isArray(args) && args.includes('whoami'),
+          ([, args]) => cloudflareOperationType(args) === 'auth.whoami',
         ),
       ).toHaveLength(1);
       expect(mockLogWarn).toHaveBeenCalledWith(
@@ -3126,8 +3137,8 @@ export default config;
       expect(mockListProjects).not.toHaveBeenCalled();
       expect(existsSync(join(root, '.github', 'workflows', 'void-deploy.yml'))).toBe(false);
       expect(
-        mockSpawnSync.mock.calls.some(
-          ([, args]) => Array.isArray(args) && (args.includes('whoami') || args.includes('login')),
+        mockSpawnSync.mock.calls.some(([, args]) =>
+          ['auth.whoami', 'auth.login'].includes(cloudflareOperationType(args) ?? ''),
         ),
       ).toBe(false);
     } finally {

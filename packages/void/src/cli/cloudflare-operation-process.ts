@@ -1,24 +1,39 @@
 #!/usr/bin/env node
-/**
- * Private transport for the existing Void Cloudflare command seams. The
- * orchestrators still use their established argument/result contracts; this
- * process translates them to the pinned cf CLI. It never invokes Wrangler.
- */
 import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+/**
+ * Execute typed Cloudflare operations using the pinned provider CLI and API.
+ * Secret values arrive on stdin; captured results use one structured envelope.
+ */
+import type { CloudflareOperation } from '@void/deploy-cloudflare';
 import { parse } from 'jsonc-parser';
 import { dirname, join, resolve } from 'pathslash';
 import { EnvHttpProxyAgent, fetch as httpFetch } from 'undici';
 import { persistCfKeyringPreference, readCfSessionCredential } from './cf-session.ts';
 import { cloudflareDeviceCode, printCloudflareLoginPrompt } from './cloudflare-login-output.ts';
 
-type Result = { status: number; stdout: string; stderr: string };
+type Result = {
+  status: number;
+  stdout: string;
+  stderr: string;
+  data?: unknown;
+  errorCode?: number;
+  signal?: NodeJS.Signals | null;
+  error?: string;
+  failure?: 'not-found' | 'durable-migration' | 'containers-unavailable';
+};
 type Json = Record<string, unknown>;
 
 const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
-const args = process.argv.slice(2);
+const operation = (() => {
+  try {
+    return JSON.parse(process.argv[2] ?? 'null');
+  } catch {
+    return null;
+  }
+})() as CloudflareOperation;
 // This dedicated transport process uses the same OAuth store for login,
 // deployment, and ancillary API calls. API-token overrides still win.
 process.env.CLOUDFLARE_AUTH_USE_KEYRING ??= 'true';
@@ -51,8 +66,17 @@ function cfEnvironment(): NodeJS.ProcessEnv {
   return env;
 }
 
-function result(status: number, stdout = '', stderr = ''): Result {
-  return { status, stdout, stderr };
+function result(status: number, stdout = '', stderr = '', data?: unknown): Result {
+  const code = /\[(?:code:\s*)?(\d{4,})\]/.exec(stderr);
+  const errorCode = code ? Number(code[1]) : undefined;
+  return {
+    status,
+    stdout,
+    stderr,
+    ...(data !== undefined ? { data } : {}),
+    ...(errorCode ? { errorCode } : {}),
+    ...([10006, 10007, 10090].includes(errorCode ?? 0) ? { failure: 'not-found' as const } : {}),
+  };
 }
 
 function runCf(command: Array<string>, cwd = process.cwd()): Result {
@@ -75,7 +99,18 @@ function runCf(command: Array<string>, cwd = process.cwd()): Result {
     .filter(Boolean)
     .join('\n')
     .replace(/\[(\d{4,})\]/g, '[code: $1]');
-  return result(child.status ?? 1, child.stdout ?? '', stderr);
+  if (child.signal || child.error || child.status === null) {
+    return {
+      status: 1,
+      stdout: '',
+      stderr,
+      signal: child.signal,
+      error:
+        child.error?.message ??
+        (child.signal ? undefined : 'Cloudflare CLI did not report an exit status.'),
+    };
+  }
+  return result(child.status, child.stdout ?? '', stderr);
 }
 
 function runInteractiveCf(command: Array<string>): Promise<Result> {
@@ -180,15 +215,9 @@ function object(value: unknown): Json {
   return value as Json;
 }
 
-function field(name: string): string | undefined {
-  const index = args.indexOf(name);
-  return index >= 0 ? args[index + 1] : undefined;
-}
-
 function configPath(): string | undefined {
-  return field('-c') ?? field('--config');
+  return 'configPath' in operation ? operation.configPath : undefined;
 }
-
 function config(): Json {
   const path = configPath();
   if (!path) {
@@ -196,9 +225,8 @@ function config(): Json {
   }
   return object(parse(readFileSync(path, 'utf8')));
 }
-
 function workerName(): string {
-  const name = field('--name') ?? config().name;
+  const name = ('workerName' in operation ? operation.workerName : undefined) ?? config().name;
   if (typeof name !== 'string' || !name) {
     throw new Error('Cloudflare Worker name is missing from the generated config.');
   }
@@ -506,56 +534,48 @@ async function sessionCredential(): Promise<{ type: 'oauth' | 'api_token'; token
 }
 
 async function auth(): Promise<Result> {
-  if (args[0] === 'login') {
+  if (operation.type === 'auth.login') {
     const loggedIn = await runInteractiveCf(['auth', 'login', '--force']);
     if (loggedIn.status === 0) {
       persistCfKeyringPreference(process.cwd());
     }
     return loggedIn;
   }
-  if (args[0] === 'logout') {
+  if (operation.type === 'auth.logout') {
     return runCf(['auth', 'logout']);
   }
-  if (args[0] === 'whoami') {
+  if (operation.type === 'auth.whoami') {
     const called = runCf(['auth', 'whoami']);
     if (called.status !== 0) {
       return called;
     }
     const identity = object(parsedJson(called.stdout));
     if (identity.authenticated !== true || identity.tokenValid !== true) {
-      return result(
-        1,
-        JSON.stringify({ loggedIn: false }),
-        'Cloudflare authentication is required.',
-      );
+      return result(1, '', 'Cloudflare authentication is required.', { loggedIn: false });
     }
     if (String(identity.authSource).startsWith('OAuth token from ')) {
       persistCfKeyringPreference(process.cwd());
     }
-    return result(
-      0,
-      JSON.stringify({
-        loggedIn: true,
-        accounts: identity.accounts,
-        email: identity.email,
-        tokenPermissions: identity.scopes,
-        authType:
-          process.env.CLOUDFLARE_API_KEY || process.env.CF_API_KEY
-            ? 'Global API Key'
-            : String(identity.authSource).startsWith('OAuth token')
-              ? 'OAuth Token'
-              : 'API Token',
-      }),
-      called.stderr,
-    );
+    return result(0, '', called.stderr, {
+      loggedIn: true,
+      accounts: identity.accounts,
+      email: identity.email,
+      tokenPermissions: identity.scopes,
+      authType:
+        process.env.CLOUDFLARE_API_KEY || process.env.CF_API_KEY
+          ? 'Global API Key'
+          : String(identity.authSource).startsWith('OAuth token')
+            ? 'OAuth Token'
+            : 'API Token',
+    });
   }
-  if (args[0] === 'auth' && args[1] === 'token') {
-    const credential = await sessionCredential();
-    return credential
-      ? result(0, `${JSON.stringify(credential)}\n`)
-      : result(1, '', 'Cloudflare session has no OAuth bearer.');
+  if (operation.type !== 'auth.token') {
+    throw new Error('Unsupported Cloudflare authentication operation.');
   }
-  return result(1, '', 'Unsupported Cloudflare authentication operation.');
+  const credential = await sessionCredential();
+  return credential
+    ? result(0, '', '', credential)
+    : result(1, '', 'Cloudflare session has no OAuth bearer.');
 }
 
 function listAllResourcePages(command: Array<string>, extraFlags: Array<string> = []): Result {
@@ -626,152 +646,135 @@ async function readAllQueues(): Promise<Array<Json>> {
 }
 
 async function resources(): Promise<Result> {
-  const [group, verb, third] = args;
-  if (group === 'd1' && verb === 'execute' && third) {
-    const database = d1Database(third);
-    const sql = field('--command');
-    if (!sql) {
-      throw new Error('D1 SQL command is missing.');
+  switch (operation.type) {
+    case 'd1.execute': {
+      const database = d1Database(operation.database);
+      return runCf(['d1', 'query', database.id, '--sql', operation.sql]);
     }
-    return runCf(['d1', 'query', database.id, '--sql', sql]);
-  }
-  if (group === 'd1' && verb === 'migrations' && (third === 'list' || third === 'apply')) {
-    const token = args[3];
-    if (!token) {
-      throw new Error('D1 migration target is missing.');
+    case 'd1.migrations.list':
+    case 'd1.migrations.apply': {
+      const database = d1Database(operation.database);
+      const verb = operation.type === 'd1.migrations.list' ? 'list' : 'apply';
+      const called = runCf([
+        'd1',
+        'migrations',
+        verb,
+        database.id,
+        '--dir',
+        database.dir,
+        ...(database.pattern ? ['--pattern', database.pattern] : []),
+        '--table',
+        database.table,
+      ]);
+      if (called.status !== 0 || verb !== 'list') {
+        return called;
+      }
+      const pending = parsedJson(called.stdout);
+      if (
+        !Array.isArray(pending) ||
+        pending.some((item) => typeof object(item).Name !== 'string')
+      ) {
+        throw new Error('D1 migration list was malformed.');
+      }
+      return result(0, '', called.stderr, { pending: pending.map((item) => object(item).Name) });
     }
-    const database = d1Database(token);
-    const called = runCf([
-      'd1',
-      'migrations',
-      third,
-      database.id,
-      '--dir',
-      database.dir,
-      ...(database.pattern ? ['--pattern', database.pattern] : []),
-      '--table',
-      database.table,
-    ]);
-    if (called.status !== 0 || third !== 'list') {
-      return called;
+    case 'containers.list':
+      return runCf(['containers', 'applications', 'list']);
+    case 'd1.list':
+      return listAllResourcePages(['d1', 'list']);
+    case 'd1.info': {
+      const listed = listAllResourcePages(['d1', 'list']);
+      if (listed.status !== 0) {
+        return listed;
+      }
+      const list = parsedJson(listed.stdout);
+      if (!Array.isArray(list)) {
+        throw new Error('D1 list was malformed.');
+      }
+      const value = list.find((item) => object(item).name === operation.name);
+      return value === undefined
+        ? { ...result(1, '', 'D1 database does not exist.'), failure: 'not-found' }
+        : result(0, '', '', value);
     }
-    const pending = parsedJson(called.stdout);
-    if (!Array.isArray(pending)) {
-      throw new Error('D1 migration list was malformed.');
-    }
-    return result(
-      0,
-      pending.length
-        ? `Migrations to be applied:\n${pending.map((item) => object(item).Name).join('\n')}\n`
-        : 'No migrations to apply!\n',
-    );
-  }
-  if (group === 'containers' && verb === 'list') {
-    return runCf(['containers', 'applications', 'list']);
-  }
-  if (group === 'd1' && verb === 'list') {
-    return listAllResourcePages(['d1', 'list']);
-  }
-  if (group === 'd1' && verb === 'info' && third) {
-    const listed = listAllResourcePages(['d1', 'list']);
-    if (listed.status !== 0) {
-      return listed;
-    }
-    const value = parsedJson(listed.stdout);
-    if (!Array.isArray(value)) {
-      throw new Error('D1 list was malformed.');
-    }
-    const selected = value.find((item) => object(item).name === third) ?? null;
-    return selected === null
-      ? result(1, '', `D1 database ${JSON.stringify(third)} does not exist.`)
-      : result(0, `${JSON.stringify(selected)}\n`);
-  }
-  if (group === 'd1' && verb === 'create' && third) {
-    const created = runCf(['d1', 'create', '--name', third]);
-    if (created.status !== 0) {
+    case 'd1.create': {
+      const created = runCf(['d1', 'create', '--name', operation.name]);
+      if (created.status !== 0) {
+        return created;
+      }
+      const database = object(parsedJson(created.stdout));
+      if (typeof database.uuid !== 'string') {
+        throw new Error('D1 creation returned no database ID.');
+      }
+      updateBinding('d1_databases', operation.binding, {
+        database_name: operation.name,
+        database_id: database.uuid,
+      });
       return created;
     }
-    const database = object(parsedJson(created.stdout));
-    if (typeof database.uuid !== 'string') {
-      throw new Error('D1 creation returned no database ID.');
-    }
-    updateBinding('d1_databases', field('--binding') ?? '', {
-      database_name: third,
-      database_id: database.uuid,
-    });
-    return created;
-  }
-  if (group === 'kv' && verb === 'namespace' && third === 'list') {
-    return listAllResourcePages(
-      ['kv', 'namespaces', 'list'],
-      ['--order', 'id', '--direction', 'asc'],
-    );
-  }
-  if (group === 'kv' && verb === 'namespace' && third === 'create' && args[3]) {
-    const created = runCf(['kv', 'namespaces', 'create', '--title', args[3]]);
-    if (created.status !== 0) {
+    case 'kv.namespace.list':
+      return listAllResourcePages(
+        ['kv', 'namespaces', 'list'],
+        ['--order', 'id', '--direction', 'asc'],
+      );
+    case 'kv.namespace.create': {
+      const created = runCf(['kv', 'namespaces', 'create', '--title', operation.name]);
+      if (created.status !== 0) {
+        return created;
+      }
+      const namespace = object(parsedJson(created.stdout));
+      if (typeof namespace.id !== 'string') {
+        throw new Error('KV creation returned no namespace ID.');
+      }
+      updateBinding('kv_namespaces', operation.binding, { id: namespace.id });
       return created;
     }
-    const namespace = object(parsedJson(created.stdout));
-    if (typeof namespace.id !== 'string') {
-      throw new Error('KV creation returned no namespace ID.');
+    case 'r2.bucket.info':
+      return runCf(['r2', 'buckets', 'get', operation.name]);
+    case 'r2.bucket.create': {
+      const created = runCf(['r2', 'buckets', 'create', '--name', operation.name]);
+      if (created.status === 0) {
+        updateBinding('r2_buckets', operation.binding, { bucket_name: operation.name });
+      }
+      return created;
     }
-    updateBinding('kv_namespaces', field('--binding') ?? '', { id: namespace.id });
-    return created;
+    case 'hyperdrive.create': {
+      const url = new URL(readFileSync(0, 'utf8'));
+      const name = operation.name;
+      const created = await withSecretFile(
+        JSON.stringify({
+          name,
+          origin: {
+            host: url.hostname,
+            port: Number(url.port || (url.protocol.startsWith('mysql') ? 3306 : 5432)),
+            database: decodeURIComponent(url.pathname.replace(/^\//, '')),
+            scheme: url.protocol.replace(':', ''),
+            user: decodeURIComponent(url.username),
+            password: decodeURIComponent(url.password),
+          },
+        }),
+        (path) => runCf(['hyperdrive', 'create', '--body', '@' + path]),
+      );
+      if (created.status !== 0) {
+        return { ...created, stdout: '', stderr: 'Hyperdrive creation failed.' };
+      }
+      const hyperdrive = object(parsedJson(created.stdout));
+      if (typeof hyperdrive.id !== 'string') {
+        throw new Error('Hyperdrive creation returned no ID.');
+      }
+      updateBinding('hyperdrive', operation.binding, { id: hyperdrive.id });
+      return result(0, '', '', { id: hyperdrive.id, name });
+    }
+    case 'queues.create':
+      return runCf(['queues', 'create', '--queue-name', operation.name]);
+    case 'queues.info': {
+      const queue = (await readAllQueues()).find((item) => item.queue_name === operation.name);
+      return queue
+        ? result(0, '', '', { id: queue.queue_id, name: queue.queue_name })
+        : { ...result(1, '', 'Cloudflare Queue does not exist.'), failure: 'not-found' };
+    }
+    default:
+      throw new Error('Unsupported Cloudflare resource operation.');
   }
-  if (group === 'r2' && verb === 'bucket' && third === 'info' && args[3]) {
-    const read = runCf(['r2', 'buckets', 'get', args[3]]);
-    return read.status !== 0 && /\[code:\s*10006\]/.test(read.stderr)
-      ? result(1, '', '[code: 10006] The specified bucket does not exist.')
-      : read;
-  }
-  if (group === 'r2' && verb === 'bucket' && third === 'create' && args[3]) {
-    const created = runCf(['r2', 'buckets', 'create', '--name', args[3]]);
-    if (created.status === 0) {
-      updateBinding('r2_buckets', field('--binding') ?? '', { bucket_name: args[3] });
-    }
-    return created;
-  }
-  if (group === 'hyperdrive' && verb === 'create' && third) {
-    const connection = args.find((part) => part.startsWith('--connection-string='))?.slice(20);
-    if (!connection) {
-      throw new Error('Hyperdrive connection string is missing.');
-    }
-    const url = new URL(connection);
-    const created = await withSecretFile(
-      JSON.stringify({
-        name: third,
-        origin: {
-          host: url.hostname,
-          port: Number(url.port || (url.protocol.startsWith('mysql') ? 3306 : 5432)),
-          database: decodeURIComponent(url.pathname.replace(/^\//, '')),
-          scheme: url.protocol.replace(':', ''),
-          user: decodeURIComponent(url.username),
-          password: decodeURIComponent(url.password),
-        },
-      }),
-      (path) => runCf(['hyperdrive', 'create', '--body', `@${path}`]),
-    );
-    if (created.status !== 0) {
-      return result(created.status, '', 'Hyperdrive creation failed.');
-    }
-    const hyperdrive = object(parsedJson(created.stdout));
-    if (typeof hyperdrive.id !== 'string') {
-      throw new Error('Hyperdrive creation returned no ID.');
-    }
-    updateBinding('hyperdrive', field('--binding') ?? '', { id: hyperdrive.id });
-    return result(0, `${JSON.stringify({ id: hyperdrive.id, name: third })}\n`);
-  }
-  if (group === 'queues' && (verb === 'info' || verb === 'create') && third) {
-    if (verb === 'create') {
-      return runCf(['queues', 'create', '--queue-name', third]);
-    }
-    const queue = (await readAllQueues()).find((item) => item.queue_name === third);
-    return queue
-      ? result(0, `Queue Name: ${third}\n`)
-      : result(1, '', `Queue "${third}" does not exist`);
-  }
-  return result(1, '', `Unsupported Cloudflare resource operation: ${group} ${verb}.`);
 }
 
 function emailZone(domain: string): string {
@@ -782,7 +785,7 @@ function emailZone(domain: string): string {
     if (read.status === 0) {
       return candidate;
     }
-    if (!/Zone not found:/.test(read.stderr)) {
+    if (read.signal || read.error || !/Zone not found:/.test(read.stderr)) {
       throw new Error('Cloudflare could not resolve the Email zone.');
     }
   }
@@ -790,90 +793,54 @@ function emailZone(domain: string): string {
 }
 
 function email(): Result {
-  const [group, product, operation, candidate] = args;
-  if (group !== 'email' || !candidate) {
-    return result(1, '', 'Unsupported Cloudflare email operation.');
+  if (!('domain' in operation)) {
+    throw new Error('Cloudflare Email domain is missing.');
   }
-  if (product === 'routing' && operation === 'settings') {
-    const read = runCf(['email-routing', 'settings', 'get', '--zone', candidate]);
-    if (read.status !== 0) {
-      return /Zone not found:/.test(read.stderr)
-        ? result(1, '', `Could not find a zone for \`${candidate}\`.`)
+  const domain = operation.domain;
+  switch (operation.type) {
+    case 'email.routing.settings': {
+      const read = runCf(['email-routing', 'settings', 'get', '--zone', domain]);
+      return read.status !== 0 && !read.signal && !read.error && /Zone not found:/.test(read.stderr)
+        ? result(0, '', '', null)
         : read;
     }
-    return read;
-  }
-  if (product === 'routing' && operation === 'enable') {
-    return runCf(['email-routing', 'enable', '--zone', candidate, '--name', candidate]);
-  }
-  if (product === 'routing' && operation === 'rules' && args[3] === 'list' && args[4]) {
-    const zone = args[4];
-    const rules: Array<unknown> = [];
-    for (let page = 1; page <= 100; page++) {
-      const listed = runCf([
-        'email-routing',
-        'rules',
-        'list-account',
-        '--zone',
-        zone,
-        '--page',
-        String(page),
-        '--per-page',
-        '100',
-      ]);
+    case 'email.routing.enable':
+      return runCf(['email-routing', 'enable', '--zone', domain, '--name', domain]);
+    case 'email.routing.rules.list':
+      return listAllResourcePages(['email-routing', 'rules', 'list-account'], ['--zone', domain]);
+    case 'email.sending.settings': {
+      const listed = runCf(['email-sending', 'subdomains', 'list', '--zone', emailZone(domain)]);
       if (listed.status !== 0) {
         return listed;
       }
-      const items = parsedJson(listed.stdout);
-      if (!Array.isArray(items)) {
-        throw new Error('Email Routing rules were malformed.');
+      const values = parsedJson(listed.stdout);
+      if (!Array.isArray(values)) {
+        throw new Error('Email Sending subdomains were malformed.');
       }
-      rules.push(...items);
-      if (items.length < 100) {
-        return result(0, `${JSON.stringify(rules)}\n`);
-      }
+      return result(0, '', '', values.map(object).find((item) => item.name === domain) ?? null);
     }
-    throw new Error('Email Routing rules exceeded the supported page limit.');
+    case 'email.sending.enable':
+      return runCf([
+        'email-sending',
+        'subdomains',
+        'create',
+        '--zone',
+        emailZone(domain),
+        '--name',
+        domain,
+      ]);
+    default:
+      throw new Error('Unsupported Cloudflare Email operation.');
   }
-  if (product === 'sending' && operation === 'settings') {
-    const listed = runCf(['email-sending', 'subdomains', 'list', '--zone', emailZone(candidate)]);
-    if (listed.status !== 0) {
-      return listed;
-    }
-    const values = parsedJson(listed.stdout);
-    if (!Array.isArray(values)) {
-      throw new Error('Email Sending subdomains were malformed.');
-    }
-    const match = values.map(object).find((item) => item.name === candidate);
-    if (!match) {
-      return result(1, '', `No sending subdomain found for \`${candidate}\`.`);
-    }
-    return result(0, `${JSON.stringify(match)}\n`);
-  }
-  if (product === 'sending' && operation === 'enable') {
-    return runCf([
-      'email-sending',
-      'subdomains',
-      'create',
-      '--zone',
-      emailZone(candidate),
-      '--name',
-      candidate,
-    ]);
-  }
-  return result(1, '', `Unsupported Cloudflare email operation: ${product} ${operation}.`);
 }
 
 async function secrets(): Promise<Result> {
   const worker = workerName();
-  const verb = args[1];
   const apply = async (action: () => Result): Promise<Result> => {
     const first = action();
-    if (first.status === 0 || !/\[code:\s*10007\]/.test(first.stderr)) {
+    if (first.status === 0 || first.errorCode !== 10007) {
       return first;
     }
-    // A first secret may be set before the application has ever deployed. cf's
-    // secret endpoint needs an existing Worker, so create a targetless draft.
     const raw = {
       name: worker,
       account_id: process.env.CLOUDFLARE_ACCOUNT_ID ?? config().account_id,
@@ -886,140 +853,118 @@ async function secrets(): Promise<Result> {
     );
     return draft.status === 0 ? action() : draft;
   };
-  if (verb === 'list') {
-    const listed = runCf(['workers', 'secrets', 'list', '--worker', worker]);
-    if (listed.status !== 0 && /\[code:\s*(?:10007|10090)\]/.test(listed.stderr)) {
-      return result(1, '', `Worker "${worker}" not found. [code: 10007]`);
-    }
-    return listed;
-  }
-  if (verb === 'put' && args[2]) {
-    const value = readFileSync(0, 'utf8').replace(/\n$/, '');
-    return await withSecretFile(
-      JSON.stringify({ name: args[2], text: value, type: 'secret_text' }),
-      (path) =>
+  switch (operation.type) {
+    case 'secret.list':
+      return runCf(['workers', 'secrets', 'list', '--worker', worker]);
+    case 'secret.put': {
+      const value = readFileSync(0, 'utf8').replace(/\n$/, '');
+      const name = operation.name;
+      return withSecretFile(JSON.stringify({ name, text: value, type: 'secret_text' }), (path) =>
         apply(() =>
-          runCf([
-            'workers',
-            'secrets',
-            'update',
-            args[2],
-            '--worker',
-            worker,
-            '--body',
-            `@${path}`,
-          ]),
+          runCf(['workers', 'secrets', 'update', name, '--worker', worker, '--body', '@' + path]),
         ),
-    );
+      );
+    }
+    case 'secret.bulk': {
+      const values = object(parsedJson(readFileSync(0, 'utf8')));
+      const patch = Object.fromEntries(
+        Object.entries(values).map(([name, text]) => [name, { type: 'secret_text', text }]),
+      );
+      return withSecretFile(JSON.stringify(patch), (path) =>
+        apply(() => runCf(['workers', 'secrets', 'bulk', '--worker', worker, '--file', path])),
+      );
+    }
+    case 'secret.delete':
+      return runCf(['workers', 'secrets', 'delete', operation.name, '--worker', worker, '--force']);
+    default:
+      throw new Error('Unsupported Cloudflare secret operation.');
   }
-  if (verb === 'bulk') {
-    const input = object(parsedJson(readFileSync(0, 'utf8')));
-    const patch = Object.fromEntries(
-      Object.entries(input).map(([name, text]) => [
-        name,
-        {
-          type: 'secret_text',
-          text,
-        },
-      ]),
-    );
-    return await withSecretFile(JSON.stringify(patch), (path) =>
-      apply(() => runCf(['workers', 'secrets', 'bulk', '--worker', worker, '--file', path])),
-    );
-  }
-  if (verb === 'delete' && args[2]) {
-    return runCf(['workers', 'secrets', 'delete', args[2], '--worker', worker, '--force']);
-  }
-  return result(1, '', `Unsupported Cloudflare secret operation: ${verb}.`);
 }
 
 async function workerHistory(): Promise<Result> {
   const worker = workerName();
-  const [group, verb, third] = args;
-  if (group === 'deployments' && (verb === 'status' || verb === 'list')) {
-    const called = runCf(['workers', 'deployments', 'list', '--worker', worker]);
-    if (called.status !== 0) {
-      return called;
-    }
-    const deployments = object(parsedJson(called.stdout)).deployments;
-    if (!Array.isArray(deployments)) {
-      throw new Error('Worker deployments were malformed.');
-    }
-    if (verb === 'status') {
-      return deployments[0]
-        ? result(0, `${JSON.stringify(deployments[0])}\n`)
-        : result(1, '', 'Worker has no active deployment.');
-    }
-    return result(0, `${JSON.stringify(deployments)}\n`);
-  }
-  if (group === 'versions' && verb === 'list') {
-    return cleanJson(['workers', 'versions', 'list', '--worker-id', worker], (value) => {
-      if (!Array.isArray(value)) {
-        throw new Error('Worker versions were malformed.');
+  switch (operation.type) {
+    case 'deployments.status':
+    case 'deployments.list': {
+      const called = runCf(['workers', 'deployments', 'list', '--worker', worker]);
+      if (called.status !== 0) {
+        return called;
       }
-      return value.map((entry) => {
-        const version = object(entry);
-        return { ...version, metadata: { created_on: version.created_on } };
+      const deployments = object(parsedJson(called.stdout)).deployments;
+      if (!Array.isArray(deployments)) {
+        throw new Error('Worker deployments were malformed.');
+      }
+      return operation.type === 'deployments.list'
+        ? result(0, '', called.stderr, deployments)
+        : deployments[0]
+          ? result(0, '', called.stderr, deployments[0])
+          : result(1, '', 'Worker has no active deployment.');
+    }
+    case 'versions.list':
+      return cleanJson(['workers', 'versions', 'list', '--worker-id', worker], (value) => {
+        if (!Array.isArray(value)) {
+          throw new Error('Worker versions were malformed.');
+        }
+        return value.map((entry) => {
+          const version = object(entry);
+          return { ...version, metadata: { created_on: version.created_on } };
+        });
       });
-    });
-  }
-  if (group === 'versions' && verb === 'view' && third) {
-    const called = runCf(['workers', 'versions', 'get', third, '--worker-id', worker]);
-    if (called.status !== 0) {
-      return called;
-    }
-    const version = object(parsedJson(called.stdout));
-    if (version.id !== third || !Array.isArray(version.bindings)) {
-      throw new Error('Worker version bindings were malformed.');
-    }
-    const resources = await readVersionResources(worker, third);
-    return result(0, `${JSON.stringify({ ...version, resources })}\n`);
-  }
-  if (group === 'versions' && verb === 'deploy') {
-    const firstFlag = args.findIndex((part, index) => index >= 2 && part.startsWith('-'));
-    const parts = args.slice(2, firstFlag === -1 ? undefined : firstFlag);
-    const versions = parts.map((part) => {
-      const [version_id, fraction] = part.split('@');
-      const percentage = Number(fraction);
-      if (!/^[0-9a-f-]{36}$/i.test(version_id ?? '') || !Number.isFinite(percentage)) {
-        throw new Error('Cloudflare deployment version was malformed.');
+    case 'versions.view': {
+      const versionId = operation.versionId;
+      const called = runCf(['workers', 'versions', 'get', versionId, '--worker-id', worker]);
+      if (called.status !== 0) {
+        return called;
       }
-      return { version_id, percentage };
-    });
-    if (
-      !versions.length ||
-      Math.abs(versions.reduce((sum, entry) => sum + entry.percentage, 0) - 100) > 0.001
-    ) {
-      throw new Error('Cloudflare deployment percentages must total 100.');
+      const version = object(parsedJson(called.stdout));
+      if (version.id !== versionId || !Array.isArray(version.bindings)) {
+        throw new Error('Worker version bindings were malformed.');
+      }
+      const resources = await readVersionResources(worker, versionId);
+      return result(0, '', called.stderr, { ...version, resources });
     }
-    const message = field('--message');
-    return runCf([
-      'workers',
-      'deployments',
-      'create',
-      '--worker',
-      worker,
-      '--body',
-      JSON.stringify({
-        strategy: 'percentage',
-        versions,
-        ...(message ? { annotations: { 'workers/message': message } } : {}),
-      }),
-    ]);
+    case 'versions.deploy': {
+      const versions = operation.versions.map((value) => ({
+        version_id: value.versionId,
+        percentage: value.percentage,
+      }));
+      if (
+        !versions.length ||
+        versions.some(
+          (value) =>
+            !/^[-a-f\d]{36}$/i.test(value.version_id) ||
+            !Number.isFinite(value.percentage) ||
+            value.percentage < 0 ||
+            value.percentage > 100,
+        ) ||
+        Math.abs(versions.reduce((sum, value) => sum + value.percentage, 0) - 100) > 0.001
+      ) {
+        throw new Error('Cloudflare deployment percentages must total 100.');
+      }
+      return runCf([
+        'workers',
+        'deployments',
+        'create',
+        '--worker',
+        worker,
+        '--body',
+        JSON.stringify({
+          strategy: 'percentage',
+          versions,
+          ...(operation.message ? { annotations: { 'workers/message': operation.message } } : {}),
+        }),
+      ]);
+    }
+    default:
+      throw new Error('Unsupported Cloudflare Worker history operation.');
   }
-  return result(1, '', `Unsupported Cloudflare Worker history operation: ${group} ${verb}.`);
 }
 
 async function workerChanges(): Promise<Result> {
-  if (args[0] === 'queues' && args[1] === 'consumer' && args[2] === 'remove') {
-    const queueName = args[3];
-    const worker = args[4];
-    if (!queueName || !worker) {
-      throw new Error('Queue consumer target is missing.');
-    }
-    const queue = (await readAllQueues()).find((item) => item.queue_name === queueName);
+  if (operation.type === 'queues.consumer.remove') {
+    const queue = (await readAllQueues()).find((item) => item.queue_name === operation.queueName);
     if (!queue || typeof queue.queue_id !== 'string') {
-      return result(1, '', `Queue "${queueName}" does not exist`);
+      return { ...result(1, '', 'Cloudflare Queue does not exist.'), failure: 'not-found' };
     }
     const consumers = runCf(['queues', 'consumers', 'list', '--queue-id', queue.queue_id]);
     if (consumers.status !== 0) {
@@ -1029,7 +974,9 @@ async function workerChanges(): Promise<Result> {
     if (!Array.isArray(members)) {
       throw new Error('Queue consumer list was malformed.');
     }
-    for (const item of members.map(object).filter((entry) => entry.script === worker)) {
+    for (const item of members
+      .map(object)
+      .filter((entry) => entry.script === operation.workerName)) {
       if (typeof item.consumer_id !== 'string') {
         throw new Error('Queue consumer ID is missing.');
       }
@@ -1048,80 +995,97 @@ async function workerChanges(): Promise<Result> {
     }
     return result(0);
   }
-  if (args[0] === 'triggers' && args[1] === 'deploy') {
-    const raw = config();
-    const name = workerName();
-    if (raw.name !== name) {
-      throw new Error('Cloudflare trigger Worker name changed.');
+  const raw = config();
+  const name = workerName();
+  if (raw.name !== name) {
+    throw new Error('Cloudflare Worker target changed.');
+  }
+  if (operation.type === 'triggers.clear-crons' || operation.type === 'triggers.clear-domains') {
+    if (raw.account_id !== undefined && raw.account_id !== accountId()) {
+      throw new Error('Cloudflare trigger target changed.');
     }
-    return await withBuildOutput(raw, null, (directory) =>
-      runCf(
-        [
-          'workers',
-          'triggers',
-          'deploy',
-          '--prebuilt',
-          ...(args.includes('--dry-run') ? ['--dry-run'] : []),
-        ],
-        directory,
-      ),
+    return operation.type === 'triggers.clear-crons'
+      ? clearWorkerCronSchedules(name)
+      : clearWorkerCustomDomains(name);
+  }
+  if (operation.type === 'triggers.deploy') {
+    return withBuildOutput(raw, null, (directory) =>
+      runCf(['workers', 'triggers', 'deploy', '--prebuilt'], directory),
     );
   }
-  if (args[0] === 'triggers' && args[1] === 'clear-crons') {
-    const raw = config();
-    const name = workerName();
-    if (raw.name !== name || (raw.account_id !== undefined && raw.account_id !== accountId())) {
-      throw new Error('Cloudflare trigger target changed.');
-    }
-    return await clearWorkerCronSchedules(name);
-  }
-  if (args[0] === 'triggers' && args[1] === 'clear-domains') {
-    const raw = config();
-    const name = workerName();
-    if (raw.name !== name || (raw.account_id !== undefined && raw.account_id !== accountId())) {
-      throw new Error('Cloudflare trigger target changed.');
-    }
-    return await clearWorkerCustomDomains(name);
-  }
-  if ((args[0] === 'versions' && args[1] === 'upload') || args[0] === 'deploy') {
-    const raw = config();
+  if (operation.type === 'versions.upload' || operation.type === 'worker.deploy') {
     const path = configPath()!;
     if (typeof raw.main !== 'string' || !raw.main || raw.no_bundle !== true) {
       throw new Error('Cloudflare Worker upload requires a prebuilt platform Worker.');
     }
     const source = resolve(dirname(path), raw.main);
-    const message = field('--message');
-    const secrets = field('--secrets-file');
-    return await withBuildOutput(raw, source, (directory) =>
+    const request = operation;
+    const called = await withBuildOutput(raw, source, (directory) =>
       runCf(
         [
-          ...(args[0] === 'deploy' ? ['deploy'] : ['workers', 'versions', 'create']),
+          ...(request.type === 'worker.deploy' ? ['deploy'] : ['workers', 'versions', 'create']),
           '--prebuilt',
-          ...(message ? ['--message', message] : []),
-          ...(secrets ? ['--secrets-file', secrets] : []),
-          ...(args.includes('--dry-run') ? ['--dry-run'] : []),
+          ...(request.message ? ['--message', request.message] : []),
+          ...(request.secretsFilePath ? ['--secrets-file', request.secretsFilePath] : []),
         ],
         directory,
       ),
     );
+    if (called.status !== 0) {
+      return called;
+    }
+    // cf renders uploads for the terminal; decode once at the process boundary.
+    // Callers receive an identity and URLs, never a fabricated CLI transcript.
+    let uploaded: Json = {};
+    try {
+      uploaded = object(parsedJson(called.stdout));
+    } catch {
+      /* Human upload presentation. */
+    }
+    const output = called.stdout;
+    const versionId =
+      uploaded.version_id ??
+      uploaded.id ??
+      uploaded.versionId ??
+      output.match(/(?:Worker|Current) Version ID:\s*([0-9a-f]{8}-[0-9a-f-]{27})/i)?.[1];
+    if (typeof versionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(versionId)) {
+      throw new Error('Cloudflare did not return the uploaded Worker version ID.');
+    }
+    const previewUrl =
+      typeof uploaded.preview_url === 'string'
+        ? uploaded.preview_url
+        : output.match(/Version Preview(?: Alias)? URL:\s*(https:\/\/\S+)/i)?.[1];
+    const workersDevUrl =
+      typeof uploaded.workers_dev_url === 'string'
+        ? uploaded.workers_dev_url
+        : output.match(/(https:\/\/[a-z0-9.-]+\.workers\.dev(?:\/[^\s]*)?)/i)?.[1];
+    return result(0, '', called.stderr, {
+      versionId,
+      ...(previewUrl ? { previewUrl } : {}),
+      ...(workersDevUrl ? { workersDevUrl } : {}),
+    });
   }
-  return result(1, '', `Unsupported Cloudflare Worker operation: ${args.slice(0, 2).join(' ')}.`);
+  throw new Error('Unsupported Cloudflare Worker operation.');
 }
 
 async function tail(): Promise<Result> {
-  const worker = args[1];
-  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? config().account_id;
-  if (!worker || typeof accountId !== 'string' || !accountId || worker !== workerName()) {
+  if (operation.type !== 'tail') {
+    throw new Error('Cloudflare tail operation is required.');
+  }
+  const worker = workerName();
+  const raw = config();
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? raw.account_id;
+  if (!worker || typeof accountId !== 'string' || !accountId || worker !== raw.name) {
     throw new Error('Cloudflare tail target is not pinned.');
   }
   const filters: Array<Json> = [];
-  if (field('--search')) {
-    filters.push({ query: field('--search') });
+  if (operation.search) {
+    filters.push({ query: operation.search });
   }
-  if (field('--version-id')) {
-    filters.push({ scriptVersion: field('--version-id') });
+  if (operation.versionId) {
+    filters.push({ scriptVersion: operation.versionId });
   }
-  if (field('--status') === 'error') {
+  if (operation.status === 'error') {
     filters.push({ outcome: ['exception', 'exceededCpu', 'exceededMemory', 'unknown'] });
   }
   const base = (
@@ -1231,45 +1195,75 @@ async function tail(): Promise<Result> {
 }
 
 async function main(): Promise<Result> {
-  if (['whoami', 'login', 'logout', 'auth'].includes(args[0] ?? '')) {
+  if (process.argv.length !== 3) {
+    throw new Error('Exactly one typed Cloudflare operation is required.');
+  }
+  if (!operation || typeof operation !== 'object' || typeof operation.type !== 'string') {
+    throw new Error('Cloudflare operation is required.');
+  }
+  if (operation.type.startsWith('auth.')) {
     return auth();
   }
-  if (args[0] === 'secret') {
-    return await secrets();
+  if (operation.type.startsWith('secret.')) {
+    return secrets();
   }
-  if (args[0] === 'tail') {
-    return await tail();
+  if (operation.type === 'tail') {
+    return tail();
   }
-  if (args[0] === 'email') {
+  if (operation.type.startsWith('email.')) {
     return email();
   }
-  if (args[0] === 'deployments' || (args[0] === 'versions' && args[1] !== 'upload')) {
-    return await workerHistory();
+  if (
+    operation.type.startsWith('deployments.') ||
+    (operation.type.startsWith('versions.') && operation.type !== 'versions.upload')
+  ) {
+    return workerHistory();
   }
   if (
-    args[0] === 'triggers' ||
-    args[0] === 'deploy' ||
-    (args[0] === 'versions' && args[1] === 'upload') ||
-    (args[0] === 'queues' && args[1] === 'consumer')
+    operation.type.startsWith('triggers.') ||
+    operation.type === 'worker.deploy' ||
+    operation.type === 'versions.upload' ||
+    operation.type === 'queues.consumer.remove'
   ) {
-    return await workerChanges();
+    return workerChanges();
   }
-  if (['d1', 'kv', 'r2', 'hyperdrive', 'queues', 'containers'].includes(args[0] ?? '')) {
-    return await resources();
-  }
-  return result(1, '', `Unsupported Cloudflare operation: ${args.slice(0, 2).join(' ')}.`);
+  return resources();
 }
 
 try {
   const output = await main();
-  if (output.stdout) {
-    process.stdout.write(output.stdout);
+  if (operation.type !== 'auth.login' && operation.type !== 'tail') {
+    let data = output.data;
+    let humanOutput = '';
+    if (data === undefined && output.stdout.trim()) {
+      try {
+        data = parsedJson(output.stdout);
+      } catch {
+        humanOutput = output.stdout;
+      }
+    }
+    process.stdout.write(
+      JSON.stringify({
+        operationResult: 1,
+        ...(output.signal ? { signal: output.signal } : {}),
+        ...(output.error ? { error: output.error } : {}),
+        ...(data !== undefined ? { data } : {}),
+        ...(output.errorCode !== undefined ? { errorCode: output.errorCode } : {}),
+        ...(output.failure ? { failure: output.failure } : {}),
+        ...(output.stderr ? { errors: [{ code: output.errorCode, message: output.stderr }] } : {}),
+        ...(humanOutput ? { output: humanOutput } : {}),
+      }) + '\n',
+    );
   }
   if (output.stderr) {
     process.stderr.write(output.stderr);
   }
   process.exitCode = output.status;
 } catch (error) {
-  process.stderr.write(error instanceof Error ? error.message : 'Cloudflare command failed.');
+  const message = error instanceof Error ? error.message : 'Cloudflare operation failed.';
+  if (operation?.type !== 'auth.login' && operation?.type !== 'tail') {
+    process.stdout.write(JSON.stringify({ operationResult: 1, errors: [{ message }] }) + '\n');
+  }
+  process.stderr.write(message);
   process.exitCode = 1;
 }

@@ -4,6 +4,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { CloudflareOperation } from '@void/deploy-cloudflare';
 import type { PlatformInstallationManifest } from '@void/platform';
 import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test';
 import { hyperdriveOriginFromConnectionString } from '../../src/cli/platform-cloudflare.ts';
@@ -16,12 +17,12 @@ import { listInstallationManifests } from '../../src/cli/platform-registry.ts';
 import type { RunWrangler } from '../../src/cli/provision.ts';
 
 // Runs the real Worker deploy, cutover checkpoint, and pre-traffic verification
-// against a stateful in-memory Cloudflare account. Only the Wrangler process is
+// against a stateful in-memory Cloudflare account. Only the provider process is
 // replaced; the guarded create still goes through the conditional-create proxy.
 const wrangler = vi.hoisted(() => ({ run: null as RunWrangler | null }));
 vi.mock('../../src/cli/provision.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/cli/provision.ts')>()),
-  createDefaultRunWrangler: () => (args: Array<string>, opts: Parameters<RunWrangler>[1]) =>
+  createDefaultRunWrangler: () => (args: CloudflareOperation, opts: Parameters<RunWrangler>[1]) =>
     wrangler.run!(args, opts),
 }));
 
@@ -84,30 +85,27 @@ async function createFakeCloudflare() {
   const kv = new Map<string, string>();
   const r2 = new Map<string, string>();
   const named = new Map<string, Map<string, string>>();
-  const commands: Array<{ args: Array<string>; worker: string | null }> = [];
+  const commands: Array<{ args: CloudflareOperation; worker: string | null }> = [];
   let clock = Date.parse('2026-10-01T00:00:00.000Z');
   let failBlockedCreate: string | null = null;
   let failUpload: string | null = null;
 
-  const flag = (args: Array<string>, ...names: Array<string>) => {
-    const index = args.findIndex((arg) => names.includes(arg));
-    return index === -1 ? undefined : args[index + 1];
+  const configOf = (operation: CloudflareOperation): Record<string, unknown> | null => {
+    return operation.configPath ? JSON.parse(readFileSync(operation.configPath, 'utf8')) : null;
   };
-  const configOf = (args: Array<string>): Record<string, unknown> | null => {
-    const path = flag(args, '--config', '-c');
-    return path ? (JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>) : null;
-  };
-  const workerOf = (args: Array<string>) =>
-    flag(args, '--name') ?? (configOf(args)?.name as string | undefined) ?? null;
-  const ok = (stdout = '') => ({ status: 0, stderr: '', stdout });
+  const workerOf = (operation: CloudflareOperation) =>
+    ('workerName' in operation ? operation.workerName : undefined) ??
+    (configOf(operation)?.name as string | undefined) ??
+    null;
+  const ok = (data?: unknown) => ({ status: 0, stderr: '', stdout: '', data });
   const failed = (stderr: string) => ({ status: 1, stderr, stdout: '' });
-  const storeVersion = (name: string, args: Array<string>): FakeVersion => {
-    const config = configOf(args)!;
+  const storeVersion = (name: string, operation: CloudflareOperation): FakeVersion => {
+    const config = configOf(operation)!;
     const vars = (config.vars ?? {}) as Record<string, string>;
     const migrations = Array.isArray(config.migrations) ? config.migrations : [];
     const tag = (migrations.at(-1) as { tag?: string } | undefined)?.tag;
     const version: FakeVersion = {
-      annotations: { 'workers/message': flag(args, '--message') ?? '' },
+      annotations: { 'workers/message': 'message' in operation ? (operation.message ?? '') : '' },
       id: randomUUID(),
       resources: {
         bindings: [
@@ -136,8 +134,7 @@ async function createFakeCloudflare() {
   wrangler.run = async (args, opts) => {
     const worker = workerOf(args);
     commands.push({ args, worker });
-    const command = `${args[0]} ${args[1] ?? ''}`.trim();
-    if (args[0] === 'deploy') {
+    if (args.type === 'worker.deploy') {
       const base = `${opts.apiBaseUrl}/accounts/${opts.accountId}/workers/scripts/${worker}`;
       if (failBlockedCreate === worker) {
         failBlockedCreate = null;
@@ -150,45 +147,44 @@ async function createFakeCloudflare() {
       }
       const version = storeVersion(worker!, args);
       activate(worker!, version.id);
-      return ok(`Uploaded ${worker}\nCurrent Version ID: ${version.id}`);
+      return ok({ versionId: version.id });
     }
-    if (command === 'versions upload') {
+    if (args.type === 'versions.upload') {
       if (failUpload === worker) {
         failUpload = null;
         return failed('upload failed');
       }
       const version = storeVersion(worker!, args);
-      return ok(`Worker Version ID: ${version.id}`);
+      return ok({ versionId: version.id });
     }
-    if (command === 'versions deploy') {
-      const targets = args.slice(2).filter((arg) => /@\d+$/.test(arg));
+    if (args.type === 'versions.deploy') {
       const entry = workers.get(worker!)!;
       entry.deployments.unshift({
         created_on: new Date((clock += 1000)).toISOString(),
         id: randomUUID(),
-        versions: targets.map((target) => {
-          const [versionId, percentage] = target.split('@');
-          return { percentage: Number(percentage), version_id: versionId! };
-        }),
+        versions: args.versions.map((target) => ({
+          percentage: target.percentage,
+          version_id: target.versionId,
+        })),
       });
       return ok();
     }
-    if (command === 'deployments list') {
+    if (args.type === 'deployments.list') {
       const entry = workers.get(worker!);
-      return entry ? ok(JSON.stringify(entry.deployments)) : failed('Worker not found');
+      return entry ? ok(entry.deployments) : failed('Worker not found');
     }
-    if (command === 'deployments status') {
+    if (args.type === 'deployments.status') {
       const latest = workers.get(worker!)?.deployments[0];
-      return latest ? ok(JSON.stringify({ versions: latest.versions })) : failed('not found');
+      return latest ? ok({ versions: latest.versions }) : failed('not found');
     }
-    if (command === 'versions view') {
-      const version = workers.get(worker!)?.versions.get(args[2]!);
-      return version ? ok(JSON.stringify(version)) : failed('version not found');
+    if (args.type === 'versions.view') {
+      const version = workers.get(worker!)?.versions.get(args.versionId);
+      return version ? ok(version) : failed('version not found');
     }
-    if (command === 'triggers deploy') {
+    if (args.type === 'triggers.deploy') {
       return ok();
     }
-    throw new Error(`Unexpected Wrangler command: ${args.join(' ')}`);
+    throw new Error(`Unexpected Cloudflare operation: ${args.type}`);
   };
 
   const create =
@@ -399,9 +395,9 @@ it('stages a fresh immutable version of every Worker before enabling a fresh ins
   expect(
     cloud.commands
       .filter((command) => command.worker === tail)
-      .map((command) => command.args.slice(0, 2).join(' '))
-      .filter((command) => command.startsWith('deploy ') || command === 'versions upload'),
-  ).toEqual(['deploy --config', 'versions upload']);
+      .map((command) => command.args.type)
+      .filter((command) => command === 'worker.deploy' || command === 'versions.upload'),
+  ).toEqual(['worker.deploy', 'versions.upload']);
 });
 
 it('enables traffic when resuming after the first Worker create was refused', async () => {
