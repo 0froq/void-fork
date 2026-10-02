@@ -183,6 +183,7 @@ function expectPnpmAllowBuilds(root: string): void {
 }
 
 vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
+  settings: { accessible: false },
   intro: vi.fn(),
   outro: (...args: Array<unknown>) => mockOutro(...args),
   note: (...args: Array<unknown>) => mockNote(...args),
