@@ -211,14 +211,13 @@ project-scoped credential with `void project token create` instead.
 
 ## Cloudflare authentication
 
-Void ships and invokes compatible Cloudflare tooling itself. Users do not need to install or run a separate Cloudflare CLI. Browser credentials are stored in an encrypted file protected by the operating-system keychain. When Void adopts an existing browser session, it persists the secure-storage preference so subsequent logins through compatible tooling use the same credential store.
+Use Void's Cloudflare commands to sign in and manage credentials. No separate Cloudflare CLI is needed. Browser credentials are encrypted and protected by your system keychain.
 
-- `void cloudflare login` — open a fresh browser OAuth sign-in, including when already signed in. Use this to switch Cloudflare users without first logging out; Void does not remove the prior session before opening sign-in.
-- `void cloudflare status` — show the authenticated email, authentication method, accessible account names and IDs, and the pinned deployment account and its source. Credential values are never printed.
+- `void cloudflare login` — sign in through your browser or switch Cloudflare users.
+- `void cloudflare status` — show your identity, credential source, accessible accounts, and deployment account.
 - `void cloudflare logout` — remove the local browser session.
 
 Interactive `void connect --platform cloudflare`, `void init`, and `void deploy --platform cloudflare` invoke the same login flow automatically when necessary. Non-interactive CI must set `CLOUDFLARE_API_TOKEN`.
-When a browser session is required, Void opens Cloudflare login immediately and prints `Press Ctrl+C to cancel`; there is no redundant terminal confirmation.
 
 Signing in changes the browser session, not `account_id` in the project configuration. Check `void cloudflare status` after switching users; if the new user cannot access the pinned account, resolve the project target separately before deploying.
 
