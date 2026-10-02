@@ -1,3 +1,4 @@
+import { CANCEL_SYMBOL } from '@clack/prompts';
 import { createPlatformDeploymentManifest } from '@void/platform';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { pc } from '../../src/cli/output.ts';
@@ -74,9 +75,7 @@ beforeEach(() => {
       ? options[0].value
       : 'workers-dev',
   );
-  mocks.confirm.mockImplementation(async ({ message }) =>
-    message.startsWith('Use ') ? true : false,
-  );
+  mocks.confirm.mockResolvedValue(false);
   mocks.plan.mockResolvedValue({
     account: { id: 'account', name: 'Account' },
     actions: [],
@@ -100,7 +99,7 @@ afterEach(() => {
 });
 
 describe('interactive platform installation prompts', () => {
-  it('lists and confirms an externally managed Hyperdrive with an unrelated name', async () => {
+  it('uses the selected Hyperdrive without a second confirmation', async () => {
     vi.spyOn(PlatformCloudflareClient.prototype, 'listHyperdriveConfigs').mockResolvedValue([
       { id: 'other-id', name: 'another-database' },
       { id: 'terraform-id', name: 'company-managed-postgres' },
@@ -146,10 +145,7 @@ describe('interactive platform installation prompts', () => {
         { value: 'terraform-id', label: 'company-managed-postgres', hint: 'terraform-id' },
       ],
     });
-    expect(mocks.confirm).toHaveBeenCalledWith({
-      message: 'Use company-managed-postgres for this platform?',
-      initialValue: true,
-    });
+    expect(mocks.confirm).not.toHaveBeenCalled();
     expect(mocks.plan).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -267,28 +263,19 @@ describe('interactive platform installation prompts', () => {
     expect(mocks.plan).not.toHaveBeenCalled();
   });
 
-  it('stops before planning if an existing Hyperdrive is declined', async () => {
+  it('stops before planning if Hyperdrive selection is cancelled', async () => {
     vi.spyOn(PlatformCloudflareClient.prototype, 'listHyperdriveConfigs').mockResolvedValue([
       { id: 'terraform-id', name: 'void-test-database' },
     ]);
-    vi.spyOn(PlatformCloudflareClient.prototype, 'getHyperdriveConfig').mockResolvedValue({
-      id: 'terraform-id',
-      name: 'void-test-database',
-      origin: {
-        database: 'void_platform',
-        host: 'db.example.com',
-        port: 5432,
-        scheme: 'postgresql',
-        user: 'runtime_user',
-      },
-      cachingDisabled: true,
-    });
-
-    mocks.confirm.mockResolvedValue(false);
+    const getConfig = vi.spyOn(PlatformCloudflareClient.prototype, 'getHyperdriveConfig');
+    mocks.select.mockImplementation(async ({ message }) =>
+      message === 'Which Hyperdrive should Void use?' ? CANCEL_SYMBOL : 'existing',
+    );
 
     await expect(
       runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev'])),
     ).rejects.toThrow('Cancelled');
+    expect(getConfig).not.toHaveBeenCalled();
     expect(mocks.plan).not.toHaveBeenCalled();
   });
 

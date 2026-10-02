@@ -500,15 +500,6 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
             `platform: Disable SQL result caching on existing Hyperdrive ${live.name} before installing.`,
           );
         }
-        const confirmed = args.hyperdrive
-          ? true
-          : await confirm({
-              message: `Use ${live.name} for this platform?`,
-              initialValue: true,
-            });
-        if (isCancel(confirmed) || !confirmed) {
-          throw new Error('platform: Cancelled.');
-        }
         externalHyperdrive = {
           id: live.id,
           name: live.name,
