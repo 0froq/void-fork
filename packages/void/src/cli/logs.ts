@@ -1,4 +1,4 @@
-import { intro, outro, log } from '@voidzero-dev/vite-plus-prompts';
+import { intro, outro, log, wrapTextWithPrefix } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { PlatformClient, type LogEntry } from './client.ts';
 import { cliTitle, dim, pc } from './output.ts';
@@ -98,22 +98,38 @@ function printEntry(entry: LogEntry): void {
         ? pc.yellow(status)
         : status;
 
-  console.log(`${dim(time)} ${method} ${url} ${coloredStatus}`);
+  console.log(
+    wrapTextWithPrefix(
+      process.stdout,
+      `${method} ${url} ${coloredStatus}`,
+      ' '.repeat(time.length + 1),
+      `${dim(time)} `,
+    ),
+  );
 
   for (const l of entry.logs) {
     const text = l.message.map(String).join(' ');
     const level = l.level ?? 'log';
-    if (level === 'error') {
-      console.log(`  ${pc.red(`[${level}]`)} ${text}`);
-    } else if (level === 'warn') {
-      console.log(`  ${pc.yellow(`[${level}]`)} ${text}`);
-    } else {
-      console.log(`  ${dim(`[${level}]`)} ${text}`);
-    }
+    const marker =
+      level === 'error'
+        ? pc.red(`[${level}]`)
+        : level === 'warn'
+          ? pc.yellow(`[${level}]`)
+          : dim(`[${level}]`);
+    console.log(
+      wrapTextWithPrefix(process.stdout, text, ' '.repeat(level.length + 5), `  ${marker} `),
+    );
   }
 
   for (const ex of entry.exceptions) {
-    console.log(`  ${pc.red('[exception]')} ${ex.name}: ${ex.message}`);
+    console.log(
+      wrapTextWithPrefix(
+        process.stdout,
+        `${ex.name}: ${ex.message}`,
+        ' '.repeat(14),
+        `  ${pc.red('[exception]')} `,
+      ),
+    );
   }
 }
 
