@@ -35,7 +35,7 @@ void platform install
 
 :::
 
-After reviewing `--plan`, run `void platform install` and select your saved plan, or run the command printed under **Next, run this command to install the platform**. Both carry your choices into installation and check the current Cloudflare state. Confirm the refreshed plan, then follow the credential prompts. Void opens the relevant setup pages and provides fallback links in the terminal. It reuses values you have already supplied.
+After reviewing `--plan`, run `void platform install` and select your saved plan, or run the command printed under **Next, run this command to install the platform**. Both carry your choices into installation and check the current Cloudflare state. Review the refreshed plan. At **Apply this plan?**, **Yes** is selected; press Enter to continue to the credential prompts, or choose **No** to stop. Void opens the relevant setup pages and provides fallback links in the terminal. It reuses values you have already supplied.
 
 Saved plans contain your installation choices, including paths to any authentication configuration or custom runtime. They contain no secrets or approval to install. Declining the plan or cancelling management-token setup keeps those choices for your next attempt.
 

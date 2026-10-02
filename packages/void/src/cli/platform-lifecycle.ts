@@ -694,7 +694,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       assertPlatformOperatorCredentialCanApplyPlan(operatorCredential, plan);
     }
     if (process.stdin.isTTY && !args.yes) {
-      const proceed = await confirm({ message: 'Apply this plan?', initialValue: false });
+      const proceed = await confirm({ message: 'Apply this plan?', initialValue: true });
       if (isCancel(proceed) || !proceed) {
         outro('No changes made.');
         return;

@@ -1118,7 +1118,7 @@ describe('platform credential onboarding', () => {
     expect(mocks.plan).toHaveBeenCalledWith(expect.anything(), firstInput, null, expect.anything());
     expect(mocks.confirm).toHaveBeenCalledWith({
       message: 'Apply this plan?',
-      initialValue: false,
+      initialValue: true,
     });
     expect(mocks.install).toHaveBeenCalledOnce();
     expect(listSavedPlatformInstallPlans()).toEqual([]);
@@ -1132,7 +1132,7 @@ describe('platform credential onboarding', () => {
     await runPlatformLifecycleCommand(parsePlatformArgs(['install']));
     expect(mocks.confirm).toHaveBeenCalledWith({
       message: 'Apply this plan?',
-      initialValue: false,
+      initialValue: true,
     });
     expect(mocks.install).not.toHaveBeenCalled();
     expect(listSavedPlatformInstallPlans()).toHaveLength(1);
