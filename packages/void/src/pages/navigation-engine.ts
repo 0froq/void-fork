@@ -622,9 +622,8 @@ export async function createPageNavigationEngine(
         window.location.href = url;
         return undefined;
       }
-      pageData = _staticPageDataCacheKeys.has(getPageDataCacheKey(fetchUrl, method))
-        ? clonePageData(cachedPageData as PageData)
-        : (cachedPageData as PageData);
+      // Deferred initialization and adapters mutate props; retain the cached wire payload.
+      pageData = clonePageData(cachedPageData as PageData);
       deferredRegistry.setupResolved(pageData);
       if (!_prefetchCache.isFresh(cacheEntry)) {
         const bgHeaders = {

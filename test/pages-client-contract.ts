@@ -91,6 +91,42 @@ export function registerSharedClientTests({
     }
   });
 
+  it('revisits prefetched deferred pages without nesting their resolved props', async () => {
+    const page = await newPage();
+    let deferredRequests = 0;
+    page.on('request', (request) => {
+      if (request.url() === BASE + '/deferred') {
+        deferredRequests++;
+      }
+    });
+    try {
+      await page.goto(BASE + '/');
+      await waitForHydration(page);
+      await page.evaluate(() => {
+        (window as TestWindow).__SPA_MARKER = true;
+      });
+      const prefetched = page.waitForResponse(
+        (response) =>
+          response.url() === BASE + '/deferred' &&
+          response.request().headers()['purpose'] === 'prefetch',
+      );
+      await page.hover('a[href="/deferred"]');
+      await (await prefetched).json();
+      for (let visit = 0; visit < 3; visit++) {
+        await page.click('a[href="/deferred"]');
+        await page.waitForFunction(() =>
+          document.querySelector('[data-testid="deferred-resolved"]')?.textContent?.includes('42'),
+        );
+        expect(await page.evaluate(() => (window as TestWindow).__SPA_MARKER)).toBe(true);
+        await page.click('a[href="/"]');
+        await page.waitForFunction(() => window.location.pathname === '/');
+      }
+      expect(deferredRequests).toBe(1);
+    } finally {
+      await page.context().close();
+    }
+  });
+
   // The longer journey also covers both forward navigation steps and their
   // rendered data, so separate list/detail browser contexts add no coverage.
   it('browser back/forward navigation', async () => {

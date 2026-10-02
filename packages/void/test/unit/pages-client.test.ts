@@ -189,6 +189,60 @@ describe('createVoidRouter prefetch', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['replace', 'mutate'])(
+    'keeps prefetched deferred data intact with %s adapters',
+    async (mode) => {
+      stubClientGlobals();
+      const pageData = {
+        component: 'users',
+        props: { stats: { count: 42 } },
+        deferredKeys: { stats: 'stats' },
+      };
+      const fetchMock = vi.fn(async () =>
+        Response.json(pageData, { headers: { 'X-VoidPages': 'true' } }),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+      const applyUpdate = vi.fn();
+      const { router } = await createVoidRouter({
+        adapter: {
+          applyUpdate,
+          createDeferred: () => ({ loading: true, value: null, error: null }),
+          isLoading: (ref) => (ref as { loading: boolean }).loading,
+          resolveDeferred: (ref, value) =>
+            mode === 'mutate'
+              ? Object.assign(ref as object, { loading: false, value })
+              : { loading: false, value, error: null },
+          rejectDeferred: (_ref, error) => ({ loading: false, value: null, error }),
+        },
+        components: { home: async () => ({ default: {} }), users: async () => ({ default: {} }) },
+        layoutTree: {},
+        routeMeta: {},
+        matchRoute: () => 'users',
+        viewTransitions: false,
+        prefetchHoverDelay: 75,
+        prefetchDefaultCacheFor: parseCacheFor('30s'),
+      });
+      try {
+        await router.prefetch('/users');
+        for (let visit = 0; visit < 3; visit++) {
+          await router.visit('/users');
+          const rendered = applyUpdate.mock.calls.at(-1)![0];
+          expect(rendered.props.stats).toEqual({
+            loading: false,
+            value: { count: 42 },
+            error: null,
+          });
+          // Component mutations must not become part of the next cached visit either.
+          rendered.props.stats.value.count = 100;
+          expect(await router.prefetch('/users')).toEqual(pageData);
+        }
+        expect(fetchMock).toHaveBeenCalledOnce();
+      } finally {
+        router.flushAll();
+      }
+    },
+  );
+
   it('serves revalidated data after a stale-while-revalidate refresh', async () => {
     stubClientGlobals();
     let n = 0;
