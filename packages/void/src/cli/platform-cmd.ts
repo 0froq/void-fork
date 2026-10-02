@@ -140,6 +140,30 @@ export function saveDiscoveredPlatform(discovery: PlatformDiscoveryDocument): Pl
 
 export async function runPlatformCommand(_root: string, args: PlatformArgs): Promise<void> {
   if (args.subcommand === 'config') {
+    if ('configGroup' in args) {
+      if (args.configGroup === '') {
+        if (!process.stdin.isTTY) {
+          throw new Error(
+            'platform: Choose void platform config auth or void platform config plans.',
+          );
+        }
+        const group = await select({
+          message: 'Platform configuration:',
+          options: [
+            { value: 'auth', label: 'Authentication and protection' },
+            { value: 'plans', label: 'Plans and limits' },
+          ],
+        });
+        if (isCancel(group)) {
+          return;
+        }
+        const { parsePlatformArgs } = await import('./platform-args.ts');
+        return runPlatformCommand(_root, parsePlatformArgs(['config', group]));
+      }
+      const { runPlatformPlansConfig } = await import('./platform-plans-config.ts');
+      await runPlatformPlansConfig(args);
+      return;
+    }
     const { runPlatformAuthConfig } = await import('./platform-auth-config.ts');
     await runPlatformAuthConfig(args);
     return;

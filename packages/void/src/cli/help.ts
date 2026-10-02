@@ -287,6 +287,10 @@ const HELP_TREE: HelpTree = {
         command: 'config auth [command]',
         description: 'Configure login methods, company protection, and provider recovery',
       },
+      {
+        command: 'config plans [command]',
+        description: 'Manage plans, account limits, and the default plan',
+      },
       { command: 'list', description: 'List installed and connected platforms' },
       { command: 'use [id]', description: 'Select the default Void platform' },
       { command: 'status [id]', description: 'Inspect a platform and its health' },
@@ -310,8 +314,65 @@ const HELP_TREE: HelpTree = {
       ...operatorHelpTree(),
       config: {
         summary: 'Configure platform settings.',
-        usage: ['void platform config auth [command] [options]'],
+        usage: ['void platform config <auth|plans> [command] [options]'],
         children: {
+          plans: {
+            summary: 'Manage plans and limits. Without a command, opens interactive configuration.',
+            usage: [
+              'void platform config plans [show|add|set|reset|archive|restore|remove|default|sync] [plan-id] [options]',
+            ],
+            commands: [
+              {
+                command: 'show [id]',
+                description: 'Show the catalog or one plan and its account count',
+              },
+              {
+                command: 'add <id> --copy <id> --name <name>',
+                description: 'Copy an existing plan with a new stable ID',
+              },
+              {
+                command: 'set <id>',
+                description: 'Edit a plan name, limits, or build instance size',
+              },
+              {
+                command: 'reset <id>',
+                description: 'Restore a built-in plan’s original limits and build size',
+              },
+              {
+                command: 'archive <id>',
+                description: 'Keep current accounts while stopping new assignments',
+              },
+              {
+                command: 'restore <id>',
+                description: 'Allow assignments to an archived plan again',
+              },
+              {
+                command: 'remove <id>',
+                description: 'Remove an unused plan or move its accounts to a replacement',
+              },
+              { command: 'default <id>', description: 'Choose the plan new accounts receive' },
+              { command: 'sync', description: 'Continue pending account limit updates' },
+            ],
+            options: [
+              { command: '--connection <id-or-url>', description: 'Select a registered platform' },
+              {
+                command: '--file <path>',
+                description: 'Read plan settings and partial limits from JSON',
+              },
+              {
+                command: '--name <name>',
+                description: 'Set the display name when adding or editing',
+              },
+              { command: '--copy <id>', description: 'Copy this plan when adding a new one' },
+              {
+                command: '--replacement <id>',
+                description: 'Move accounts and any default before removing a plan',
+              },
+              { command: '--plan', description: 'Preview the change and affected accounts' },
+              { command: '--yes', description: 'Apply without prompting' },
+              { command: '--json', description: 'Print structured output' },
+            ],
+          },
           auth: {
             summary:
               'Manage login methods and independent platform protection. Without a command, opens interactive configuration.',

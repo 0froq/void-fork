@@ -5,13 +5,14 @@ import {
 } from '@void/platform';
 import { operatorGroups, parseOperatorArgs, type OperatorArgs } from './operator-args.ts';
 import { parsePlatformConfigArgs, type PlatformConfigArgs } from './platform-config-args.ts';
+import { parsePlatformPlansArgs, type PlatformPlansArgs } from './platform-plans-args.ts';
 import type { SubcommandDef } from './subcommand-prompt.ts';
 
 export const platformSubcommands: Array<SubcommandDef> = [
   {
     name: 'config',
-    hint: 'Configure authentication',
-    description: 'Configure login methods, company protection, or provider recovery',
+    hint: 'Authentication, plans, and limits',
+    description: 'Configure login methods, protection, plans, or limits',
   },
   ...operatorGroups.map((name) => ({
     name,
@@ -53,6 +54,8 @@ export const platformSubcommands: Array<SubcommandDef> = [
 
 export type PlatformArgs =
   | PlatformConfigArgs
+  | PlatformPlansArgs
+  | { subcommand: 'config'; configGroup: ''; plan: false; yes: false }
   | OperatorArgs
   | { subcommand: 'list' }
   | { subcommand: 'use'; selector: string }
@@ -206,7 +209,10 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
   }
   const [subcommand, ...rest] = args;
   if (subcommand === 'config') {
-    return parsePlatformConfigArgs(rest);
+    if (rest.length === 0) {
+      return { subcommand: 'config', configGroup: '', plan: false, yes: false };
+    }
+    return rest[0] === 'plans' ? parsePlatformPlansArgs(rest) : parsePlatformConfigArgs(rest);
   }
 
   if (subcommand === 'domain') {

@@ -10,6 +10,7 @@ walkthrough and the [CLI reference](../../docs/reference/cli.md#operator-command
 for every command.
 
 Use `void platform config auth` to manage login methods and company signup.
+Use `void platform config plans` to manage account plans, enforced limits, and the default for new accounts. See [Plans and Limits](../../docs/guide/platform/administration/plans.md).
 Cloudflare Access protection has separate create/connect controls. Users can
 link another enabled login to their account with `void account link`.
 

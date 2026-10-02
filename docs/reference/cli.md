@@ -485,6 +485,28 @@ void platform auth token [--token-stdin]
 
 With no `--provider`, browser login offers the platform's enabled login methods.
 
+#### Plan configuration
+
+`void platform config plans` opens an interactive plan menu using your administrator session. Plans have stable IDs and editable display names. Copy an existing plan to add one, edit limits without redeploying, archive it to stop new assignments, or remove it with an explicit replacement for its accounts.
+
+```sh
+void platform config plans show [plan-id]
+void platform config plans add <plan-id> --copy <existing-id> --name "Team"
+void platform config plans set <plan-id> [--name "Team"] [--file plan.json]
+void platform config plans reset <builtin-plan-id>
+void platform config plans archive <plan-id>
+void platform config plans restore <plan-id>
+void platform config plans remove <plan-id> [--replacement <plan-id>]
+void platform config plans default <plan-id>
+void platform config plans sync
+```
+
+Use `--plan` to preview changes and affected accounts; scripted mutations require `--yes`. Every command supports `--connection <registered-id-or-url>` and `--json`. `show` reports the effective limits, default, assignments, and pending account updates. `reset` restores a built-in plan's original limits and build instance size. Archived plans keep their existing accounts but cannot receive new assignments; change the default before archiving it. `remove` requires a replacement for a plan that has accounts or is the default. Changing the default affects only new accounts.
+
+For `add` and `set`, `--file` reads a JSON object with optional `name`, `limits`, `buildInstanceType`, and boolean `allowShortSlugs`. `limits` is a partial object of nonnegative whole numbers; `0` means unlimited by the plan. Build timeouts remain capped at the platform maximum of 60 minutes; `0` uses that maximum. Omitted settings keep their current values or the copied plan's values. `buildInstanceType` is `standard-3` or `standard-4`. `allowShortSlugs` permits future assignments of project slugs of five characters or fewer; existing URLs remain available. Storage quotas are not editable. See [Plans and Limits](../guide/platform/administration/plans.md) for supported limits and examples.
+
+An apply checks the preview's revision and rejects concurrent changes. Lower quotas can restrict accounts already above them; usage history and billing periods are preserved. The CLI continues account updates until complete. If an update fails or stops making progress, the configuration remains saved and the command exits unsuccessfully. Run `sync --yes` to continue before editing plans again. Inspect `show` and operator events after an uncertain request outcome.
+
 #### Authentication configuration
 
 `void platform config auth` opens interactive configuration. These commands use

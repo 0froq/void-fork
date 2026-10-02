@@ -38,12 +38,15 @@ The preview shows both owners, their plans and suspension state, blockers, and t
 
 After the transfer, the former owner becomes a project administrator. Existing project-scoped CI deploy credentials are revoked; create replacements as the new owner. The new owner's plan and limits apply immediately. Usage before the transfer remains charged to the former owner; later usage is charged to the new owner. If an apply reports partial convergence, inspect the project and operator event log before repeating it.
 
-New users on a self-hosted installation start with the `custom` profile, which
+By default, new users on a self-hosted installation start with the `custom` profile, which
 does not cap application requests, AI usage, deployment frequency, or retained
 Worker deployments. Named profiles such as `pro` apply the platform's quota and
 retention policies; they do not purchase Cloudflare services or bill your users.
 Storage figures are not a hard storage-quota boundary. Set an operating budget
 and retention policy before opening signup beyond your invited team.
+
+Use [Plans and Limits](/guide/platform/administration/plans) to define your own
+plans, change limits, or choose a different default for new accounts.
 
 The last active administrator cannot be deleted or suspended, including through
 the browser admin UI. Another administrator must still have access. Automatic

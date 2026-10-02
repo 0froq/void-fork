@@ -303,8 +303,9 @@ if (helpPath) {
     },
     {
       name: 'platform',
-      hint: 'auth | user | project | deployment | signup | email | zero-trust | system | install',
-      description: 'Install platforms and administer users, projects, access, and operations',
+      hint: 'config | auth | user | project | deployment | signup | email | zero-trust | system | install',
+      description:
+        'Install platforms and administer plans, users, projects, access, and operations',
     },
     {
       name: 'cloudflare',

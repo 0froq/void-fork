@@ -1,10 +1,24 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, expect, test } from 'vite-plus/test';
+import { getUser } from '../../src/db.ts';
+import type { ApiEnv } from '../../src/env.ts';
 import { app } from '../../src/index.ts';
-import { clearTables, createTestUser, setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
+import { readPlanCatalog } from '../../src/plans.ts';
+import {
+  clearTables,
+  createTestProject,
+  createTestUser,
+  setupEnv,
+  teardownEnv,
+  type TestEnv,
+} from './helpers.ts';
+import { createUsageCounterFixture } from './usage-counter-fixture.ts';
 
 const cli = fileURLToPath(
   new URL('../../../../../packages/void/dist/cli/cli.mjs', import.meta.url),
@@ -59,6 +73,7 @@ afterAll(async () => {
 beforeEach(async () => {
   requests = 0;
   await clearTables(env.db);
+  env.USAGE_COUNTER = createUsageCounterFixture(env as unknown as ApiEnv['Bindings']);
   await env.ROUTING.put('signup:enabled', 'false');
   const admin = await createTestUser(
     env.db,
@@ -165,4 +180,128 @@ test('built CLI requires acknowledgement, exposes API validation, and honors rev
   const revoked = await run(['user', 'list', '--json']);
   expect(revoked.code).toBe(1);
   expect(JSON.parse(revoked.stderr)).toMatchObject({ error: 'unauthorized', status: 401 });
+});
+
+test('built CLI manages plans and refreshes existing app limits against recorded usage', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'void-plan-cli-'));
+  try {
+    const preview = await run([
+      'config',
+      'plans',
+      'add',
+      'team',
+      '--copy',
+      'pro',
+      '--name',
+      'Team',
+      '--plan',
+      '--json',
+    ]);
+    expect(preview.code, preview.stderr).toBe(0);
+    expect(JSON.parse(preview.stdout)).toMatchObject({ dryRun: true, expectedRevision: 0 });
+    expect((await readPlanCatalog(env.db)).revision).toBe(0);
+    const add = await run([
+      'config',
+      'plans',
+      'add',
+      'team',
+      '--copy',
+      'pro',
+      '--name',
+      'Team',
+      '--yes',
+      '--json',
+    ]);
+    expect(add.code, add.stderr).toBe(0);
+    const owner = await createTestUser(env.db, 'plan-cli-owner');
+    const project = await createTestProject(env.db, owner.id, 'plan-cli-project');
+    await env.ROUTING.put(
+      project.slug,
+      JSON.stringify({ workerName: 'existing-worker', projectId: project.id, userId: owner.id }),
+    );
+    const assigned = await run(['user', 'plan', owner.id, 'team', '--yes', '--json']);
+    expect(assigned.code, assigned.stderr).toBe(0);
+    const counter = env.USAGE_COUNTER.get(env.USAGE_COUNTER.idFromName(owner.id));
+    expect(
+      (
+        await counter.fetch(
+          new Request('https://do/record', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: owner.id,
+              events: [
+                {
+                  projectId: project.id,
+                  userId: owner.id,
+                  slug: project.slug,
+                  requests: 3,
+                  responseBytes: 0,
+                },
+              ],
+            }),
+          }),
+        )
+      ).status,
+    ).toBe(200);
+    const file = join(directory, 'team.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        name: 'Team Plus',
+        limits: {
+          requestsPerMonth: 2,
+          cpuMsPerRequest: 80,
+        },
+      }),
+    );
+    const updated = await run([
+      'config',
+      'plans',
+      'set',
+      'team',
+      '--file',
+      file,
+      '--yes',
+      '--json',
+    ]);
+    expect(updated.code, updated.stderr).toBe(0);
+    expect(JSON.parse(updated.stdout)).toMatchObject({
+      affectedAccounts: 1,
+      reconciliation: { complete: true },
+    });
+    expect(JSON.parse((await env.ROUTING.get(project.slug))!)).toMatchObject({
+      workerName: 'existing-worker',
+      limits: { cpuMs: 80 },
+      suspended: 'requests_exceeded',
+    });
+    const archived = await run(['config', 'plans', 'archive', 'team', '--yes', '--json']);
+    expect(archived.code, archived.stderr).toBe(0);
+    const blocked = await run(['user', 'plan', owner.id, 'team', '--yes', '--json']);
+    expect(blocked.code).toBe(1);
+    const restored = await run(['config', 'plans', 'restore', 'team', '--yes', '--json']);
+    expect(restored.code, restored.stderr).toBe(0);
+    const defaulted = await run(['config', 'plans', 'default', 'team', '--yes', '--json']);
+    expect(defaulted.code, defaulted.stderr).toBe(0);
+    const removed = await run([
+      'config',
+      'plans',
+      'remove',
+      'team',
+      '--replacement',
+      'pro',
+      '--yes',
+      '--json',
+    ]);
+    expect(removed.code, removed.stderr).toBe(0);
+    expect(await getUser(env.db, owner.id)).toMatchObject({ plan: 'pro', suspended_reason: null });
+    expect((await readPlanCatalog(env.db)).defaultPlanId).toBe('pro');
+    expect(await (await counter.fetch(new Request('https://do/state'))).json()).toMatchObject({
+      plan: 'pro',
+      totalRequests: 3,
+    });
+    expect(JSON.parse((await env.ROUTING.get(project.slug))!).suspended).toBeUndefined();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
