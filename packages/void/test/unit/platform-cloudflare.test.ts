@@ -113,7 +113,7 @@ describe('platform Cloudflare client', () => {
         ),
     });
     await expect(notOnboarded.getWorkersSubdomain('account')).rejects.toThrow(
-      'finish Workers onboarding',
+      'platform: Could not read the workers.dev subdomain for account account (HTTP 404). Open https://dash.cloudflare.com/account/workers-and-pages once to provision your account for Workers automatically, then retry the install.',
     );
   });
 

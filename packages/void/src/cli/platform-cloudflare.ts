@@ -265,7 +265,7 @@ export class PlatformCloudflareClient {
         status === 401 || status === 403
           ? 'Check your Cloudflare login or API token permissions for this account, then rerun the command.'
           : status === 404
-            ? `Check ${setupUrl}. If no subdomain is shown, finish Workers onboarding and choose one; otherwise check account access and retry.`
+            ? `Open ${setupUrl} once to provision your account for Workers automatically, then retry the install.`
             : 'Rerun the command. If the dashboard already shows a subdomain, no Workers onboarding change is needed.';
       throw new Error(
         `platform: Could not read the workers.dev subdomain for account ${accountId} (${reason}). ${guidance}`,
