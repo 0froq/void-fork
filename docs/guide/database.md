@@ -366,13 +366,13 @@ See the [CLI reference](../reference/cli.md#database) for connection setup, SQL 
 The `void gen model` command generates dialect-appropriate `sqliteTable`, `pgTable`, or `mysqlTable` definitions.
 
 ```bash
-void gen model post title:string body:text published:boolean
+void gen model posts title:string body:text published:boolean
 ```
 
 This creates:
 
-1. `db/schema/post.ts`: a Drizzle table definition with `id`, `createdAt`, `updatedAt`, and your columns
-2. Updates `db/schema.ts` with `export * from "./schema/post"`
+1. `db/schema/posts.ts`: a Drizzle table definition with `id`, `createdAt`, `updatedAt`, and your columns
+2. Updates `db/schema.ts` with `export * from "./schema/posts"`
 3. `routes/api/posts/index.ts`: `GET` for list and `POST` for insert with validation
 4. `routes/api/posts/[id].ts`: `GET` by id with `404` handling
 

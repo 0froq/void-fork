@@ -732,7 +732,7 @@ export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
 
 The callback receives:
 
-- `dialect`: `"sqlite"` or `"postgresql"`
+- `dialect`: `"sqlite"`, `"postgresql"`, or `"mysql"`
 - `db`: a local Drizzle instance for the active dialect
 - `schema`: the exports from `db/schema.ts` or `db/schema/`
 

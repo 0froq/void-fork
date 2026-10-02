@@ -1201,7 +1201,7 @@ For PostgreSQL schemas with views, triggers, custom types, functions, or standal
 void gen model <name> [columns...]
 ```
 
-Scaffold a complete model: migration file, CRUD API routes, and regenerated DB types in one command.
+Scaffold a Drizzle table, list and create routes, and a route to fetch one row by ID.
 
 ```sh
 void gen model posts title:string body:text published:boolean
@@ -1209,12 +1209,13 @@ void gen model posts title:string body:text published:boolean
 
 Creates:
 
-- `db/migrations/NNN_create_posts.sql`: `CREATE TABLE` with `id` (autoincrement), your columns, and `created_at`
+- `db/schema/posts.ts`: a table with `id`, `createdAt`, `updatedAt`, and your columns
+- An export from `db/schema.ts`
 - `routes/api/posts/index.ts`: `GET` for list and `POST` for insert with validation
 - `routes/api/posts/[id].ts`: `GET` by id with `404` handling
 - Regenerated `.void/db.d.ts`
 
-The generated routes automatically detect your validation library from `package.json` (`valibot`, `zod`, or `arktype`). If none is found, you will be prompted to choose one or skip validation. See [Database: Scaffolding](../guide/database.md#scaffolding) for the full type mapping.
+The generated routes automatically detect your validation library from `package.json` (`valibot`, `zod`, or `arktype`). If none is found, you will be prompted to choose one or skip validation. Run `void db push` to apply the schema locally, or `void db generate` to create migrations before deploying.
 
 Column format: `name:type` or `name:type?` (nullable). Types: `string`, `text`, `datetime`, `integer`, `boolean`, `real`, `blob`.
 
@@ -1338,10 +1339,10 @@ On a direct Cloudflare target, the value is sent to Cloudflare over stdin and st
 void secret sync <file> [--project <name>]
 ```
 
-Bulk upload secrets from a dotenv file. Each `KEY=value` line in the file is uploaded as a secret.
+Upload production server values from a dotenv file stored outside your project. Include only keys declared in `env.ts`; leave out local development credentials and public `VITE_*` values.
 
 ```sh
-void secret sync .env             # validates and uploads declared server values
+void secret sync /secure/path/production.env
 ```
 
 Existing remote secrets absent from the file are kept. Every entry must be a server key declared in `env.ts`, and its value must pass validation.
