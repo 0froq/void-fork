@@ -512,7 +512,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       if (choice === 'setup') {
         note(
           `Create a Hyperdrive in account ${accountId} with any unused name${suggestedNameAvailable ? ` such as ${suggestedName}` : ''}. Point it at the same dedicated PostgreSQL database you will give Void, use a runtime database user, and disable SQL result caching. If your organization manages Hyperdrive, ask its administrator to create it. Then rerun this command and select it from the list.\nSetup: https://developers.cloudflare.com/hyperdrive/get-started/`,
-          'Set up Hyperdrive first',
+          pc.bold('Set up Hyperdrive first'),
         );
         outro('No Cloudflare or local installation state was changed.');
         return;
@@ -550,8 +550,14 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
         }
         if (!args.hyperdrive) {
           note(
-            `Database: ${live.origin.database}\nHost: ${live.origin.host}\nPort: ${live.origin.port ?? 'configured by Cloudflare Tunnel'}\nUser: ${live.origin.user}\nSQL result caching: ${live.cachingDisabled ? 'disabled' : 'enabled'}`,
-            `Existing Hyperdrive ${live.name}`,
+            [
+              `${pc.bold('Database:')} ${live.origin.database}`,
+              `${pc.bold('Host:')} ${live.origin.host}`,
+              `${pc.bold('Port:')} ${live.origin.port ?? 'configured by Cloudflare Tunnel'}`,
+              `${pc.bold('User:')} ${live.origin.user}`,
+              `${pc.bold('SQL result caching:')} ${live.cachingDisabled ? 'disabled' : 'enabled'}`,
+            ].join('\n'),
+            pc.bold(`Existing Hyperdrive ${live.name}`),
           );
         }
         if (!live.cachingDisabled) {
@@ -664,14 +670,14 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
     }
     note(
       formatPlatformInstallPlan(plan),
-      args.plan ? 'Read-only installation plan' : 'Installation plan',
+      pc.bold(args.plan ? 'Read-only installation plan' : 'Installation plan'),
     );
-    note(formatPlatformRuntime(runtime), 'Platform runtime');
+    note(formatPlatformRuntime(runtime), pc.bold('Platform runtime'));
     const needsManagementToken = platformOperatorNeedsManagementToken(operatorCredential, plan);
     if (args.plan) {
       note(
         formatPlatformSetupPlan(plan, { managementToken: needsManagementToken }),
-        'Required Credentials',
+        pc.bold('Required Credentials'),
       );
       if (!existing) {
         log.info('Plan saved locally for your next install.');
@@ -1074,7 +1080,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
         result.zoneNameServers.length > 0
           ? `Update the domain at your registrar to use:\n${result.zoneNameServers.join('\n')}\n\nThen rerun: void platform install --resume --name ${result.manifest.id}`
           : `Wait for ${zoneName} to become active, then rerun:\nvoid platform install --resume --name ${result.manifest.id}`,
-        'Waiting for nameservers',
+        pc.bold('Waiting for nameservers'),
       );
       outro(`Installation ${result.manifest.id} is safely checkpointed.`);
       return;
@@ -1082,7 +1088,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
     if (result.waitingForSandboxDrain) {
       note(
         "The compatible candidate runtime is live in sandbox-drain maintenance mode and application traffic remains disabled. Preview bounded work with `void platform system sandbox-drain --plan`. Follow any returned `nextCursor` with `--cursor '<value>'`. Then apply with `void platform system sandbox-drain --yes` and rerun until it reports DB-backed `complete: true`. Rerun this install command afterward to enable traffic.",
-        'Waiting for managed Sandbox drain',
+        pc.bold('Waiting for managed Sandbox drain'),
       );
       outro(`Installation ${result.manifest.id} is safely checkpointed.`);
       return;

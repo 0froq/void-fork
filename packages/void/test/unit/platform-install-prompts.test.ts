@@ -301,7 +301,7 @@ describe('interactive platform installation prompts', () => {
     expect(mocks.plan).not.toHaveBeenCalled();
   });
 
-  it('bolds platform runtime labels without styling their values', async () => {
+  it('bolds all section headings and runtime labels without styling their values', async () => {
     vi.spyOn(pc, 'bold').mockImplementation(pc.createColors(true).bold);
     const runtime = loadPlatformRuntime('');
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev']));
@@ -312,8 +312,13 @@ describe('interactive platform installation prompts', () => {
         `\u001b[1mRevision:\u001b[22m ${runtime.manifest.sourceRevision ?? 'not recorded'}`,
         `\u001b[1mManifest SHA-256:\u001b[22m ${runtime.manifestSha256}`,
       ].join('\n'),
-      'Platform runtime',
+      '\u001b[1mPlatform runtime\u001b[22m',
     );
+    expect(mocks.note.mock.calls.map(([, title]) => title)).toEqual([
+      '\u001b[1mRead-only installation plan\u001b[22m',
+      '\u001b[1mPlatform runtime\u001b[22m',
+      '\u001b[1mRequired Credentials\u001b[22m',
+    ]);
   });
 
   it('preserves the entered name in the display name suggestion', async () => {
