@@ -1,4 +1,4 @@
-import { intro, log, note, outro } from '@clack/prompts';
+import { intro, log, note, outro } from '@voidzero-dev/vite-plus-prompts';
 import { prepareProject } from '../codegen/prepare.ts';
 import { cliTitle } from './output.ts';
 import type { PrepareArgs } from './prepare-args.ts';

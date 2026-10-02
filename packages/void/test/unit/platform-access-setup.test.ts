@@ -1,8 +1,8 @@
-import { CANCEL_SYMBOL } from '@clack/prompts';
 import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
 } from '@void/platform';
+import { CANCEL_SYMBOL } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   activatePlatformAccessCredentials,
@@ -21,8 +21,8 @@ const prompts = vi.hoisted(() => ({
   note: vi.fn(),
   info: vi.fn(),
 }));
-vi.mock('@clack/prompts', async (original) => {
-  const actual = await original<typeof import('@clack/prompts')>();
+vi.mock('@voidzero-dev/vite-plus-prompts', async (original) => {
+  const actual = await original<typeof import('@voidzero-dev/vite-plus-prompts')>();
   return { ...actual, ...prompts, log: { ...actual.log, info: prompts.info } };
 });
 

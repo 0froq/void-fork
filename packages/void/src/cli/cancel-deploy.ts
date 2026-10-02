@@ -1,4 +1,4 @@
-import { intro, outro, log, confirm, isCancel } from '@clack/prompts';
+import { intro, outro, log, confirm, isCancel } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { PlatformClient, type DeploymentResponse } from './client.ts';
 import { cliTitle } from './output.ts';

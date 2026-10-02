@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { log } from '@clack/prompts';
+import { log } from '@voidzero-dev/vite-plus-prompts';
 import type { AccountArgs } from './account-args.ts';
 import { getToken, removeToken } from './auth.ts';
 import { PlatformClient } from './client.ts';

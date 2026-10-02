@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { intro, outro, log, note } from '@clack/prompts';
+import { intro, outro, log, note } from '@voidzero-dev/vite-plus-prompts';
 import { join } from 'pathslash';
 import { findEnvFile, generateEnvTypes } from '../codegen/env-types.ts';
 import { getToken } from './auth.ts';

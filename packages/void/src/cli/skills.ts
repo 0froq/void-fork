@@ -6,7 +6,7 @@ import {
   readlinkSync,
   symlinkSync,
 } from 'node:fs';
-import { log } from '@clack/prompts';
+import { log } from '@voidzero-dev/vite-plus-prompts';
 import { join, relative } from 'pathslash';
 import { getPackageDir, type AgentConfig } from './agents.ts';
 

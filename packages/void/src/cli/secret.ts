@@ -1,5 +1,14 @@
 import { readFileSync } from 'node:fs';
-import { intro, outro, log, note, cancel, isCancel, password, confirm } from '@clack/prompts';
+import {
+  intro,
+  outro,
+  log,
+  note,
+  cancel,
+  isCancel,
+  password,
+  confirm,
+} from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { PlatformClient } from './client.ts';
 import { validateSecretValues } from './env-validation.ts';

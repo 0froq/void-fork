@@ -1,5 +1,5 @@
-import { isCancel, log, select, text } from '@clack/prompts';
 import { parsePlatformDiscoveryDocument, type PlatformDiscoveryDocument } from '@void/platform';
+import { isCancel, log, select, text } from '@voidzero-dev/vite-plus-prompts';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import {
   ensureCloudflaredToken,

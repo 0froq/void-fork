@@ -1,4 +1,4 @@
-import { log, note } from '@clack/prompts';
+import { log, note } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { EmailLogsResponse, PlatformClient } from '../../src/cli/client.ts';
 import { emailLogs } from '../../src/cli/email.ts';
@@ -7,8 +7,8 @@ function client(body: EmailLogsResponse): Pick<PlatformClient, 'getEmailLogs'> {
   return { getEmailLogs: vi.fn(async () => body) };
 }
 
-vi.mock('@clack/prompts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@clack/prompts')>();
+vi.mock('@voidzero-dev/vite-plus-prompts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@voidzero-dev/vite-plus-prompts')>();
   return { ...actual, note: vi.fn() };
 });
 

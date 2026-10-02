@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
-import { intro, log, outro } from '@clack/prompts';
+import { intro, log, outro } from '@voidzero-dev/vite-plus-prompts';
 import { parse, parseTree, type Node, type ParseError } from 'jsonc-parser';
 import { join } from 'pathslash';
 import {

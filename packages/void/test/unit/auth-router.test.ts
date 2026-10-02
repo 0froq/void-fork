@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('../../src/cli/account-cmd.ts', () => ({ runAccountCommand: mocks.account }));
 vi.mock('../../src/cli/cloudflare-cmd.ts', () => ({ runCloudflareCommand: mocks.cloudflare }));
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   select: mocks.select,
   isCancel: (value: unknown) => typeof value === 'symbol',
 }));

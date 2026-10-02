@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   intro: vi.fn(),
   outro: vi.fn(),
   log: { success: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn(), step: vi.fn() },
@@ -443,7 +443,7 @@ describe('warnRedundantForceOn3xx', () => {
   // surfaces a single aggregated `log.warn` via `warnRedundantForceOn3xx`.
   it('skips emitting when the count is zero', async () => {
     const { warnRedundantForceOn3xx } = await import('../../src/cli/deploy.ts');
-    const { log } = await import('@clack/prompts');
+    const { log } = await import('@voidzero-dev/vite-plus-prompts');
     const warnSpy = log.warn as ReturnType<typeof vi.fn>;
     warnSpy.mockClear();
 
@@ -454,7 +454,7 @@ describe('warnRedundantForceOn3xx', () => {
 
   it('emits a single aggregated warning including the count when > 0', async () => {
     const { warnRedundantForceOn3xx } = await import('../../src/cli/deploy.ts');
-    const { log } = await import('@clack/prompts');
+    const { log } = await import('@voidzero-dev/vite-plus-prompts');
     const warnSpy = log.warn as ReturnType<typeof vi.fn>;
     warnSpy.mockClear();
 

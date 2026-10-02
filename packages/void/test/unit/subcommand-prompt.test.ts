@@ -1,6 +1,6 @@
 import { PassThrough, Writable } from 'node:stream';
 import { stripVTControlCharacters } from 'node:util';
-import { S_RADIO_ACTIVE, S_RADIO_INACTIVE, S_STEP_ACTIVE } from '@clack/prompts';
+import { S_RADIO_ACTIVE, S_RADIO_INACTIVE, S_STEP_ACTIVE } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
 import { promptSubcommand, type SubcommandDef } from '../../src/cli/subcommand-prompt.ts';
 

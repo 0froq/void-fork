@@ -21,7 +21,7 @@ const mockRunPgMigrations = vi.fn();
 const mockGetMySqlAppliedMigrations = vi.fn();
 const mockRunMySqlMigrations = vi.fn();
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   intro: (...args: Array<unknown>) => mockIntro(...args),
   outro: (...args: Array<unknown>) => mockOutro(...args),
   log: {

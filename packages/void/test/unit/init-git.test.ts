@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CANCEL_SYMBOL, cancel, confirm, log } from '@clack/prompts';
+import { CANCEL_SYMBOL, cancel, confirm, log } from '@voidzero-dev/vite-plus-prompts';
 import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { initialCommitCommand, setupGit } from '../../src/cli/init-git.ts';
@@ -12,8 +12,9 @@ vi.mock('node:child_process', async (importOriginal) => {
   return { ...actual, spawnSync: vi.fn(actual.spawnSync) };
 });
 
-vi.mock('@clack/prompts', async (importOriginal) => {
-  const { CANCEL_SYMBOL, isCancel } = await importOriginal<typeof import('@clack/prompts')>();
+vi.mock('@voidzero-dev/vite-plus-prompts', async (importOriginal) => {
+  const { CANCEL_SYMBOL, isCancel } =
+    await importOriginal<typeof import('@voidzero-dev/vite-plus-prompts')>();
   return {
     CANCEL_SYMBOL,
     cancel: vi.fn(),

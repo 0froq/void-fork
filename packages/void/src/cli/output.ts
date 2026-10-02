@@ -1,4 +1,11 @@
-import { isCI, log, spinner, type SpinnerOptions, type SpinnerResult } from '@clack/prompts';
+import {
+  isCI,
+  log,
+  settings,
+  spinner,
+  type SpinnerOptions,
+  type SpinnerResult,
+} from '@voidzero-dev/vite-plus-prompts';
 import pc from 'picocolors';
 
 export { pc };
@@ -9,24 +16,23 @@ export function cliCommandName(): 'void' | 'void-dev' {
   return entryName === 'void-dev' || entryName === 'void-dev.cmd' ? 'void-dev' : 'void';
 }
 
-/**
- * Terminal-safe spinner wrapper. In CI and redirected output,
- * `@clack/prompts` spinner emits DEC Private Mode cursor hide/show codes
- * (`\x1b[?25l` / `\x1b[?25h`) that render as text artifacts. This wrapper
- * replaces the spinner with plain log output.
- */
+/** Keep phase updates visible in static progress output, including redirected terminals. */
 export function createSpinner(
   options?: Pick<SpinnerOptions, 'onCancel'>,
   isTerminal: boolean = process.stdout.isTTY === true,
 ): SpinnerResult {
-  if (!isCI() && isTerminal) {
+  const accessible =
+    settings?.accessible ?? ![undefined, '', '0', 'false'].includes(process.env.ACCESSIBLE);
+  if (!isCI() && isTerminal && !accessible) {
     return spinner(options);
   }
 
   let currentMessage = '';
+  let cancelled = false;
   return {
     start(msg = '') {
       currentMessage = msg;
+      cancelled = false;
       if (msg) {
         log.step(msg);
       }
@@ -43,6 +49,7 @@ export function createSpinner(
       }
     },
     cancel(msg = '') {
+      cancelled = true;
       if (msg) {
         log.warn(msg);
       }
@@ -52,9 +59,13 @@ export function createSpinner(
         log.error(msg);
       }
     },
+    pause() {},
+    resume(msg = '') {
+      this.message(msg);
+    },
     clear() {},
     get isCancelled() {
-      return false;
+      return cancelled;
     },
   };
 }

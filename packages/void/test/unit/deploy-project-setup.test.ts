@@ -12,7 +12,7 @@ const mockStep = vi.fn();
 const mockSuccess = vi.fn();
 const mockWarn = vi.fn();
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   cancel: vi.fn(),
   confirm: (...args: Array<unknown>) => mockConfirm(...args),
   intro: vi.fn(),

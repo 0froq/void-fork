@@ -7,7 +7,7 @@ import { runGenCommand, formatTimestamp } from '../../src/cli/gen.ts';
 
 const mockSelect = vi.fn();
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   intro: vi.fn(),
   outro: vi.fn(),
   log: { success: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn(), step: vi.fn() },
@@ -760,7 +760,7 @@ describe('gen migration', () => {
     const snapshotBytes = Buffer.from(JSON.stringify({ id: 'snap-0000', prevId: null }));
     writeFileSync(snapshotPath, snapshotBytes);
 
-    const { log } = await import('@clack/prompts');
+    const { log } = await import('@voidzero-dev/vite-plus-prompts');
     const errorMock = log.error as ReturnType<typeof vi.fn>;
     errorMock.mockClear();
     const exitSpy = spyExit();
@@ -805,7 +805,7 @@ describe('gen migration', () => {
     const snapshotBytes = Buffer.from(JSON.stringify({ id: 'snap-0000', prevId: null }));
     writeFileSync(snapshotPath, snapshotBytes);
 
-    const { log } = await import('@clack/prompts');
+    const { log } = await import('@voidzero-dev/vite-plus-prompts');
     const errorMock = log.error as ReturnType<typeof vi.fn>;
     errorMock.mockClear();
     const exitSpy = spyExit();
@@ -956,7 +956,7 @@ describe('gen migration', () => {
     // Flip the project config to postgresql, contradicting the journal.
     writeFileSync(join(TMP, 'void.json'), JSON.stringify({ database: 'pg' }));
 
-    const { log } = await import('@clack/prompts');
+    const { log } = await import('@voidzero-dev/vite-plus-prompts');
     const errorMock = log.error as ReturnType<typeof vi.fn>;
     errorMock.mockClear();
     const exitSpy = spyExit();
@@ -1088,7 +1088,7 @@ describe('gen migration', () => {
     // `void.json` dialect is irrelevant — the whitelist fires first.
     writeFileSync(join(TMP, 'void.json'), JSON.stringify({}));
 
-    const { log } = await import('@clack/prompts');
+    const { log } = await import('@voidzero-dev/vite-plus-prompts');
     const errorMock = log.error as ReturnType<typeof vi.fn>;
     errorMock.mockClear();
     const exitSpy = spyExit();
@@ -1217,7 +1217,7 @@ describe('gen migration', () => {
       JSON.stringify({ version: '6', dialect: 'sqlite', tables: {}, id: 'other' }, null, 2) + '\n',
     );
 
-    const { log } = await import('@clack/prompts');
+    const { log } = await import('@voidzero-dev/vite-plus-prompts');
     const errorMock = log.error as ReturnType<typeof vi.fn>;
     errorMock.mockClear();
     const exitSpy = spyExit();
@@ -1328,7 +1328,7 @@ describe('gen migration', () => {
     // refuses with the "partial drizzle-kit state" message.
     writeFileSync(join(migrationsDir, 'migrations.js'), 'export default {};\n');
 
-    const { log } = await import('@clack/prompts');
+    const { log } = await import('@voidzero-dev/vite-plus-prompts');
     const errorMock = log.error as ReturnType<typeof vi.fn>;
     errorMock.mockClear();
     const exitSpy = spyExit();

@@ -21,7 +21,6 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@clack/prompts": "catalog:",
     "@types/node": "catalog:",
     "@voidzero-dev/vite-plus-prompts": "workspace:*",
     "pathslash": "catalog:",

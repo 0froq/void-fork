@@ -1,4 +1,4 @@
-import { log, note } from '@clack/prompts';
+import { log, note } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { type DomainStatusResponse, PlatformClient } from './client.ts';
 import type { DomainArgs } from './domain-args.ts';

@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { confirm, isCancel, log, note, outro, select } from '@clack/prompts';
 import {
   createPlatformResourceOwnershipMarker,
   parsePlatformInstallationManifest,
@@ -14,6 +13,7 @@ import {
   type InstallationResource,
   type PlatformInstallationManifest,
 } from '@void/platform';
+import { confirm, isCancel, log, note, outro, select } from '@voidzero-dev/vite-plus-prompts';
 import { createSpinner } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import { platformDatabaseNameFromOwnerUrl } from './platform-auth-database.ts';

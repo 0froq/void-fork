@@ -29,7 +29,7 @@ const mockListDomains = vi.fn();
 const mockGetDomainStatus = vi.fn();
 const mockRemoveDomain = vi.fn();
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   log: {
     error: (...args: Array<unknown>) => mockLogError(...args),
     success: (...args: Array<unknown>) => mockLogSuccess(...args),

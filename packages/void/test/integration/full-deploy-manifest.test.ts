@@ -18,15 +18,17 @@ import {
 import type { ProjectRole } from '../../src/cli/client.ts';
 import type { DetectedFramework } from '../../src/plugin-inference.ts';
 
-// @clack/prompts + the output-spinner wrapper are TTY-bound; noop them (same as
+// @voidzero-dev/vite-plus-prompts + the output-spinner wrapper are TTY-bound; noop them (same as
 // direct-r2-deploy.test.ts) so runDeploy's interactive UI doesn't render here.
 const noopSpinner = {
   start: vi.fn(),
   stop: vi.fn(),
   message: vi.fn(),
 };
-vi.mock('@clack/prompts', async () => {
-  const actual = await vi.importActual<typeof import('@clack/prompts')>('@clack/prompts');
+vi.mock('@voidzero-dev/vite-plus-prompts', async () => {
+  const actual = await vi.importActual<typeof import('@voidzero-dev/vite-plus-prompts')>(
+    '@voidzero-dev/vite-plus-prompts',
+  );
   return {
     ...actual,
     intro: vi.fn(),

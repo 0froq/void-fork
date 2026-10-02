@@ -7,7 +7,7 @@ import {
   S_RADIO_INACTIVE,
   S_CHECKBOX_ACTIVE,
   S_CHECKBOX_INACTIVE,
-} from '@clack/prompts';
+} from '@voidzero-dev/vite-plus-prompts';
 import { wrapAnsi } from 'fast-wrap-ansi';
 import { pc } from './output.ts';
 

@@ -75,7 +75,7 @@ let originalFetch: typeof globalThis.fetch | undefined;
 const mockConfirm = vi.fn<(opts: { message: string }) => Promise<boolean | symbol>>();
 const mockIsCancel = vi.fn<(value: unknown) => boolean>((v) => typeof v === 'symbol');
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   intro: vi.fn(),
   outro: vi.fn(),
   confirm: (opts: { message: string }) => mockConfirm(opts),
@@ -774,7 +774,7 @@ describe('void db execute --remote (PostgreSQL)', () => {
     const { PlatformApiError } = await import('../../src/cli/client.ts');
     mockGetDatabaseUrl.mockRejectedValue(new PlatformApiError('test', 404, '{}'));
 
-    const { log: clackLog } = await import('@clack/prompts');
+    const { log: clackLog } = await import('@voidzero-dev/vite-plus-prompts');
 
     await expect(
       runDbCommand(root, {

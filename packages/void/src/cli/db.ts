@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { confirm, intro, isCancel, outro, log } from '@clack/prompts';
+import { confirm, intro, isCancel, outro, log } from '@voidzero-dev/vite-plus-prompts';
 import { basename, extname, join, relative, resolve } from 'pathslash';
 import {
   readConfig,
@@ -320,7 +320,8 @@ async function runConnect(
   }
 
   if (!connectionString) {
-    const { text: promptText, isCancel: isCancelCheck } = await import('@clack/prompts');
+    const { text: promptText, isCancel: isCancelCheck } =
+      await import('@voidzero-dev/vite-plus-prompts');
     const answer = await promptText({
       message: `Enter your ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'} connection string:`,
       placeholder:
@@ -2267,7 +2268,8 @@ async function runSetUrl(root: string): Promise<void> {
     process.exit(1);
   }
 
-  const { text: promptText, isCancel: isCancelCheck } = await import('@clack/prompts');
+  const { text: promptText, isCancel: isCancelCheck } =
+    await import('@voidzero-dev/vite-plus-prompts');
 
   const connectionString = await promptText({
     message: `Enter your ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'} connection string:`,

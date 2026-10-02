@@ -1,4 +1,3 @@
-import { confirm, isCancel, log, note, text } from '@clack/prompts';
 import {
   createApplicationRoutes,
   createPlatformDeploymentManifest,
@@ -8,6 +7,7 @@ import {
   type PlatformApplication,
   type PlatformInstallationManifest,
 } from '@void/platform';
+import { confirm, isCancel, log, note, text } from '@voidzero-dev/vite-plus-prompts';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import {

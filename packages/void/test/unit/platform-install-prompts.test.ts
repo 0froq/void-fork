@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
-import { CANCEL_SYMBOL } from '@clack/prompts';
 import { createPlatformDeploymentManifest } from '@void/platform';
+import { CANCEL_SYMBOL } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { pc } from '../../src/cli/output.ts';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
@@ -26,8 +26,8 @@ function notesWithoutColors(): Array<[string, string]> {
     stripVTControlCharacters(title),
   ]);
 }
-vi.mock('@clack/prompts', async (original) => ({
-  ...(await original<typeof import('@clack/prompts')>()),
+vi.mock('@voidzero-dev/vite-plus-prompts', async (original) => ({
+  ...(await original<typeof import('@voidzero-dev/vite-plus-prompts')>()),
   // These fixtures retain GitHub-only setup; Access choices have their own matrix.
   confirm: (input: { message: string }) =>
     input.message === 'Also protect the platform UI and APIs with Cloudflare Access?'

@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { log } from '@clack/prompts';
 import type { CloudflareOperation } from '@void/deploy-cloudflare';
+import { log } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   cloudflareAuthNeedsTerminal,

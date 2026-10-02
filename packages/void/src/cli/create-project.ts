@@ -1,4 +1,4 @@
-import { log } from '@clack/prompts';
+import { log } from '@voidzero-dev/vite-plus-prompts';
 import { PlatformApiError, type CreateProjectResponse, type PlatformClient } from './client.ts';
 import { pc, sanitizeTerminalText } from './output.ts';
 import { attachSelectedPlatform, writeProjectConfig, type ProjectConfig } from './project.ts';

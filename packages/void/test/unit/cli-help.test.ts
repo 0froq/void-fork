@@ -1,9 +1,9 @@
-import { note } from '@clack/prompts';
+import { note } from '@voidzero-dev/vite-plus-prompts';
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { parseEmailArgs } from '../../src/cli/email-args.ts';
 import { getHelpPath, hasHelpPage, printHelpPage } from '../../src/cli/help.ts';
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   note: vi.fn(),
   outro: vi.fn(),
 }));

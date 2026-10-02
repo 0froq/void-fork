@@ -1,4 +1,4 @@
-import { intro, log, outro } from '@clack/prompts';
+import { intro, log, outro } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { PlatformClient } from './client.ts';
 import { cliTitle, dim, tablePrefix } from './output.ts';

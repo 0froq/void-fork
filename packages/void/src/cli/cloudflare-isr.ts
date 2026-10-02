@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { confirm, isCancel, log } from '@clack/prompts';
 import type { ApprovedCloudflareKvBinding } from '@void/deploy-cloudflare';
 import { readStoredResourceName } from '@void/deploy-cloudflare';
+import { confirm, isCancel, log } from '@voidzero-dev/vite-plus-prompts';
 import { modify, applyEdits } from 'jsonc-parser';
 import { join } from 'pathslash';
 import { TYPED_CONFIG_FILE } from '../config-loader.ts';

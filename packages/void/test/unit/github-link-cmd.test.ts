@@ -1,4 +1,4 @@
-import { log } from '@clack/prompts';
+import { log } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { PlatformApiError, type PlatformClient } from '../../src/cli/client.ts';
 import { runGithubLink } from '../../src/cli/github-cmd.ts';

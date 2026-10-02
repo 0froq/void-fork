@@ -22,7 +22,6 @@ allowBuilds:
   workerd: true
 
 catalog:
-  '@clack/prompts': ^1.8.1
   # Stays on 4.x on purpose: Wrangler lists workers-types ^5 as an OPTIONAL peer, and
   # every 5.x since 5.20260807.2 declares global `Buffer`/`process` as `any`, which collides
   # with `@types/node` under packages/void's `types: ["node", "@cloudflare/workers-types"]`

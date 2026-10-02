@@ -98,7 +98,7 @@ const mockLog = {
   warn: vi.fn(),
 };
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   intro: vi.fn(),
   outro: vi.fn(),
   log: {

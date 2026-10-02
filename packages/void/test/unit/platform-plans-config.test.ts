@@ -1,8 +1,8 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { confirm, select, text } from '@clack/prompts';
 import { createDefaultPlanCatalog, PLAN_LIMITS } from '@void/platform/plans';
+import { confirm, select, text } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
 import { parsePlatformPlansArgs } from '../../src/cli/platform-plans-args.ts';
@@ -12,7 +12,7 @@ vi.mock('../../src/cli/operator-auth.ts', () => ({
   resolveOperatorOrigin: () => 'https://api.example.com',
   readOperatorToken: () => 'operator-fixture',
 }));
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   confirm: vi.fn(),
   select: vi.fn(),
   text: vi.fn(),

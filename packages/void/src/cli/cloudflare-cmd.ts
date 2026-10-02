@@ -1,4 +1,4 @@
-import { log } from '@clack/prompts';
+import { log } from '@voidzero-dev/vite-plus-prompts';
 import { basename } from 'pathslash';
 import type { CloudflareArgs } from './cloudflare-args.ts';
 import {

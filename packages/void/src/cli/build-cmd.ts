@@ -1,5 +1,5 @@
 import { appendFileSync, writeFileSync } from 'node:fs';
-import { intro, log, outro } from '@clack/prompts';
+import { intro, log, outro } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import type { BuildArgs } from './build-args.ts';
 import { PlatformApiError, PlatformClient, type BuildLogsResponse } from './client.ts';

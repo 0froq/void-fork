@@ -10,7 +10,7 @@ const mockInfo = vi.fn();
 const mockError = vi.fn();
 const mockWarn = vi.fn();
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   cancel: vi.fn(),
   isCancel: () => false,
   log: {

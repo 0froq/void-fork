@@ -1,4 +1,4 @@
-import { isCancel, select } from '@clack/prompts';
+import { isCancel, select } from '@voidzero-dev/vite-plus-prompts';
 import type { AccountArgs } from './account-args.ts';
 import type { AuthArgs } from './auth-args.ts';
 import type { CloudflareArgs } from './cloudflare-args.ts';

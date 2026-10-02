@@ -25,7 +25,7 @@ const originalIsTTY = process.stdin.isTTY;
 let savedVoidToken: string | undefined;
 let savedVoidApiUrl: string | undefined;
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   intro: vi.fn(),
   outro: vi.fn(),
   note: vi.fn(),

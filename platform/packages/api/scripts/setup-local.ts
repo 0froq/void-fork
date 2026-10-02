@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process';
 import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as p from '@clack/prompts';
+import * as p from '@voidzero-dev/vite-plus-prompts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const platformDir = resolve(__dirname, '..');

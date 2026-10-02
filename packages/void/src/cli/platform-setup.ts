@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { log } from '@clack/prompts';
 import type { PlatformDeploymentManifest } from '@void/platform';
+import { log } from '@voidzero-dev/vite-plus-prompts';
 import { openBrowser } from './auth.ts';
 import { pc } from './output.ts';
 import type { PlatformManagementAccess } from './platform-auth.ts';

@@ -1,4 +1,4 @@
-import { select, text, isCancel, cancel, confirm } from '@clack/prompts';
+import { select, text, isCancel, cancel, confirm } from '@voidzero-dev/vite-plus-prompts';
 import { getSiteDomain } from './auth.ts';
 import type { ProjectResponse } from './client.ts';
 import { validateProjectSlug } from './project-slug.ts';

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { log } from '@clack/prompts';
+import { log } from '@voidzero-dev/vite-plus-prompts';
 import { getApiUrl, getToken, openBrowser, runPlatformLogin, savePlatformToken } from './auth.ts';
 import { PlatformClient } from './client.ts';
 import { selectPlatformLoginMethod } from './login.ts';

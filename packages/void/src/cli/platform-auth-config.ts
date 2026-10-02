@@ -3,6 +3,13 @@ import { readFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { stripVTControlCharacters } from 'node:util';
 import {
+  parsePlatformLoginConfiguration,
+  type PlatformLoginConfiguration,
+  type PlatformLoginKind,
+  parsePlatformAdmissionPolicy,
+  type PlatformAdmissionPolicy,
+} from '@void/platform';
+import {
   type CANCEL_SYMBOL,
   confirm,
   isCancel,
@@ -10,14 +17,7 @@ import {
   password,
   select,
   text,
-} from '@clack/prompts';
-import {
-  parsePlatformLoginConfiguration,
-  type PlatformLoginConfiguration,
-  type PlatformLoginKind,
-  parsePlatformAdmissionPolicy,
-  type PlatformAdmissionPolicy,
-} from '@void/platform';
+} from '@voidzero-dev/vite-plus-prompts';
 import { openBrowser } from './auth.ts';
 import { readOperatorToken, resolveOperatorOrigin } from './operator-auth.ts';
 import { OperatorClient } from './operator-client.ts';

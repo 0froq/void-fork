@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import * as p from '@clack/prompts';
+import * as p from '@voidzero-dev/vite-plus-prompts';
 import { resolve } from 'pathslash';
 import pc from 'picocolors';
 import { detectPM, pmExec, pmInstall, run, writePnpmBuildPolicy } from './pm.ts';

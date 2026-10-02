@@ -1,15 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import {
-  type CANCEL_SYMBOL,
-  confirm,
-  isCancel,
-  multiselect,
-  password,
-  select,
-  text,
-} from '@clack/prompts';
-import {
   PLATFORM_LOGIN_KINDS,
   parsePlatformAccessProtection,
   parsePlatformAdmissionPolicy,
@@ -19,6 +10,15 @@ import {
   type PlatformDeploymentManifest,
   type PlatformLoginKind,
 } from '@void/platform';
+import {
+  type CANCEL_SYMBOL,
+  confirm,
+  isCancel,
+  multiselect,
+  password,
+  select,
+  text,
+} from '@voidzero-dev/vite-plus-prompts';
 import {
   activatePlatformAccessCredentials,
   parsePlatformAccessSetupSpec,

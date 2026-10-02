@@ -1,5 +1,5 @@
-import { intro, outro, log, select, isCancel, cancel } from '@clack/prompts';
 import type { PlatformAuthenticationDiscovery } from '@void/platform';
+import { intro, outro, log, select, isCancel, cancel } from '@voidzero-dev/vite-plus-prompts';
 import {
   getToken,
   getApiUrl,

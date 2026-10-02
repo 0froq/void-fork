@@ -21,7 +21,7 @@ const existingProject = {
   custom_domain: null,
 };
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   cancel: (...args: Array<unknown>) => mockCancel(...args),
   confirm: (...args: Array<unknown>) => mockConfirm(...args),
   intro: vi.fn(),

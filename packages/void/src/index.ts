@@ -667,7 +667,7 @@ async function runAiSetupPrompt(
   apiUrl: string,
   server: import('vite').ViteDevServer,
 ): Promise<void> {
-  const { select, text, isCancel, log } = await import('@clack/prompts');
+  const { select, text, isCancel, log } = await import('@voidzero-dev/vite-plus-prompts');
   const { PlatformClient } = await import('./cli/client.ts');
   const { attachSelectedPlatform, writeProjectConfig } = await import('./cli/project.ts');
   const { inferDefaultSlug } = await import('./cli/resolve-project.ts');

@@ -1,11 +1,21 @@
 import { randomBytes } from 'node:crypto';
-import { confirm, intro, isCancel, log, note, outro, password, select, text } from '@clack/prompts';
 import {
   createPlatformResourceNames,
   normalizeApplicationDomain,
   normalizeInstallationSlug,
   type PlatformInstallationManifest,
 } from '@void/platform';
+import {
+  confirm,
+  intro,
+  isCancel,
+  log,
+  note,
+  outro,
+  password,
+  select,
+  text,
+} from '@voidzero-dev/vite-plus-prompts';
 import { resolve } from 'pathslash';
 import { cliCommandName, cliTitle, createSpinner, pc } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';

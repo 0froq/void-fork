@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { intro, outro, log, select, isCancel, cancel } from '@clack/prompts';
+import { intro, outro, log, select, isCancel, cancel } from '@voidzero-dev/vite-plus-prompts';
 import { join, dirname, relative } from 'pathslash';
 import { ensureProjectTsconfig } from '../codegen/project-tsconfig.ts';
 import { readConfig, getDatabaseDialect } from '../config.ts';

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync } from 'node:fs';
-import { log } from '@clack/prompts';
+import { log } from '@voidzero-dev/vite-plus-prompts';
 import { join } from 'pathslash';
 import { accountSubcommands, parseAccountArgs } from './account-args.ts';
 import { getPackageDir } from './agents.ts';

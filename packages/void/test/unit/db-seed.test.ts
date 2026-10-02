@@ -12,7 +12,7 @@ const mockLog = {
   success: vi.fn(),
 };
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   intro: (...args: Array<unknown>) => mockIntro(...args),
   outro: (...args: Array<unknown>) => mockOutro(...args),
   log: {

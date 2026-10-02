@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { stripVTControlCharacters } from 'node:util';
+import type { PlatformInstallationManifest } from '@void/platform';
 import {
   type CANCEL_SYMBOL,
   confirm,
@@ -10,8 +11,7 @@ import {
   password,
   select,
   text,
-} from '@clack/prompts';
-import type { PlatformInstallationManifest } from '@void/platform';
+} from '@voidzero-dev/vite-plus-prompts';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { pc } from './output.ts';
 import {

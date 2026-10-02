@@ -30,7 +30,7 @@ vi.mock('../../src/cli/output.ts', async (importOriginal) => ({
   createSpinner: state.spinner,
 }));
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   confirm: vi.fn(),
   isCancel: () => false,
   log: { info: vi.fn(), success: vi.fn() },
@@ -198,7 +198,7 @@ vi.mock('../../src/cli/platform-registry.ts', async (importOriginal) => {
   };
 });
 
-import { log, note } from '@clack/prompts';
+import { log, note } from '@voidzero-dev/vite-plus-prompts';
 import {
   acquirePlatformDatabaseLifecycleLock,
   installPlatform,

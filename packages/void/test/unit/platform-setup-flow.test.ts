@@ -2,12 +2,12 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
-import { log, note, outro } from '@clack/prompts';
 import {
   createPlatformDeploymentManifest,
   recordInstallationResource,
   transitionInstallation,
 } from '@void/platform';
+import { log, note, outro } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { pc } from '../../src/cli/output.ts';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
@@ -47,8 +47,8 @@ const mocks = vi.hoisted(() => ({
   spinner: vi.fn(),
   progress: { start: vi.fn(), stop: vi.fn(), message: vi.fn(), error: vi.fn(), clear: vi.fn() },
 }));
-vi.mock('@clack/prompts', async (original) => ({
-  ...(await original<typeof import('@clack/prompts')>()),
+vi.mock('@voidzero-dev/vite-plus-prompts', async (original) => ({
+  ...(await original<typeof import('@voidzero-dev/vite-plus-prompts')>()),
   // These fixtures retain GitHub-only setup; Access choices have their own matrix.
   confirm: (input: { message: string }) =>
     input.message === 'Also protect the platform UI and APIs with Cloudflare Access?'

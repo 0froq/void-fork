@@ -59,7 +59,7 @@ vi.mock('node:child_process', () => ({
     mockExecFileSync(...(args as Parameters<typeof mockExecFileSync>)),
 }));
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   intro: vi.fn(),
   outro: vi.fn(),
   confirm: vi.fn(),
@@ -163,7 +163,7 @@ describe('void db studio --remote (PostgreSQL)', () => {
     const { PlatformApiError } = await import('../../src/cli/client.ts');
     mockGetDatabaseUrl.mockRejectedValue(new PlatformApiError('test', 404, '{}'));
 
-    const { log: clackLog } = await import('@clack/prompts');
+    const { log: clackLog } = await import('@voidzero-dev/vite-plus-prompts');
 
     await expect(runDbCommand(root, { action: 'studio', remote: true })).rejects.toThrow(
       'process.exit:1',
@@ -242,7 +242,7 @@ describe('void db studio --remote (D1)', () => {
   it('errors with "not yet supported" message and does not call writeDrizzleConfig or execFileSync', async () => {
     const root = createProjectRoot(); // D1 project (no database: 'pg')
 
-    const { log: clackLog } = await import('@clack/prompts');
+    const { log: clackLog } = await import('@voidzero-dev/vite-plus-prompts');
 
     await expect(runDbCommand(root, { action: 'studio', remote: true })).rejects.toThrow(
       'process.exit:1',

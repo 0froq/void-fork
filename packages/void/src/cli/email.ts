@@ -1,8 +1,8 @@
 import { execSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { confirm, isCancel, log, note, password } from '@clack/prompts';
 import { parseRootWranglerConfig, readWranglerTopLevelString } from '@void/deploy-cloudflare';
+import { confirm, isCancel, log, note, password } from '@voidzero-dev/vite-plus-prompts';
 import { join } from 'pathslash';
 import { readConfig } from '../config.ts';
 import { readProjectPaths } from '../project-paths.ts';

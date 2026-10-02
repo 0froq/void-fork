@@ -11,7 +11,6 @@ export default defineConfig({
       resolveDepSubpath: true,
       onlyBundle: [
         '@voidzero-dev/vite-plus-prompts',
-        '@clack/prompts',
         '@clack/core',
         'fast-string-truncated-width',
         'fast-string-width',

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { note, outro } from '@clack/prompts';
+import { note, outro } from '@voidzero-dev/vite-plus-prompts';
 import { join } from 'pathslash';
 import { getPackageDir } from './agents.ts';
 import { asciiArts } from './ascii.ts';

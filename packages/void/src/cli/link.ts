@@ -1,4 +1,4 @@
-import { intro, outro, log, cancel } from '@clack/prompts';
+import { intro, outro, log, cancel } from '@voidzero-dev/vite-plus-prompts';
 import { getToken, getSiteDomain } from './auth.ts';
 import { PlatformClient } from './client.ts';
 import { promptAndCreateProject } from './create-project.ts';

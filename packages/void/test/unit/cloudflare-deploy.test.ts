@@ -1,12 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { log } from '@clack/prompts';
 import {
   CloudflareWorkerInspectionError,
   parseCloudflareVersionMessage,
   type CloudflareOperation,
 } from '@void/deploy-cloudflare';
+import { log } from '@voidzero-dev/vite-plus-prompts';
 import { toSlash } from 'pathslash';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { activateCloudflareVersion as activateCloudflareVersionPrimitive } from '../../../deploy-cloudflare/src/index.ts';

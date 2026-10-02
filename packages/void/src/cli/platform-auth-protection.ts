@@ -1,11 +1,11 @@
 import { createHmac } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { confirm, isCancel } from '@clack/prompts';
 import {
   parsePlatformAccessProtection,
   platformProtectionProofMessage,
   type PlatformInstallationManifest,
 } from '@void/platform';
+import { confirm, isCancel } from '@voidzero-dev/vite-plus-prompts';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { ensurePlatformAccessToken } from './cf-access.ts';
 import { readOperatorToken, resolveOperatorOrigin } from './operator-auth.ts';

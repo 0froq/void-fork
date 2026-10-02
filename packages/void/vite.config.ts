@@ -187,7 +187,6 @@ export default defineConfig({
         'magic-string',
         '@jridgewell/sourcemap-codec',
         '@voidzero-dev/vite-plus-prompts',
-        '@clack/prompts',
         '@clack/core',
         'fast-string-truncated-width',
         'fast-string-width',

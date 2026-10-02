@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { log, isCancel, select } from '@clack/prompts';
+import { log, isCancel, select } from '@voidzero-dev/vite-plus-prompts';
 import { basename, join } from 'pathslash';
 import {
   createBundledCloudflareAuthRunner,

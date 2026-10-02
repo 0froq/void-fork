@@ -14,7 +14,7 @@ import { hasDeploySchemaDrift } from '../../src/cli/deploy.ts';
 import { generateStarterMigration } from '../../src/cli/init.ts';
 import { createPagesStarterTemplate, type ScaffoldStarterMode } from '../../src/cli/template.ts';
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   intro: vi.fn(),
   outro: vi.fn(),
   note: vi.fn(),

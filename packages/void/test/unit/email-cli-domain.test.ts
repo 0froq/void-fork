@@ -1,4 +1,4 @@
-import { log, note } from '@clack/prompts';
+import { log, note } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   PlatformApiError,
@@ -27,8 +27,8 @@ import {
  * here are inert placeholders and are never printed.
  */
 
-vi.mock('@clack/prompts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@clack/prompts')>();
+vi.mock('@voidzero-dev/vite-plus-prompts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@voidzero-dev/vite-plus-prompts')>();
   return { ...actual, note: vi.fn() };
 });
 

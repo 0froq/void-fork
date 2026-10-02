@@ -1,6 +1,5 @@
 import { readFile } from 'node:fs/promises';
 import { stripVTControlCharacters } from 'node:util';
-import { type CANCEL_SYMBOL, confirm, isCancel, select, text } from '@clack/prompts';
 import {
   PLAN_EDITABLE_LIMIT_KEYS,
   PLAN_LIMITS,
@@ -11,6 +10,13 @@ import {
   type PlatformPlanCatalog,
   type PlatformPlanDefinition,
 } from '@void/platform/plans';
+import {
+  type CANCEL_SYMBOL,
+  confirm,
+  isCancel,
+  select,
+  text,
+} from '@voidzero-dev/vite-plus-prompts';
 import { readOperatorToken, resolveOperatorOrigin } from './operator-auth.ts';
 import { OperatorClient, OperatorClientError } from './operator-client.ts';
 import type { PlatformPlansArgs } from './platform-plans-args.ts';

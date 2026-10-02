@@ -31,7 +31,7 @@ vi.mock('../../src/cli/client.ts', () => ({
     whoami = mocks.whoami;
   },
 }));
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   log: { success: vi.fn(), info: vi.fn() },
   select: mocks.select,
   text: vi.fn(),

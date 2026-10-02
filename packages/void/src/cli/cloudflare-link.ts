@@ -1,6 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
-import { confirm, isCancel, log } from '@clack/prompts';
 import {
   assertExistingCloudflareConfig,
   readExistingCloudflareWorker,
@@ -8,6 +7,7 @@ import {
   type CloudflareCommandRunner,
   type ApprovedCloudflareKvBinding,
 } from '@void/deploy-cloudflare';
+import { confirm, isCancel, log } from '@voidzero-dev/vite-plus-prompts';
 import { applyEdits, modify, parse, type ParseError } from 'jsonc-parser';
 import { basename, join } from 'pathslash';
 import { materializeCloudflareConfig, persistCloudflareConfig } from '../cloudflare-config.ts';

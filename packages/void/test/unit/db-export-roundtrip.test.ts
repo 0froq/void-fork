@@ -27,7 +27,7 @@ vi.mock('pg', () => ({
     }
   },
 }));
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   intro() {},
   outro() {},
   confirm: async () => true,

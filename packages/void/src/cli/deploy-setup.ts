@@ -1,4 +1,4 @@
-import { cancel, confirm, isCancel, log } from '@clack/prompts';
+import { cancel, confirm, isCancel, log } from '@voidzero-dev/vite-plus-prompts';
 import { getToken, isStagingMode } from './auth.ts';
 import { PlatformClient } from './client.ts';
 import { promptAndCreateProject } from './create-project.ts';

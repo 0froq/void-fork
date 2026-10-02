@@ -11,8 +11,18 @@ import {
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { intro, outro, log, confirm, isCancel, cancel, note, select, text } from '@clack/prompts';
 import type { PlatformDiscoveryDocument } from '@void/platform';
+import {
+  intro,
+  outro,
+  log,
+  confirm,
+  isCancel,
+  cancel,
+  note,
+  select,
+  text,
+} from '@voidzero-dev/vite-plus-prompts';
 import { parse, type ParseError } from 'jsonc-parser';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'pathslash';
 import { materializeCloudflareConfig } from '../cloudflare-config.ts';

@@ -18,14 +18,16 @@ vi.mock('node:fs', async () => {
   };
 });
 
-// `@clack/prompts` opens TTY-bound spinners we don't want to render in tests.
+// `@voidzero-dev/vite-plus-prompts` opens TTY-bound spinners we don't want to render in tests.
 const noopSpinner = {
   start: vi.fn(),
   stop: vi.fn(),
   message: vi.fn(),
 };
-vi.mock('@clack/prompts', async () => {
-  const actual = await vi.importActual<typeof import('@clack/prompts')>('@clack/prompts');
+vi.mock('@voidzero-dev/vite-plus-prompts', async () => {
+  const actual = await vi.importActual<typeof import('@voidzero-dev/vite-plus-prompts')>(
+    '@voidzero-dev/vite-plus-prompts',
+  );
   return {
     ...actual,
     intro: vi.fn(),

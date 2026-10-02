@@ -1,6 +1,6 @@
 import { PassThrough, Writable } from 'node:stream';
 import { stripVTControlCharacters } from 'node:util';
-import { isCancel } from '@clack/prompts';
+import { isCancel } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
 import { passwordWithPlaceholder } from '../../src/cli/prompt-password.ts';
 

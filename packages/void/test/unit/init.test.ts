@@ -182,7 +182,7 @@ function expectPnpmAllowBuilds(root: string): void {
   expect(yaml).not.toContain('onlyBuiltDependencies:');
 }
 
-vi.mock('@clack/prompts', () => ({
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
   intro: vi.fn(),
   outro: (...args: Array<unknown>) => mockOutro(...args),
   note: (...args: Array<unknown>) => mockNote(...args),

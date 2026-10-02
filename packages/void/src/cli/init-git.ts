@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { cancel, confirm, isCancel, log } from '@clack/prompts';
+import { cancel, confirm, isCancel, log } from '@voidzero-dev/vite-plus-prompts';
 import { dirname, join, resolve } from 'pathslash';
 
 export async function setupGit(root: string, git?: boolean): Promise<boolean> {

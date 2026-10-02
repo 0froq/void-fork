@@ -32,7 +32,7 @@ vi.mock('../../src/cli/client.ts', () => ({
     startIdentityLink = state.link;
   },
 }));
-vi.mock('@clack/prompts', () => ({ log: { info: vi.fn() } }));
+vi.mock('@voidzero-dev/vite-plus-prompts', () => ({ log: { info: vi.fn() } }));
 import { runAuthLink } from '../../src/cli/auth-link.ts';
 beforeEach(() => vi.clearAllMocks());
 describe('ordinary account linking CLI', () => {

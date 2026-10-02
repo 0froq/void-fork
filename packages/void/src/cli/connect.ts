@@ -1,5 +1,5 @@
-import { isCancel, log, select } from '@clack/prompts';
 import type { PlatformDiscoveryDocument } from '@void/platform';
+import { isCancel, log, select } from '@voidzero-dev/vite-plus-prompts';
 import { readPlatformToken } from './auth.ts';
 import { isExpiredTokenError, PlatformClient } from './client.ts';
 import { connectCloudflare } from './cloudflare-connect.ts';

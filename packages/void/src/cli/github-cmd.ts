@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { cancel, confirm, isCancel, log, select, text } from '@clack/prompts';
+import { cancel, confirm, isCancel, log, select, text } from '@voidzero-dev/vite-plus-prompts';
 import {
   awaitBrowserCallback,
   createCodeChallenge,

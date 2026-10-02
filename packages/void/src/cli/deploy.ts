@@ -21,16 +21,6 @@ import { basename, dirname, join, normalize, relative, resolve } from 'pathslash
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
 const deployDriftCheckDir = join('.void', 'deploy-drift-check');
 import {
-  intro,
-  outro,
-  log as clackLog,
-  note,
-  confirm,
-  isCancel,
-  select,
-  type SpinnerResult,
-} from '@clack/prompts';
-import {
   CloudflareWorkerInspectionError,
   activateCloudflareVersion,
   encodeCloudflareVersionMessage,
@@ -55,6 +45,16 @@ import {
   type ApprovedCloudflareKvBinding,
 } from '@void/deploy-cloudflare';
 import { createDeployArtifact, createDeployUploadPayload } from '@void/deploy-core';
+import {
+  intro,
+  outro,
+  log as clackLog,
+  note,
+  confirm,
+  isCancel,
+  select,
+  type SpinnerResult,
+} from '@voidzero-dev/vite-plus-prompts';
 import { analyzeApplicationSync, type ApplicationAnalysis } from '../application-analysis.ts';
 import { analyzeApplication, completeApplicationAnalysis } from '../application-routing.ts';
 import {
@@ -8231,7 +8231,8 @@ async function runFrameworkDeploy(
         (resource: ResourceSummary) => resource.type === 'hyperdrive',
       );
       if (!hasHyperdrive) {
-        const { text: promptText, isCancel: isCancelPrompt } = await import('@clack/prompts');
+        const { text: promptText, isCancel: isCancelPrompt } =
+          await import('@voidzero-dev/vite-plus-prompts');
         const connectionString = await promptText({
           message: `Your project uses ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'}. Enter your connection string:`,
           placeholder:
@@ -8648,7 +8649,8 @@ async function runFullDeploy(
         (resource: ResourceSummary) => resource.type === 'hyperdrive',
       );
       if (!hasHyperdrive) {
-        const { text: promptText, isCancel: isCancelPrompt } = await import('@clack/prompts');
+        const { text: promptText, isCancel: isCancelPrompt } =
+          await import('@voidzero-dev/vite-plus-prompts');
         const connectionString = await promptText({
           message: `Your project uses ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'}. Enter your connection string:`,
           placeholder:

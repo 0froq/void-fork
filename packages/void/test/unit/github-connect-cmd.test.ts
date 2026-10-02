@@ -1,4 +1,4 @@
-import { log } from '@clack/prompts';
+import { log } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { createCodeChallenge } from '../../src/cli/auth.ts';
 import {
@@ -19,12 +19,12 @@ vi.mock('node:child_process', () => ({
   execFile: (...args: Array<unknown>) => mockExecFile(...args),
 }));
 
-// Partial mock of @clack/prompts: only `text` is replaced (for the repo
+// Partial mock of @voidzero-dev/vite-plus-prompts: only `text` is replaced (for the repo
 // prompt); everything else — including `log`, which the spies below target —
 // passes through from the actual module.
 const mockText = vi.fn();
-vi.mock('@clack/prompts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@clack/prompts')>();
+vi.mock('@voidzero-dev/vite-plus-prompts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@voidzero-dev/vite-plus-prompts')>();
   return { ...actual, text: (...args: Array<unknown>) => mockText(...args) };
 });
 

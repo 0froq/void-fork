@@ -1,4 +1,4 @@
-import { log } from '@clack/prompts';
+import { log } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { PlatformClient } from '../../src/cli/client.ts';
 import { emailAllow } from '../../src/cli/email.ts';
