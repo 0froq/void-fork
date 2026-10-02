@@ -348,6 +348,12 @@ still releases container capacity when Postgres is unavailable.
 ## Admin UI
 
 The admin surface is built into this worker under `/admin/*`.
+For installed platforms, System Status probes the proxy through the private
+`PLATFORM_PROXY` service binding while the installer separately verifies its public
+URL. The binding is attached only during enabled cutover, after the proxy exists,
+so API/proxy bootstrap does not introduce a circular provisioning dependency.
+Older deployments without the binding retain the HTTP probe fallback.
+
 The browser uses `POST /admin/fate` for administrator page data. It runs under the
 existing admin-cookie and same-origin middleware, while the CLI/operator API
 stays on `/operator/v1`. First loads hydrate a request-scoped Fate snapshot into

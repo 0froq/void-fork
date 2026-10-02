@@ -27,6 +27,7 @@ export function createPlatformWorkerConfigs(input: {
   installationId: string;
   ownershipNonce: string;
   platformVersion: string;
+  proxyHealthBinding?: boolean;
   publicEndpoints?: boolean;
   proxyUrl: string;
   emailGatewayUrl: string;
@@ -91,8 +92,8 @@ export function createPlatformWorkerConfigs(input: {
   ];
   const dispatchNamespace = [{ binding: 'DISPATCH', namespace: names.dispatchNamespace }];
   const r2 = [{ binding: 'STATIC_ASSETS_R2', bucket_name: names.assetsBucket }];
-  // Public workers.dev probes must re-enter Cloudflare's public edge. Service
-  // bindings here would make API/proxy bootstrap depend on each other existing.
+  // Installer probes must re-enter the public edge. The optional API-to-proxy
+  // health binding is attached only at final cutover, after the proxy exists.
   const fetchWorkersDev =
     Boolean(deployment.application.workersDev) ||
     [apiUrl, proxyUrl, ...(deployment.capabilities.email ? [emailGatewayUrl] : [])].some((url) =>
@@ -101,6 +102,9 @@ export function createPlatformWorkerConfigs(input: {
 
   const api: Record<string, unknown> = {
     ...common,
+    ...(input.proxyHealthBinding && publicEndpoints && trafficState === 'enabled'
+      ? { services: [{ binding: 'PLATFORM_PROXY', service: names.proxyWorker }] }
+      : {}),
     version_metadata: { binding: 'VERSION_METADATA' },
     workers_dev:
       publicEndpoints &&

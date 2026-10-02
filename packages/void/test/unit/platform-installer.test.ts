@@ -561,6 +561,20 @@ describe('platform installer', () => {
           expect(progress.at(-1)).toMatch(
             /^(Deploying|Enabling) the (api|proxy|emailGateway|tail|dispatch) service/,
           );
+          if (config.name === plan.deployment.resources.apiWorker) {
+            const enabled =
+              (config.vars as Record<string, string>).PLATFORM_TRAFFIC_STATE === 'enabled';
+            expect(config.services).toEqual(
+              enabled
+                ? [{ binding: 'PLATFORM_PROXY', service: plan.deployment.resources.proxyWorker }]
+                : undefined,
+            );
+            if (enabled) {
+              expect(
+                configs.some((prior) => prior.name === plan.deployment.resources.proxyWorker),
+              ).toBe(true);
+            }
+          }
           configs.push(config);
         },
         migrateDatabase: async () => {

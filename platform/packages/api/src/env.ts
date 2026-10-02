@@ -96,6 +96,8 @@ export type ApiEnv = Env & {
      */
     TAIL_SERVICE_NAME?: string;
     VOID_PROXY_SERVICE?: string;
+    /** Private readiness checks, attached after the proxy Worker has been provisioned. */
+    PLATFORM_PROXY?: Fetcher;
     SANDBOX_CONTROL_SERVICE?: string;
     VOID_PROXY_TOKEN?: string;
     /** Trusted producer used by the API-owned sandbox lease counter. */

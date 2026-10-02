@@ -42,6 +42,11 @@ secret manager to an object keyed by each exact API/proxy origin, with
 and stops if the gate still rejects its checks. Account-wide Default-Deny and
 deployed-application policies remain your responsibility.
 
+If **System Status** reports `proxy HTTP 302 (redirect)` on an older Access-protected
+installation, upgrade with `void platform upgrade <id>`. Current installations use
+a private connection for the dashboard's proxy health check. Keep the proxy's
+Access protection enabled.
+
 ### Expired administrator setup code
 
 Resume an unfinished installation with `void platform install --resume --name <id>`.

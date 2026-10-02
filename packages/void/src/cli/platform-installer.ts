@@ -2000,6 +2000,7 @@ export async function installPlatform(
     }
     const configInput = {
       authenticationDatabaseUncached: true,
+      proxyHealthBinding: true,
       accountId: plan.account.id,
       apiUrl: plan.apiUrl,
       deployment: plan.deployment,

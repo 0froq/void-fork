@@ -40,6 +40,58 @@ describe('platform email deployment manifest', () => {
 });
 
 describe('platform usage queue bindings', () => {
+  it.each([
+    { trafficState: 'staging' as const, publicEndpoints: true, bound: false },
+    { trafficState: 'sandbox-drain' as const, publicEndpoints: true, bound: false },
+    { trafficState: 'enabled' as const, publicEndpoints: false, bound: false },
+    { trafficState: 'enabled' as const, publicEndpoints: true, bound: true },
+  ])(
+    'attaches private proxy health only at enabled cutover: $trafficState / $publicEndpoints',
+    ({ trafficState, publicEndpoints, bound }) => {
+      const deployment = createPlatformDeploymentManifest({
+        application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+        displayName: 'Example',
+        installationSlug: 'example',
+      });
+      const configs = createPlatformWorkerConfigs({
+        accountId: 'account',
+        apiUrl: 'https://api.example.com',
+        proxyUrl: 'https://proxy.example.com',
+        emailGatewayUrl: 'https://email.example.com',
+        deployment,
+        healthProbeToken: 'probe',
+        installationId: 'example',
+        ownershipNonce: 'ownership',
+        platformVersion: '1.0.0',
+        proxyHealthBinding: true,
+        trafficState,
+        publicEndpoints,
+        resources: {
+          hyperdrive: 'db',
+          isrCacheKv: 'isr',
+          legacyAssetsKv: 'assets',
+          routingKv: 'routing',
+          zone: 'zone',
+        },
+        runtimeEntrypoints: {
+          api: 'api.mjs',
+          proxy: 'proxy.mjs',
+          dispatch: 'dispatch.mjs',
+          tail: 'tail.mjs',
+          emailGateway: 'email.mjs',
+        },
+      });
+      expect(configs.api.services).toEqual(
+        bound
+          ? [{ binding: 'PLATFORM_PROXY', service: deployment.resources.proxyWorker }]
+          : undefined,
+      );
+      expect(configs.proxy.services).toEqual([
+        { binding: 'API', service: deployment.resources.apiWorker },
+      ]);
+    },
+  );
+
   it('routes shared mail through its configured zone, independent of the application zone', () => {
     const deployment = createPlatformDeploymentManifest({
       application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },

@@ -40,10 +40,11 @@ async function checkUrl(
   name: string,
   url: string,
   headers?: Record<string, string>,
+  request: (url: string, init: RequestInit) => Promise<Response> = fetch,
 ): Promise<HealthCheck> {
   const start = Date.now();
   try {
-    const res = await fetch(url, {
+    const res = await request(url, {
       headers,
       // Do not forward probe credentials to a login redirect or treat its HTML
       // login page as a successful health check.
@@ -180,6 +181,9 @@ export async function systemHealth(
         'proxy',
         `${proxyUrl.replace(/\/$/, '')}/health`,
         installed ? dispatchHeaders : undefined,
+        installed && env.PLATFORM_PROXY
+          ? (url, init) => env.PLATFORM_PROXY!.fetch(url, init)
+          : undefined,
       ),
       ...(!installed
         ? [

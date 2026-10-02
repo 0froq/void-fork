@@ -536,6 +536,97 @@ describe('operator build operations', () => {
 });
 
 describe('operator installation-aware system and worker operations', () => {
+  test('probes the installed proxy privately when Access redirects its public URL', async () => {
+    const publicFetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input) =>
+        String(input).startsWith('https://my-proxy.example')
+          ? Response.redirect('https://company.cloudflareaccess.com/login', 302)
+          : Response.json({ ok: true }),
+      );
+    const privateFetch = vi.fn(async () => Response.json({ ok: true }));
+    const response = await req('/system/health', undefined, {
+      PLATFORM_INSTALLATION_ID: 'installation',
+      PROXY_URL: 'https://my-proxy.example',
+      SITE_DOMAIN: 'apps.example',
+      PLATFORM_HEALTH_PROBE_TOKEN: 'probe',
+      PLATFORM_PROXY: { fetch: privateFetch },
+    });
+    expect(await response.json()).toMatchObject({ allOk: true });
+    expect(privateFetch).toHaveBeenCalledExactlyOnceWith(
+      'https://my-proxy.example/health',
+      expect.objectContaining({
+        headers: { 'X-Void-Platform-Probe': 'probe' },
+        redirect: 'manual',
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(publicFetch.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://void-platform-health.apps.example/health',
+    ]);
+  });
+
+  test.each([302, 503])(
+    'reports a private proxy HTTP %s without falling back to the public URL',
+    async (status) => {
+      const publicFetch = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(Response.json({ ok: true }));
+      const response = await req('/system/health', undefined, {
+        PLATFORM_INSTALLATION_ID: 'installation',
+        PROXY_URL: 'https://my-proxy.example',
+        SITE_DOMAIN: 'apps.example',
+        PLATFORM_HEALTH_PROBE_TOKEN: 'probe',
+        PLATFORM_PROXY: { fetch: vi.fn(async () => new Response(null, { status })) },
+      });
+      expect(await response.json()).toMatchObject({
+        allOk: false,
+        checks: expect.arrayContaining([
+          expect.objectContaining({
+            name: 'proxy',
+            ok: false,
+            error: `HTTP ${status}${status === 302 ? ' (redirect)' : ''}`,
+          }),
+        ]),
+      });
+      expect(publicFetch.mock.calls.map(([url]) => String(url))).toEqual([
+        'https://void-platform-health.apps.example/health',
+      ]);
+    },
+  );
+
+  test('does not expose private proxy errors or fall back to an unauthenticated request', async () => {
+    const publicFetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(Response.json({ ok: true }));
+    const response = await req('/system/health', undefined, {
+      PLATFORM_INSTALLATION_ID: 'installation',
+      PROXY_URL: 'https://my-proxy.example',
+      SITE_DOMAIN: 'apps.example',
+      PLATFORM_HEALTH_PROBE_TOKEN: 'probe',
+      PLATFORM_PROXY: {
+        fetch: vi.fn(async () => {
+          throw new Error('private-binding-secret');
+        }),
+      },
+    });
+    const body = await response.json();
+    expect(body).toMatchObject({
+      allOk: false,
+      checks: expect.arrayContaining([
+        expect.objectContaining({
+          name: 'proxy',
+          ok: false,
+          error: 'Could not reach the service.',
+        }),
+      ]),
+    });
+    expect(JSON.stringify(body)).not.toContain('private-binding-secret');
+    expect(publicFetch.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://void-platform-health.apps.example/health',
+    ]);
+  });
+
   test('health uses configured installed proxy and authenticated dispatch probe, without a dashboard', async () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ok: true }));
     const response = await req('/system/health', undefined, {
@@ -640,6 +731,11 @@ describe('operator installation-aware system and worker operations', () => {
         PROXY_URL: 'https://proxy.staging.void.cloud',
         DASHBOARD_URL: 'https://dash.staging.void.cloud',
         PLATFORM_HEALTH_PROBE_TOKEN: 'must-not-send',
+        PLATFORM_PROXY: {
+          fetch: vi.fn(async () => {
+            throw new Error('legacy should use public health');
+          }),
+        },
       })
     ).json();
     expect(result).toMatchObject({ allOk: true });
