@@ -131,7 +131,7 @@ void github connect <project> --repo <owner/repo> --executor github_actions
 
 Set the repository's `VOID_API_URL` variable to your platform's API URL. Keep `permissions: id-token: write` in the workflow for [GitHub OIDC](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect). The workflow uses your linked project, or the `VOID_PROJECT` repository variable.
 
-Core self-hosted installations do not support this integration. Use your own CI workflow with a [scoped developer token](./platform/administration/access.md#developer-tokens).
+Core self-hosted installations do not support this integration. Use your own CI workflow with a [project deploy token](./platform/installation/first-deployment.md).
 
 ## Other Targets
 
