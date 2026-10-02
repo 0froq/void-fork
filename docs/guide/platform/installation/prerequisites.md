@@ -37,7 +37,7 @@ pnpm add --global void
 void platform install --plan
 ```
 
-Sign in to Cloudflare when prompted, then choose an installation name and account. `--plan` previews the resources without changing them or requiring runtime secrets.
+Sign in to Cloudflare when prompted, then choose an installation name and account. `--plan` previews the resources without changing them or requiring runtime secrets. Completed plans save your choices locally. Run `void platform install` again to select a saved plan; Void checks the current Cloudflare state before asking you to apply it.
 
 For a domain installation, use these answers. Testing mode skips the application domain, zone, and catch-all questions:
 

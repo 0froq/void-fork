@@ -244,7 +244,7 @@ export function formatPlatformSetupPlan(
   ].join('\n');
 }
 
-export function formatPlatformInstallCommand(options: {
+export type PlatformInstallCommandOptions = {
   commandName: 'void' | 'void-dev';
   accountId: string;
   installationSlug: string;
@@ -261,19 +261,15 @@ export function formatPlatformInstallCommand(options: {
   runtime: string;
   resumeId?: string;
   yes: boolean;
-}): string {
-  const quote = (value: string) => {
-    if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) {
-      return value;
-    }
-    return process.platform === 'win32'
-      ? `'${value.replaceAll("'", "''")}'`
-      : `'${value.replaceAll("'", "'\\''")}'`;
-  };
+};
+
+export function platformInstallCommandArguments(
+  options: PlatformInstallCommandOptions,
+): Array<string> {
   const parts = [options.commandName, 'platform', 'install'];
   const flag = (name: string, value: string) => {
     if (value) {
-      parts.push(name, quote(value));
+      parts.push(name, value);
     }
   };
   if (options.resumeId) {
@@ -312,7 +308,20 @@ export function formatPlatformInstallCommand(options: {
   if (options.yes) {
     parts.push('--yes');
   }
-  return parts.join(' ');
+  return parts;
+}
+
+export function formatPlatformInstallCommand(options: PlatformInstallCommandOptions): string {
+  return platformInstallCommandArguments(options)
+    .map((value) => {
+      if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) {
+        return value;
+      }
+      return process.platform === 'win32'
+        ? `'${value.replaceAll("'", "''")}'`
+        : `'${value.replaceAll("'", "'\\''")}'`;
+    })
+    .join(' ');
 }
 
 export function openPlatformSetupPage(

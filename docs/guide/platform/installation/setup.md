@@ -35,7 +35,9 @@ void platform install
 
 :::
 
-After reviewing `--plan`, run the command printed under **Next step: run this command to install**. It carries your choices into installation. Confirm the plan, then follow the credential prompts. Void opens the relevant setup pages and provides fallback links in the terminal. It reuses values you have already supplied.
+After reviewing `--plan`, run `void platform install` and select your saved plan, or run the command printed under **Next step: run this command to install**. Both carry your choices into installation and check the current Cloudflare state. Confirm the refreshed plan, then follow the credential prompts. Void opens the relevant setup pages and provides fallback links in the terminal. It reuses values you have already supplied.
+
+Saved plans contain your installation choices, including paths to any authentication configuration or custom runtime. They contain no secrets or approval to install. Declining the plan or cancelling management-token setup keeps those choices for your next attempt.
 
 ## Choose login methods
 
@@ -170,7 +172,7 @@ If Void created a zone, it stops in `waiting-for-dns` and prints nameservers. Se
 void platform install --resume --name <installation-id>
 ```
 
-Resume prompts for a management token if DNS changes still need one; you can also supply it through `CLOUDFLARE_API_TOKEN`. When using a source build, also pass the same `--runtime` directory. Resume uses the saved checkpoint and original secrets; do not start a second installation or generate replacement keys. If setup failed before a checkpoint was saved, rerun the original command.
+Resume prompts for a management token if DNS changes still need one; you can also supply it through `CLOUDFLARE_API_TOKEN`. When using a source build, also pass the same `--runtime` directory. Resume uses the saved checkpoint and original secrets; do not start a second installation or generate replacement keys. If setup stopped before a checkpoint was saved, rerun `void platform install` and select your saved plan, or rerun the original command.
 
 You can also rerun `void platform install` and choose **Continue setup** for an unfinished installation. For non-interactive recovery, use `--resume --name <id>`. Manage completed platforms with `platform status`, `repair`, or `upgrade`.
 

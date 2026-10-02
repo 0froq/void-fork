@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { CANCEL_SYMBOL } from '@clack/prompts';
 import { createPlatformDeploymentManifest } from '@void/platform';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -49,6 +52,7 @@ vi.mock('../../src/cli/platform-plan.ts', async (original) => ({
 }));
 
 const ttyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+let directory: string;
 const args = [
   'install',
   '--plan',
@@ -62,6 +66,8 @@ const args = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  directory = mkdtempSync(join(tmpdir(), 'void-install-prompts-'));
+  vi.stubEnv('VOID_PLATFORM_REGISTRY_DIR', directory);
   mocks.multiselect.mockResolvedValue(['github']);
   Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -92,6 +98,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  rmSync(directory, { recursive: true, force: true });
   if (ttyDescriptor) {
     Object.defineProperty(process.stdin, 'isTTY', ttyDescriptor);
   } else {

@@ -37,7 +37,7 @@ export const platformSubcommands: Array<SubcommandDef> = [
   },
   {
     name: 'install',
-    hint: 'Preview choices with --plan, then run the printed install command',
+    hint: 'Preview and save choices with --plan, then select the saved plan to install',
     description: 'Install a Void platform with a domain or workers.dev for testing',
   },
   { name: 'upgrade', arg: '[id]', description: 'Upgrade an installed Void platform' },

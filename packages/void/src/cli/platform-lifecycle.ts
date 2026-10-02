@@ -6,6 +6,7 @@ import {
   normalizeInstallationSlug,
   type PlatformInstallationManifest,
 } from '@void/platform';
+import { resolve } from 'pathslash';
 import { cliCommandName, cliTitle, createSpinner, pc } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import {
@@ -50,6 +51,11 @@ import {
   writePendingInstallationSecrets,
 } from './platform-registry.ts';
 import {
+  listSavedPlatformInstallPlans,
+  savePlatformInstallChoices,
+  removeSavedPlatformInstallPlan,
+} from './platform-saved-plans.ts';
+import {
   completePlatformSetupDraft,
   isPlatformSetupDraft,
   isPlatformInstallInProgress,
@@ -60,6 +66,7 @@ import {
   formatPlatformSetupPlan,
   openPlatformSetupPage,
   platformManagementSetupPage,
+  platformInstallCommandArguments,
   platformSetupPages,
   platformSetupFieldHelp,
 } from './platform-setup.ts';
@@ -107,23 +114,23 @@ export function resolvePlatformInstallDatabaseUrl(
   return explicit || recorded;
 }
 
-export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<void> {
-  if (args.subcommand === 'domain') {
+export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Promise<void> {
+  if (commandArgs.subcommand === 'domain') {
     const { runPlatformDomainCommand } = await import('./platform-domain.ts');
-    await runPlatformDomainCommand(args);
+    await runPlatformDomainCommand(commandArgs);
     return;
   }
-  if (args.subcommand === 'discover') {
+  if (commandArgs.subcommand === 'discover') {
     const credential = await resolvePlatformCloudflareCredential();
     const client = new PlatformCloudflareClient(credential.token);
     const accounts = await readAccounts(client);
-    const accountId = await selectAccount(accounts, args.account);
+    const accountId = await selectAccount(accounts, commandArgs.account);
     const { recoverPlatformInstallations } = await import('./platform-recovery.ts');
     const recovered = await recoverPlatformInstallations(
       client,
       accountId,
       undefined,
-      args.selector,
+      commandArgs.selector,
     );
     if (recovered.length === 0) {
       log.info(`No recoverable Void platform installations were found in ${accountId}.`);
@@ -136,13 +143,14 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     }
     return;
   }
-  if (args.subcommand !== 'install') {
+  if (commandArgs.subcommand !== 'install') {
     const { runInstalledPlatformCommand } = await import('./platform-management.ts');
-    await runInstalledPlatformCommand(args);
+    await runInstalledPlatformCommand(commandArgs);
     return;
   }
 
-  const runtime = loadPlatformRuntime(args.runtime);
+  let args: Extract<PlatformArgs, { subcommand: 'install' }> = commandArgs;
+  let runtime = loadPlatformRuntime(args.runtime);
 
   assertNoninteractivePlatformMutationAcknowledged(args, process.stdin.isTTY === true);
 
@@ -186,7 +194,36 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
             !args.name ||
             manifest.deployment.installationSlug === normalizeInstallationSlug(args.name),
         );
-        if (installs.length > 0) {
+        const manifests = listInstallationManifests();
+        const savedPlans =
+          !args.applicationDomain &&
+          !args.workersDev &&
+          !args.zone &&
+          !args.displayName &&
+          !args.hyperdrive &&
+          !args.controlPlaneDomain &&
+          !args.noControlPlaneDomain &&
+          !args.authConfig &&
+          !args.loginMethods &&
+          !args.runtime &&
+          args.accessProtection === undefined &&
+          !args.dedicatedZoneSpecified &&
+          args.dashboardUrl === undefined
+            ? listSavedPlatformInstallPlans().filter(
+                (saved) =>
+                  (!args.name || saved.args.name === normalizeInstallationSlug(args.name)) &&
+                  (!args.account ||
+                    saved.args.account === args.account ||
+                    saved.accountName.toLowerCase() === args.account.toLowerCase()) &&
+                  !manifests.some(
+                    (manifest) =>
+                      manifest.status !== 'uninstalled' &&
+                      manifest.account.id === saved.args.account &&
+                      manifest.deployment.installationSlug === saved.args.name,
+                  ),
+              )
+            : [];
+        if (installs.length > 0 || savedPlans.length > 0) {
           const choice = await select({
             message: 'Continue a previous platform install?',
             options: [
@@ -194,6 +231,11 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
                 value: install.id,
                 label: `Continue setup for ${install.deployment.displayName} (${install.deployment.installationSlug})`,
                 hint: install.account.name,
+              })),
+              ...savedPlans.map((saved) => ({
+                value: `plan:${saved.id}`,
+                label: `Use saved plan for ${saved.args.displayName} (${saved.args.name})`,
+                hint: `${saved.accountName} · ${saved.args.workersDev ? 'workers.dev' : saved.args.applicationDomain}`,
               })),
               { value: 'new', label: 'Start a new platform install' },
             ],
@@ -204,6 +246,15 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
           if (choice === 'new') {
             // Do not let --name silently reselect the draft the user just declined.
             requestedName = '';
+          } else if (choice.startsWith('plan:')) {
+            const saved = savedPlans.find((plan) => `plan:${plan.id}` === choice);
+            if (!saved) {
+              throw new Error('platform: The selected plan is no longer available.');
+            }
+            args = { ...saved.args, plan: args.plan, yes: args.yes };
+            runtime = loadPlatformRuntime(args.runtime);
+            installationName = args.name;
+            requestedName = args.name;
           } else {
             const selected = installs.find((install) => install.id === choice);
             if (!selected) {
@@ -578,6 +629,38 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       deploymentExecution: runtime.manifest.deploymentExecution === 1,
     };
     let plan = await createPlatformInstallPlan(client, planInput, existing, planOptions);
+    const commandOptions = {
+      commandName: cliCommandName(),
+      accountId,
+      installationSlug,
+      displayName,
+      applicationDomain,
+      zoneName,
+      controlPlaneDomain,
+      ...(args.dashboardUrl !== undefined ? { dashboardUrl: args.dashboardUrl } : {}),
+      dedicatedZone,
+      workersDev,
+      authConfig: args.authConfig,
+      authentication: authenticationSelection.authentication,
+      hyperdrive:
+        !existing || isPlatformSetupDraft(existing)
+          ? (externalHyperdrive?.id ?? 'create')
+          : undefined,
+      runtime: args.runtime,
+      ...(existing ? { resumeId: existing.id } : {}),
+      yes: args.yes || process.stdin.isTTY !== true,
+    };
+    if (!existing) {
+      savePlatformInstallChoices(
+        platformInstallCommandArguments({
+          ...commandOptions,
+          runtime: args.runtime ? resolve(args.runtime) : '',
+          ...(args.authConfig ? { authConfig: resolve(args.authConfig) } : {}),
+          yes: false,
+        }).slice(2),
+        plan.account.name,
+      );
+    }
     note(
       formatPlatformInstallPlan(plan),
       args.plan ? 'Read-only installation plan' : 'Installation plan',
@@ -586,6 +669,9 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     const needsManagementToken = platformOperatorNeedsManagementToken(operatorCredential, plan);
     if (args.plan) {
       console.log(formatPlatformSetupPlan(plan, { managementToken: needsManagementToken }));
+      if (!existing) {
+        log.info('Plan saved locally for your next install.');
+      }
       outro(
         needsManagementToken
           ? 'Plan complete. Management API token required.'
@@ -593,27 +679,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       );
       console.log(
         `\n${pc.bold(existing ? 'Next step: run this command to resume' : 'Next step: run this command to install')}\n\n${pc.cyan(
-          formatPlatformInstallCommand({
-            commandName: cliCommandName(),
-            accountId,
-            installationSlug,
-            displayName,
-            applicationDomain,
-            zoneName,
-            controlPlaneDomain,
-            ...(args.dashboardUrl !== undefined ? { dashboardUrl: args.dashboardUrl } : {}),
-            dedicatedZone,
-            workersDev,
-            authConfig: args.authConfig,
-            authentication: authenticationSelection.authentication,
-            hyperdrive:
-              !existing || isPlatformSetupDraft(existing)
-                ? (externalHyperdrive?.id ?? 'create')
-                : undefined,
-            runtime: args.runtime,
-            ...(existing ? { resumeId: existing.id } : {}),
-            yes: args.yes || process.stdin.isTTY !== true,
-          }),
+          formatPlatformInstallCommand(commandOptions),
         )}\n`,
       );
       return;
@@ -670,6 +736,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     if (!existing) {
       existing = savePlatformSetupDraft(plan, runtime.manifest.platformVersion);
     }
+    removeSavedPlatformInstallPlan({ ...args, account: accountId, name: installationSlug });
     const setupManifest = existing;
     const credentialSetup = isPlatformSetupDraft(existing);
     const values: Record<string, string> = { ...checkpoint };

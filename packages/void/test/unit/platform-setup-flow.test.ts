@@ -19,6 +19,7 @@ import {
   writePendingInstallationSecrets,
   writeInstallationManifest,
 } from '../../src/cli/platform-registry.ts';
+import { listSavedPlatformInstallPlans } from '../../src/cli/platform-saved-plans.ts';
 import {
   completePlatformSetupDraft,
   isPlatformSetupDraft,
@@ -347,6 +348,9 @@ describe('platform credential onboarding', () => {
     await expect(runPlatformLifecycleCommand(parsePlatformArgs(args))).rejects.toThrow('Cancelled');
     expect(listInstallationManifests()).toEqual([]);
     expect(mocks.install).not.toHaveBeenCalled();
+    expect(listSavedPlatformInstallPlans()).toHaveLength(1);
+    const savedFile = readdirSync(directory).find((file) => file.startsWith('plan-'))!;
+    expect(readFileSync(join(directory, savedFile), 'utf8')).not.toContain('operator-token');
   });
 
   it('requires a management environment token for headless DNS changes', async () => {
@@ -539,8 +543,10 @@ describe('platform credential onboarding', () => {
   });
 
   it('does not offer to reinstall an already completed platform when its name is entered', async () => {
+    await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));
     const draft = await savedSetup();
     writeInstallationManifest({ ...draft, status: 'installed' });
+    vi.clearAllMocks();
     mocks.text.mockResolvedValueOnce('test-setup');
     await expect(
       runPlatformLifecycleCommand(parsePlatformArgs(['install', '--plan'])),
@@ -548,6 +554,7 @@ describe('platform credential onboarding', () => {
     expect(mocks.select).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
     expect(mocks.plan).not.toHaveBeenCalled();
+    expect(listSavedPlatformInstallPlans()).toHaveLength(1);
   });
 
   it('stops if the database says a selected installation completed elsewhere', async () => {
@@ -1028,12 +1035,19 @@ describe('platform credential onboarding', () => {
     expect(listInstallationManifests()).toEqual([]);
   });
 
-  it('keeps plan mode read-only, with direct links and no browser launches', async () => {
+  it('saves plan choices without Cloudflare changes, credentials, or browser launches', async () => {
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));
     expect(mocks.open).not.toHaveBeenCalled();
     expect(mocks.password).not.toHaveBeenCalled();
     expect(listInstallationManifests()).toEqual([]);
-    expect(readdirSync(directory)).toEqual([]);
+    expect(listSavedPlatformInstallPlans()).toEqual([
+      expect.objectContaining({
+        accountName: 'Account',
+        args: expect.objectContaining({ name: 'test-setup', account: 'account', workersDev: true }),
+      }),
+    ]);
+    expect(readdirSync(directory)).toHaveLength(1);
+    expect(mocks.install).not.toHaveBeenCalled();
     expect(mocks.spinner).not.toHaveBeenCalled();
   });
   it('continues from the printed command without repeating nonsecret choices', async () => {
@@ -1059,12 +1073,92 @@ describe('platform credential onboarding', () => {
     expect(mocks.password).toHaveBeenCalled();
     expect(mocks.install).toHaveBeenCalledOnce();
   });
+  it('offers a saved preview on a bare invocation and replans before installation', async () => {
+    await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));
+    const saved = listSavedPlatformInstallPlans()[0]!;
+    const firstInput = mocks.plan.mock.calls[0]![1];
+    vi.clearAllMocks();
+    for (const [key, value] of Object.entries(environment)) {
+      vi.stubEnv(key, value);
+    }
+
+    await runPlatformLifecycleCommand(parsePlatformArgs(['install']));
+
+    expect(mocks.select).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        options: [
+          {
+            value: `plan:${saved.id}`,
+            label: 'Use saved plan for Test (test-setup)',
+            hint: 'Account · workers.dev',
+          },
+          { value: 'new', label: 'Start a new platform install' },
+        ],
+      }),
+    );
+    expect(mocks.text).not.toHaveBeenCalled();
+    expect(mocks.multiselect).not.toHaveBeenCalled();
+    expect(mocks.plan).toHaveBeenCalledWith(expect.anything(), firstInput, null, expect.anything());
+    expect(mocks.confirm).toHaveBeenCalledWith({
+      message: 'Apply this plan?',
+      initialValue: false,
+    });
+    expect(mocks.install).toHaveBeenCalledOnce();
+    expect(listSavedPlatformInstallPlans()).toEqual([]);
+    expect(listInstallationManifests()).toHaveLength(1);
+  });
+  it('never carries --yes from a saved plan and retains choices when applying is declined', async () => {
+    await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--yes', '--plan']));
+    expect(listSavedPlatformInstallPlans()[0]?.args.yes).toBe(false);
+    vi.clearAllMocks();
+    mocks.confirm.mockResolvedValueOnce(false);
+    await runPlatformLifecycleCommand(parsePlatformArgs(['install']));
+    expect(mocks.confirm).toHaveBeenCalledWith({
+      message: 'Apply this plan?',
+      initialValue: false,
+    });
+    expect(mocks.install).not.toHaveBeenCalled();
+    expect(listSavedPlatformInstallPlans()).toHaveLength(1);
+    expect(listInstallationManifests()).toEqual([]);
+  });
+  it('can refresh a saved preview without prompting for its choices or applying it', async () => {
+    await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));
+    const firstInput = mocks.plan.mock.calls[0]![1];
+    vi.clearAllMocks();
+    await runPlatformLifecycleCommand(parsePlatformArgs(['install', '--plan']));
+    expect(mocks.plan).toHaveBeenCalledWith(expect.anything(), firstInput, null, expect.anything());
+    expect(mocks.text).not.toHaveBeenCalled();
+    expect(mocks.multiselect).not.toHaveBeenCalled();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(mocks.password).not.toHaveBeenCalled();
+    expect(mocks.install).not.toHaveBeenCalled();
+    expect(listSavedPlatformInstallPlans()).toHaveLength(1);
+  });
+  it('offers started setup instead of a stale preview for the same platform', async () => {
+    await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));
+    const draft = await savedSetup();
+    vi.clearAllMocks();
+    await runPlatformLifecycleCommand(parsePlatformArgs(['install', '--plan']));
+    expect(mocks.select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: [
+          {
+            value: draft.id,
+            label: `Continue setup for ${draft.deployment.displayName} (test-setup)`,
+            hint: 'Account',
+          },
+          { value: 'new', label: 'Start a new platform install' },
+        ],
+      }),
+    );
+  });
   it('does not save a draft or open pages when the plan is declined', async () => {
     mocks.confirm.mockResolvedValue(false);
     await runPlatformLifecycleCommand(parsePlatformArgs(args));
     expect(listInstallationManifests()).toEqual([]);
     expect(mocks.open).not.toHaveBeenCalled();
     expect(mocks.spinner).not.toHaveBeenCalled();
+    expect(listSavedPlatformInstallPlans()).toHaveLength(1);
   });
   it('opens each missing credential page and preserves encrypted progress and callback identity across cancellation', async () => {
     const normalPassword = mocks.password.getMockImplementation()!;

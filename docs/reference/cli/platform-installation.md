@@ -26,14 +26,14 @@ void platform install [options] [--yes]
 | `--control-plane-domain <domain>` | Optional API custom hostname; defaults to `workers.dev`                              |
 | `--no-control-plane-domain`       | Use the default `workers.dev` API hostname                                           |
 | `--dashboard-url <origin>`        | HTTPS origin of an optional dashboard deployed separately                            |
-| `--plan`                          | Resolve and print a read-only plan                                                   |
+| `--plan`                          | Preview Cloudflare changes and save installation choices locally                     |
 | `--resume`                        | Continue the matching checkpointed installation                                      |
 | `--runtime <path>`                | Deploy a locally built, integrity-checked runtime directory                          |
 | `--yes`                           | Acknowledge Cloudflare changes in non-interactive use                                |
 
 For a first installation, follow [Install a Void Platform](../../guide/self-hosted-platform.md). The interactive installer recommends using a domain and offers **Use workers.dev for testing** as a visible alternative. Void creates the platform infrastructure and tables. External PostgreSQL and a configured login method are required in either mode. Select all login methods you want to enable; none are selected initially. Non-interactive installation defaults to GitHub when no login configuration is supplied. `--workers-dev` skips zone/DNS/certificate operations and cannot be combined with `--application-domain`, `--zone`, or `--dedicated-zone`.
 
-Read-only plans, workers.dev installations with the default API hostname, and supported lifecycle operations can use Cloudflare browser login and the system keychain. Installation that writes DNS or creates a zone needs an explicit management token through `CLOUDFLARE_API_TOKEN` or `CF_API_TOKEN`.
+Read-only plans, workers.dev installations with the default API hostname, and supported lifecycle operations can use Cloudflare browser login and the system keychain. Installation that writes DNS or creates a zone needs a management API token. The interactive installer guides you to create one and paste it into a masked prompt; scripts use `CLOUDFLARE_API_TOKEN` or `CF_API_TOKEN`.
 
 The installed platform needs a separate runtime token to provision resources for apps. The interactive installer prompts for it and the other setup values. For non-interactive installs, inject the variables listed in [Install from CI](../../guide/platform/installation/ci.md).
 
@@ -45,7 +45,7 @@ path, query, or fragment. Void permits that origin's login callbacks and saves
 it for later maintenance; it does not deploy a dashboard Worker. Omission keeps
 an existing installation's saved dashboard origin.
 
-`--plan` previews resource names, login methods, callback URLs, and credential requirements. Run the install or resume command printed at the end to continue. For login configuration, use either `--auth-config` or `--login-methods` with the Access protection flags.
+`--plan` previews resource names, login methods, callback URLs, and credential requirements. Completed previews save nonsecret installation choices locally. Rerun `void platform install` to choose a saved plan and review a fresh check of Cloudflare state, or run the install or resume command printed at the end. Started installations use their saved checkpoints; completed installations are excluded from the chooser. For login configuration, use either `--auth-config` or `--login-methods` with the Access protection flags.
 
 New resources use `void-<name>-<role>` names; choose an unused installation name. The installer opens setup pages for missing credentials and reuses values already supplied.
 
