@@ -84,7 +84,7 @@ void platform system health
 
 Health checks use the services configured for the selected platform. An unhealthy result exits with a nonzero status, so the same command can be used in a script.
 
-The browser dashboard's **System Status** checks refresh every 30 seconds. Failed checks show an HTTP status or connection error beside the service name. If the dashboard cannot refresh the checks, it reports that status is unavailable instead of displaying stale results.
+The dashboard’s **System Status** page refreshes health checks every 30 seconds and shows errors beside the affected service.
 
 Use `void platform upgrade`, `repair`, `disable`, and `enable` to maintain your platform. See [platform maintenance](/guide/platform/installation/maintenance#resume-repair-recover-and-upgrade).
 
@@ -117,5 +117,3 @@ unset VOID_OPERATOR_TOKEN
 Disable shell tracing for the exchange and do not write either token to logs or plaintext files. A full API login session expires after 30 days and can be revoked sooner; renew it through the normal authenticated login flow and update the protected CI secret. A job that runs longer than one hour must repeat the exchange while its full API session is still valid. An expired operator token cannot refresh itself, and Void does not issue permanent service tokens for administrator automation.
 
 `auth login --token-stdin` performs the same elevation and saves the one-hour operator token in the system keychain for interactive use. See [operator authentication](/reference/cli#operator-authentication) for the full command syntax.
-
-An email zone has one connection and ingress Worker shared by its exact domain assignments. Removing one assignment preserves resources used by the others. The Email administration page can explicitly rotate that connection secret; ordinary synchronization does not rotate it. Setup and cleanup outcomes include operation IDs, and uncertain provider writes remain recorded until reconciled.

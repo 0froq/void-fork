@@ -139,7 +139,7 @@ function defineMiddleware(handler: MiddlewareHandler<CloudEnv>): MiddlewareHandl
 
 Built-in Basic authentication middleware for temporary site gates and pre-launch protection. Use it from `middleware/` with credentials from `void/env` to protect the whole app, or pass it to `defineHandler()` for a single route.
 
-Void internal endpoints under `/__void` are always excluded so deploy-time migrations, prerendering, cron/queue dispatch, and remote binding helpers still reach Void's own internal-token checks.
+Void’s reserved `/__void` endpoints use their own authentication and are excluded from Basic auth.
 
 When credentials come from `void/env`, wrap the reads in functions so they are resolved per request after Void has bound the runtime env.
 
@@ -391,7 +391,7 @@ function defineAuth(config: VoidAuthConfig): VoidAuthConfig;
 
 ### `getUser()`
 
-Returns the current authenticated user from AsyncLocalStorage, or `null` when no user is present.
+Returns the current authenticated user, or `null` when no user is present.
 
 ```ts
 import { getUser } from 'void/auth';
@@ -893,7 +893,7 @@ See [Type Safety](../guide/type-safety.md#context-variables) for details.
 
 ### `TypedHandler<V, R>`
 
-The return type of `defineHandler`. Carries phantom types for validators (`V`) and return type (`R`) used by the codegen to produce typed routes.
+The return type of `defineHandler`, with validator types (`V`) and the handler’s return type (`R`).
 
 ```ts
 interface TypedHandler<V extends ValidatorSlots = {}, R = unknown> {
@@ -920,7 +920,7 @@ interface HeadDescriptor {
 
 ### `RouteMap`
 
-Empty stub interface augmented at build time by the generated `.void/routes.d.ts`. It contains the full type information for routes, methods, inputs, and outputs, and the typed `fetch` client reads from it.
+Generated route types used by the typed `fetch` client. Contains each route’s methods, inputs, and outputs.
 
 ```ts
 import type { RouteMap } from 'void/routes';

@@ -5,7 +5,7 @@ outline: deep
 # Authentication
 
 ::: warning ⚠️ Void Apps Only
-Void-managed auth currently works only for Void apps. Meta-framework mode is not supported yet.
+Void-managed auth requires a native Void app on Cloudflare. For meta-frameworks or Node.js, Bun, and Deno, use Better Auth directly.
 :::
 
 Void configures [Better Auth](https://www.better-auth.com/) for your app, including its database connection, API routes, and client. Start with email and password, or add a social login provider.
@@ -157,10 +157,3 @@ void db generate
 Review and commit the SQL before deploying. Void includes your auth configuration and plugin tables; you don't need to duplicate them in `db/schema.ts` or run the Better Auth CLI.
 
 MySQL stores OAuth access, refresh, and ID tokens as unbounded text. Existing direct-deploy MySQL apps should run `void db generate` once after upgrading to widen earlier `varchar(255)` token columns. Void platform deployments apply the same safe widening automatically.
-
-## Unsupported Modes
-
-Use Better Auth directly for other app types:
-
-- meta-framework mode should use Better Auth's official framework integrations directly
-- `target: "node" | "bun" | "deno"` should use Better Auth directly

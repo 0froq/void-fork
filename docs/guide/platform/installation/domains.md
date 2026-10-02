@@ -25,9 +25,9 @@ Browser login sessions are specific to each origin. Apps using their own OAuth p
 
 ### What Changes in Testing Mode?
 
-Each deployed app gets a small forwarding Worker and its own `workers.dev` origin. It forwards requests, including WebSockets and SSE, through the same platform router. Names include installation and project IDs; a later project with the same slug cannot inherit a deleted project's test URL.
+In testing mode, each app gets a `workers.dev` URL. These URLs continue working after you add a domain; new apps then use the domain.
 
-Testing origins use shared ISR storage but bypass the extra edge response cache because you cannot use your zone's purge API for `workers.dev`. Custom-domain requests use the normal edge cache after activation. Existing test URLs and forwarding Workers are retained when you add a domain; new apps then use the domain without creating more forwarding Workers. Like other platform Workers, forwarders are retained for manual cleanup on uninstall; platform disablement and project suspension still apply to their traffic.
+Testing URLs support WebSockets, SSE, and shared ISR storage, but skip the extra edge response cache. Their forwarding Workers remain for manual cleanup after uninstall. Platform disablement and project suspension still block their traffic.
 
 ## Other Domain Options
 

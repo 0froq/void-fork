@@ -66,6 +66,5 @@ If the cached page expires before your next deploy, the next request waits for a
 ## Behavior details
 
 - Prerender happens once per deployment, before traffic is routed to the new version. Prerendered pages are cached at the edge.
-- Each deploy clears the ISR cache. The deployment shows `"prerendering"` during this phase.
 - Only paths with a positive revalidate TTL are prerendered (TTL `0` is skipped).
 - Prerender failures are logged but never block the deploy. The page will render on the first request as usual.

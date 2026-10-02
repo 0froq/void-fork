@@ -48,8 +48,6 @@ export const POST = defineHandler(async (c) => {
 });
 ```
 
-`ai.stream()` returns a `Response` with SSE headers.
-
 ## Listing Models
 
 Use `ai.models()` to list available models:

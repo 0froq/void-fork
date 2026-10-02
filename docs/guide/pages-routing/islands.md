@@ -55,13 +55,7 @@ Islands mode builds on top of [Pages Routing](./overview). You need a working Pa
 
 ## When to Use Islands
 
-Islands mode is a good fit when:
-
-- **Most of your page is static content:** blog posts, marketing pages, or documentation
-- **Only a few components need interactivity:** a counter, a form, or a live widget
-- **Performance is critical:** you want near-zero JavaScript for static content
-
-If your entire page is interactive (dashboards, apps with lots of client state), stick with regular [Pages Routing](./overview).
+Use islands for blogs, marketing pages, or documentation with a few interactive components. For dashboards and apps with shared client state, use regular [Pages Routing](./overview).
 
 ## Creating an Island Page
 

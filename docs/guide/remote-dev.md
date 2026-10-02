@@ -42,7 +42,7 @@ VOID_REMOTE=1 vite dev
 | R2      | Local file-backed R2       | Remote R2 bucket    |
 | AI      | Always proxied             | Always proxied      |
 
-AI inference is always routed through the proxy regardless of remote mode. There is no local AI emulation.
+AI requests use your platform’s account and allowance in both local and remote mode. There is no local AI simulator.
 
 ## Checking Remote Mode
 
@@ -62,4 +62,3 @@ When the dev server starts with remote mode active, it prints:
 - **R2 conditional writes:** `put(..., { onlyIf })` requires a current Void platform and an active deployment with the native remote-binding handler. Update the platform and redeploy the project if this operation is unavailable. Failed preconditions return `null`.
 - **D1 dump:** `db.dump()` is not supported in remote mode.
 - **D1 batches:** `db.batch()` requires an updated platform and project deployment.
-- **Writes affect real data:** remote mode connects to your actual deployed resources. Inserts, updates, and deletes are real, so use it carefully or point it at a staging project.

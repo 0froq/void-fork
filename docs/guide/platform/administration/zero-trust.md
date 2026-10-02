@@ -8,8 +8,6 @@ Project Zero Trust puts Cloudflare Access in front of the hostnames of projects 
 
 This is separate from the Access login and protection for the platform API. Projects deployed directly to Cloudflare are not affected.
 
-The steps below set it up. [How Protection Works](#how-protection-works) explains what visitors see, which Access applications Void creates, and what happens while settings change.
-
 ## Requirements
 
 - A Cloudflare Zero Trust organization in the account that hosts the platform, with the identity providers and reusable Access policies you want to use. Select at least one Allow policy that matches people by identity. Void rejects Bypass and Service Auth policies, and rules that allow Everyone or any service token.
@@ -71,26 +69,11 @@ void platform zero-trust disable
 
 This removes the Access applications Void created and makes all projects public. On large installations it runs in steps; run it again, or check `void platform zero-trust status`, until Zero Trust shows as disabled with no operation running.
 
-Uninstalling the platform does not remove these applications. `void platform uninstall` refuses to start while Zero Trust is enabled, a change is still running, or some Void-managed Access applications are left. Its error lists their names. Disable Zero Trust first, then uninstall. Once the uninstall starts turning the platform off, Zero Trust changes and deployments are refused. If it stops after that point, run it again, or bring the platform back with `void platform enable` or `void platform repair`. If a project's applications could not be removed, Void retries every hour while the platform is enabled. If the error says a project deletion stopped partway, run `void project delete` for that project again to remove them.
+Disable Zero Trust and wait for its applications to be removed before [uninstalling the platform](/guide/platform/installation/uninstall). If project deletion stopped partway, retry `void project delete` for that project.
 
 ## How Protection Works
 
-Every request to a protected project passes two checks before your code runs:
-
-```text
-Visitor
-  │
-  ▼
-Cloudflare Access ─── not signed in ─────────▶ sign-in page
-  │ signed in and allowed by your policies
-  ▼
-Void checks the Access token ─── rejected ───▶ 403 page
-  │ token is valid for this hostname
-  ▼
-Your project: routes, pages, assets, WebSockets
-```
-
-A public project skips both. Access lets every visitor through, and Void does not look for a token.
+Cloudflare Access handles sign-in and applies your policies. Void also verifies the token before serving a protected project. Public projects allow visitors without sign-in.
 
 ### What Visitors See
 
@@ -108,7 +91,7 @@ Void only covers the `workers.dev` testing URLs of this installation. Other Work
 
 #### The 403 Page
 
-Void answers `403 Cloudflare Access authentication required` when a request reaches a protected project without a valid Access token for it. Page requests get a short HTML error page. Requests under `/api`, requests for files, requests that are not `GET` or `HEAD`, and requests that do not accept HTML get the same message as plain text. The response is never cached.
+A request without a valid token receives `403 Cloudflare Access authentication required`. Page requests show an HTML error; API and asset requests receive plain text. These responses are never cached.
 
 Visitors who went through the sign-in page normally never see it. They can see it:
 
@@ -122,18 +105,12 @@ Protection applies to the whole hostname. There are no path exceptions. `/api/*`
 
 #### Webhooks and Other Non-Browser Clients
 
-Void only accepts policies that match people by identity. It rejects Bypass and Service Auth policies, and rules that allow Everyone or any service token. So a machine cannot pass on its own. Payment and Git webhooks, CI jobs, uptime checks, and plain `curl` calls get the sign-in page or the 403 response.
+Project protection requires a person’s identity. Webhooks, CI jobs, uptime checks, and unauthenticated `curl` calls receive the sign-in page or a 403.
 
 If a project must accept such requests:
 
 - make the project public with `void project zero-trust public` and check callers in your own code, or
 - move the endpoints that machines call into a separate project, and make only that project public.
-
-### Two Checks on Every Request
-
-Cloudflare Access handles sign-in and applies your policies. Void then checks that the token belongs to your Zero Trust team and the project's hostname, and has not expired.
-
-Deleting or changing an Access application cannot make a protected project public; visitors receive a 403 until protection is repaired. Changes to a selected reusable policy affect who can sign in to every project using it.
 
 ### Access Applications Void Creates
 
@@ -162,9 +139,9 @@ Run `void platform zero-trust status` for the shared and health-check applicatio
 
 ### Editing Applications in the Dashboard
 
-Manage Void's applications with `void platform zero-trust configure` and the project commands. Dashboard changes remain until Void next updates the application; settled projects are not continuously checked for drift.
+Manage Void’s applications through `void platform zero-trust configure` and the project commands. Editing or deleting them in Cloudflare can block access until you reconcile. Dashboard edits may be replaced the next time Void updates an application.
 
-You can edit the rules in a selected reusable policy. It must still be an identity-based Allow policy without Everyone or service tokens. Check the configuration with:
+You can edit a selected reusable policy’s rules in Cloudflare. Changes affect every project using that policy. Keep an identity-based Allow policy without Everyone or service tokens, then check it with:
 
 ```sh
 void platform zero-trust status --check
@@ -195,23 +172,13 @@ Protecting or making a project public usually finishes before the command return
 
 Platform-wide changes run in steps. During initial setup, custom domains stay public until Void reaches their project. During disable, hostnames can become public at different times. Follow progress with `void platform zero-trust status`.
 
-A custom domain on a protected project becomes reachable only after its Access protection is ready. Deploys and rollbacks wait for project protection changes to finish. If they are refused, inspect project status and reconcile before retrying.
+A new custom domain becomes reachable only after its project’s protection is ready.
 
 ### Caching
 
-Responses for signed-in visitors are never shared between visitors. Void skips its shared caches for every request that carries an Access token: [ISR](/guide/edge/revalidation#cache-bypass) and the [static asset edge cache](/guide/edge/static-assets#non-hashed-assets). Each visitor gets a response made for their request.
-
-On a protected project, this means:
-
-- pages render on every request, and ISR never serves a cached page;
-- static files and hashed assets skip the edge cache;
-- the project handles more requests and may respond more slowly than a public project.
-
-Public projects keep using the shared caches as usual.
+Requests carrying an Access token bypass [ISR](/guide/edge/revalidation#cache-bypass) and the [static asset edge cache](/guide/edge/static-assets#non-hashed-assets). Protected pages render on each request, which can increase latency and request usage. Public projects keep their shared caches.
 
 ## Recovery
-
-A project never becomes public by mistake while a change is in progress. See [What Happens During Changes](#what-happens-during-changes).
 
 - **Status stays `configuring` or `disabling`.** Large changes run in steps. Scheduled maintenance continues them within a few minutes, or run `void platform zero-trust reconcile`.
 - **Status shows an error.** Fix the cause shown, such as token permissions or the application limit, then run `void platform zero-trust reconcile`. Otherwise Void retries every hour.

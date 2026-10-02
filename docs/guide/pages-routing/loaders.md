@@ -24,17 +24,7 @@ export const loader = defineHandler(async (c) => {
 });
 ```
 
-`InferProps` extracts the return type from a `defineHandler` call, so you don't need to maintain a separate interface. You can also write the interface explicitly if you prefer:
-
-```ts
-export interface Props {
-  users: Array<{ id: number; name: string; email: string }>;
-}
-
-export const loader = defineHandler<Props>(async (c) => {
-  return { users: await db.select().from(users) };
-});
-```
+`InferProps` infers the loader’s return type, so page props stay in sync with the data it returns.
 
 ## Using the Data in Page Components
 

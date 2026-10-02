@@ -45,21 +45,9 @@ export default defineScheduled(async (controller, env) => {
 
 ## `defineScheduled`
 
-Wrap a handler with `defineScheduled()` to get types for the scheduled event, environment, and execution context.
+Wrap a handler with [`defineScheduled()`](../reference/api.md#definescheduled-handler) to type its scheduled event, environment, and execution context.
 
-Handler signature:
-
-```ts
-(controller: ScheduledController, env: CloudEnv['Bindings'], ctx: ExecutionContext) =>
-  unknown | Promise<unknown>;
-```
-
-Notes:
-
-- Jobs are matched by exact cron string.
-- When jobs share an expression, each matching job runs once per invocation. Void waits for all matching jobs, even if one fails, then reports any failures. Native triggers and managed deliveries are deduplicated by expression.
-- Files or directories starting with `_` are ignored.
-- Missing `cron` export causes an error during scan/build.
+Jobs sharing a cron expression each run once per invocation. Void waits for all matching jobs and reports any failures. Files and directories starting with `_` are ignored.
 
 ## Local development
 
@@ -71,7 +59,7 @@ Content-Type: application/json
 { "cron": "<expression>", "scheduledTime": <unix_ms> }
 ```
 
-The `cron` value must match a string you exported from a `crons/*.ts` file — that's how the dispatcher routes to the right handler. Returns `{ "ok": true }` on success.
+Set `cron` to an expression exported by your job. A successful call returns `{ "ok": true }`.
 
 The endpoint requires a local dev trigger token. Void prints a paste-ready curl command with the current token when the dev server starts.
 
@@ -87,7 +75,5 @@ If you set `__VOID_PROXY_TOKEN` in `.env`, that explicit token takes precedence 
 The endpoint works in native Void apps and supported frameworks. Framework jobs run in the adapter's development runtime and use the bindings it provides.
 
 ## Deployment behavior
-
-Void configures the declared cron schedules when you deploy.
 
 Native scheduled events do not require a manual HTTP token. For framework deployments, HTTP requests to `/__void/scheduled` require a matching `x-void-internal` token: the managed platform supplies its proxy token, or you can explicitly configure `CRON_SECRET` for manual calls. An absent or mismatched token returns `401` without running a job.

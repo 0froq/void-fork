@@ -113,8 +113,6 @@ export default defineConfig({
 
 :::
 
-That's it. Any `.md` file in `pages/` is now a routable page.
-
 ## Page Anatomy
 
 A markdown page has three optional parts: a script block, frontmatter, and the body.
@@ -144,7 +142,7 @@ Welcome to Void. Here's an interactive demo:
 
 ## Client Scripts
 
-The `<script>` block can contain both island imports and regular JavaScript. Island imports (with `{ island }`) go through the SSR + hydration pipeline as usual. Everything else is bundled as a client module and executed when the page loads.
+Use the `<script>` block for island imports and JavaScript that runs when the page loads:
 
 ```md
 <script>
@@ -320,7 +318,7 @@ Users who want full control can skip the import and write their own CSS.
 
 ## Markdown Features
 
-All features produce static HTML at build time with zero client JS (except the copy button).
+Markdown features render as static HTML. Code-copy buttons add a small client script.
 
 ### Containers
 
@@ -369,7 +367,7 @@ Custom titles work too: `::: tip Pro Tip`.
 
 ### Syntax Highlighting
 
-Code blocks are highlighted at build time with [Shiki](https://shiki.style) using dual light and dark themes by default: `github-light` and `github-dark`. No client-side JavaScript is needed because theme switching is pure CSS.
+Code blocks use [Shiki](https://shiki.style) with `github-light` and `github-dark` themes by default.
 
 ### Line Highlighting
 

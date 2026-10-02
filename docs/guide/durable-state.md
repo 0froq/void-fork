@@ -34,16 +34,6 @@ export default Counter;
 
 Default-export the object returned by `defineDurableState()`.
 
-For `counter.ts`, Void generates:
-
-| Resource                 | Generated name            |
-| ------------------------ | ------------------------- |
-| Binding                  | `COUNTER`                 |
-| Worker class             | `CounterDurableObject`    |
-| Cloudflare migration tag | `void-durable-counter-v1` |
-
-Names are derived from kebab-case filenames: `shopping-cart.ts` becomes `SHOPPING_CART` and `ShoppingCartDurableObject`.
-
 ## Call it from a route
 
 Import your definition and call `get()` with a name to select an object. Method arguments and return values are typed:
@@ -125,7 +115,7 @@ export const Counter = defineDurableState({
 export default Counter;
 ```
 
-These state migrations are separate from Cloudflare's Durable Object class migration. Void generates the latter with `new_sqlite_classes` when it discovers the file.
+State migrations update your saved values. Void manages Cloudflare’s separate class migrations in `void.lock.json`.
 
 Do not delete or reorder generated Durable Object migrations in `void.lock.json` after deployment. For a class addition, rename, or removal on an existing Worker, review the migration and run `void deploy --platform cloudflare --atomic`. If this Worker needs atomic publication on every deploy, set `deploy: { cloudflare: { mode: 'atomic' } }` in `void.config.ts`. Cloudflare applies class lifecycle changes in one deployment. The Worker receives traffic before Void checks readiness, and you cannot roll back across that migration boundary. Staged deploys keep pre-traffic readiness verification.
 
@@ -160,7 +150,7 @@ export const Counter = defineDurableState({
 export default Counter;
 ```
 
-You can now rename the file within `durable-objects/`, update its imports, and deploy normally. Keep `name: 'counter'` and the same names passed to `Counter.get()`: the binding, Worker class, migration history, and stored state stay the same. Pinning the displayed name does not require a Cloudflare class migration.
+Rename the file within `durable-objects/`, update its imports, and deploy. Keep `name: 'counter'` and the names passed to `Counter.get()` unchanged to preserve the stored state.
 
 `name` is optional. Use a static string, either inline or in a local `const`, containing words that start with a letter, such as `'shopping-cart'`. Names must produce distinct Worker classes and bindings. Changing an existing resource's `name` selects a different resource.
 
@@ -170,6 +160,6 @@ If you already moved the file, `void info` also shows resources recorded in `voi
 
 Typed state works in local development and direct Cloudflare deploys of native Void apps. Deploy with `void deploy --platform cloudflare`.
 
-Deploying custom Durable Object modules to a Void platform isn't supported yet. `void deploy --platform void` stops before building and points you to the Cloudflare path. Meta-frameworks and Node.js, Bun, and Deno targets also reject `durable-objects/` with guidance.
+Custom Durable Object modules are not supported on Void platforms, in meta-frameworks, or on Node.js, Bun, and Deno.
 
 This is separate from [typed WebSocket routes](./websockets.md), which also use SQLite-backed Durable Objects and work on both direct Cloudflare and hosted Void deployments.

@@ -59,7 +59,7 @@ Cloudflare emails the recipient with a verification link. Once they click it and
 void email destinations
 ```
 
-The project owner's account email is added automatically when the project is created on an email-enabled platform, so it skips `void email allow` — not the verification. See [Setup](#setup) for when it is verified at once and when there is a link to click.
+The project owner’s email is added automatically, but still needs verification as described in [Setup](#setup).
 
 ::: warning When this is the right fit
 The shared sender suits team alerts, project notifications, and replies to inbound mail.
@@ -205,7 +205,7 @@ During `void dev`, sends are captured to an in-memory inbox instead of going to 
 [void] Email inbox: http://localhost:5173/__void/inbox?token=<printed-token>
 ```
 
-The inbox shows a list view with subject, sender, recipient, and timestamp. Click a message to see headers, attachments, and an HTML preview rendered in a sandboxed iframe. Each message can be downloaded as a `.eml` file.
+Open a message to preview its HTML, inspect attachments, or download it as an `.eml` file.
 
 Every inbox route requires a local access token. Void includes it in the printed inbox URL and browser links. For command-line requests, send it in the `x-void-dev-trigger` header as shown below; requests without it return `401`. The token is stored in `.void/dev-trigger-token`. Treat inbox URLs as credentials, especially when exposing your dev server to a network.
 
@@ -346,7 +346,7 @@ deployed `email/` handlers without per-project DNS setup once the platform has v
 handlers once its inbound readiness is `ready`. Use `void email domain status`
 to check current provider routing and any remaining setup steps.
 
-On your own Cloudflare account there is no shared facility: the deploy derives one Email Routing rule per handler and records it in `void.lock.json` for you — see [Your own Cloudflare account](#your-own-cloudflare-account).
+For direct deployments, follow [Your own Cloudflare account](#your-own-cloudflare-account) to configure inbound addresses.
 
 There is no local inbound trigger yet — `void dev` serves the outbound dev inbox only, so test inbound handlers with `createInboundTestHarness` below.
 

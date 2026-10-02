@@ -10,8 +10,6 @@ Typed WebSocket routes currently work in native Void apps. They aren't available
 
 Create a `.ws.ts` route to send typed messages between your server and connected clients. Each route instance has its own Cloudflare Durable Object for shared state. WebSocket routes require the Cloudflare target.
 
-New WebSocket route classes use SQLite-backed Durable Objects on both deployment platforms.
-
 For example, `/rooms/[id]` gives each chat room its own instance. Use it for chat, presence, collaborative documents, or notifications.
 
 ## Route files
@@ -151,15 +149,7 @@ Messages are JSON events. Raw string and binary messages are not supported.
 
 ## Authentication
 
-WebSocket hooks use the same built-in session resolution as HTTP auth. When Void auth is enabled, `ctx.user` is available in:
-
-- `onBeforeConnect`
-- `onConnect`
-- `onMessage`
-- `onClose`
-- `onRequest`
-
-This makes cookie-authenticated sockets work without re-parsing the session manually.
+When Void auth is enabled, every WebSocket hook receives the current user as `ctx.user`, or `null` for an anonymous connection. Use `onBeforeConnect` to reject unauthenticated clients.
 
 ## Hooks
 
@@ -230,15 +220,7 @@ Clients now connect to `/rooms/:id` with `params: { id: 'general' }`. The key re
 
 ## Constraints
 
-WebSocket routes currently support:
-
-- Cloudflare-only
-- one route-derived connection target per socket
-- no Socket.IO-style dynamic room join/leave API
-- no global pub/sub abstraction
-- JSON event messages only
-
-Each socket connects to one route instance. Applications that need to switch rooms should manage that connection change explicitly.
+Each socket connects to one route instance. To switch rooms, close the current connection and open another. For publishing to multiple topics, see [Live Event Streams](./live.md).
 
 ## Deployment
 

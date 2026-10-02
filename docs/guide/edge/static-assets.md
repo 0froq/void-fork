@@ -29,7 +29,7 @@ export default defineConfig({
 
 If `build.assetsDir` is set to `""`, meaning hashed files live at the root, the optimization is skipped because there is no directory-based way to distinguish hashed from non-hashed files.
 
-Void also includes presets for where supported meta frameworks (Astro, Nuxt, SvelteKit, etc.) place their hashed assets, so framework-generated assets enjoy optimal caching out of the box.
+Supported meta-frameworks use their own asset directories automatically.
 
 ### Native Cloudflare deployments
 
@@ -45,7 +45,7 @@ Other static files, such as `index.html` and `favicon.ico`, are cached until the
 Cache-Control: public, s-maxage=31536000, max-age=0, must-revalidate
 ```
 
-Cached at the edge until the next deploy. Browsers always revalidate on the next request.
+Browsers revalidate these files on each request.
 
 **What gets cached:**
 

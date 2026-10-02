@@ -75,7 +75,7 @@ void <group> <command> --help
 void <group> help <command>
 ```
 
-Use `void --help` for the command list. For a specific command, try `void deploy --help` or `void db execute --help`. Help runs without signing in, validating the project, or making network requests.
+Use `void --help` for the command list, or `void deploy --help` for a specific command. Help is available without signing in or setting up a project.
 
 ## Setup
 
@@ -134,9 +134,7 @@ Void platforms with GitHub Actions support use short-lived OIDC credentials. Aut
 void prepare
 ```
 
-Generates the project-local `.void/` artifacts used by TypeScript and runtime codegen without starting `vite dev` or running a full `vite build`.
-
-This is the intended command for CI, fresh clones, editor bootstrap, and any workflow that needs `routes.d.ts`, `db.d.ts`, `queues.d.ts`, `env.d.ts`, and `.void/tsconfig.json` in place before typechecking.
+Generates Void’s types and TypeScript configuration without starting the dev server or building the app. Run it after a fresh clone or before typechecking in CI.
 
 ## Connect
 
@@ -151,7 +149,7 @@ Connect a project to its deployment destination. With no arguments, choose Cloud
 
 For Cloudflare, Void signs in through the browser when needed, selects an accessible account, and saves `cloudflare.account_id` in `void.config.ts` or resolved state in `void.lock.json`. It shares this setup with `void init`. An existing account selection is preserved; conflicting or inaccessible account settings must be resolved before continuing.
 
-For a Void platform, Void validates its discovery document, reuses a valid session or opens browser login using the platform's supported providers, and saves the verified API and proxy origins. Credentials are stored in the operating-system keychain for that API origin. A sole login provider is selected automatically.
+For a Void platform, Void checks the connection and signs you in through your browser when needed. It saves credentials in your system keychain separately for each platform.
 
 The deployment preference is saved in `.void/project.json`. Connecting to another Void platform preserves an existing project link; the CLI explains when that link or an environment override still selects a different destination. Use `void project link` to explicitly choose a project. Cloudflare selection also retains existing Void project metadata so you can switch back later.
 
@@ -370,10 +368,7 @@ On a direct Cloudflare target, `--filter` becomes Cloudflare's live search, `--d
 void project requests [--status <filter>] [--range <duration>]
 ```
 
-Show request-level traffic recorded at the edge for the linked project: one line per request with time, method, HTTP status, request type, and server timing. Unlike `void project logs` (which only has rows for invoked user workers), this reads the edge request-metering data, so it also surfaces:
-
-- **5xx the edge router generated itself** — missing deployment manifest, static-asset read timeouts, SSR dispatch timeouts — which never invoke your worker and so never appear in logs.
-- **Requests to static/SPA projects**, which are served directly from storage and never run a worker.
+Show request traffic for the linked project, including static assets and edge errors that do not appear in Worker logs.
 
 | Flag                 | Purpose                                                                                       | Default |
 | -------------------- | --------------------------------------------------------------------------------------------- | ------- |
@@ -910,17 +905,17 @@ path, query, or fragment. Void permits that origin's login callbacks and saves
 it for later maintenance; it does not deploy a dashboard Worker. Omission keeps
 an existing installation's saved dashboard origin.
 
-`--plan` shows resource names, login methods, the callback URL, and a brief credential checklist with setup links without opening credential pages or saving a draft. Cloudflare browser login can still open if needed. It highlights the next install command at the end of the output. The command preserves your configuration choices, including the default API hostname, Hyperdrive selection, login methods, Access protection, and dashboard origin. Run that command to recalculate and confirm the plan without answering the same configuration questions again. Missing credentials are collected during installation. For unfinished installations, the plan prints the saved `--resume` command instead. Use `--auth-config` on its own for login configuration, or use `--login-methods` and the Access protection flags.
+`--plan` previews resource names, login methods, callback URLs, and credential requirements. Run the install or resume command printed at the end to continue. For login configuration, use either `--auth-config` or `--login-methods` with the Access protection flags.
 
-New resources use `void-<name>-<role>` names. Existing installations keep their recorded names; an unowned name conflict stops installation. After confirmation, Void opens setup pages for missing credentials. The runtime-token link preselects required account permissions, including Workers Tail, Hyperdrive, and AI Gateway when needed; select the indicated zone for domain installs. Supplied credentials skip those pages.
+New resources use `void-<name>-<role>` names; choose an unused installation name. The installer opens setup pages for missing credentials and reuses values already supplied.
 
-Setup drafts save Worker names, the login callback, and partial credentials encrypted locally. Interactive installs offer unfinished installations, including interrupted provisioning, or a new one. Choosing an unfinished name asks to resume it; choosing a new one leaves earlier setup, credentials, and resources untouched. Use `--resume` for non-interactive recovery. Completed platforms cannot be resumed.
+Installation progress and partial credentials are saved encrypted locally. Rerun the installer to continue unfinished setup, or pass `--resume --name <id>`. Use lifecycle commands for completed installations.
 
 Use an empty PostgreSQL database dedicated to the installation. You can correct a failed initial connection, but after the database is claimed or Hyperdrive is provisioned, commands reject a different URL.
 
-During interactive installation, choose whether Void creates Hyperdrive or uses an existing one. The installer lists the account's Hyperdrive configurations, suggests a matching generated name when present, and lets you select any configuration. Review its database, host, port, runtime user, and cache setting before confirming; its name need not match the installation name. If you need to create a separately managed configuration, Void shows setup instructions and stops before provisioning. Supply an owner PostgreSQL URL at the normal prompt for database claims and migrations. Void adopts the selected Hyperdrive after verifying its database origin and disabled SQL result caching; its configuration stays under the external manager's control. Unattended installs can set `VOID_PLATFORM_HYPERDRIVE_ID`, `VOID_PLATFORM_HYPERDRIVE_ORIGIN_HOST`, and `VOID_PLATFORM_HYPERDRIVE_ORIGIN_USER` together.
+Choose whether Void creates Hyperdrive or uses an existing configuration. An existing Hyperdrive must point to the platform database with SQL result caching disabled. Supply a database owner URL for migrations. See [Use an existing Hyperdrive](../guide/platform/installation/prerequisites.md#use-an-existing-hyperdrive) for setup and [Install from CI](../guide/platform/installation/ci.md) for unattended inputs.
 
-Recovery secrets are encrypted with AES-256-GCM using a key in your system keychain. The encrypted data is tied to the installation identity. Without a keychain, supply a canonical base64-encoded 32-byte `VOID_PLATFORM_RECOVERY_KEY`; otherwise Void stops before saving secrets. CI can generate a temporary key when its original credentials remain in protected secrets.
+Recovery secrets are encrypted using your system keychain. Without one, supply a base64-encoded 32-byte `VOID_PLATFORM_RECOVERY_KEY`. Keep the original credentials in protected CI secrets for recovery.
 
 If a newly created zone is waiting for registrar delegation, resume after it becomes active:
 
@@ -977,8 +972,6 @@ After discovery on another machine, set `VOID_PLATFORM_DATABASE_URL`. An upgrade
 
 Repair and upgrade preserve disabled state. New, resumed, and previously disabled installations block user traffic until all target Workers pass verification; the installer's health probes can still run. Routes and custom domains remain attached.
 
-Commands preserve existing routes and domains, verify the configured database, and coordinate concurrent administrators before making changes.
-
 `--runtime` selects a custom platform build. Relative paths resolve from your current directory. Void verifies the build before making changes; see [Platform Development](../guide/platform/development/runtime.md#deploying-your-runtime) for creating one.
 
 Without `--runtime`, the CLI uses its packaged platform version.
@@ -987,11 +980,9 @@ Platform migrations only move forward. Void checks compatibility before updating
 
 An upgrade completes after the new Workers pass health checks. If rollout fails, Void attempts to restore the previous Workers. Retrying does not repeat completed migrations.
 
-`platform rollback` restores a compatible earlier runtime without reversing database migrations. Pass its files with `--runtime`. If the installed version is a custom build, also supply that version with `--from-runtime`. Void refuses targets that are incompatible with the current database or predate installed authentication, sandbox-drain, or ownership-aware usage protocols. A later `upgrade` can move forward again.
+`platform rollback` restores a compatible earlier runtime without reversing database migrations. Pass its files with `--runtime`; if the installed version is custom, also supply that version with `--from-runtime`. Void refuses incompatible targets.
 
 Uninstall verifies remote ownership before removing anything. Data resources are retained unless you pass `--purge-data`. Workers, the Queues they use, R2, AI Gateway, DNS records, routes, custom domains, adopted resources, external PostgreSQL, and zones are always retained for manual review.
-
-Resources that may have been shared or repurposed are retained for manual review. Platform traffic stays blocked. External PostgreSQL and its data are never deleted.
 
 See [Disable and Uninstall](../guide/platform/installation/uninstall.md#remove-retained-resources) for the full removal policy and the cleanup order.
 
@@ -1089,7 +1080,7 @@ Use this for quick schema iteration while prototyping. Before deploying, generat
 
 Generate SQL migration files from schema changes.
 
-The command compares your current `db/schema.ts` or `db/schema/` modules against the last generated Drizzle snapshot and writes new migration artifacts under `db/migrations/`. When Void-managed auth is enabled, it also resolves the Better Auth schema in production mode and includes those tables automatically, including configured renames and plugin tables. This works for auth-only apps without an application schema. Review and commit the generated files before deploying.
+Compares your schema with the last Drizzle snapshot and writes migrations under `db/migrations/`. It includes Void-managed auth tables and configured auth plugins, even without an application schema. Review and commit the generated files before deploying.
 
 For SQLite, Void checks that the migration history applies to a fresh database. If generation fails this check, the previous SQL, snapshots, and journal are restored. If an existing migration fails, repair that unapplied migration first: rerunning generation compares snapshots and does not repair existing SQL. This check does not verify that a migration preserves existing data; review table rebuilds and foreign-key actions carefully.
 
@@ -1353,8 +1344,7 @@ Bulk upload secrets from a dotenv file. Each `KEY=value` line in the file is upl
 void secret sync .env             # validates and uploads declared server values
 ```
 
-Direct Cloudflare targets use Cloudflare's bulk-secret API. Existing remote secrets absent from the file are not pruned.
-Every entry must be a non-client key declared in `env.ts`, and its plaintext value must pass the schema before upload.
+Existing remote secrets absent from the file are kept. Every entry must be a server key declared in `env.ts`, and its value must pass validation.
 
 ### `void secret delete`
 
@@ -1706,7 +1696,7 @@ Reconcile the domain connection and refresh readiness. Sync does not rotate its 
 void email domain rotate-secret <domain> [--project <name>]
 ```
 
-Rotate the ingress secret for the zone connection shared by this domain and its siblings. Inbound must be ready; run `void email domain sync <domain>` first if setup is incomplete. The platform accepts the staged secret before updating the Worker and promotes it only after verifying the deployed generation. An uncertain update stays recorded for reconciliation.
+Rotate the connection secret shared by this domain and other domains on the same zone. Inbound delivery must be ready; run `void email domain sync <domain>` first if setup is incomplete. Inspect an uncertain result before retrying.
 
 #### `void email domain remove`
 
@@ -1742,12 +1732,9 @@ On Workers Free, inbound mail and sends to verified recipients remain available.
 
 ### `void init --agents`
 
-Runs all agent setup steps:
+Adds Void instructions to `AGENTS.md` and links skills for detected coding agents. Existing instructions outside the Void block are preserved.
 
-1. **Instructions:** always creates or updates `AGENTS.md` with four brief bullets and versioned markers. Content outside the Void block and other instruction files are preserved.
-2. **Skills:** links skills for detected coding agents.
-
-There is no agent-selection prompt. If no agent is detected, skill linking is skipped; the instructions point directly to `node_modules/void/skills/void/docs/`.
+If no supported agent is detected, `AGENTS.md` links to the bundled docs. See [Coding Agents](../integrations/agents.md).
 
 ## Environment variables
 

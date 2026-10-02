@@ -39,7 +39,7 @@ STRIPE_KEY=sk_test_example
 VITE_API_ORIGIN=http://localhost:5173
 ```
 
-`.env` should be gitignored. Void rejects legacy `.env.local`, `.env.development`, `.env.production`, `.env.example`, other `.env.*` files, and Wrangler `.dev.vars*` files so there is no hidden precedence order.
+Keep `.env` out of Git. Other dotenv files, including `.env.local`, `.env.production`, `.env.example`, and Wrangler’s `.dev.vars*`, are not supported. See [Environment migration](./env-migration.md) if your app uses them.
 
 Run the local check at any time:
 
@@ -68,7 +68,7 @@ Secret commands validate values against `env.ts` before upload. Production value
 
 Client-prefixed keys are rejected by secret commands. Keep local development credentials and `VITE_*` values out of the production secrets file.
 
-`void deploy` never adds `.env` values to its manifest. It requires every required server key to exist remotely before upload.
+`void deploy` requires every required server key to exist remotely. It never uploads `.env` values.
 
 The same secret commands work for direct Cloudflare deployments. Schema-declared server values must be Worker secrets, not plaintext `vars`.
 

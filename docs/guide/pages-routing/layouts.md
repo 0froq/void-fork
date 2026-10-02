@@ -146,8 +146,6 @@ When a page renders, the layout wraps it. The page component is injected as the 
 
 <img src="./layout-nesting.svg" alt="Layout nesting diagram: pages/layout wraps pages/users/layout wraps pages/users/[id] page component" style="max-width: 520px; width: 100%;" />
 
-Layouts nest automatically and persist across navigations within their subtree, so component state is preserved.
-
 ## Named Layouts
 
 Named layouts let individual pages opt into a different layout without changing the URL structure. Define them in `_layouts/` directories within `pages/`:

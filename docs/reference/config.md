@@ -197,7 +197,7 @@ Output mode. Controls the default rendering strategy for pages.
 | `"server"` (default) | `false`           | `export const prerender = true`  | Deploy-time (platform ISR) |
 | `"static"`           | `true`            | `export const prerender = false` | Build or deploy post-build |
 
-When set to `"static"`, all pages are prerendered as static HTML files written to `dist/client/`. A standalone `vite build` renders them in the build; managed `void deploy` renders immediately afterward in the trusted deploy process so build plugins never receive platform credentials. Individual pages can opt out with `export const prerender = false`. Dynamic pages (with route params) without a `getPrerenderPaths()` export are implicitly not prerendered.
+When set to `"static"`, pages are prerendered to HTML in `dist/client/`. Individual pages can opt out with `export const prerender = false`. Dynamic pages need `getPrerenderPaths()` to be prerendered.
 
 When omitted or set to `"server"`, pages are server-rendered on request. Individual pages can opt into deploy-time prerendering with `export const prerender = true`, or opt out of server-rendered component HTML with `export const ssr = false`.
 
@@ -251,7 +251,7 @@ Enable and configure Cloudflare Sandboxes. Importing from `void/sandbox` enables
 
 Supported sizes are `lite` and `standard-1` through `standard-4`. Native deploys build Dockerfiles with Docker; registry images must be digest-pinned references from the Cloudflare managed registry. Custom images must include the matching Sandbox SDK helper. For a local Dockerfile, supply `platformImage` when deploying to a managed platform. See [Sandboxes](../guide/sandboxes.md) for image setup and runtime examples.
 
-Sandbox requires [Workers Paid](https://dash.cloudflare.com/?to=/:account/workers/plans) and Containers access, checked before provisioning or building. Managed runtime tokens need Account / Containers: Edit and Account / Cloudchamber: Edit. Apps without Sandbox use neither Containers nor an entitlement check.
+Sandbox requires [Workers Paid](https://dash.cloudflare.com/?to=/:account/workers/plans) and Containers access. Managed runtime tokens need Account / Containers: Edit and Account / Cloudchamber: Edit. See [Sandbox deployment](../guide/sandboxes.md#deployment).
 
 ### `target`
 
@@ -343,7 +343,7 @@ Routing and edge configuration for headers, redirects, rewrites, and caching.
 
 #### `routing.headers`
 
-Custom response headers for dispatch-worker responses. Keys are URL patterns, values are arrays of `"Name: value"` strings. See [Custom Headers](../guide/edge/headers) for details.
+Custom response headers. Keys are URL patterns, values are arrays of `"Name: value"` strings. See [Custom Headers](../guide/edge/headers) for details.
 
 ```json
 {

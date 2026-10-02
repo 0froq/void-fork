@@ -20,7 +20,7 @@ A Void app can be **API-only** (just `routes/`), a **SPA + API** (frontend in `s
 
 <VoidAppFileTree annotations />
 
-Your worker handles API routes, page rendering, and (optionally) [custom SSR](./ssr.md). Static assets are served from the edge via per-worker assets. Cloudflare bindings (D1, KV, R2) are [inferred from your source code](../reference/resource-inference.md) and provisioned automatically.
+Void serves API routes, page rendering, and optional [custom SSR](./ssr.md) alongside static assets. Resources such as D1, KV, and R2 are [inferred from your code](../reference/resource-inference.md) and provisioned when you deploy.
 
 Void apps can also use [`output: 'static'`](./ssg.md) to pre-render all pages at build time. That gives you a fully static site that can be deployed anywhere, with no Cloudflare Worker required.
 
@@ -40,10 +40,6 @@ Void supports deploying Vite-based meta-framework apps with `void deploy`. The f
 | [Astro](https://astro.build/)                       | `astro`                 | [Guide](../integrations/frameworks/astro.md)          |
 
 Add `voidPlugin()` to the framework's Vite config to get binding inference, typed DB generation, migration management, cron jobs, queues, and caching. Void-managed auth is not supported in framework mode; use Better Auth's official integration for your framework. See the [Meta Frameworks Integration](../integrations/frameworks/overview.md) for supported features and setup guides.
-
-**Deploy:** `void deploy` runs your framework's build, provisions resources, applies migrations, and deploys to the selected target. Your framework continues to handle routing and rendering.
-
-**Detected when** any of the above packages is in your dependencies.
 
 ## Pre-built Static Sites
 
