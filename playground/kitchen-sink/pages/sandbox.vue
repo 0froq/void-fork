@@ -32,6 +32,7 @@ async function runCode() {
     const body = (await res.json()) as {
       ok: boolean;
       error?: string;
+      message?: string;
       output?: unknown;
       stdout?: string;
       stderr?: string;
@@ -40,7 +41,7 @@ async function runCode() {
     };
 
     if (!res.ok || !body.ok) {
-      error.value = body.error ?? body.stderr ?? `${res.status} ${res.statusText}`;
+      error.value = body.message ?? body.error ?? body.stderr ?? `${res.status} ${res.statusText}`;
     }
 
     result.value = body.output ?? null;

@@ -200,7 +200,13 @@ export class SandboxContainer<Env = unknown> extends DurableObject<Env> {
   protected async afterStart(): Promise<void> {}
   protected async beforeUse(): Promise<void> {}
   protected async stopped(): Promise<void> {}
-  protected async waitForProcessExit(exitCode: Promise<number>): Promise<number> {
+  protected processContext(_exitCode: Promise<number>): unknown {
+    return undefined;
+  }
+  protected async waitForProcessExit(
+    exitCode: Promise<number>,
+    _context?: unknown,
+  ): Promise<number> {
     return exitCode;
   }
 
@@ -396,9 +402,10 @@ export class SandboxContainer<Env = unknown> extends DurableObject<Env> {
         await this.ensureRunning();
         const process = await this.execProcess(argv, { cwd: '/workspace', ...options });
         void process.exitCode.then(finish, finish);
+        const processContext = this.processContext(process.exitCode);
         return {
           capability: new ProcessCapability(process, () =>
-            this.waitForProcessExit(process.exitCode),
+            this.waitForProcessExit(process.exitCode, processContext),
           ),
           pid: process.pid,
           isPty: process.isPty ?? false,

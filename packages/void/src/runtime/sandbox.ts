@@ -1,6 +1,7 @@
 import type { Files } from '@cloudflare/sandbox';
 import { getRawRuntimeEnv } from './env-raw.ts';
 import { requireRuntimeBinding } from './env.ts';
+import { UsageLimit, limitOperation, type LimitOperation } from './limits.ts';
 import {
   SandboxContainer,
   validateSandboxOptions,
@@ -22,25 +23,30 @@ export type SandboxProcess = {
   stdin: WritableStream | null;
   stdout: ReadableStream | null;
   stderr: ReadableStream | null;
-  readonly exitCode: Promise<number>;
-  output(): Promise<ExecOutput>;
+  readonly exitCode: LimitOperation<number>;
+  output(): LimitOperation<ExecOutput>;
   kill(signal?: number): Promise<void>;
   resize(cols: number, rows: number): Promise<void>;
 };
+export type SandboxFiles = {
+  [K in keyof Files]: Files[K] extends (...args: infer A) => Promise<infer R>
+    ? (...args: A) => LimitOperation<R>
+    : never;
+};
 export type SandboxClient = {
-  exec(argv: Array<string>, options?: SandboxExecOptions): Promise<SandboxProcess>;
-  files: Files;
-  fetch(port: number, request: Request): Promise<Response>;
+  exec(argv: Array<string>, options?: SandboxExecOptions): LimitOperation<SandboxProcess>;
+  run(argv: Array<string>, options?: SandboxExecOptions): LimitOperation<ExecOutput>;
+  files: SandboxFiles;
+  fetch(port: number, request: Request): LimitOperation<Response>;
   running(): Promise<boolean>;
   destroy(): Promise<void>;
 };
 
-export class SandboxLimitError extends Error {
+export class SandboxLimitError extends UsageLimit {
   override readonly name = 'SandboxLimitError';
-  readonly reason: 'concurrency' | 'runtime_budget';
+  declare readonly reason: 'concurrency' | 'runtime_budget';
   constructor(reason: 'concurrency' | 'runtime_budget', message?: string) {
-    super(message ?? `Sandbox limit reached: ${reason}`);
-    this.reason = reason;
+    super({ resource: 'sandbox', reason, message: message ?? `Sandbox limit reached: ${reason}` });
   }
 }
 export class SandboxUnavailableError extends Error {
@@ -123,49 +129,81 @@ function client(capability: SandboxCapability): SandboxClient {
       throw error;
     }
   };
-  const files = new Proxy(Object.create(null) as Files, {
+  const files = new Proxy(Object.create(null) as SandboxFiles, {
     get(_target, method) {
       if (typeof method !== 'string' || method === 'then') {
         return undefined;
       }
       return (...args: Array<unknown>) => {
         const index = method === 'writeFile' || method === 'rename' ? 3 : 2;
-        return callWithOptions('files', [method, ...args], index);
+        return limitOperation(() => callWithOptions('files', [method, ...args], index));
       };
     },
   });
+  const execute = async (
+    argv: Array<string>,
+    options?: SandboxExecOptions,
+  ): Promise<SandboxProcess> => {
+    const wire = (await callWithOptions('exec', [argv, options], 1)) as SandboxProcessWire;
+    let exitCode: LimitOperation<number> | undefined;
+    let output: LimitOperation<ExecOutput> | undefined;
+    const process: SandboxProcess = {
+      pid: wire.pid,
+      isPty: wire.isPty,
+      stdin: wire.stdin,
+      stdout: wire.stdout,
+      stderr: wire.stderr,
+      get exitCode() {
+        return (exitCode ??= limitOperation(async () => {
+          try {
+            return (await wire.capability.invoke('exitCode', [])) as number;
+          } catch (error) {
+            rethrowSandboxError(error);
+          }
+        }));
+      },
+      output() {
+        return (output ??= limitOperation(async () => {
+          try {
+            return await Promise.all([
+              wire.stdout ? new Response(wire.stdout).arrayBuffer() : new ArrayBuffer(0),
+              wire.stderr ? new Response(wire.stderr).arrayBuffer() : new ArrayBuffer(0),
+              process.exitCode.match({
+                ok: (code) => code,
+                limited: (limit) => {
+                  throw limit;
+                },
+              }),
+            ]).then(([stdout, stderr, exitCode]) => ({ stdout, stderr, exitCode }));
+          } catch (error) {
+            rethrowSandboxError(error);
+          }
+        }));
+      },
+      kill: async (signal) => {
+        await wire.capability.invoke('kill', [signal]);
+      },
+      resize: async (cols, rows) => {
+        await wire.capability.invoke('resize', [cols, rows]);
+      },
+    };
+    return process;
+  };
   return {
     files,
-    async exec(argv, options) {
-      const wire = (await callWithOptions('exec', [argv, options], 1)) as SandboxProcessWire;
-      let exitCode: Promise<number> | undefined;
-      let output: Promise<ExecOutput> | undefined;
-      const process: SandboxProcess = {
-        pid: wire.pid,
-        isPty: wire.isPty,
-        stdin: wire.stdin,
-        stdout: wire.stdout,
-        stderr: wire.stderr,
-        get exitCode() {
-          return (exitCode ??= wire.capability.invoke('exitCode', []) as Promise<number>);
-        },
-        output() {
-          return (output ??= Promise.all([
-            wire.stdout ? new Response(wire.stdout).arrayBuffer() : new ArrayBuffer(0),
-            wire.stderr ? new Response(wire.stderr).arrayBuffer() : new ArrayBuffer(0),
-            process.exitCode,
-          ]).then(([stdout, stderr, exitCode]) => ({ stdout, stderr, exitCode })));
-        },
-        kill: async (signal) => {
-          await wire.capability.invoke('kill', [signal]);
-        },
-        resize: async (cols, rows) => {
-          await wire.capability.invoke('resize', [cols, rows]);
-        },
-      };
-      return process;
-    },
-    fetch: async (port, request) => (await call('fetch', [port, request])) as Response,
+    exec: (argv, options) => limitOperation(() => execute(argv, options)),
+    run: (argv, options) =>
+      limitOperation(async () => {
+        const process = await execute(argv, options);
+        return process.output().match({
+          ok: (result) => result,
+          limited: (limit) => {
+            throw limit;
+          },
+        });
+      }),
+    fetch: (port, request) =>
+      limitOperation(async () => (await call('fetch', [port, request])) as Response),
     running: async () => (await call('running', [])) as boolean,
     destroy: async () => {
       await call('destroy', []);

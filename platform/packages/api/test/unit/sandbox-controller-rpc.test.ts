@@ -62,8 +62,8 @@ import { getSandbox } from ${JSON.stringify(join(root, 'packages/void/src/runtim
 export default { async fetch(request, env) {
   const id = new URL(request.url).pathname.slice(1);
   const sandbox = await getSandbox(id, { inactivityTimeoutMs: 50 });
-  const process = await sandbox.exec(['sleep', '100']);
-  const waiting = id === 'waiting' ? process.exitCode : undefined;
+  const process = await sandbox.exec(['sleep', '100']).match({ ok: value => value, limited: limit => { throw limit; } });
+  const waiting = id === 'waiting' ? process.exitCode.match({ ok: value => value, limited: limit => { throw limit; } }) : undefined;
   // Keep the same RPC session and its unconsumed stdout capability open.
   await new Promise(resolve => setTimeout(resolve, 150));
   const running = await env.__VOID_SANDBOX.check(id);

@@ -486,3 +486,39 @@ describe('Sandbox capability boundary', () => {
     expect(f.container.start).not.toHaveBeenCalled();
   });
 });
+
+it('preserves budget termination for an old process after a new generation starts', async () => {
+  const f = fixture();
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  let finish!: (code: number) => void;
+  f.process.exitCode = new Promise((resolve) => {
+    finish = resolve;
+  });
+  f.container.destroy.mockImplementation(async () => {
+    f.container.running = false;
+    finish(137);
+  });
+  const process = (await f.start()) as {
+    capability: { invoke(op: string, args: Array<unknown>): Promise<unknown> };
+  };
+  f.control.heartbeat.mockResolvedValue({ ok: false, reason: 'runtime_budget' });
+  await f.controller.alarm();
+  f.control.heartbeat.mockResolvedValue({ ok: true });
+  f.process.exitCode = Promise.resolve(0);
+  const next = (await f.start()) as typeof process;
+  expect(await next.capability.invoke('exitCode', [])).toBe(0);
+  await expect(process.capability.invoke('exitCode', [])).rejects.toThrow(
+    'VOID_SANDBOX_runtime_budget',
+  );
+});
+
+it('keeps a completed process successful when the account exhausts its budget later', async () => {
+  const f = fixture();
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  const process = (await f.start()) as {
+    capability: { invoke(op: string, args: Array<unknown>): Promise<unknown> };
+  };
+  f.control.heartbeat.mockResolvedValue({ ok: false, reason: 'runtime_budget' });
+  await f.controller.alarm();
+  expect(await process.capability.invoke('exitCode', [])).toBe(0);
+});

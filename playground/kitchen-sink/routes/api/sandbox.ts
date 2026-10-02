@@ -1,5 +1,6 @@
 import { defineHandler } from 'void';
-import { getSandbox, SandboxLimitError, type SandboxClient } from 'void/sandbox';
+import type { UsageLimit } from 'void/limits';
+import { getSandbox, type SandboxClient } from 'void/sandbox';
 import { sampleRequests } from '../../lib/sandbox-demo.ts';
 
 const MAX_CODE_LENGTH = 8_000;
@@ -45,6 +46,13 @@ export const POST = defineHandler(async (c) => {
     );
   }
 
+  const limited = (limit: UsageLimit) =>
+    limit.response({
+      message:
+        limit.reason === 'concurrency'
+          ? 'All runners are busy. Your code has been kept; try again shortly.'
+          : 'The execution allowance is exhausted. Your code has been kept.',
+    });
   let sandbox: SandboxClient | undefined;
   try {
     // Programs from concurrent callers must never share files or processes.
@@ -52,28 +60,43 @@ export const POST = defineHandler(async (c) => {
       inactivityTimeoutMs: 30_000,
     });
 
-    await sandbox.files.mkdir(WORKDIR, { recursive: true });
-    await sandbox.files.writeFile(
-      `${WORKDIR}/input.json`,
-      JSON.stringify({ requests: sampleRequests }, null, 2),
-    );
-    await sandbox.files.writeFile(`${WORKDIR}/user-code.mjs`, code);
-    await sandbox.files.writeFile(`${WORKDIR}/run.mjs`, RUNNER);
+    for (const operation of [
+      sandbox.files.mkdir(WORKDIR, { recursive: true }),
+      sandbox.files.writeFile(
+        `${WORKDIR}/input.json`,
+        JSON.stringify({ requests: sampleRequests }, null, 2),
+      ),
+      sandbox.files.writeFile(`${WORKDIR}/user-code.mjs`, code),
+      sandbox.files.writeFile(`${WORKDIR}/run.mjs`, RUNNER),
+    ]) {
+      const denial = await operation.match({ ok: () => null, limited });
+      if (denial) {
+        return denial;
+      }
+    }
 
     const started = performance.now();
-    const process = await sandbox.exec(['node', 'run.mjs'], {
-      cwd: WORKDIR,
-      signal: AbortSignal.timeout(5_000),
-      env: {
-        NODE_OPTIONS: '--disable-proto=throw',
-      },
-    });
-
-    const result = await process.output();
+    const result = await sandbox
+      .run(['node', 'run.mjs'], {
+        cwd: WORKDIR,
+        signal: AbortSignal.timeout(5_000),
+        env: {
+          NODE_OPTIONS: '--disable-proto=throw',
+        },
+      })
+      .match({ ok: (result) => result, limited });
+    if (result instanceof Response) {
+      return result;
+    }
     let output: unknown = null;
     if (result.exitCode === 0) {
-      const file = await sandbox.files.readFile(`${WORKDIR}/output.json`);
-      output = JSON.parse(await file.text());
+      const file = await sandbox.files
+        .readFile(`${WORKDIR}/output.json`)
+        .match({ ok: (response) => response.text(), limited });
+      if (file instanceof Response) {
+        return file;
+      }
+      output = JSON.parse(file);
     }
 
     return c.json({
@@ -85,12 +108,6 @@ export const POST = defineHandler(async (c) => {
       duration: performance.now() - started,
     });
   } catch (err) {
-    // Quota denials from the platform gate are user-facing 4xx, not server
-    // errors. Reference implementations get copied — surfacing this as a 500
-    // teaches the wrong pattern.
-    if (err instanceof SandboxLimitError) {
-      return c.json({ ok: false, error: err.message, reason: err.reason }, 429);
-    }
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ ok: false, error: message }, 500);
   } finally {

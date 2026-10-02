@@ -64,23 +64,23 @@ export default { async fetch(request) {
   const sandbox = await getSandbox('default');
   const path = new URL(request.url).pathname;
   if (path === '/files') {
-    await sandbox.files.writeFile('/file', new Blob(['input stream']).stream());
-    return await sandbox.files.readFile('/file');
+    await sandbox.files.writeFile('/file', new Blob(['input stream']).stream()).match({ ok: value => value, limited: limit => { throw limit; } });
+    return await sandbox.files.readFile('/file').match({ ok: value => value, limited: limit => { throw limit; } });
   }
   if (path === '/blob') {
-    await sandbox.files.writeFile('/file', new Blob(['blob content']));
-    return await sandbox.files.readFile('/file');
+    await sandbox.files.writeFile('/file', new Blob(['blob content'])).match({ ok: value => value, limited: limit => { throw limit; } });
+    return await sandbox.files.readFile('/file').match({ ok: value => value, limited: limit => { throw limit; } });
   }
   if (path === '/process') {
-    const process = await sandbox.exec(['sleep', '10']);
+    const process = await sandbox.exec(['sleep', '10']).match({ ok: value => value, limited: limit => { throw limit; } });
     await process.kill(9);
-    return Response.json({pid: process.pid, exitCode: await process.exitCode});
+    return Response.json({pid: process.pid, exitCode: await process.exitCode.match({ ok: value => value, limited: limit => { throw limit; } })});
   }
   if (path === '/abort') {
     const abort = new AbortController();
-    const process = await sandbox.exec(['sleep', '10'], {signal: abort.signal});
+    const process = await sandbox.exec(['sleep', '10'], {signal: abort.signal}).match({ ok: value => value, limited: limit => { throw limit; } });
     abort.abort();
-    return Response.json({exitCode: await process.exitCode});
+    return Response.json({exitCode: await process.exitCode.match({ ok: value => value, limited: limit => { throw limit; } })});
   }
   if (path === '/rejected') {
     const abort = new AbortController();
@@ -90,17 +90,17 @@ export default { async fetch(request) {
     const remove = signal.removeEventListener.bind(signal);
     signal.addEventListener = (type, listener, options) => { if (type === 'abort') listeners.add(listener); return add(type, listener, options); };
     signal.removeEventListener = (type, listener, options) => { if (type === 'abort') listeners.delete(listener); return remove(type, listener, options); };
-    try { await sandbox.exec(['denied'], {signal}); } catch {}
+    try { await sandbox.exec(['denied'], {signal}).match({ ok: value => value, limited: limit => { throw limit; } }); } catch {}
     return Response.json({listeners: listeners.size});
   }
   if (path === '/stdin') {
-    const process = await sandbox.exec(['cat'], {stdin: 'pipe'});
+    const process = await sandbox.exec(['cat'], {stdin: 'pipe'}).match({ ok: value => value, limited: limit => { throw limit; } });
     const writer = process.stdin.getWriter();
     await writer.write(new TextEncoder().encode('stdin stream')); await writer.close();
-    return await sandbox.files.readFile('/file');
+    return await sandbox.files.readFile('/file').match({ ok: value => value, limited: limit => { throw limit; } });
   }
-  const process = await sandbox.exec(['echo', 'ok']);
-  const result = await process.output();
+  const process = await sandbox.exec(['echo', 'ok']).match({ ok: value => value, limited: limit => { throw limit; } });
+  const result = await process.output().match({ ok: value => value, limited: limit => { throw limit; } });
   return Response.json({output: new TextDecoder().decode(result.stdout), exitCode: result.exitCode});
 } };
 `,

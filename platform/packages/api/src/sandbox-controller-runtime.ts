@@ -82,6 +82,16 @@ export class SandboxController extends SandboxContainer<ControllerEnv> {
   #activity: Activity | undefined;
   #activityReady: Promise<void> | undefined;
   #busy = 0;
+  #generation: { failure?: Error } = {};
+  protected override processContext(exitCode: Promise<number>): unknown {
+    const generation = this.#generation;
+    const completion: { failure?: Error } = {};
+    const capture = () => {
+      completion.failure = generation.failure;
+    };
+    void exitCode.then(capture, capture);
+    return completion;
+  }
 
   async #loadActivity(): Promise<void> {
     this.#activityReady ??= (async () => {
@@ -129,10 +139,21 @@ export class SandboxController extends SandboxContainer<ControllerEnv> {
       await this.ctx.storage.put(ACTIVITY_KEY, this.#activity);
     }
   }
-  protected override async waitForProcessExit(exitCode: Promise<number>): Promise<number> {
+  protected override async waitForProcessExit(
+    exitCode: Promise<number>,
+    context?: unknown,
+  ): Promise<number> {
     const finish = await this.#active();
     try {
-      return await exitCode;
+      try {
+        const code = await exitCode;
+        if ((context as { failure?: Error })?.failure) {
+          throw (context as { failure: Error }).failure;
+        }
+        return code;
+      } catch (error) {
+        throw (context as { failure?: Error })?.failure ?? error;
+      }
     } finally {
       await finish();
     }
@@ -264,6 +285,7 @@ export class SandboxController extends SandboxContainer<ControllerEnv> {
     if (this.container.running) {
       await this.container.destroy();
     }
+    this.#generation = {};
     lease = { generation: crypto.randomUUID(), phase: 'pending' };
     await this.ctx.storage.put(LEASE_KEY, lease);
     await this.#arm();
@@ -307,6 +329,7 @@ export class SandboxController extends SandboxContainer<ControllerEnv> {
     try {
       await this.#control('heartbeat', lease);
     } catch (error) {
+      this.#generation.failure = error instanceof Error ? error : denied('unavailable');
       await this.destroy().catch(() => {});
       throw error;
     }
@@ -362,6 +385,7 @@ export class SandboxController extends SandboxContainer<ControllerEnv> {
         await this.destroy();
       }
     } catch (error) {
+      this.#generation.failure = error instanceof Error ? error : denied('unavailable');
       await this.destroy().catch(() => {});
       console.error('[void/sandbox] lifecycle check failed', error);
     } finally {

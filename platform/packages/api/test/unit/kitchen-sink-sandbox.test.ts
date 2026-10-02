@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { Hono } from 'hono';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { CloudEnv } from 'void/handler';
+import { limitOperation, UsageLimit } from '../../../../../packages/void/src/runtime/limits.ts';
 import { kitchenSinkSourceFixture } from './kitchen-sink-source-fixture.ts';
 
 const mocks = vi.hoisted(() => ({ getSandbox: vi.fn() }));
@@ -40,30 +41,30 @@ describe('kitchen-sink Sandbox requests', () => {
       const files = new Map<string, string>();
       return {
         files: {
-          mkdir: vi.fn(),
-          writeFile: async (path: string, value: string) => {
-            files.set(path, value);
-          },
-          readFile: async (path: string) => new Response(files.get(path)),
+          mkdir: () => limitOperation(async () => {}),
+          writeFile: (path: string, value: string) =>
+            limitOperation(async () => {
+              files.set(path, value);
+            }),
+          readFile: (path: string) => limitOperation(async () => new Response(files.get(path))),
         },
-        exec: async () => {
-          if (++started === 2) {
-            release();
-          }
-          await bothStarted;
-          // The command reads its program only after both requests have
-          // written files, reproducing the race when they share a container.
-          const marker = files.get('/workspace/void-kitchen-sink-code-lab/user-code.mjs');
-          const output = JSON.stringify({ value: marker });
-          files.set('/workspace/void-kitchen-sink-code-lab/output.json', output);
-          return {
-            output: async () => ({
+        run: () =>
+          limitOperation(async () => {
+            if (++started === 2) {
+              release();
+            }
+            await bothStarted;
+            // The command reads its program only after both requests have
+            // written files, reproducing the race when they share a container.
+            const marker = files.get('/workspace/void-kitchen-sink-code-lab/user-code.mjs');
+            const output = JSON.stringify({ value: marker });
+            files.set('/workspace/void-kitchen-sink-code-lab/output.json', output);
+            return {
               exitCode: 0,
               stdout: new TextEncoder().encode(output),
               stderr: new ArrayBuffer(0),
-            }),
-          };
-        },
+            };
+          }),
         destroy: vi.fn(),
       };
     }
@@ -95,8 +96,14 @@ describe('kitchen-sink Sandbox requests', () => {
   it('destroys a container when execution fails and preserves the reported error', async () => {
     const destroy = vi.fn();
     mocks.getSandbox.mockResolvedValue({
-      files: { mkdir: vi.fn(), writeFile: vi.fn() },
-      exec: vi.fn().mockRejectedValue(new Error('command failed')),
+      files: {
+        mkdir: () => limitOperation(async () => {}),
+        writeFile: () => limitOperation(async () => {}),
+      },
+      run: () =>
+        limitOperation(async () => {
+          throw new Error('command failed');
+        }),
       destroy,
     });
     const response = await request('invalid program');
@@ -104,4 +111,17 @@ describe('kitchen-sink Sandbox requests', () => {
     expect(await response.json()).toEqual({ ok: false, error: 'command failed' });
     expect(destroy).toHaveBeenCalledOnce();
   });
+});
+
+it('returns a structured quota response while still cleaning up the container', async () => {
+  const destroy = vi.fn();
+  const denied = () =>
+    limitOperation(async () => {
+      throw new UsageLimit({ resource: 'sandbox', reason: 'concurrency', message: 'Busy' });
+    });
+  mocks.getSandbox.mockResolvedValue({ files: { mkdir: denied, writeFile: denied }, destroy });
+  const response = await request('keep this code');
+  expect(response.status).toBe(429);
+  expect(await response.json()).toMatchObject({ code: 'usage_limit', reason: 'concurrency' });
+  expect(destroy).toHaveBeenCalledOnce();
 });
