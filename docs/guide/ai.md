@@ -210,7 +210,7 @@ export const POST = defineHandler(async (c) => {
 });
 ```
 
-Use `ai.provider().fetch()` for provider-native image APIs:
+Use `ai.provider().fetch()` for provider-native image APIs. Match the [provider's request schema](https://developers.openai.com/api/reference/resources/images/methods/generate):
 
 ```ts
 export const POST = defineHandler(async (c) => {
@@ -218,10 +218,9 @@ export const POST = defineHandler(async (c) => {
 
   return ai.provider('openai').fetch('/images/generations', {
     body: {
-      model: 'gpt-image-1.5',
+      model: 'gpt-image-2.5-sunburst',
       prompt,
       size: '1024x1024',
-      response_format: 'b64_json',
     },
   });
 });
@@ -233,7 +232,7 @@ For multipart provider APIs, pass `FormData`:
 export const POST = defineHandler(async (c) => {
   const body = await c.req.parseBody();
   const form = new FormData();
-  form.set('model', 'gpt-image-1.5');
+  form.set('model', 'gpt-image-2.5-sunburst');
   form.set('prompt', String(body.prompt));
   form.set('image', body.image as Blob, 'source.png');
 
