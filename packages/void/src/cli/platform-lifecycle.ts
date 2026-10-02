@@ -580,7 +580,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     note(formatPlatformRuntime(runtime), 'Platform runtime');
     if (args.plan) {
       console.log(formatPlatformSetupPlan(plan));
-      outro('Plan complete. No installation changes were made.');
+      outro('Plan complete and ready to execute.');
       console.log(
         `\n${pc.bold(existing ? 'Next step: run this command to resume' : 'Next step: run this command to install')}\n\n${pc.cyan(
           formatPlatformInstallCommand({
