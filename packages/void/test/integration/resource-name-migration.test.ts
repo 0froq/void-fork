@@ -268,7 +268,10 @@ export default defineRoom({
     expect(await counter('?instance=other')).toBe(2);
     expect(await connect('/rooms/general')).toEqual({ visits: 3, id: 'room=general' });
     expect(await connect('/rooms/other')).toEqual({ visits: 2, id: 'room=other' });
-    expect((await runtime!.dispatchFetch('http://localhost/chat/general')).status).toBe(404);
+    const removedRoute = await runtime!.dispatchFetch('http://localhost/chat/general');
+    expect(removedRoute.status).toBe(404);
+    // Drain the response before restarting workerd so disposal cannot wait on its open stream.
+    await removedRoute.arrayBuffer();
 
     rmSync(join(routesDirectory, 'rooms', '[room].ws.ts'));
     writeSources('visits.ts', 'rooms/[id].ws.ts', true, true);
