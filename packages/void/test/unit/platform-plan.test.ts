@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { stripVTControlCharacters } from 'node:util';
 import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
@@ -259,7 +260,7 @@ describe('platform installation planning', () => {
       name: 'company-managed-postgres',
     });
     expect(plan.deployment.resources.hyperdrive).toBe('company-managed-postgres');
-    expect(formatPlatformInstallPlan(plan)).toContain(
+    expect(stripVTControlCharacters(formatPlatformInstallPlan(plan))).toContain(
       'Database: void_platform via Hyperdrive company-managed-postgres',
     );
     const recorded = recordInstallationResource(

@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import { CANCEL_SYMBOL } from '@clack/prompts';
 import { createPlatformDeploymentManifest } from '@void/platform';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -18,6 +19,13 @@ const mocks = vi.hoisted(() => ({
   text: vi.fn(),
   plan: vi.fn(),
 }));
+
+function notesWithoutColors(): Array<[string, string]> {
+  return mocks.note.mock.calls.map(([message, title]) => [
+    stripVTControlCharacters(message),
+    stripVTControlCharacters(title),
+  ]);
+}
 vi.mock('@clack/prompts', async (original) => ({
   ...(await original<typeof import('@clack/prompts')>()),
   // These fixtures retain GitHub-only setup; Access choices have their own matrix.
@@ -135,10 +143,10 @@ describe('interactive platform installation prompts', () => {
     );
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev']));
 
-    expect(mocks.note).toHaveBeenCalledWith(
+    expect(notesWithoutColors()).toContainEqual([
       expect.stringContaining('Port: configured by Cloudflare Tunnel'),
       'Existing Hyperdrive company-managed-postgres',
-    );
+    ]);
     expect(mocks.select).toHaveBeenCalledWith({
       message: 'How should Void set up Hyperdrive?',
       options: [
@@ -193,10 +201,10 @@ describe('interactive platform installation prompts', () => {
     expect(mocks.select).not.toHaveBeenCalled();
     expect(mocks.multiselect).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
-    expect(mocks.note).not.toHaveBeenCalledWith(
+    expect(notesWithoutColors()).not.toContainEqual([
       expect.any(String),
       'Existing Hyperdrive company-managed-postgres',
-    );
+    ]);
     expect(PlatformCloudflareClient.prototype.getHyperdriveConfig).toHaveBeenCalledWith(
       'account',
       'terraform-id',
@@ -278,10 +286,10 @@ describe('interactive platform installation prompts', () => {
         { value: 'setup', label: 'Set up a separately managed Hyperdrive' },
       ],
     });
-    expect(mocks.note).toHaveBeenCalledWith(
+    expect(notesWithoutColors()).toContainEqual([
       expect.stringContaining('with any unused name such as void-test-database'),
       'Set up Hyperdrive first',
-    );
+    ]);
     expect(mocks.plan).not.toHaveBeenCalled();
   });
 

@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 import { listInstallationManifests } from '../../src/cli/platform-registry.ts';
 import {
@@ -115,11 +116,11 @@ describe('saved platform install choices', () => {
     value.arguments[value.arguments.indexOf('account')] = 'another-account';
     writeFileSync(path, JSON.stringify(value));
     expect(() => listSavedPlatformInstallPlans(directory)).toThrow(
-      `Invalid saved installation plan ${path}: Plan identity`,
+      `Invalid saved installation plan ${toSlash(path)}: Plan identity`,
     );
     writeFileSync(path, '{');
     expect(() => listSavedPlatformInstallPlans(directory)).toThrow(
-      `Invalid saved installation plan ${path}`,
+      `Invalid saved installation plan ${toSlash(path)}`,
     );
   });
 });

@@ -279,25 +279,29 @@ describe('platform credential onboarding', () => {
   it('explains the management token requirement in a preview without collecting secrets', async () => {
     requireManagementToken();
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));
+    const notes = vi
+      .mocked(note)
+      .mock.calls.map(([message, title]) => [
+        stripVTControlCharacters(message ?? ''),
+        stripVTControlCharacters(title ?? ''),
+      ]);
     expect(outro).toHaveBeenCalledWith('Plan complete and ready to execute.');
-    expect(note).toHaveBeenCalledWith(
+    expect(notes).toContainEqual([
       expect.stringContaining('• Cloudflare management API token for DNS changes'),
       'Required Credentials',
-    );
-    expect(vi.mocked(note).mock.calls.map(([, title]) => title)).toEqual([
+    ]);
+    expect(notes.map(([, title]) => title)).toEqual([
       'Read-only installation plan',
       'Platform runtime',
       'Required Credentials',
     ]);
-    expect(note).toHaveBeenCalledWith(
+    expect(notes).toContainEqual([
       expect.stringContaining(
         `Login callback: ${(await mocks.plan.mock.results[0]!.value).apiUrl}/auth/callback`,
       ),
       'Read-only installation plan',
-    );
-    const credentialSummary = vi
-      .mocked(note)
-      .mock.calls.find(([, title]) => title === 'Required Credentials')![0];
+    ]);
+    const credentialSummary = notes.find(([, title]) => title === 'Required Credentials')![0];
     expect(credentialSummary).not.toContain('/auth/callback');
     expect(mocks.password).not.toHaveBeenCalled();
     expect(mocks.open).not.toHaveBeenCalled();
