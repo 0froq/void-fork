@@ -27,48 +27,16 @@ relative to `platform/` unless they begin with `../`.
 - Public SDK: repository-level `packages/`. If work involves the SDK, read the root `AGENTS.md` and the affected package instructions first.
 - Public-facing docs: repository-level `docs/` (VitePress site).
 
-## Best Practices That Must Be Followed
+## Contributor guidance
 
-1. General
-
-- **Always** read `meta/lessons.md` at the start of each session before taking any action.
+- Read [the operating lessons](./meta/lessons.md) before changing the platform.
 - **Never** commit without asking for confirmation.
-- When writing technical design docs or implementation plans to disk, place them in `meta/design-docs` and follow existing file name and frontmatter conventions. Keep commercial strategy, pricing research, competitor analysis, and private operational inventories out of the repository.
-- When adding new dependencies to the project, always run `npm view [package] version` to get the latest version.
-
-2. Subagent Strategy
-   - Use subagents liberally to keep the main context window clean.
-   - Offload research, exploration, and parallel analysis to subagents.
-   - For complex problems, allocate more compute via subagents.
-   - Assign one task per subagent to ensure focused execution.
-
-3. Self-Improvement Loop
-   - After any correction from the user, update meta/lessons.md with the relevant pattern.
-   - Create rules for yourself that prevent repeating the same mistake.
-   - Iterate on these lessons rigorously until the mistake rate declines.
-
-4. Principles
-   - Simplicity First: Make every change as simple as possible. Minimize code impact.
-   - No Laziness: Identify root causes. Avoid temporary fixes. Apply senior developer standards.
-   - Minimal Impact: Touch only what is necessary. Avoid introducing new bugs.
-   - For non-trivial changes, pause and ask whether there is a more elegant solution.
-   - If a fix feels hacky, implement the solution you would choose knowing everything you now know.
-   - Do not over-engineer simple or obvious fixes.
-   - Critically evaluate your own work before presenting it.
-
-5. Planning
-   - Enter plan mode for any non-trivial task (three or more steps, or involving architectural decisions).
-   - If something goes wrong, stop and re-plan immediately rather than continuing blindly.
-   - Every implementation plan should include the following:
-   - During plan generation: ask clarifying questions when necessary, especially around developer-experience defining design decisions.
-   - Verification:
-     - Run `vp run check` from the repository root for typechecking after completing a batch of tasks.
-     - Run `vp test run` on tests relevant to the current feature only during feature development. Only run the full test suite when everything is done for final verification.
-     - If there are tests hanging or running particularly slow, investigate right there and attempt to fix. Testing velocity is something that should be maintained or improved at every opportunity.
-   - Documentation: after verification, update all docs if relevant and applicable:
-     - `README.md` (this file)
-     - affected packages's `README.md` or `AGENTS.md`
-   - Record implementation progress in the relevant current technical design or issue.
+- Keep technical design records in `meta/design-docs/`, following its naming and
+  frontmatter conventions. Keep commercial strategy, pricing research,
+  competitor analysis, and private operational inventories out of the repository.
+- Follow the root [instructions](../AGENTS.md) and
+  [testing guide](../TESTING.md) for verification. Update the affected package
+  guide when its behavior or contributor workflow changes.
 
 ## Quick Reference
 
