@@ -1710,29 +1710,6 @@ export async function cancelDeployment(
   return row ?? null;
 }
 
-export async function getLastLiveAssetManifest(
-  db: Db,
-  projectId: string,
-): Promise<Record<string, { hash: string; size: number }> | null> {
-  // Rollback can make an older deployment authoritative while newer rows keep
-  // status='live' for history. Asset carry-forward must follow the deployment
-  // actually serving the project, otherwise an identical redeploy of that
-  // newer row treats its hashes as cached even when the active serving
-  // manifest does not contain them and publishes missing paths.
-  const [activeRow] = await db
-    .select({ asset_hashes: deployments.asset_hashes })
-    .from(projects)
-    .innerJoin(deployments, eq(projects.active_deployment_id, deployments.id))
-    .where(and(eq(projects.id, projectId), eq(deployments.status, 'live')))
-    .limit(1);
-
-  if (activeRow) {
-    return activeRow.asset_hashes ? JSON.parse(activeRow.asset_hashes) : null;
-  }
-
-  return null;
-}
-
 export async function setActiveDeployment(
   db: Db,
   projectId: string,
@@ -2045,17 +2022,6 @@ export async function invalidateMigrationRenamesForOldName(
   await db
     .delete(migrationRenames)
     .where(and(eq(migrationRenames.project_id, projectId), eq(migrationRenames.to_name, oldName)));
-}
-
-export async function getRetainedDeployments(
-  db: Db,
-  projectId: string,
-): Promise<ReadonlyArray<Deployment>> {
-  return db
-    .select()
-    .from(deployments)
-    .where(and(eq(deployments.project_id, projectId), eq(deployments.retained, true)))
-    .orderBy(desc(deployments.created_at));
 }
 
 export async function getRetainedDeploymentsExcluding(
