@@ -142,6 +142,36 @@ describe('processUsageEventBatch — sandbox events', () => {
     getProjectOwnershipPeriodsByProjectIdsMock.mockResolvedValue([]);
   });
 
+  it('preserves sandbox and request accounting when monthly requests are unlimited', async () => {
+    const stubFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    getUserMock.mockResolvedValue({ id: 'u1', plan: 'custom' });
+    const through = Date.now();
+    const batch = await makeSignedBatch(
+      [
+        {
+          projectId: 'p1',
+          userId: 'u1',
+          slug: 's1',
+          requests: 0,
+          responseBytes: 0,
+          sandboxInstanceId: 'sb-1',
+          sandboxMeteredFrom: through - 30_000,
+          sandboxMeteredThrough: through,
+        },
+      ],
+      undefined,
+      'sandbox-counter',
+    );
+    await processUsageEventBatch(batch as never, makeEnv(stubFetch) as never);
+    expect(stubFetch).toHaveBeenCalledTimes(1);
+    expect(await fetchCalls(stubFetch)[0][0].json()).toMatchObject({
+      userId: 'u1',
+      plan: 'custom',
+      events: [{ sandboxMeteredThrough: through }],
+    });
+    expect(batch.calls.ackAll).toBe(1);
+  });
+
   it('forwards a sandbox event with userId to the DO', async () => {
     const stubFetch = vi.fn(async () => new Response(null, { status: 200 }));
     getUserMock.mockResolvedValue({ id: 'u1', plan: 'solo' });

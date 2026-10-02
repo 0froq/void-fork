@@ -10,8 +10,6 @@ import {
   TableRow,
 } from '@astryxdesign/core/Table';
 import { useRequest, useView } from 'react-fate';
-import type { PlanId } from '../../../tiers.ts';
-import { PLAN_LIMITS, getPlanLimits } from '../../../tiers.ts';
 import { UserDetailView, userDetailRequest } from '../../fate/views.ts';
 import { useDetailTitle, type AdminPageProps } from '../page-utils.ts';
 import {
@@ -32,10 +30,8 @@ export function UserDetailPage({ path, platformName, username }: AdminPageProps)
   if (!pageData) {
     throw new Error('User data is unavailable.');
   }
-  const { user, projects, deploysToday, usage, tz } = pageData;
+  const { user, projects, deploysToday, usage, tz, plans, limits } = pageData;
   useDetailTitle(pageData.user.login, platformName);
-  const plans = Object.keys(PLAN_LIMITS) as ReadonlyArray<PlanId>;
-  const limits = getPlanLimits(user.plan);
 
   return (
     <Layout platformName={platformName} title={user.login} username={username}>
@@ -78,7 +74,10 @@ export function UserDetailPage({ path, platformName, username }: AdminPageProps)
           label="Plan"
           name="plan"
           initialValue={user.plan}
-          options={plans.map((plan) => ({ value: plan, label: plan }))}
+          options={plans.map((plan) => ({
+            value: plan.id,
+            label: plan.archived ? `${plan.name} (archived)` : plan.name,
+          }))}
         />
         <Button type="submit" label="Update" />
       </form>

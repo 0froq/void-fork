@@ -2,6 +2,7 @@ import { parsePlatformAdmissionPolicy } from '@void/platform';
 import { and, eq } from 'drizzle-orm';
 import { createOAuthAccount, createUser, getUserByEmail, type Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
+import { getDefaultPlan, lockPlanCatalog } from '../plans.ts';
 import {
   platformCompanyIdentities,
   platformLoginIdentities,
@@ -72,6 +73,7 @@ export async function resolvePlatformLogin(
 ): Promise<{ user: User; created: boolean }> {
   const result = await db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;
+    await lockPlanCatalog(tx);
     const settings = await lockAuthSettings(tx);
     const connection = await readLoginConnection(tx, attempt.connectionId);
     if (
@@ -162,7 +164,7 @@ export async function resolvePlatformLogin(
         identity.login,
         identity.emailVerified ? identity.email : null,
         'user',
-        env.PLATFORM_INSTALLATION_ID ? 'custom' : 'free',
+        (await getDefaultPlan(tx, env.PLATFORM_INSTALLATION_ID ? 'custom' : 'free')).id,
       );
       await tx.insert(platformLoginIdentities).values({
         id: crypto.randomUUID(),

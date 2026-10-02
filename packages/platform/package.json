@@ -22,6 +22,10 @@
     "./email-protocol": {
       "types": "./dist/email-protocol.d.mts",
       "import": "./dist/email-protocol.mjs"
+    },
+    "./plans": {
+      "types": "./dist/plans.d.mts",
+      "import": "./dist/plans.mjs"
     }
   },
   "publishConfig": {

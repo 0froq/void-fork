@@ -72,6 +72,8 @@ export const deploymentsPageDataView = dataView<DeploymentsPageRecord>('AdminDep
   tz: true,
 });
 export const userDetailDataView = dataView<UserDetailRecord>('AdminUserDetail')({
+  limits: true,
+  plans: true,
   id: true,
   user: true,
   projects: true,

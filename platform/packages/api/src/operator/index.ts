@@ -9,6 +9,7 @@ import { authenticatedSessionRoutes, operatorAuth, operatorSessionRoutes } from 
 import { OperatorError } from './common.ts';
 import { emailOperatorRoutes } from './email-routes.ts';
 import { operationsRoutes } from './operations-routes.ts';
+import { planOperatorRoutes } from './plans-routes.ts';
 import { tenantRoutes } from './tenant-routes.ts';
 import { zeroTrustOperatorRoutes } from './zero-trust-routes.ts';
 
@@ -63,6 +64,7 @@ operatorApi.route('/', operatorAuditRoutes);
 operatorApi.route('/', tenantRoutes);
 operatorApi.route('/', operationsRoutes);
 operatorApi.route('/', authenticationConfigRoutes);
+operatorApi.route('/', planOperatorRoutes);
 operatorApi.route('/', emailOperatorRoutes);
 operatorApi.route('/', zeroTrustOperatorRoutes);
 operatorApi.notFound((context) =>

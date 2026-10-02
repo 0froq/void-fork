@@ -576,11 +576,11 @@ export const FAST_CRON = '*/2 * * * *';
 const MAX_PENDING_RECONCILE_PER_RUN = 200; // bound CF polling + protect later maintenance; tunable
 
 // Max age before an ACTIVE GitHub Actions build is force-failed by the hourly
-// reaper. Comfortably exceeds the largest plan `buildTimeoutMinutes` (20) plus
-// margin, so a still-running build is never reaped — only ones whose
+// reaper. The supported build timeout is at most 60 minutes; a 15-minute
+// margin leaves admitted builds and their token grace period intact — only ones whose
 // `workflow_run` completion was missed (or whose connection was removed
 // mid-run) and that would otherwise pin a concurrency slot forever.
-const STALE_ACTIONS_BUILD_MAX_AGE_MINUTES = 60;
+const STALE_ACTIONS_BUILD_MAX_AGE_MINUTES = 75;
 
 // Max age (from `started_at`) before an ACTIVE container build is force-failed
 // by the hourly reaper. The hard-max build timeout is 60 min, so 75 leaves a

@@ -10,6 +10,7 @@ import {
   vi,
 } from 'vite-plus/test';
 import { respondToProjectInvitation } from '../../src/db.ts';
+import type { ApiEnv } from '../../src/env.ts';
 import { app } from '../../src/index.ts';
 import {
   deployments,
@@ -40,6 +41,7 @@ import {
   type TestEnv,
 } from './helpers.ts';
 import { nativeFormSubmission } from './native-form-browser.ts';
+import { createUsageCounterFixture } from './usage-counter-fixture.ts';
 
 let env: TestEnv;
 let manifestCounter = 0;
@@ -65,7 +67,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function req(path: string, cookie?: string, init?: RequestInit): Response | Promise<Response> {
+function req(
+  path: string,
+  cookie?: string,
+  init?: RequestInit,
+  overrides?: Partial<ApiEnv['Bindings']>,
+): Response | Promise<Response> {
   const headers: Record<string, string> = {
     ...(init?.headers as Record<string, string>),
   };
@@ -78,7 +85,7 @@ function req(path: string, cookie?: string, init?: RequestInit): Response | Prom
   }
   return app.fetch(
     new Request(`http://localhost${path}`, { ...init, headers, redirect: 'manual' }),
-    env,
+    { ...env, ...overrides },
   );
 }
 
@@ -1155,11 +1162,20 @@ describe('POST /admin/users/:id/plan', () => {
       .where(eq(users.id, user.id));
 
     const body = new URLSearchParams({ plan: 'pro' });
-    const res = await req(`/admin/users/${user.id}/plan`, admin.adminJwt, {
-      method: 'POST',
-      body: body.toString(),
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
-    });
+    const res = await req(
+      `/admin/users/${user.id}/plan`,
+      admin.adminJwt,
+      {
+        method: 'POST',
+        body: body.toString(),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+      },
+      {
+        USAGE_COUNTER: createUsageCounterFixture(env as unknown as ApiEnv['Bindings'], {
+          [user.id]: { totalSandboxSeconds: 40 * 3600, sandboxRuntimeSuspended: true },
+        }),
+      },
+    );
     expect(res.status).toBe(302);
 
     // KV block key should be deleted.
@@ -1173,7 +1189,7 @@ describe('POST /admin/users/:id/plan', () => {
     expect(row.suspended_reason).toBeNull();
   });
 
-  test('optimistically clears request suspension (DB + route marker) on plan change', async () => {
+  test('reevaluates recorded request usage and clears its suspension when the new plan is unlimited', async () => {
     const admin = await createTestUser(
       env.db,
       'admin-plan-req',
@@ -1185,10 +1201,7 @@ describe('POST /admin/users/:id/plan', () => {
     const user = await createTestUser(env.db, 'planuser-req', 'github', undefined, 'solo');
     const project = await createTestProject(env.db, user.id, 'planuser-req-slug');
 
-    // Request-suspended on the old plan. A plan change must drop the request
-    // suspension too (symmetric with sandbox), or a capped→unlimited upgrade
-    // would strand the user at 429 — the scheduled reconcile skips unlimited
-    // plans, so nothing else clears it.
+    // Execute the production counter so this verifies actual quota reevaluation.
     await env.db
       .update(users)
       .set({ suspended_reason: 'requests_exceeded' })
@@ -1199,11 +1212,20 @@ describe('POST /admin/users/:id/plan', () => {
     );
 
     const body = new URLSearchParams({ plan: 'sponsored' });
-    const res = await req(`/admin/users/${user.id}/plan`, admin.adminJwt, {
-      method: 'POST',
-      body: body.toString(),
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
-    });
+    const res = await req(
+      `/admin/users/${user.id}/plan`,
+      admin.adminJwt,
+      {
+        method: 'POST',
+        body: body.toString(),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+      },
+      {
+        USAGE_COUNTER: createUsageCounterFixture(env as unknown as ApiEnv['Bindings'], {
+          [user.id]: { totalRequests: 10_000_000, requestsSuspended: true },
+        }),
+      },
+    );
     expect(res.status).toBe(302);
 
     const [row] = await env.db

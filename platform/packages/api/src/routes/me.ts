@@ -1,12 +1,12 @@
 import { Hono } from 'hono';
 import type { ApiEnv } from '../env.ts';
-import { getPlanLimits } from '../tiers.ts';
+import { resolvePlanLimits } from '../plans.ts';
 
 const app = new Hono<ApiEnv>()
 
   .get('/', async (context) => {
     const user = context.get('user');
-    const limits = getPlanLimits(user.plan);
+    const limits = await resolvePlanLimits(context.get('db'), user.plan);
     return context.json({
       id: user.id,
       login: user.login,

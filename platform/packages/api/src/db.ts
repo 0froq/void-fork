@@ -26,6 +26,7 @@ import { lockAuthSettings } from './auth/configuration.ts';
 import { lockEmailPolicy } from './email/admission.ts';
 import { generateId } from './id.ts';
 import { getProjectQueueName } from './naming.ts';
+import { getDefaultPlan, lockPlanCatalog, requireAssignablePlan, resolvePlan } from './plans.ts';
 import { requireProjectCapability } from './project-access.ts';
 import * as schema from './schema.ts';
 import {
@@ -65,7 +66,7 @@ import {
   REASON_REQUESTS_EXCEEDED,
   REASON_SANDBOX_RUNTIME_EXCEEDED,
 } from './suspension.ts';
-import { getBuildInstanceType, getPlanLimits, type PlanId } from './tiers.ts';
+import type { PlanId } from './tiers.ts';
 import type {
   Build,
   Deployment,
@@ -119,14 +120,19 @@ export async function createUser(
   login: string,
   email: string | null,
   role: 'user' | 'admin' = 'user',
-  plan: PlanId = 'free',
+  plan?: PlanId,
 ): Promise<User> {
-  const id = generateId('user');
-  const [row] = await db
-    .insert(users)
-    .values({ id, provider, provider_id: providerId, login, email, role, plan })
-    .returning();
-  return row;
+  return db.transaction(async (tx) => {
+    await lockPlanCatalog(tx);
+    const assignedPlan =
+      plan === undefined ? await getDefaultPlan(tx) : await requireAssignablePlan(tx, plan);
+    const id = generateId('user');
+    const [row] = await tx
+      .insert(users)
+      .values({ id, provider, provider_id: providerId, login, email, role, plan: assignedPlan.id })
+      .returning();
+    return row;
+  });
 }
 
 /**
@@ -148,6 +154,7 @@ export async function createUserForPlatform(
     bootstrapGitHubId: string;
   },
 ): Promise<User> {
+  await lockPlanCatalog(db);
   if (await lockAuthSettings(db)) {
     throw new SelfHostedSignupRestrictedError();
   }
@@ -167,7 +174,16 @@ export async function createUserForPlatform(
   } else if (!options?.additionalSignupAllowed) {
     throw new SelfHostedSignupRestrictedError();
   }
-  return createUser(db, provider, providerId, login, email, existing ? 'user' : 'admin', 'custom');
+  const defaultPlan = await getDefaultPlan(db, 'custom');
+  return createUser(
+    db,
+    provider,
+    providerId,
+    login,
+    email,
+    existing ? 'user' : 'admin',
+    defaultPlan.id,
+  );
 }
 
 /** Bootstrap the configured owner through admin OAuth without opening general signup. */
@@ -398,7 +414,11 @@ export async function linkGitHubIdentity(
 }
 
 export async function updateUserPlan(db: Db, id: string, plan: PlanId): Promise<void> {
-  await db.update(users).set({ plan }).where(eq(users.id, id));
+  await db.transaction(async (tx) => {
+    await lockPlanCatalog(tx);
+    await requireAssignablePlan(tx, plan);
+    await tx.update(users).set({ plan }).where(eq(users.id, id));
+  });
 }
 
 export async function countUserDeploymentsToday(db: Db, userId: string): Promise<number> {
@@ -4164,7 +4184,7 @@ export async function getQueuedBuilds(
  * plan, suspension reason, and count of builds in `ACTIVE_BUILD_STATUSES`
  * (`starting`/`building`/`deploying`). The scheduler uses this to decide which
  * owners are AT their plan's concurrency cap (cap is plan-derived in
- * `getPlanLimits`, NOT a DB column) and pass those ids to `getQueuedBuilds` as
+ * the effective plan catalog, NOT a user DB column) and pass those ids to `getQueuedBuilds` as
  * `excludeUserIds`, so a capped tenant's rows never starve the scan window.
  *
  * Only `container` builds gate scheduling, so the queued-work filter is scoped
@@ -4487,7 +4507,9 @@ export async function supersedeAndCreateContainerBuild(
     // Resolve the size of record from the same owner row whose lock serializes
     // admission. A plan change that lands while webhook processing is doing its
     // network checks must take effect before this enqueue commits.
-    const instanceType = ownerState ? getBuildInstanceType(ownerState.plan) : null;
+    const instanceType = ownerState
+      ? (await resolvePlan(tx, ownerState.plan)).buildInstanceType
+      : null;
 
     // Serialize against PATCH /projects/:id/github: lock + re-read the single
     // connection (project_id is UNIQUE). If a concurrent config change committed
@@ -4897,7 +4919,8 @@ export async function createGithubActionsBuildWithinLimit(
     expectedWorkflowPath: string;
   },
 ): Promise<
-  | { outcome: 'created' | 'reused'; build: Build }
+  | { outcome: 'created'; build: Build; timeoutMinutes: number }
+  | { outcome: 'reused'; build: Build }
   | { outcome: 'limit-exceeded' }
   | { outcome: 'connection-removed' }
   | { outcome: 'connection-replaced' }
@@ -4941,7 +4964,8 @@ export async function createGithubActionsBuildWithinLimit(
     if (ownerState && isAdminSuspended(ownerState.suspendedReason)) {
       return { outcome: 'owner-suspended' };
     }
-    const limit = ownerState ? getPlanLimits(ownerState.plan).concurrentBuilds : 0;
+    const ownerPlan = ownerState ? await resolvePlan(tx, ownerState.plan) : null;
+    const limit = ownerPlan?.limits.concurrentBuilds ?? 0;
 
     // Serialize against DELETE /projects/:id/github: lock + re-read the connection
     // inside this tx. If a concurrent disconnect committed first, the row is gone
@@ -5062,7 +5086,7 @@ export async function createGithubActionsBuildWithinLimit(
     // the current attempt can't self-cancel. Marking them terminal frees the
     // owner's concurrency slot and revokes their deploy token so they can't race
     // `void deploy` for the project — without this, a still-ACTIVE attempt-1
-    // (whose completion webhook was missed) would survive until the 60m reaper.
+    // (whose completion webhook was missed) would survive until the stale-build reaper.
     // (The scaffolded workflow's `concurrency: cancel-in-progress` cancels the
     // older RUN on GitHub's side; this is the server-side backstop.)
     if (args.branch != null && args.branch !== '') {
@@ -5107,7 +5131,11 @@ export async function createGithubActionsBuildWithinLimit(
         logs_url: args.logsUrl ?? null,
       })
       .returning();
-    return { outcome: 'created', build: row };
+    return {
+      outcome: 'created',
+      build: row,
+      timeoutMinutes: ownerPlan?.limits.buildTimeoutMinutes ?? 0,
+    };
   });
 }
 
@@ -5123,7 +5151,7 @@ export async function claimBuildForStartWithinLimit(
     userId: string;
     projectId: string;
   },
-): Promise<{ instanceType: string; ownerPlan: PlanId } | null> {
+): Promise<{ instanceType: string; ownerPlan: PlanId; timeoutMinutes: number } | null> {
   return db.transaction(async (tx) => {
     const [owner] = await tx
       .select({ plan: users.plan, suspendedReason: users.suspended_reason })
@@ -5135,7 +5163,8 @@ export async function claimBuildForStartWithinLimit(
       return null;
     }
 
-    const limit = getPlanLimits(owner.plan).concurrentBuilds;
+    const plan = await resolvePlan(tx, owner.plan);
+    const limit = plan.limits.concurrentBuilds;
     if (limit > 0) {
       const [result] = await tx
         .select({ count: count() })
@@ -5164,7 +5193,7 @@ export async function claimBuildForStartWithinLimit(
       .set({
         status: 'starting',
         started_at: sql`now()`,
-        instance_type: sql`coalesce(${builds.instance_type}, ${getBuildInstanceType(owner.plan)})`,
+        instance_type: sql`coalesce(${builds.instance_type}, ${plan.buildInstanceType})`,
       })
       .where(and(eq(builds.id, args.buildId), eq(builds.status, 'queued')))
       .returning();
@@ -5177,6 +5206,7 @@ export async function claimBuildForStartWithinLimit(
     return {
       instanceType: claimed.instance_type,
       ownerPlan: owner.plan,
+      timeoutMinutes: plan.limits.buildTimeoutMinutes,
     };
   });
 }

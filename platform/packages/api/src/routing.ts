@@ -101,8 +101,9 @@ export type RoutingSuspensionUpdate =
  * Resolve a routing undo without overwriting a later authoritative mutation.
  * Exact matches restore directly. A suspension-only rewrite still belongs to
  * the attempted deployment, so restore its prior route while carrying the
- * newest `suspended` marker. A Zero Trust rewrite does not block the undo
- * either; callers set `zeroTrust` on the restored route from PostgreSQL.
+ * newest `suspended` marker. Mutable owner, plan-limit and Zero Trust metadata
+ * do not block the undo either; callers refresh them from PostgreSQL under the
+ * project fence. Deployment identity and all other payload fields still match.
  * Any other change (including deletion) wins and suppresses the stale undo.
  */
 export function resolveRoutingUndo(
@@ -125,6 +126,12 @@ export function resolveRoutingUndo(
     delete writtenEntry.suspended;
     delete currentEntry.zeroTrust;
     delete writtenEntry.zeroTrust;
+    delete currentEntry.limits;
+    delete writtenEntry.limits;
+    delete currentEntry.userId;
+    delete writtenEntry.userId;
+    delete currentEntry.plan;
+    delete writtenEntry.plan;
     if (JSON.stringify(currentEntry) !== JSON.stringify(writtenEntry)) {
       return { restore: false, value: null };
     }

@@ -2,10 +2,10 @@ import { and, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { hmacVerifyState } from '../auth/hmac.ts';
 import type { ApiEnv } from '../env.ts';
+import { resolvePlanLimits } from '../plans.ts';
 import { getVersionedWorkerName } from '../project-secrets.ts';
 import { computeDispatchLimits } from '../routing.ts';
 import { deployments, projects, users } from '../schema.ts';
-import { getPlanLimits } from '../tiers.ts';
 import type { DeployManifest } from '../types.ts';
 import { emailProjectControls } from './admission-schema.ts';
 import { emailZoneConnections } from './connection-schema.ts';
@@ -311,7 +311,10 @@ app.post('/resolve-ingress', async (context) => {
       409,
     );
   }
-  const limits = computeDispatchLimits(getPlanLimits(authority.plan), manifest.limits);
+  const limits = computeDispatchLimits(
+    await resolvePlanLimits(db, authority.plan),
+    manifest.limits,
+  );
   return context.json({
     projectId,
     slug,

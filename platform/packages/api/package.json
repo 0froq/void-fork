@@ -31,6 +31,7 @@
     "@void/deploy-core": "workspace:*",
     "@void/edge": "workspace:*",
     "@void/isr": "workspace:*",
+    "@void/platform": "workspace:*",
     "@void/react": "workspace:*",
     "@xterm/headless": "^6.0.0",
     "aws4fetch": "^1.0.20",

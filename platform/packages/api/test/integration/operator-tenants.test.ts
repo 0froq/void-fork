@@ -640,7 +640,8 @@ describe('operator tenant mutations', () => {
       },
     ]);
     expect(transferCounterCalls[1]!.body).not.toHaveProperty('plan');
-    expect(planCounterCalls.map((call) => call.path)).toEqual(['/reevaluate-sandbox']);
+    expect(planCounterCalls.map((call) => call.path)).toEqual(['/init', '/reevaluate-limits']);
+    expect(planCounterCalls[1]!.body).toEqual({ userId: target.id });
     expect(JSON.parse((await env.ROUTING.get(project.slug))!).suspended).toBeUndefined();
 
     resumeSuspendDb.resolve();
@@ -1055,6 +1056,55 @@ describe('operator tenant mutations', () => {
       details: { cleanupComplete: false },
     });
     expect(await getUser(env.db, user.id)).toMatchObject({ suspended_reason: 'admin_suspended' });
+  });
+
+  test('preserves quota suspension when a new plan cannot finish reevaluating usage', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const user = await createTestUser(env.db, 'quota-update-owner');
+    const project = await createTestProject(env.db, user.id, 'quota-update-project');
+    const originalUser = (await getUser(env.db, user.id))!;
+    const originalProject = (await dbModule.getProject(env.db, project.id))!;
+    await env.db
+      .update(users)
+      .set({ suspended_reason: 'requests_exceeded' })
+      .where(eq(users.id, user.id));
+    await env.ROUTING.put(
+      project.slug,
+      JSON.stringify({
+        workerName: 'worker',
+        projectId: project.id,
+        userId: user.id,
+        suspended: 'requests_exceeded',
+      }),
+    );
+    const calls: Array<{ ownerId: string; path: string; body: Record<string, unknown> }> = [];
+    const response = await req(
+      `/users/${user.id}/plan`,
+      { plan: 'pro' },
+      {
+        USAGE_COUNTER: captureUsageCounter(calls, '/reevaluate-limits'),
+      },
+    );
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      error: 'partial_failure',
+      details: { plan: 'pro', cleanupComplete: false },
+    });
+    expect(await getUser(env.db, user.id)).toMatchObject({
+      plan: 'pro',
+      suspended_reason: 'requests_exceeded',
+      billing_cycle_start: originalUser.billing_cycle_start,
+    });
+    expect(JSON.parse((await env.ROUTING.get(project.slug))!)).toMatchObject({
+      suspended: 'requests_exceeded',
+    });
+    expect(calls.map((call) => call.path)).toEqual(['/init', '/reevaluate-limits']);
+    expect(calls[0]!.body).toMatchObject({
+      userId: user.id,
+      plan: 'pro',
+      projectSlugs: { [project.id]: project.slug },
+      projectOwnershipStarts: { [project.id]: originalProject.created_at },
+    });
   });
 
   test('deletes a user and its projects with structured teardown results', async () => {

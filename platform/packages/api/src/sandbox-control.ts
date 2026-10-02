@@ -4,12 +4,12 @@ import { and, eq, sql } from 'drizzle-orm';
 import { getPlatformCapabilities } from './capabilities.ts';
 import { createDb } from './db.ts';
 import type { ApiEnv } from './env.ts';
+import { resolvePlanLimits } from './plans.ts';
 import { sandboxBlockKey } from './routing.ts';
 import type { SandboxControlResult } from './sandbox-concurrency-counter.ts';
 import { readSandboxDrainCheckpoint } from './sandbox-drain.ts';
 import { deployments, projects, users } from './schema.ts';
 import { REASON_SANDBOX_RUNTIME_EXCEEDED } from './suspension.ts';
-import { getPlanLimits } from './tiers.ts';
 
 type SandboxControllerIdentity = Readonly<{
   projectId: string;
@@ -128,7 +128,7 @@ export class SandboxControl extends WorkerEntrypoint<
     }
     return {
       ok: true,
-      limit: getPlanLimits(owner.plan).sandboxMaxConcurrentInstances,
+      limit: (await resolvePlanLimits(db, owner.plan)).sandboxMaxConcurrentInstances,
       slug: project.slug,
     };
   }

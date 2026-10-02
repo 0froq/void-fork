@@ -1,6 +1,6 @@
 import { createDb, getProjectUsageOwnershipSnapshot, getUser } from './db.ts';
 import type { ApiEnv } from './env.ts';
-import { getCurrentBillingPeriodStart, getPlanLimits } from './tiers.ts';
+import { getCurrentBillingPeriodStart } from './tiers.ts';
 import {
   ensureUsageSigningKey,
   SANDBOX_USAGE_RETENTION_MS,
@@ -188,16 +188,12 @@ export async function processUsageEventBatch(
 
   const results = await Promise.allSettled(
     [...grouped.entries()].map(async ([userId, userEvents]) => {
-      // Look up user plan (skip DO call for unlimited plans)
+      // Resolve every account so request and sandbox accounting share the same ledger.
       const user = await getUser(db, userId);
       if (!user) {
         return;
       } // Unknown user, skip
       const plan = user.plan ?? 'free';
-      const limits = getPlanLimits(plan);
-      if (limits.requestsPerMonth === 0) {
-        return;
-      } // Unlimited plan, skip DO
 
       // Forward to DO
       const doId = env.USAGE_COUNTER.idFromName(userId);

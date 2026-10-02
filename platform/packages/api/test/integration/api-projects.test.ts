@@ -847,7 +847,9 @@ describe('POST /projects/:id/prerender-token', () => {
       build: build.id,
     });
     const payload = await verifyPrerenderToken(token, env.JWT_SECRET);
-    expect(payload!.exp - payload!.iat).toBe(15 * 60);
+    const parent = await verifyDeployToken(deployToken, env.JWT_SECRET);
+    expect(payload!.exp).toBeLessThanOrEqual(parent!.exp);
+    expect(payload!.exp).toBeGreaterThanOrEqual(parent!.exp - 1);
 
     const internalAuth = await hmacSignState(project.id, env.JWT_SECRET);
     const verifyBuild = () =>
@@ -1989,7 +1991,7 @@ describe('POST /projects', () => {
     );
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({
-      error: 'short slugs (5 characters or fewer) require a paid plan',
+      error: 'the selected plan does not permit short slugs (5 characters or fewer)',
     });
   });
 

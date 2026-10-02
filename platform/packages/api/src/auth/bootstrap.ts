@@ -6,6 +6,7 @@ import {
 import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { createOAuthAccount, createUser, type Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
+import { getDefaultPlan, lockPlanCatalog } from '../plans.ts';
 import { encryptPlatformCredential } from '../project-secrets.ts';
 import {
   platformAuthAttempts,
@@ -124,6 +125,7 @@ export async function initializeAuthentication(
   const requestHash = await hashLoginProof(JSON.stringify(configuration));
   return db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;
+    await lockPlanCatalog(tx);
     const claim = await tx.execute<{ installation_id: string }>(
       sql`SELECT installation_id FROM __void_platform_installation WHERE singleton = true`,
     );
@@ -299,6 +301,7 @@ export async function confirmBootstrapIdentity(
   requireUncachedAuthenticationDatabase(env);
   return db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;
+    await lockPlanCatalog(tx);
     const settings = await lockAuthSettings(tx);
     await tx.execute(sql`LOCK TABLE ${users} IN SHARE ROW EXCLUSIVE MODE`);
     const pending = await pendingAuthenticationSetup(tx);
@@ -340,7 +343,7 @@ export async function confirmBootstrapIdentity(
       identity.login,
       identity.emailVerified ? identity.email : null,
       'admin',
-      'custom',
+      (await getDefaultPlan(tx, 'custom')).id,
     );
     await tx.insert(platformLoginIdentities).values({
       id: crypto.randomUUID(),

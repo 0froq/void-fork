@@ -1,3 +1,4 @@
+import { PLAN_EDITABLE_LIMIT_KEYS } from '@void/platform/plans';
 import { count, desc, eq } from 'drizzle-orm';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { AuthenticationConfigurationError } from '../auth/configuration.ts';
@@ -81,6 +82,34 @@ function auditTarget(
       connectionId: pathIdentifier(segments[3]),
       action: pathIdentifier(segments[4] ?? segments[2]),
       revision: typeof body.revision === 'number' ? body.revision : undefined,
+    });
+  }
+  if (segments[0] === 'config' && segments[1] === 'plans') {
+    const limits =
+      body.limits && typeof body.limits === 'object' && !Array.isArray(body.limits)
+        ? Object.fromEntries(
+            Object.entries(body.limits).filter(
+              ([key, value]) =>
+                (PLAN_EDITABLE_LIMIT_KEYS as ReadonlyArray<string>).includes(key) &&
+                Number.isSafeInteger(value) &&
+                (value as number) >= 0,
+            ),
+          )
+        : undefined;
+    return JSON.stringify({
+      planId: segments[3] ? pathIdentifier(segments[2]) : boundedString(body.id, 64),
+      action: pathIdentifier(segments[3] ?? segments[2]),
+      expectedRevision: Number.isSafeInteger(body.expectedRevision)
+        ? body.expectedRevision
+        : undefined,
+      name: boundedString(body.name, 80),
+      copyFrom: boundedString(body.copyFrom, 64),
+      replacementPlanId: boundedString(body.replacementPlanId, 64),
+      defaultPlanId: boundedString(body.planId, 64),
+      archived: typeof body.archived === 'boolean' ? body.archived : undefined,
+      buildInstanceType: boundedString(body.buildInstanceType, 32),
+      allowShortSlugs: typeof body.allowShortSlugs === 'boolean' ? body.allowShortSlugs : undefined,
+      limits,
     });
   }
   if (segments[0] === 'users' && id) {

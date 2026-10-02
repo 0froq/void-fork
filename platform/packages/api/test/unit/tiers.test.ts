@@ -110,6 +110,13 @@ describe('PLAN_LIMITS', () => {
 });
 
 describe('getPlanLimits', () => {
+  it.each(['constructor', '__proto__', 'toString'])(
+    'uses free limits for inherited name %s',
+    (plan) => {
+      expect(getPlanLimits(plan)).toBe(PLAN_LIMITS.free);
+    },
+  );
+
   it('returns correct limits for known plans', () => {
     expect(getPlanLimits('free')).toBe(PLAN_LIMITS.free);
     expect(getPlanLimits('solo')).toBe(PLAN_LIMITS.solo);

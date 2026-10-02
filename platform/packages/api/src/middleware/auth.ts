@@ -168,6 +168,7 @@ export const authMiddleware: MiddlewareHandler<ApiEnv> = async (context, next) =
     // deploy. Undefined for legacy deploy tokens with no build claim — the
     // guard only fires when this is set.
     context.set('deployBuild', payload.build);
+    context.set('deployTokenExpiresAt', payload.exp);
     if (payload.credential) {
       const credential = await context
         .get('db')

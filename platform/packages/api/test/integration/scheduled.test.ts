@@ -288,6 +288,35 @@ describe('scheduled()', () => {
     });
   });
 
+  it('preserves an Actions build within the admitted timeout margin and reaps abandoned builds', async () => {
+    const user = await createTestUser(env.db, 'long-builder');
+    const project = await createTestProject(env.db, user.id);
+    await env.db.insert(builds).values([
+      {
+        id: 'actions-grace',
+        project_id: project.id,
+        user_id: user.id,
+        executor: 'github_actions',
+        status: 'building',
+        created_at: sql`now() - interval '65 minutes'`,
+      },
+      {
+        id: 'actions-abandoned',
+        project_id: project.id,
+        user_id: user.id,
+        executor: 'github_actions',
+        status: 'building',
+        created_at: sql`now() - interval '80 minutes'`,
+      },
+    ]);
+    await scheduled(mockController, makeBindings(env), mockCtx);
+    const rows = new Map(
+      (await env.db.select().from(builds)).map((build) => [build.id, build.status]),
+    );
+    expect(rows.get('actions-grace')).toBe('building');
+    expect(rows.get('actions-abandoned')).toBe('failed');
+  });
+
   // The container reaper's DB terminalize frees the slot + revokes the token,
   // but the `started_at > maxAge` predicate does not prove the container is gone
   // (the DO may have been evicted / its alarm lost). The scheduled handler must

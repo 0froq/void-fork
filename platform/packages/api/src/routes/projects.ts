@@ -58,6 +58,7 @@ import { type ApiEnv, isDevBypass } from '../env.ts';
 import { validateSubmittedExecutionPlans } from '../migrations/execution-plan.ts';
 import { ensureTrackingTable, queryD1, runRemoteMigrations } from '../migrations/remote-runner.ts';
 import { getProjectDeploymentWorkerName, getProjectQueueName } from '../naming.ts';
+import { resolvePlan, resolvePlanLimits } from '../plans.ts';
 import { PROJECT_PERMISSION_MESSAGES } from '../project-access.ts';
 import { encryptProjectSecret, decryptProjectSecret } from '../project-secrets.ts';
 import { ProjectRequiresNormalizationError, requireNormalizedProject } from '../project-state.ts';
@@ -86,7 +87,6 @@ import {
   computeDispatchLimits,
   resolveRoutingUndo,
 } from '../routing.ts';
-import { getPlanLimits } from '../tiers.ts';
 import type { Build, DeployManifest, Project, ProjectRole, User } from '../types.ts';
 import { zeroTrustNotReadyMessage } from '../zero-trust/errors.ts';
 import { initializeNewProjectZeroTrust } from '../zero-trust/project.ts';
@@ -724,11 +724,11 @@ const app = new Hono<ApiEnv>()
       return context.json({ error: 'this name is reserved' }, 400);
     }
 
-    // Short slugs (5 chars or fewer) are reserved for paid plans
+    // Preserve short-slug eligibility when an administrator copies or renames a plan.
     if (body.slug.length <= 5) {
-      if (context.get('user').plan === 'free') {
+      if (!(await resolvePlan(context.get('db'), context.get('user').plan)).allowShortSlugs) {
         return context.json(
-          { error: 'short slugs (5 characters or fewer) require a paid plan' },
+          { error: 'the selected plan does not permit short slugs (5 characters or fewer)' },
           403,
         );
       }
@@ -853,8 +853,23 @@ const app = new Hono<ApiEnv>()
     const user = context.get('user');
     const deployBuild = context.get('deployBuild');
     const deployCredential = context.get('deployCredential');
-    const signToken = (buildId?: string) =>
-      signPrerenderToken(
+    const signToken = (buildId?: string) => {
+      const maximumTtl = deployTokenTtlSecondsForBuildMinutes(0);
+      const expiry = context.get('deployTokenExpiresAt');
+      const ttlSeconds =
+        buildId && expiry !== undefined
+          ? Math.min(maximumTtl, Math.floor(expiry - Date.now() / 1000))
+          : maximumTtl;
+      if (ttlSeconds <= 0) {
+        return context.json(
+          {
+            error: 'deploy token expired before prerendering',
+            message: 'Start a new build to obtain a valid deployment credential.',
+          },
+          401,
+        );
+      }
+      return signPrerenderToken(
         {
           projectId: project.id,
           userId: user.id,
@@ -864,17 +879,13 @@ const app = new Hono<ApiEnv>()
         },
         context.env.JWT_SECRET,
         {
-          // A manual CLI prerender can legitimately run longer than five
-          // minutes because path discovery and rendering are sequential. It
-          // has no build row whose plan timeout can size the token, so give it
-          // the same bounded 65-minute ceiling as an unlimited build. This
-          // remains a proxy-only, single-project credential and avoids
-          // restoring the caller's broad platform token inside Miniflare.
-          ttlSeconds: deployTokenTtlSecondsForBuildMinutes(
-            buildId ? getPlanLimits(access.owner.plan).buildTimeoutMinutes : 0,
-          ),
+          // Managed builds retain the deadline admitted by their scoped token,
+          // even if their account's plan changes while they are running. Manual
+          // prerenders use the existing bounded 65-minute ceiling.
+          ttlSeconds,
         },
       );
+    };
 
     let token: string;
     if (deployBuild) {
@@ -923,7 +934,11 @@ const app = new Hono<ApiEnv>()
       }
       token = minted;
     } else {
-      token = await signToken();
+      const minted = await signToken();
+      if (minted instanceof Response) {
+        return minted;
+      }
+      token = minted;
     }
     return context.json({ token });
   })
@@ -1358,7 +1373,7 @@ const app = new Hono<ApiEnv>()
             ? JSON.parse(target.manifest)
             : null;
           const dispatchLimits = computeDispatchLimits(
-            getPlanLimits(lockedAccess.owner.plan),
+            await resolvePlanLimits(tx, lockedAccess.owner.plan),
             manifest?.limits,
           );
           // Rollback external-write pass depends only on authoritative

@@ -9,10 +9,10 @@ import {
   getUser,
 } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
+import { resolvePlanLimits } from '../plans.ts';
 import { computeDispatchLimits } from '../routing-limits.ts';
 import { domains } from '../schema.ts';
 import { routingSuspensionReason } from '../suspension.ts';
-import { PLAN_LIMITS } from '../tiers.ts';
 import type { DeployManifest, Project, ProjectZeroTrust } from '../types.ts';
 import {
   type ManagedAccessApplication,
@@ -296,7 +296,10 @@ export async function publishProjectZeroTrustRoutingLocked(
   const manifest = routeDeployment?.manifest
     ? (JSON.parse(routeDeployment.manifest) as DeployManifest)
     : null;
-  const dispatchLimits = computeDispatchLimits(PLAN_LIMITS[owner.plan], manifest?.limits);
+  const dispatchLimits = computeDispatchLimits(
+    await resolvePlanLimits(db, owner.plan),
+    manifest?.limits,
+  );
   const suspensionReason = routingSuspensionReason(owner.suspended_reason);
   // Protected destinations are capped separately. Clearing public routing has
   // no domain cap and checkpoints progress while holding the project lock.

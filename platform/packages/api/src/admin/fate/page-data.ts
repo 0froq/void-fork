@@ -27,6 +27,7 @@ import type { Db } from '../../db.ts';
 import type { ApiEnv } from '../../env.ts';
 import { OperatorError } from '../../operator/common.ts';
 import { cliVersionStats } from '../../operator/system-operations.ts';
+import { readPlanCatalog, planFromCatalog } from '../../plans.ts';
 import { getPlatformApiUrl, platformConnectCommand } from '../../platform-identity.ts';
 import { projectWithUrl } from '../../project-url.ts';
 import { projectUrl } from '../../project-url.ts';
@@ -142,9 +143,15 @@ export async function loadDeploymentsPage(context: AdminContext, path: string) {
 export async function loadUserDetailPage(context: AdminContext, path: string) {
   const { id } = detailLocation(path, '/admin/users/');
   const { getOperatorUser } = await import('../../operator/tenant-service.ts');
+  const detail = await getOperatorUser(context, id);
+  const catalog = await readPlanCatalog(context.get('db'));
   return {
     id: path,
-    ...(await getOperatorUser(context, id)),
+    ...detail,
+    limits: planFromCatalog(catalog, detail.user.plan).limits,
+    plans: catalog.plans
+      .filter((plan) => !plan.archived || plan.id === detail.user.plan)
+      .map((plan) => ({ id: plan.id, name: plan.name, archived: plan.archived })),
     tz: (context.req.raw.cf?.timezone as string | undefined) ?? undefined,
   };
 }

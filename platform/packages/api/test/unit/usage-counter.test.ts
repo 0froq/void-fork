@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vite-plus/test';
 
 // Mock cloudflare:workers since DurableObject base class isn't available in unit tests
+vi.mock('../../src/plans.ts', async () => {
+  const { getPlanLimits } = await import('../../src/tiers.ts');
+  return { resolvePlanLimits: vi.fn(async (_db: unknown, plan: string) => getPlanLimits(plan)) };
+});
+
 vi.mock('cloudflare:workers', () => ({
   DurableObject: class {},
 }));
@@ -52,7 +57,14 @@ import {
   getUser,
   suspendUser,
 } from '../../src/db.ts';
+import { resolvePlanLimits } from '../../src/plans.ts';
 import { queryProjectAiUsage } from '../../src/routes/usage.ts';
+import { getPlanLimits } from '../../src/tiers.ts';
+
+beforeEach(() => {
+  vi.mocked(getUser).mockResolvedValue({ id: 'u1', plan: 'pro' } as never);
+  vi.mocked(resolvePlanLimits).mockImplementation(async (_db, plan) => getPlanLimits(plan));
+});
 import { SANDBOX_USAGE_RETENTION_MS } from '../../src/usage-auth.ts';
 import {
   evaluateRequestLimit,
@@ -523,6 +535,7 @@ describe('UsageCounter.handleRecord — sandbox', () => {
   });
 
   it('triggers sandbox suspension when crossing the plan limit', async () => {
+    vi.mocked(getUser).mockResolvedValue({ id: 'u1', plan: 'solo' } as never);
     // solo: sandboxRuntimeSecondsPerMonth = 30 * 3600 = 108_000
     const { counter, kv, storage } = makeCounter({
       plan: 'solo',
@@ -602,6 +615,7 @@ describe('UsageCounter.handleRecord — sandbox', () => {
   });
 
   it('is retry-safe when the sandbox-block KV write fails (latch not set until the block is written)', async () => {
+    vi.mocked(getUser).mockResolvedValue({ id: 'u1', plan: 'solo' } as never);
     // Regression: the sandbox latch is flipped only AFTER the block KV put + DB
     // suspend succeed. getState() caches and returns the same object on a queue
     // retry; flipping first then throwing on the put would make the retry skip the
@@ -944,6 +958,7 @@ describe('UsageCounter.handleReevaluateSandbox', () => {
   });
 
   it('still clears the in-memory flag when usage exceeds the new plan (next handleRecord re-suspends)', async () => {
+    vi.mocked(getUser).mockResolvedValue({ id: 'u1', plan: 'solo' } as never);
     // On pro (200h), suspended. Downgrade to solo (30h) while usage is between the two.
     // The DO clears the flag optimistically; the next handleRecord re-evaluates and re-suspends
     // (writing KV + DB).
@@ -1002,6 +1017,7 @@ describe('UsageCounter.handleRecord — request suspension fans out to custom do
   });
 
   it('stamps suspended on the slug AND active domain routes when crossing the request cap', async () => {
+    vi.mocked(getUser).mockResolvedValue({ id: 'u1', plan: 'free' } as never);
     // free.requestsPerMonth = 3_000_000
     const { counter, kv } = makeCounter({ plan: 'free', totalRequests: 3_000_000 });
     // Seed the routes a deploy publisher would have written for this project.
@@ -1025,6 +1041,7 @@ describe('UsageCounter.handleRecord — request suspension fans out to custom do
   });
 
   it('restamps a request suspension overwritten between its edge and account writes', async () => {
+    vi.mocked(getUser).mockResolvedValue({ id: 'u1', plan: 'free' } as never);
     const { counter, kv } = makeCounter({ plan: 'free', totalRequests: 3_000_000 });
     const route = { workerName: 'w', projectId: 'p1', userId: 'u1' };
     kv.store.set('s1', JSON.stringify(route));
@@ -2024,6 +2041,9 @@ describe('UsageCounter operation ordering and persistence', () => {
   });
 
   it('preserves distinct records and initialization while a suspension write is pending', async () => {
+    vi.mocked(getUser)
+      .mockResolvedValue({ id: 'u1', plan: 'pro' } as never)
+      .mockResolvedValueOnce({ id: 'u1', plan: 'free' } as never);
     const from = Date.now() - 60_000;
     const { counter, kv, storage } = makeCounter({ plan: 'free' });
     const writing = deferred();
@@ -2091,6 +2111,7 @@ describe('UsageCounter operation ordering and persistence', () => {
   });
 
   it('holds the operation queue until sibling writes settle after an external failure', async () => {
+    vi.mocked(getUser).mockResolvedValue({ id: 'u1', plan: 'free' } as never);
     const suspending = deferred();
     const resume = deferred();
     vi.mocked(suspendUser).mockImplementationOnce(async () => {
@@ -2158,6 +2179,7 @@ describe('UsageCounter operation ordering and persistence', () => {
   });
 
   it('does not retain an unsaved init merge or plan change in the isolate cache', async () => {
+    vi.mocked(getUser).mockResolvedValue({ id: 'u1', plan: 'free' } as never);
     const { counter, storage } = makeCounter({ plan: 'free', projectSlugs: { p1: 's1' } });
     vi.spyOn(storage, 'put').mockRejectedValueOnce(new Error('storage unavailable'));
     await expect(
@@ -2182,6 +2204,7 @@ describe('UsageCounter operation ordering and persistence', () => {
   });
 
   it('retries AI enforcement after a failed KV write instead of retaining its unsaved latch', async () => {
+    vi.mocked(getUser).mockResolvedValue({ id: 'u1', plan: 'free' } as never);
     const { counter, kv, storage } = makeCounter({ plan: 'free', projectSlugs: { p1: 's1' } });
     vi.mocked(queryProjectAiUsage).mockResolvedValue({ neurons: 100_001 });
     vi.spyOn(kv, 'put').mockRejectedValueOnce(new Error('KV unavailable'));
@@ -2349,5 +2372,143 @@ describe('UsageCounter durable sandbox receipts', () => {
     expect((storage.data.get('state') as CounterState).totalSandboxSeconds).toBe(
       20 + SANDBOX_USAGE_RETENTION_MS / 1000,
     );
+  });
+});
+
+describe('UsageCounter dynamic plan reconciliation', () => {
+  function reevaluate(userId = 'u1') {
+    return new Request('https://do/reevaluate-limits', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  it('enforces a dynamic plan against retained usage without changing its billing ledger', async () => {
+    const { counter, storage, kv } = makeCounter({
+      totalRequests: 15,
+      totalNeurons: 6,
+      totalSandboxSeconds: 10,
+      projectSlugs: { p1: 's1' },
+      historicalNeurons: 2,
+    });
+    vi.mocked(getUser).mockResolvedValue({ id: 'u1', plan: 'studio' } as never);
+    vi.mocked(resolvePlanLimits).mockResolvedValue({
+      ...getPlanLimits('pro'),
+      requestsPerMonth: 10,
+      aiNeuronsPerMonth: 5,
+      sandboxRuntimeSecondsPerMonth: 8,
+    });
+    const response = await counter.fetch(reevaluate());
+    expect(await response.json()).toMatchObject({
+      requestsSuspended: true,
+      sandboxRuntimeSuspended: true,
+      aiSuspended: true,
+    });
+    expect(storage.data.get('state')).toMatchObject({
+      plan: 'studio',
+      totalRequests: 15,
+      totalNeurons: 6,
+      totalSandboxSeconds: 10,
+      billingPeriodStart: '2026-01-01T00:00:00Z',
+      historicalNeurons: 2,
+    });
+    expect(kv.store.get('sandbox-block:u1')).toBe('1');
+    expect(kv.store.get('ai-block:p1')).toBe('1');
+  });
+
+  it('clears lifted quota blocks while preserving administrator suspension and totals', async () => {
+    const { counter, storage, kv } = makeCounter({
+      plan: 'studio',
+      totalRequests: 15,
+      totalNeurons: 6,
+      totalSandboxSeconds: 10,
+      requestsSuspended: true,
+      aiSuspended: true,
+      sandboxRuntimeSuspended: true,
+      projectSlugs: { p1: 's1' },
+    });
+    kv.store.set(
+      's1',
+      JSON.stringify({ projectId: 'p1', userId: 'u1', suspended: 'admin_suspended' }),
+    );
+    kv.store.set('ai-block:p1', '1');
+    kv.store.set('sandbox-block:u1', '1');
+    vi.mocked(getUser).mockResolvedValue({
+      id: 'u1',
+      plan: 'studio',
+      suspended_reason: 'admin_suspended',
+    } as never);
+    vi.mocked(resolvePlanLimits).mockResolvedValue(getPlanLimits('custom'));
+    const response = await counter.fetch(reevaluate());
+    expect(await response.json()).toMatchObject({
+      requestsSuspended: false,
+      sandboxRuntimeSuspended: false,
+      aiSuspended: false,
+    });
+    expect(JSON.parse(kv.store.get('s1')!).suspended).toBe('admin_suspended');
+    expect(kv.store.has('ai-block:p1')).toBe(false);
+    expect(kv.store.has('sandbox-block:u1')).toBe(false);
+    expect(storage.data.get('state')).toMatchObject({
+      totalRequests: 15,
+      totalNeurons: 6,
+      totalSandboxSeconds: 10,
+    });
+  });
+
+  it('keeps recorded usage across capped, unlimited, and capped transitions', async () => {
+    const { counter, storage } = makeCounter({ totalRequests: 15, totalSandboxSeconds: 10 });
+    vi.mocked(getUser).mockResolvedValue({ id: 'u1', plan: 'studio' } as never);
+    const capped = { ...getPlanLimits('custom'), requestsPerMonth: 10 };
+    vi.mocked(resolvePlanLimits).mockResolvedValue(capped);
+    expect(await (await counter.fetch(reevaluate())).json()).toMatchObject({
+      requestsSuspended: true,
+    });
+    vi.mocked(resolvePlanLimits).mockResolvedValue(getPlanLimits('custom'));
+    expect(await (await counter.fetch(reevaluate())).json()).toMatchObject({
+      requestsSuspended: false,
+    });
+    await counter.fetch(
+      recordRequest(
+        [{ projectId: 'p1', userId: 'u1', slug: 's1', requests: 4, responseBytes: 0 }],
+        'u1',
+        'studio',
+      ),
+    );
+    vi.mocked(resolvePlanLimits).mockResolvedValue(capped);
+    expect(await (await counter.fetch(reevaluate())).json()).toMatchObject({
+      requestsSuspended: true,
+    });
+    expect(storage.data.get('state')).toMatchObject({
+      totalRequests: 19,
+      totalSandboxSeconds: 10,
+      billingPeriodStart: '2026-01-01T00:00:00Z',
+    });
+  });
+
+  it('uses authoritative assignment rather than a delayed usage envelope plan', async () => {
+    const { counter, storage } = makeCounter({ plan: 'custom' });
+    vi.mocked(getUser).mockResolvedValue({ id: 'u1', plan: 'studio' } as never);
+    vi.mocked(resolvePlanLimits).mockResolvedValue({
+      ...getPlanLimits('custom'),
+      requestsPerMonth: 2,
+    });
+    const response = await counter.fetch(
+      recordRequest(
+        [
+          {
+            projectId: 'p1',
+            userId: 'u1',
+            slug: 's1',
+            requests: 3,
+            responseBytes: 0,
+          },
+        ],
+        'u1',
+        'custom',
+      ),
+    );
+    expect(await response.json()).toMatchObject({ totalRequests: 3, suspended: true });
+    expect(storage.data.get('state')).toMatchObject({ plan: 'studio', totalRequests: 3 });
+    expect(resolvePlanLimits).toHaveBeenLastCalledWith(expect.anything(), 'studio');
   });
 });

@@ -76,6 +76,44 @@ describe('resolveRoutingUndo', () => {
     );
   });
 
+  it('undoes deployment payload after mutable owner and plan policy change', () => {
+    const attempted = {
+      workerName: 'attempted',
+      version: 'b',
+      userId: 'old-owner',
+      limits: { cpuMs: 10 },
+    };
+    const current = { ...attempted, userId: 'new-owner', limits: { cpuMs: 77 } };
+    const previous = {
+      workerName: 'committed',
+      version: 'a',
+      userId: 'old-owner',
+      limits: { cpuMs: 10 },
+    };
+    expect(
+      resolveRoutingUndo(
+        JSON.stringify(current),
+        JSON.stringify(attempted),
+        JSON.stringify(previous),
+      ),
+    ).toEqual({ restore: true, value: JSON.stringify(previous) });
+    // The compensation caller refreshes policy from the current project owner.
+    expect(
+      resolveRoutingUndo(
+        JSON.stringify({ ...current, workerName: 'newer', version: 'c' }),
+        JSON.stringify(attempted),
+        JSON.stringify(previous),
+      ).restore,
+    ).toBe(false);
+    expect(
+      resolveRoutingUndo(
+        JSON.stringify({ userId: 'old-owner', plan: 'team' }),
+        JSON.stringify({ userId: 'old-owner', plan: 'free' }),
+        JSON.stringify({ userId: 'old-owner', plan: 'solo' }),
+      ).restore,
+    ).toBe(true);
+  });
+
   const oldProtection = {
     teamDomain: 'company.cloudflareaccess.com',
     audiences: [{ hostname: '*.apps.example.com', audience: 'old-audience' }],

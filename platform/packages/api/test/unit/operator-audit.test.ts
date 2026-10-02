@@ -11,6 +11,35 @@ describe('operator audit intent normalization', () => {
       target: Record<string, unknown>;
     }> = [
       {
+        action: 'config/plans/team/set',
+        body: {
+          name: 'Team',
+          expectedRevision: 7,
+          allowShortSlugs: true,
+          limits: { requestsPerMonth: 42, d1StorageBytes: 100, credential: 'secret' },
+          secret: 'hidden',
+        },
+        target: {
+          planId: 'team',
+          action: 'set',
+          name: 'Team',
+          expectedRevision: 7,
+          allowShortSlugs: true,
+          limits: { requestsPerMonth: 42 },
+        },
+      },
+      {
+        action: 'config/plans/add',
+        body: { id: 'team', name: 'Team', copyFrom: 'free', expectedRevision: 7 },
+        target: {
+          planId: 'team',
+          action: 'add',
+          name: 'Team',
+          copyFrom: 'free',
+          expectedRevision: 7,
+        },
+      },
+      {
         action: 'users/usr_1/plan',
         body: { plan: 'pro', credential: 'secret' },
         target: { userId: 'usr_1', plan: 'pro' },

@@ -800,6 +800,9 @@ importers:
       '@void/isr':
         specifier: workspace:*
         version: link:../../../packages/isr
+      '@void/platform':
+        specifier: workspace:*
+        version: link:../../../packages/platform
       '@void/react':
         specifier: workspace:*
         version: link:../../../packages/react

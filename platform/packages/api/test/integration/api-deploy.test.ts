@@ -1,4 +1,5 @@
 import { SHARED_CACHE_POLICY_VERSION } from '@void/isr/core';
+import { createDefaultPlanCatalog } from '@void/platform/plans';
 import { desc, eq, sql } from 'drizzle-orm';
 import {
   describe,
@@ -19,9 +20,11 @@ import {
   getProject,
   removeProjectMember,
   updateDeploymentStatus,
+  updateUserPlan,
   type Db,
 } from '../../src/db.ts';
 import app from '../../src/index.ts';
+import { writePlanCatalog } from '../../src/plans.ts';
 import * as projectAccess from '../../src/project-access.ts';
 import * as projectIngress from '../../src/project-ingress.ts';
 import { validateManifestShape } from '../../src/routes/deploy.ts';
@@ -43,6 +46,7 @@ import {
   teardownEnv,
   clearTables,
   createTestUser,
+  createOperatorToken,
   createTestProject,
   createTestDeployment,
   createTestProjectSecret,
@@ -360,6 +364,165 @@ function createWaitUntilTrackingCtx(): {
 }
 
 describe('POST /projects/:id/deploy', () => {
+  it('restores committed code while retaining a completed operator plan update after cutover fails', async () => {
+    const user = await createTestUser(env.db);
+    const admin = await createTestUser(
+      env.db,
+      'policy-admin',
+      'github',
+      undefined,
+      'custom',
+      'admin',
+    );
+    const token = await createOperatorToken(env.db, admin);
+    const project = await createTestProject(env.db, user.id, 'compensate-current-policy');
+    mockCfApi();
+    const initial = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        workers: { 'index.js': 'export default {fetch(){return new Response("first")}}' },
+      }),
+      env,
+    );
+    expect(parseDeployStream(await initial.text()).at(-1)).toMatchObject({ event: 'done' });
+    const source = (await getProject(env.db, project.id))!.active_deployment_id;
+    const sourceRouting = (await env.ROUTING.get(project.slug, 'json')) as { workerName: string };
+    const originalPut = env.ROUTING.put.bind(env.ROUTING);
+    let changed = false;
+    vi.spyOn(env.ROUTING, 'put').mockImplementation(async (key, value, options) => {
+      if (key.startsWith('cutover-ready:') && !changed) {
+        changed = true;
+        const applied = await app.fetch(
+          new Request('http://localhost/operator/v1/config/plans/free/set', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              expectedRevision: 0,
+              limits: {
+                cpuMsPerRequest: 77,
+                maxCpuMsPerRequest: 100,
+                subRequestsPerInvocation: 70,
+              },
+            }),
+          }),
+          env,
+        );
+        expect(applied.status).toBe(200);
+        expect(await applied.json()).toMatchObject({
+          ok: true,
+          reconciliation: { complete: true },
+        });
+        throw new Error('injected failure after completed policy update');
+      }
+      return originalPut(key, value, options);
+    });
+    const replacement = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        workers: { 'index.js': 'export default {fetch(){return new Response("second")}}' },
+      }),
+      env,
+    );
+    expect(parseDeployStream(await replacement.text()).at(-1)).toMatchObject({
+      event: 'error',
+      message: 'injected failure after completed policy update',
+    });
+    expect(changed).toBe(true);
+    expect((await getProject(env.db, project.id))!.active_deployment_id).toBe(source);
+    expect(await env.ROUTING.get(project.slug, 'json')).toMatchObject({
+      workerName: sourceRouting.workerName,
+      version: source,
+      limits: { cpuMs: 77, subRequests: 70 },
+    });
+  });
+
+  it.each([
+    { backend: 'worker', changePlan: false },
+    { backend: 'worker', changePlan: true },
+    { backend: 'static', changePlan: true },
+  ] as const)(
+    'publishes current plan policy after a completed update during $backend preparation (assignment: $changePlan)',
+    async ({ backend, changePlan }) => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(
+        env.db,
+        user.id,
+        `late-policy-${backend}-${changePlan}`,
+      );
+      await env.db.insert(domains).values({
+        id: 'late-policy-domain',
+        project_id: project.id,
+        hostname: 'late-policy.example.com',
+        cf_hostname_id: 'late-policy-cf-hostname',
+        status: 'active',
+      });
+      mockCfApi();
+      let updated = false;
+      const scheduler = {
+        idFromName: (name: string) => ({ toString: () => name }),
+        get: () => ({
+          fetch: async (request: Request) => {
+            if (new URL(request.url).pathname === '/snapshot' && !updated) {
+              const catalog = createDefaultPlanCatalog();
+              const source = catalog.plans.find((plan) => plan.id === 'free')!;
+              const changed = {
+                ...source,
+                id: changePlan ? 'team' : 'free',
+                name: changePlan ? 'Team' : 'free',
+                limits: {
+                  ...source.limits,
+                  cpuMsPerRequest: 77,
+                  maxCpuMsPerRequest: 100,
+                  subRequestsPerInvocation: 70,
+                },
+              };
+              await writePlanCatalog(env.db, {
+                ...catalog,
+                revision: 1,
+                plans: changePlan
+                  ? [...catalog.plans, changed]
+                  : catalog.plans.map((plan) => (plan.id === 'free' ? changed : plan)),
+              });
+              if (changePlan) {
+                await updateUserPlan(env.db, user.id, 'team');
+              }
+              // The completed update is already published before this deployment takes its cutover fence.
+              await env.ROUTING.put(
+                project.slug,
+                JSON.stringify({
+                  workerName: 'previous-worker',
+                  projectId: project.id,
+                  userId: user.id,
+                  limits: { cpuMs: 77, subRequests: 70 },
+                }),
+              );
+              updated = true;
+              return Response.json({ state: null });
+            }
+            return Response.json({ ok: true });
+          },
+        }),
+      } as unknown as DurableObjectNamespace;
+      const request =
+        backend === 'static'
+          ? await buildStaticDeployRequest(env, project.id, user.jwt, { type: 'static' })
+          : await buildDeployRequest(env, project.id, user.jwt);
+      const response = await app.fetch(request, { ...env, CRON_SCHEDULER: scheduler });
+      expect(parseDeployStream(await response.text()).at(-1)).toMatchObject({ event: 'done' });
+      expect(updated).toBe(true);
+      const routing = await env.ROUTING.get(project.slug, 'json');
+      expect(routing).toMatchObject({
+        userId: user.id,
+        ...(backend === 'worker'
+          ? { limits: { cpuMs: 77, subRequests: 70 } }
+          : { staticDeploymentId: expect.any(String) }),
+      });
+      expect(await env.ROUTING.get('domain:late-policy.example.com', 'json')).toEqual(routing);
+      expect(await env.ROUTING.get(`project:${project.id}`, 'json')).toEqual({
+        userId: user.id,
+        plan: changePlan ? 'team' : 'free',
+      });
+    },
+  );
+
   it('does not require migration metadata when no SQL will run', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'no-migrations');

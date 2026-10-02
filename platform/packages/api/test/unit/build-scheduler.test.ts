@@ -2,6 +2,16 @@ import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // DurableObject base class isn't available in unit tests — mock it like the
 // other DO suites (cron-scheduler, usage-counter).
+vi.mock('../../src/plans.ts', async () => {
+  const { createDefaultPlanCatalog } = await import('@void/platform/plans');
+  return {
+    readPlanCatalog: vi.fn(async () => createDefaultPlanCatalog()),
+    planFromCatalog: (catalog: ReturnType<typeof createDefaultPlanCatalog>, id: string) =>
+      catalog.plans.find((plan) => plan.id === id) ??
+      catalog.plans.find((plan) => plan.id === 'free')!,
+  };
+});
+
 vi.mock('cloudflare:workers', () => ({
   DurableObject: class {
     ctx: unknown;
@@ -172,6 +182,8 @@ vi.mock('../../src/db.ts', () => ({
         instanceType:
           build.instance_type ?? (plan === 'free' || plan === 'solo' ? 'standard-3' : 'standard-4'),
         ownerPlan: plan,
+        timeoutMinutes:
+          plan === 'custom' ? 0 : plan === 'sponsored' ? 20 : plan === 'free' ? 10 : 15,
       };
     },
   ),

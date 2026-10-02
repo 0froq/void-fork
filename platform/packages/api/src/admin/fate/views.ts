@@ -109,6 +109,8 @@ export const deploymentsPageRequest = (path: string) =>
   }) as const;
 
 export const UserDetailView = view<AdminUserDetail>()({
+  limits: true as never,
+  plans: true,
   id: true,
   user: true as never,
   projects: true,

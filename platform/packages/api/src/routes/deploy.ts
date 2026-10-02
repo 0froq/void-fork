@@ -103,6 +103,8 @@ import { generateId } from '../id.ts';
 import { checkCliVersionOrRespond } from '../middleware/cli-version.ts';
 import { getProjectQueueName } from '../naming.ts';
 import { createDeployLogger, type DeployLogger } from '../observability/logger.ts';
+import { PLAN_CATALOG_SETTING, resolvePlanLimits } from '../plans.ts';
+import { getPlatformSetting } from '../platform-settings.ts';
 import {
   ProjectAccessDeniedError,
   projectAccessErrorBody,
@@ -148,8 +150,8 @@ import {
   resolveRoutingUndo,
 } from '../routing.ts';
 import { builds, deployments, deploymentOperations } from '../schema.ts';
-import { REASON_REQUESTS_EXCEEDED } from '../suspension.ts';
-import { getPlanLimits, isWithinLimit, STATIC_RETENTION_LIMIT, type PlanId } from '../tiers.ts';
+import { REASON_REQUESTS_EXCEEDED, routingSuspensionReason } from '../suspension.ts';
+import { isWithinLimit, STATIC_RETENTION_LIMIT } from '../tiers.ts';
 import {
   SUPPORTED_MANIFEST_VERSIONS,
   type DeployManifest,
@@ -164,6 +166,7 @@ import { zeroTrustNotReadyMessage } from '../zero-trust/errors.ts';
 import {
   resolveProjectZeroTrustRouting,
   resolveProjectZeroTrustRoutingForPublication,
+  rewriteProjectRouteMetadata,
   withProjectZeroTrustRouting,
 } from '../zero-trust/routing.ts';
 import { requireProjectRouteCapability } from './project-access.ts';
@@ -286,11 +289,14 @@ async function replayDeploymentCutover(
   db: Db,
   project: Project,
   deployment: Deployment,
-  plan: PlanId,
   committedProjectType?: Project['type'],
   options: Readonly<{ restoreCommitted?: boolean }> = {},
 ): Promise<void> {
-  const planLimits = getPlanLimits(plan);
+  const currentOwner = await getUser(db, project.user_id);
+  if (!currentOwner) {
+    throw new Error('project owner is unavailable during routing publication');
+  }
+  const planLimits = await resolvePlanLimits(db, currentOwner.plan);
   if (!deployment.manifest) {
     throw new Error(`deployment ${deployment.id} has no manifest for cutover recovery`);
   }
@@ -378,7 +384,7 @@ async function replayDeploymentCutover(
   await env.ROUTING.put(project.slug, routingJson);
   await env.ROUTING.put(
     projectAccountKey(project.id),
-    buildProjectAccountJson({ userId: project.user_id, plan }),
+    buildProjectAccountJson({ userId: currentOwner.id, plan: currentOwner.plan }),
   );
   await reconcileProjectDomainRoutes(env, domains, routingJson);
   if (!isStatic && manifest.schedules?.length) {
@@ -581,15 +587,9 @@ export async function settleDeploymentForSandboxDrain(
         : null;
       try {
         if (committedActive) {
-          await replayDeploymentCutover(
-            env,
-            txDb,
-            project,
-            committedActive,
-            owner.plan,
-            project.type,
-            { restoreCommitted: true },
-          );
+          await replayDeploymentCutover(env, txDb, project, committedActive, project.type, {
+            restoreCommitted: true,
+          });
         } else {
           await clearProjectExternalState(env, txDb, project);
         }
@@ -687,15 +687,9 @@ export async function settleDeploymentForSandboxDrain(
       : null;
     try {
       if (committedActive) {
-        await replayDeploymentCutover(
-          env,
-          txDb,
-          project,
-          committedActive,
-          owner.plan,
-          project.type,
-          { restoreCommitted: true },
-        );
+        await replayDeploymentCutover(env, txDb, project, committedActive, project.type, {
+          restoreCommitted: true,
+        });
       } else {
         await clearProjectExternalState(env, txDb, project);
       }
@@ -2436,7 +2430,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
       }
       const lockedAccess = await requireActiveDeployAccess(txDb, projectId, actor.id);
       const requestedCpuMs = incomingManifest.limits?.cpuMs;
-      const maxCpuMs = getPlanLimits(lockedAccess.owner.plan).maxCpuMsPerRequest;
+      const maxCpuMs = (await resolvePlanLimits(tx, lockedAccess.owner.plan)).maxCpuMsPerRequest;
       if (requestedCpuMs !== undefined && maxCpuMs > 0 && requestedCpuMs > maxCpuMs) {
         return { cpuLimit: { requested: requestedCpuMs, maximum: maxCpuMs } } as const;
       }
@@ -2632,7 +2626,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                   txDb,
                   lockedProject,
                   committedActive,
-                  lockedAccess.owner.plan,
                   lockedProject.type,
                   { restoreCommitted: true },
                 );
@@ -2688,13 +2681,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           if (replayProtectedDeployment) {
             let replayError: unknown;
             try {
-              await replayDeploymentCutover(
-                context.env,
-                txDb,
-                lockedProject,
-                protectedDeployment,
-                lockedAccess.owner.plan,
-              );
+              await replayDeploymentCutover(context.env, txDb, lockedProject, protectedDeployment);
               await assertPersistedDeploymentServingAssetsExist(context.env, protectedDeployment);
               await context.env.ROUTING.put(
                 cutoverReadyKey(protectedDeployment.id),
@@ -2872,7 +2859,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     );
     return deploymentReceiptResponse(context.get('db'), preDeployment.id);
   }
-  const planLimits = getPlanLimits(owner.plan);
+  const planLimits = await resolvePlanLimits(context.get('db'), owner.plan);
 
   // Construct the response stream — same NDJSON wire contract as the
   // multipart path (heartbeats, progress events, `done`/`error`).
@@ -2956,7 +2943,10 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     };
     const withProjectCutoverFence = async <T>(
       deploymentId: string,
-      mutate: (txDb: Db) => Promise<T>,
+      mutate: (
+        txDb: Db,
+        currentOwner: Awaited<ReturnType<typeof requireActiveDeployAccess>>['owner'],
+      ) => Promise<T>,
     ): Promise<T> => {
       return await context.get('db').transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
@@ -2965,7 +2955,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         if (!lockedProject || lockedProject.status === 'deleting') {
           throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
         }
-        await requireActiveDeployAccess(txDb, projectId, actor.id);
+        const currentAccess = await requireActiveDeployAccess(txDb, projectId, actor.id);
         if (execution) {
           await assertDeploymentExecutionAuthority(txDb, execution.operation);
         }
@@ -2978,7 +2968,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             throw new Error(SUPERSEDED_BUILD_ERROR_MESSAGE);
           }
         }
-        return await mutate(txDb);
+        return await mutate(txDb, currentAccess.owner);
       });
     };
     // Compensation must serialize with every project cutover, not only
@@ -3161,6 +3151,28 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     const restoreTrackedRouting = async (): Promise<void> => {
       await withProjectCompensationFence(async (txDb) => {
         const zeroTrust = await resolveProjectZeroTrustRoutingForPublication(txDb, projectId);
+        const currentProject = await getProject(txDb, projectId);
+        const currentOwner = currentProject ? await getUser(txDb, currentProject.user_id) : null;
+        if (!currentProject || !currentOwner) {
+          throw new Error('project owner is unavailable during routing compensation');
+        }
+        const refreshPolicy =
+          currentOwner.id !== owner.id ||
+          currentOwner.plan !== owner.plan ||
+          (await getPlatformSetting(txDb, PLAN_CATALOG_SETTING)) !== null;
+        const committedDeployment =
+          refreshPolicy && currentProject.active_deployment_id
+            ? await getDeployment(txDb, currentProject.active_deployment_id)
+            : null;
+        const committedManifest = committedDeployment?.manifest
+          ? (JSON.parse(committedDeployment.manifest) as DeployManifest)
+          : null;
+        const currentLimits = refreshPolicy
+          ? computeDispatchLimits(
+              await resolvePlanLimits(txDb, currentOwner.plan),
+              committedManifest?.limits,
+            )
+          : null;
         const errors: Array<unknown> = [];
         for (const [key, previous] of [...routingValuesBeforeWrite].reverse()) {
           try {
@@ -3178,12 +3190,24 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             if (undo.value === null) {
               await context.env.ROUTING.delete(key);
             } else {
-              await context.env.ROUTING.put(
-                key,
-                key === project.slug || key.startsWith('domain:')
-                  ? withProjectZeroTrustRouting(undo.value, zeroTrust, projectId)
-                  : undo.value,
-              );
+              let value = undo.value;
+              if (key === project.slug || key.startsWith('domain:')) {
+                value = refreshPolicy
+                  ? rewriteProjectRouteMetadata(JSON.parse(value) as Record<string, unknown>, {
+                      projectId,
+                      userId: currentOwner.id,
+                      limits: currentLimits,
+                      suspended: routingSuspensionReason(currentOwner.suspended_reason),
+                      zeroTrust,
+                    })
+                  : withProjectZeroTrustRouting(value, zeroTrust, projectId);
+              } else if (refreshPolicy && key === projectAccountKey(projectId)) {
+                value = buildProjectAccountJson({
+                  userId: currentOwner.id,
+                  plan: currentOwner.plan,
+                });
+              }
+              await context.env.ROUTING.put(key, value);
             }
           } catch (error) {
             errors.push(error);
@@ -3633,7 +3657,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           await assertDeploymentNotCanceled(context.get('db'), deployment.id);
           await assertProjectNotDeleting(context.get('db'), projectId);
           markPhase('routing_switch');
-          await withProjectCutoverFence(deployment.id, async (txDb) => {
+          await withProjectCutoverFence(deployment.id, async (txDb, currentOwner) => {
             const existingRouting = await context.env.ROUTING.get(project.slug);
             const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
             const zeroTrust = await resolveProjectZeroTrustRouting(txDb, projectId);
@@ -3645,7 +3669,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               manifest,
               suspended:
                 existingEntry?.suspended ??
-                (owner.suspended_reason === REASON_REQUESTS_EXCEEDED
+                (currentOwner.suspended_reason === REASON_REQUESTS_EXCEEDED
                   ? REASON_REQUESTS_EXCEEDED
                   : undefined),
               zeroTrust,
@@ -3654,7 +3678,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             await putTrackedRouting(project.slug, routingJson);
             await putTrackedRouting(
               projectAccountKey(projectId),
-              buildProjectAccountJson({ userId: project.user_id, plan: owner.plan }),
+              buildProjectAccountJson({ userId: currentOwner.id, plan: currentOwner.plan }),
             );
             routingSwitched = true;
             logger = logger.with({ routingSwitched: true });
@@ -4713,12 +4737,15 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         await assertProjectNotDeleting(context.get('db'), projectId);
 
         // Routing switch
-        const dispatchLimits = computeDispatchLimits(planLimits, manifest.limits);
         await snapshotCronState();
         await assertDeploymentNotCanceled(context.get('db'), deployment.id);
         await assertProjectNotDeleting(context.get('db'), projectId);
         markPhase('routing_switch');
-        await withProjectCutoverFence(deployment.id, async (txDb) => {
+        await withProjectCutoverFence(deployment.id, async (txDb, currentOwner) => {
+          const dispatchLimits = computeDispatchLimits(
+            await resolvePlanLimits(txDb, currentOwner.plan),
+            manifest.limits,
+          );
           const existingRouting = await context.env.ROUTING.get(project.slug);
           const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
           const zeroTrust = await resolveProjectZeroTrustRouting(txDb, projectId);
@@ -4731,7 +4758,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             dispatchLimits,
             suspended:
               existingEntry?.suspended ??
-              (owner.suspended_reason === REASON_REQUESTS_EXCEEDED
+              (currentOwner.suspended_reason === REASON_REQUESTS_EXCEEDED
                 ? REASON_REQUESTS_EXCEEDED
                 : undefined),
             hasCrons,
@@ -4743,7 +4770,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           await putTrackedRouting(project.slug, routingJson);
           await putTrackedRouting(
             projectAccountKey(projectId),
-            buildProjectAccountJson({ userId: project.user_id, plan: owner.plan }),
+            buildProjectAccountJson({ userId: currentOwner.id, plan: currentOwner.plan }),
           );
           routingSwitched = true;
           logger = logger.with({ routingSwitched: true });
@@ -5274,7 +5301,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                     txDb,
                     lockedProject,
                     committedActive,
-                    owner.plan,
                     lockedProject.type,
                     { restoreCommitted: true },
                   );

@@ -1,3 +1,4 @@
+import { createDefaultPlanCatalog } from '@void/platform/plans';
 import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import {
@@ -29,6 +30,7 @@ import {
 import type { Db } from '../../src/db.ts';
 import type { ApiEnv } from '../../src/env.ts';
 import type { GithubOidcClaims } from '../../src/github/oidc-verify.ts';
+import { writePlanCatalog } from '../../src/plans.ts';
 import { oidcRoutes } from '../../src/routes/auth-oidc.ts';
 import {
   builds,
@@ -134,6 +136,7 @@ function setCompareSideEffect(fn: (() => Promise<void>) | null): void {
 // exchange must still mint a token and persist NO check_run_id. Reset each test.
 const CHECK_RUN_ID = '999001';
 let checkRunCreateStatus = 200;
+let checkRunSideEffect: (() => Promise<void>) | null = null;
 function setCheckRunCreateStatus(status: number): void {
   checkRunCreateStatus = status;
 }
@@ -288,6 +291,7 @@ beforeEach(async () => {
   setCompareSideEffect(null);
   // Default the best-effort check-run create to succeed with a fixed id.
   setCheckRunCreateStatus(200);
+  checkRunSideEffect = null;
   checkRunCreateCount = 0;
   // The OIDC route now makes a live `GET /repos/{repo}/installation` call
   // and a live `GET /repos/{repo}/compare/{base}...{branch}` call for
@@ -307,6 +311,11 @@ beforeEach(async () => {
         });
       }
       if (url.includes('/check-runs')) {
+        if (checkRunSideEffect) {
+          const effect = checkRunSideEffect;
+          checkRunSideEffect = null;
+          await effect();
+        }
         // The best-effort "Void Build" check-run create (end of the exchange).
         if (checkRunCreateStatus < 200 || checkRunCreateStatus >= 300) {
           return new Response('check-run create failed', { status: checkRunCreateStatus });
@@ -804,6 +813,42 @@ describe('POST /auth/github-oidc', () => {
     expect(ttl).toBeGreaterThan(15 * 60); // strictly longer than the old default
     // A few seconds of slack for any clock rounding across the mint.
     expect(Math.abs(ttl - (20 * 60 + 5 * 60))).toBeLessThanOrEqual(5);
+  });
+
+  it('freezes a newly admitted Actions token timeout before later plan edits', async () => {
+    const catalog = createDefaultPlanCatalog();
+    const source = catalog.plans.find((plan) => plan.id === 'sponsored')!;
+    const studio = { ...source, id: 'studio', name: 'Studio' };
+    await writePlanCatalog(env.db, { ...catalog, plans: [...catalog.plans, studio] });
+    const user = await createTestUser(env.db, 'snapshot-builder', 'github', undefined, 'studio');
+    const project = await createTestProject(env.db, user.id, 'oidc-timeout-snapshot');
+    await seedActiveInstallation(env.db, '1');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '1',
+      repoFullName: 'octo/repo',
+      repositoryId: '42',
+      branch: 'main',
+      buildExecutor: 'github_actions',
+    });
+    checkRunSideEffect = async () => {
+      await writePlanCatalog(env.db, {
+        ...catalog,
+        plans: [
+          ...catalog.plans,
+          { ...studio, limits: { ...studio.limits, buildTimeoutMinutes: 1 } },
+        ],
+      });
+    };
+    setVerifyResult(makeClaims());
+    const response = await exchange(makeApp(env), env, {
+      oidcToken: 'good',
+      project: project.slug,
+    });
+    expect(response.status).toBe(200);
+    const { token } = (await response.json()) as { token: string };
+    const payload = await verifyDeployToken(token, JWT_SECRET);
+    expect(payload!.exp - payload!.iat).toBe(20 * 60 + 5 * 60);
   });
 
   it('accepts the exchange when no project slug is supplied in the body', async () => {

@@ -1871,7 +1871,7 @@ describe('builds', () => {
       userId: user.id,
       projectId: project.id,
     });
-    expect(claimed).toEqual({ instanceType: 'standard-4', ownerPlan: 'pro' });
+    expect(claimed).toEqual({ instanceType: 'standard-4', ownerPlan: 'pro', timeoutMinutes: 15 });
 
     const row = await getBuild(env.db, build.id);
     expect(row!.status).toBe('starting');

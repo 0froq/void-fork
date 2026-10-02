@@ -9,6 +9,7 @@ import {
   type Db,
 } from './db.ts';
 import type { ApiEnv } from './env.ts';
+import { resolvePlanLimits } from './plans.ts';
 import { queryProjectAiUsage } from './routes/usage.ts';
 import {
   sandboxBlockKey,
@@ -17,7 +18,12 @@ import {
   verifyActiveProjectOwner,
 } from './routing.ts';
 import { REASON_REQUESTS_EXCEEDED, REASON_SANDBOX_RUNTIME_EXCEEDED } from './suspension.ts';
-import { getCurrentBillingPeriodStart, getPlanLimits, isWithinLimit } from './tiers.ts';
+import {
+  getCurrentBillingPeriodStart,
+  getPlanLimits,
+  isWithinLimit,
+  type PlanLimits,
+} from './tiers.ts';
 import { SANDBOX_USAGE_RETENTION_MS } from './usage-auth.ts';
 
 // --- Exported types ---
@@ -93,20 +99,28 @@ export type UsageEvent = Readonly<{
 // --- Pure functions (exported for unit testing) ---
 
 /** Returns true if adding incomingRequests would exceed the plan's requestsPerMonth limit. */
-export function evaluateRequestLimit(state: CounterState, incomingRequests: number): boolean {
-  const limits = getPlanLimits(state.plan);
+export function evaluateRequestLimit(
+  state: CounterState,
+  incomingRequests: number,
+  limits: PlanLimits = getPlanLimits(state.plan),
+): boolean {
   return !isWithinLimit(limits.requestsPerMonth, state.totalRequests + incomingRequests);
 }
 
 /** Returns true if totalNeurons exceeds the plan's aiNeuronsPerMonth limit. Works for ALL plans. */
-export function evaluateAiLimit(state: CounterState): boolean {
-  const limits = getPlanLimits(state.plan);
+export function evaluateAiLimit(
+  state: CounterState,
+  limits: PlanLimits = getPlanLimits(state.plan),
+): boolean {
   return !isWithinLimit(limits.aiNeuronsPerMonth, state.totalNeurons);
 }
 
 /** Returns true if adding incomingSeconds would exceed the plan's sandboxRuntimeSecondsPerMonth limit. */
-export function evaluateSandboxRuntimeLimit(state: CounterState, incomingSeconds: number): boolean {
-  const limits = getPlanLimits(state.plan);
+export function evaluateSandboxRuntimeLimit(
+  state: CounterState,
+  incomingSeconds: number,
+  limits: PlanLimits = getPlanLimits(state.plan),
+): boolean {
   return !isWithinLimit(
     limits.sandboxRuntimeSecondsPerMonth,
     state.totalSandboxSeconds + incomingSeconds,
@@ -261,6 +275,9 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     if (request.method === 'POST' && path === '/detach-project') {
       return this.handleDetachProject(request);
     }
+    if (request.method === 'POST' && path === '/reevaluate-limits') {
+      return this.handleReevaluateLimits(request);
+    }
     if (request.method === 'POST' && path === '/reevaluate-sandbox') {
       return this.handleReevaluateSandbox(request);
     }
@@ -371,13 +388,14 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
       }
     }
 
-    // Update plan if provided
-    if (body.plan) {
-      state.plan = body.plan;
-    }
+    // The queue envelope may have waited behind a plan change. Resolve current
+    // ownership and limits from PostgreSQL, independently of the producer hint.
+    const owner = await getUser(getDb(), body.userId);
+    state.plan = owner?.plan ?? state.plan;
+    const limits = await resolvePlanLimits(getDb(), state.plan);
 
     // Commit each suspension latch only after every enforcement write succeeds.
-    const exceedsLimit = evaluateRequestLimit(state, 0); // already added above
+    const exceedsLimit = evaluateRequestLimit(state, 0, limits); // already added above
     if (exceedsLimit && !state.requestsSuspended) {
       await settleWrites([
         this.suspendProjects(getDb(), state.projectSlugs, body.userId, REASON_REQUESTS_EXCEEDED),
@@ -395,7 +413,7 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
       state.requestsSuspended = true;
     }
 
-    const exceedsSandbox = evaluateSandboxRuntimeLimit(state, 0); // already added above
+    const exceedsSandbox = evaluateSandboxRuntimeLimit(state, 0, limits); // already added above
     if (exceedsSandbox && !state.sandboxRuntimeSuspended) {
       await settleWrites([
         this.env.ROUTING.put(sandboxBlockKey(body.userId), '1'),
@@ -671,6 +689,68 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     return Response.json({ ok: true });
   }
 
+  /** Reconcile changed plan limits without resetting the billing ledger. */
+  private async handleReevaluateLimits(request: Request): Promise<Response> {
+    const body = (await request.json()) as { userId?: string };
+    const state = await this.getState();
+    const userId = body.userId ?? state.ownerUserId;
+    if (!userId || (state.ownerUserId && state.ownerUserId !== userId)) {
+      return Response.json({ error: 'counter owner does not match' }, { status: 409 });
+    }
+    const db = createDb(this.env.HYPERDRIVE.connectionString);
+    const owner = await getUser(db, userId);
+    if (!owner) {
+      return Response.json({ error: 'user not found' }, { status: 404 });
+    }
+    state.ownerUserId = userId;
+    state.plan = owner.plan;
+    const limits = await resolvePlanLimits(db, owner.plan);
+    const requestsSuspended = evaluateRequestLimit(state, 0, limits);
+    const sandboxRuntimeSuspended = evaluateSandboxRuntimeLimit(state, 0, limits);
+    const aiSuspended = evaluateAiLimit(state, limits);
+    const ownedIds = await this.ownedProjectIds(db, Object.keys(state.projectSlugs), userId);
+    const ownedProjects = Object.entries(state.projectSlugs).flatMap(([id, slug]) =>
+      ownedIds.has(id) ? [{ id, slug, user_id: userId }] : [],
+    );
+
+    await settleWrites([
+      (async () => {
+        if (requestsSuspended || sandboxRuntimeSuspended) {
+          await suspendUser(
+            db,
+            userId,
+            requestsSuspended ? REASON_REQUESTS_EXCEEDED : REASON_SANDBOX_RUNTIME_EXCEEDED,
+          );
+        } else {
+          await unsuspendUserIfReason(db, userId, REASON_REQUESTS_EXCEEDED);
+          await unsuspendUserIfReason(db, userId, REASON_SANDBOX_RUNTIME_EXCEEDED);
+        }
+      })(),
+      setProjectsRoutingSuspension(
+        this.env.ROUTING,
+        db,
+        ownedProjects,
+        requestsSuspended
+          ? { op: 'suspend', reason: REASON_REQUESTS_EXCEEDED, force: false }
+          : { op: 'unsuspend', matchReason: REASON_REQUESTS_EXCEEDED },
+      ),
+      sandboxRuntimeSuspended
+        ? this.env.ROUTING.put(sandboxBlockKey(userId), '1')
+        : this.env.ROUTING.delete(sandboxBlockKey(userId)),
+      ...[...ownedIds].map((projectId) =>
+        setProjectAiBlock(this.env.ROUTING, db, projectId, userId, aiSuspended),
+      ),
+    ]);
+    state.requestsSuspended = requestsSuspended;
+    state.sandboxRuntimeSuspended = sandboxRuntimeSuspended;
+    state.aiSuspended = aiSuspended;
+    await this.saveState(state);
+    if (!(await this.ctx.storage.getAlarm())) {
+      await this.ctx.storage.setAlarm(Date.now() + 15 * 60 * 1000);
+    }
+    return Response.json({ ok: true, requestsSuspended, sandboxRuntimeSuspended, aiSuspended });
+  }
+
   /**
    * Admin plan changes: optimistically clear ALL in-memory usage latches so the
    * next handleRecord (and the AI alarm) re-evaluates against the new plan.
@@ -784,7 +864,11 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
         }
       }
     }
-    const limits = getPlanLimits(state.plan);
+    const currentOwner = await getUser(db, state.ownerUserId);
+    if (currentOwner) {
+      state.plan = currentOwner.plan;
+    }
+    const limits = await resolvePlanLimits(db, state.plan);
     const projectIds = [...ownedProjectIds];
     // Closed windows still need reconciliation on unlimited plans: detachment
     // preserves their samples without depending on provider availability.
@@ -826,7 +910,7 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     this.recomputeTotalNeurons(state);
 
     // Evaluate AI limit
-    const exceedsAi = evaluateAiLimit(state);
+    const exceedsAi = evaluateAiLimit(state, limits);
     if (exceedsAi && !state.aiSuspended) {
       state.aiSuspended = true;
       // Write ai-block KV keys for each project

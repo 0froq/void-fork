@@ -5,6 +5,11 @@ const mocks = vi.hoisted(() => ({
   checkpoint: vi.fn(),
   capability: vi.fn(),
 }));
+vi.mock('../../src/plans.ts', async () => {
+  const { getPlanLimits } = await import('../../src/tiers.ts');
+  return { resolvePlanLimits: vi.fn(async (_db: unknown, plan: string) => getPlanLimits(plan)) };
+});
+
 vi.mock('cloudflare:workers', () => ({ WorkerEntrypoint: class {} }));
 vi.mock('../../src/db.ts', () => ({
   createDb: () => {
