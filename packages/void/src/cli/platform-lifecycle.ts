@@ -488,7 +488,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
           );
         }
         note(
-          `Database: ${live.origin.database}\nHost: ${live.origin.host}\nPort: ${live.origin.port}\nUser: ${live.origin.user}\nSQL result caching: ${live.cachingDisabled ? 'disabled' : 'enabled'}`,
+          `Database: ${live.origin.database}\nHost: ${live.origin.host}\nPort: ${live.origin.port ?? 'configured by Cloudflare Tunnel'}\nUser: ${live.origin.user}\nSQL result caching: ${live.cachingDisabled ? 'disabled' : 'enabled'}`,
           `Existing Hyperdrive ${live.name}`,
         );
         if (!live.cachingDisabled) {

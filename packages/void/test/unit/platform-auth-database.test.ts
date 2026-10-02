@@ -36,6 +36,8 @@ describe('fresh platform authentication database reads', () => {
         ...config.origin,
         host: 'hyperdrive-productiondb.databases.cfdata.org/itdb/primary',
         user: 'hyperdrive_void_platform_service',
+        accessClientId: 'tunnel-client-id',
+        port: null,
       },
     };
     const hash = verifyExternalPlatformHyperdrive({
@@ -77,6 +79,18 @@ describe('fresh platform authentication database reads', () => {
         client,
         'account',
         { ...resource, ownership: 'adopted', configHash: '0'.repeat(64) },
+        ownerDatabaseUrl,
+      ),
+    ).rejects.toThrow('pinned database');
+    client.getHyperdriveConfig.mockResolvedValue({
+      ...external,
+      origin: { ...external.origin, accessClientId: 'different-client-id' },
+    });
+    await expect(
+      verifyPlatformAuthenticationDatabase(
+        client,
+        'account',
+        { ...resource, ownership: 'adopted', configHash: hash },
         ownerDatabaseUrl,
       ),
     ).rejects.toThrow('pinned database');

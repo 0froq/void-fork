@@ -111,7 +111,8 @@ describe('interactive platform installation prompts', () => {
       origin: {
         database: 'void_platform',
         host: 'hyperdrive-productiondb.databases.cfdata.org/itdb/primary',
-        port: 5432,
+        accessClientId: 'tunnel-client-id',
+        port: null,
         scheme: 'postgresql',
         user: 'hyperdrive_void_platform_service',
       },
@@ -127,7 +128,7 @@ describe('interactive platform installation prompts', () => {
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev']));
 
     expect(mocks.note).toHaveBeenCalledWith(
-      expect.stringContaining('Database: void_platform'),
+      expect.stringContaining('Port: configured by Cloudflare Tunnel'),
       'Existing Hyperdrive company-managed-postgres',
     );
     expect(mocks.select).toHaveBeenCalledWith({

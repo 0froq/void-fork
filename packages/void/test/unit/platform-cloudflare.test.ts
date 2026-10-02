@@ -334,40 +334,108 @@ describe('platform Cloudflare client', () => {
     ).toBe(hyperdriveOriginConfigHash(hyperdriveOriginFromConnectionString(base)));
   });
 
-  it('reads and fingerprints a Hyperdrive origin without its password', async () => {
+  it.each([5432, '5432'])(
+    'reads and fingerprints a public Hyperdrive with port %s',
+    async (port) => {
+      const client = new PlatformCloudflareClient('token', {
+        fetcher: async () =>
+          Response.json({
+            success: true,
+            result: {
+              id: 'hyperdrive-id',
+              name: 'void-db',
+              origin: {
+                database: 'void',
+                host: 'DB.EXAMPLE.COM',
+                port,
+                scheme: 'postgres',
+                user: 'void-user',
+              },
+            },
+          }),
+      });
+      const config = await client.getHyperdriveConfig('account', 'hyperdrive-id');
+      expect(config.origin).toEqual({
+        database: 'void',
+        host: 'db.example.com',
+        port: 5432,
+        scheme: 'postgresql',
+        user: 'void-user',
+      });
+      // Existing installation manifests retain the public-origin fingerprint.
+      expect(hyperdriveOriginConfigHash(config.origin)).toBe(
+        '42174d71533f2c756129f46b5136972989ad67eb145ee62b7786ebc329c0ea61',
+      );
+      expect(hyperdriveOriginConfigHash(config.origin)).toBe(
+        hyperdriveOriginConfigHash(
+          hyperdriveOriginFromConnectionString(
+            'postgres://void-user:secret@db.example.com:5432/void',
+          ),
+        ),
+      );
+    },
+  );
+
+  it.each([undefined, null])('reads a Tunnel-backed Hyperdrive with port %s', async (port) => {
     const client = new PlatformCloudflareClient('token', {
       fetcher: async () =>
         Response.json({
           success: true,
           result: {
             id: 'hyperdrive-id',
-            name: 'void-db',
+            name: 'managed-db',
+            caching: { disabled: true },
             origin: {
               database: 'void',
-              host: 'DB.EXAMPLE.COM',
-              port: 5432,
+              host: 'db.example.com/primary',
+              port,
               scheme: 'postgres',
-              user: 'void-user',
+              user: 'runtime-user',
+              access_client_id: 'tunnel-client-id',
+              access_client_secret: 'secret',
             },
           },
         }),
     });
     const config = await client.getHyperdriveConfig('account', 'hyperdrive-id');
-    expect(config.origin).toEqual({
-      database: 'void',
-      host: 'db.example.com',
-      port: 5432,
-      scheme: 'postgresql',
-      user: 'void-user',
+    expect(config).toEqual({
+      id: 'hyperdrive-id',
+      name: 'managed-db',
+      cachingDisabled: true,
+      origin: {
+        database: 'void',
+        host: 'db.example.com/primary',
+        port: null,
+        scheme: 'postgresql',
+        user: 'runtime-user',
+        accessClientId: 'tunnel-client-id',
+      },
     });
-    expect(hyperdriveOriginConfigHash(config.origin)).toBe(
-      hyperdriveOriginConfigHash(
-        hyperdriveOriginFromConnectionString(
-          'postgres://void-user:secret@db.example.com:5432/void',
-        ),
-      ),
+    expect(hyperdriveOriginConfigHash(config.origin)).not.toBe(
+      hyperdriveOriginConfigHash({ ...config.origin, accessClientId: 'different-client-id' }),
     );
+    expect(JSON.stringify(config)).not.toContain('secret');
   });
+
+  it.each([undefined, null, 0, 65_536, 5432.5, 'invalid', true, [5432]])(
+    'rejects a public Hyperdrive with invalid port %s',
+    async (port) => {
+      const client = new PlatformCloudflareClient('token', {
+        fetcher: async () =>
+          Response.json({
+            success: true,
+            result: {
+              id: 'hyperdrive-id',
+              name: 'void-db',
+              origin: { database: 'void', host: 'db.example.com', port, scheme: 'postgres' },
+            },
+          }),
+      });
+      await expect(client.getHyperdriveConfig('account', 'hyperdrive-id')).rejects.toThrow(
+        'invalid origin port',
+      );
+    },
+  );
 
   it('never includes the API token in errors', async () => {
     const token = 'super-secret-token';
