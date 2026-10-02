@@ -6,7 +6,7 @@ outline: deep
 
 `void deploy` builds your app, provisions its resources, applies migrations, and deploys it to your own Cloudflare account or a Void platform run by your team.
 
-Choose Cloudflare for your own account or Void for a shared team platform. You can [install a Void platform](./self-hosted-platform.md) in your team's Cloudflare account.
+You can [install a Void platform](./self-hosted-platform.md) for shared team deployments.
 
 ## Deployment Targets
 
@@ -51,21 +51,13 @@ Your choice is saved in `.void/project.json`, so the next deploy is just `void d
 
 Already have a Cloudflare Worker and a root `wrangler.jsonc` or `wrangler.json`? Run `void deploy`. If no destination is selected, Void offers to link and deploy using the existing Worker and resources. Accept once to keep deploying to that site. See [Deploy an existing Worker](../integrations/cloudflare.md#deploy-an-existing-worker) for the first-deployment checks.
 
-To connect to your team's platform and sign in, run `void connect <url>` using the URL from your administrator. Use `void connect --platform cloudflare` to set up your own Cloudflare account. Connecting preserves existing project links. New Void projects need a platform connection.
+To set up deployment later, use `void connect --platform cloudflare` or `void connect <platform-url>`.
 
 Owners can [share a platform project](./project-collaboration.md) with readers, collaborators, and project administrators. This does not apply to direct Cloudflare deployments.
 
 ### Migrations
 
-If your app uses Drizzle, `void deploy` runs migrations as part of the deploy flow:
-
-1. Build the app
-2. Read SQL migrations from `db/migrations/`
-3. Check that the migrations match your current schema
-4. Apply pending migrations to the target database
-5. Make the new deploy live
-
-If you've changed your schema without a matching migration, deploy stops. Run `void db generate`, review and commit the SQL, then deploy again. For the full database workflow and backend-specific details, see the [Database guide](./database.md).
+Deploy applies pending SQL migrations from `db/migrations/`. If your schema has changes without a migration, deploy stops. Run `void db generate`, review and commit the SQL, then deploy again. See the [Database guide](./database.md).
 
 ### Flags
 
@@ -131,60 +123,21 @@ Push to the configured branch to deploy, then follow progress with `void build l
 
 ### GitHub Actions
 
-On platforms that support it, the generated workflow uses [GitHub OIDC](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect) to obtain a short-lived deploy token for your project. `void deploy` handles the exchange automatically. Keep `permissions: id-token: write` in the workflow so GitHub can issue that credential.
+Run `void init --github` to generate the workflow for your saved platform and package manager. On Void platforms with GitHub Actions support, authorize the repository once:
 
-The generated workflow uses the platform selected during `void init`. Core self-hosted installations don't yet support this integration, so Void doesn't offer the workflow for them. For a platform that does, the npm version looks like this; set the repository's `VOID_API_URL` variable to your platform's API URL:
-
-```yaml
-name: Deploy to Void
-on:
-  push:
-    branches: [main]
-
-# Cancel an older deploy when a new push arrives.
-concurrency:
-  group: void-deploy-${{ github.repository }}-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  id-token: write
-  contents: read
-
-env:
-  VOID_API_URL: ${{ vars.VOID_API_URL }}
-  VOID_PROJECT: my-app
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: lts/*
-          cache: npm
-      - run: npm ci
-      - name: Deploy
-        run: npx void deploy --platform void --project "$VOID_PROJECT"
+```sh
+void github connect <project> --repo <owner/repo> --executor github_actions
 ```
 
-Authorize the repository once with `void github connect <project> --repo <owner/repo> --executor github_actions`. Choose the `github_actions` executor for this workflow; `container` runs builds on the platform instead.
+Set the repository's `VOID_API_URL` variable to your platform's API URL. Keep `permissions: id-token: write` in the workflow for [GitHub OIDC](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect). The workflow uses your linked project, or the `VOID_PROJECT` repository variable.
 
-The generated workflow uses your package manager and linked project. If no project is linked, it reads the `VOID_PROJECT` repository variable.
+Core self-hosted installations do not support this integration. Use your own CI workflow with a [scoped developer token](./platform/administration/access.md#developer-tokens).
 
 ## Other Targets
 
 ### Your own Cloudflare account
 
-Select Cloudflare during setup, or run:
-
-```sh
-void deploy --platform cloudflare
-```
-
-Void supports full Worker apps, static sites, SPAs, and Cloudflare builds from supported frameworks. It provisions resources, applies migrations, and manages secrets for you. `.env` stays local; production server keys declared in `env.ts` must exist in encrypted remote secret storage and are rejected as plaintext Worker vars. Commands such as `void secret put`, `void project logs`, and `void project rollback` then use the same account and Worker.
-
-See the [Cloudflare guide](../integrations/cloudflare.md#deploy-to-your-own-cloudflare-account) for supported features, CI setup, and deployment limits.
+Select Cloudflare during setup, or run `void deploy --platform cloudflare`. See the [Cloudflare guide](../integrations/cloudflare.md) for configuration, CI credentials, and deployment limits.
 
 ### Node.js, Bun, and Deno
 
