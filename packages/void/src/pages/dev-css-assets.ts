@@ -173,14 +173,6 @@ export function extractInlineCss(code: string): string {
   return result.css;
 }
 
-export function extractViteDevId(code: string): string | undefined {
-  try {
-    return parseCssOutput(code).id;
-  } catch {
-    return undefined;
-  }
-}
-
 function createOrderedEdgeStore(root: string): OrderedEdgeStore {
   let version = 0;
   const byKey = new Map<string, Array<string>>();

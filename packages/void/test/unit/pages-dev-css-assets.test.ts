@@ -4,7 +4,6 @@ import {
   DEV_CSS_ASSET_ENDPOINT,
   DEV_CSS_ASSET_MODULE_ID,
   extractInlineCss,
-  extractViteDevId,
   normalizeDevCssUrl,
   pagesDevCssAssetsPlugin,
 } from '../../src/pages/dev-css-assets.ts';
@@ -168,7 +167,6 @@ const __vite__id = "/root/real.css";
 const __vite__css = ".real{}";
 export default __vite__css;`;
     expect(extractInlineCss(code)).toBe('.real{}');
-    expect(extractViteDevId(code)).toBe('/root/real.css');
   });
 
   it('reads escaped CSS from JavaScript string literals', () => {
@@ -179,14 +177,6 @@ export default __vite__css;`;
 
   it('rejects arbitrary inline CSS JavaScript', () => {
     expect(() => extractInlineCss('export default getCss()')).toThrow(/Unable to extract/);
-  });
-
-  it('extracts the Vite dev style id from CSS module transforms', () => {
-    expect(
-      extractViteDevId(
-        'const __vite__id = "/Users/me/app/src/page.css"\nconst __vite__css = ".x{}"',
-      ),
-    ).toBe('/Users/me/app/src/page.css');
   });
 
   it('rejects the token-bearing virtual module in the client environment', () => {
@@ -356,7 +346,7 @@ export default __vite__css;`;
     const nodes = new Map([
       ['/src/page.ts', { id: '/root/src/page.ts', url: '/src/page.ts' }],
       ['/src/component.ts', { id: '/root/src/component.ts', url: '/src/component.ts' }],
-      ['/src/static.css', { id: '/root/src/static.css', url: '/src/static.css' }],
+      ['/src/static.css', { id: '/root/wrong.css', url: '/src/static.css' }],
       ['/src/dynamic.css', { id: '/root/src/dynamic.css', url: '/src/dynamic.css' }],
     ]);
     const transformCalls: Array<string> = [];
@@ -373,7 +363,10 @@ export default __vite__css;`;
             transformCalls.push(url);
             if (url === '/src/static.css') {
               return {
-                code: 'const __vite__id = "/root/src/static.css"\nconst __vite__css = ".static{}"',
+                code:
+                  '// const __vite__id = "/root/comment.css"\n' +
+                  `const note = '__vite__id = "/root/string.css"';\n` +
+                  'const __vite__id = "/root/src/static.css"\nconst __vite__css = ".static{}"',
               };
             }
             if (url === '/src/static.css?inline=') {
