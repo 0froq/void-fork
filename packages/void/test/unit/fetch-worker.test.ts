@@ -1,6 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { describe, expect, it, vi, beforeEach } from 'vite-plus/test';
-import { compileWorkerClient } from '../../src/router/compile.ts';
+import { compileNodeClient, compileWorkerClient } from '../../src/router/compile.ts';
+import { FetchError as RuntimeFetchError } from '../../src/runtime/fetch-error.ts';
+import { interpolateRouteParams } from '../../src/runtime/route-url.ts';
 
 describe('compileWorkerClient', () => {
   it('generates module with fetch function and FetchError class', () => {
@@ -18,8 +20,7 @@ describe('compileWorkerClient', () => {
 
   it('includes param interpolation logic', () => {
     const code = compileWorkerClient('/resolved/auth-client.mjs');
-    expect(code).toContain('encodeURIComponent');
-    expect(code).toContain('url.replace(":" + key');
+    expect(code).toContain('interpolateRouteParams(path, options?.params)');
   });
 
   it('includes query string building', () => {
@@ -48,26 +49,8 @@ describe('compileWorkerClient', () => {
   });
 });
 
-/**
- * Runtime behavior tests — exercise the worker fetch logic directly.
- * We create standalone functions that replicate the generated module's behavior,
- * avoiding the need to eval() generated code with virtual module imports.
- */
+// Evaluate the emitted module with only its import boundary substituted.
 describe('worker fetch runtime behavior', () => {
-  // Replicate the generated FetchError class
-  class FetchError extends Error {
-    readonly status: number;
-    readonly statusText: string;
-    readonly data: unknown;
-    constructor(status: number, statusText: string, data: unknown) {
-      super(`Request failed with status ${status}`);
-      this.name = 'FetchError';
-      this.status = status;
-      this.statusText = statusText;
-      this.data = data;
-    }
-  }
-
   const requestContext = new AsyncLocalStorage<{
     request: Request;
     executionCtx: {
@@ -80,77 +63,18 @@ describe('worker fetch runtime behavior', () => {
   let mockAppFetch: ReturnType<typeof vi.fn<(...args: Array<unknown>) => Promise<Response>>>;
   let mockEnv: Record<string, unknown>;
 
-  // Replicate the generated fetch function
-  async function workerFetch(path: string, options?: Record<string, unknown>): Promise<unknown> {
-    let url = path;
-    if (options?.params) {
-      for (const [key, value] of Object.entries(options.params as Record<string, string>)) {
-        url = url.replace(':' + key, encodeURIComponent(value));
-      }
-    }
-
-    if (options?.query) {
-      const qs = new URLSearchParams(options.query as Record<string, string>).toString();
-      if (qs) {
-        url += '?' + qs;
-      }
-    }
-
-    const method = (options?.method as string) ?? 'GET';
-    const headers = new Headers(options?.headers as HeadersInit | undefined);
-
-    const store = requestContext.getStore();
-    if (store?.request) {
-      const outerReq = store.request;
-      if (!headers.has('cookie')) {
-        const cookie = outerReq.headers.get('cookie');
-        if (cookie) {
-          headers.set('cookie', cookie);
-        }
-      }
-      if (!headers.has('authorization')) {
-        const auth = outerReq.headers.get('authorization');
-        if (auth) {
-          headers.set('authorization', auth);
-        }
-      }
-    }
-
-    if (options?.body != null && !headers.has('content-type')) {
-      headers.set('content-type', 'application/json');
-    }
-
-    const request = new Request('http://worker.local' + url, {
-      method,
-      headers,
-      body: options?.body != null ? JSON.stringify(options.body) : undefined,
-    });
-
-    const executionCtx = store?.executionCtx ?? {
-      waitUntil() {},
-      passThroughOnException() {},
-    };
-    const response = (await mockAppFetch(request, mockEnv, executionCtx)) as Response;
-
-    if (response.status === 204) {
-      return undefined;
-    }
-
-    const contentType = response.headers.get('content-type') ?? '';
-    const data = contentType.includes('application/json')
-      ? await response.json()
-      : await response.text();
-
-    if (!response.ok) {
-      throw new FetchError(response.status, response.statusText, data);
-    }
-
-    return data;
-  }
+  let workerFetch: (path: string, options?: Record<string, unknown>) => Promise<unknown>;
+  let FetchError: typeof RuntimeFetchError;
 
   beforeEach(() => {
     mockAppFetch = vi.fn();
     mockEnv = { DB: {} };
+    ({ fetch: workerFetch, FetchError } = evaluateClient(
+      compileWorkerClient,
+      mockAppFetch,
+      mockEnv,
+      requestContext,
+    ));
   });
 
   it('makes a GET request by default', async () => {
@@ -236,9 +160,9 @@ describe('worker fetch runtime behavior', () => {
 
     const err = await workerFetch('/api/hello').catch((e: Error) => e);
     expect(err).toBeInstanceOf(FetchError);
-    expect((err as FetchError).status).toBe(404);
-    expect((err as FetchError).statusText).toBe('Not Found');
-    expect((err as FetchError).data).toEqual({ error: 'not found' });
+    expect((err as RuntimeFetchError).status).toBe(404);
+    expect((err as RuntimeFetchError).statusText).toBe('Not Found');
+    expect((err as RuntimeFetchError).data).toEqual({ error: 'not found' });
   });
 
   it('returns undefined for 204 No Content', async () => {
@@ -384,3 +308,39 @@ describe('worker fetch runtime behavior', () => {
     expect(passedEnv).toBe(mockEnv);
   });
 });
+
+function evaluateClient(
+  compile: typeof compileWorkerClient,
+  fetch: (...args: Array<unknown>) => Promise<Response>,
+  env: Record<string, unknown>,
+  requestContext: Pick<AsyncLocalStorage<unknown>, 'getStore'>,
+): {
+  fetch: (path: string, options?: Record<string, unknown>) => Promise<unknown>;
+  FetchError: typeof RuntimeFetchError;
+} {
+  const code = compile('/auth.mjs')
+    .replace(/^(import .*|export \{.*)\n/gm, '')
+    .replaceAll('export ', '');
+  return new Function(
+    'app',
+    'env',
+    'requestContext',
+    'interpolateRouteParams',
+    code + '\nreturn { fetch, FetchError };',
+  )({ fetch }, env, requestContext, interpolateRouteParams);
+}
+
+it.each([compileWorkerClient, compileNodeClient])(
+  'expands catch-all routes in generated %s clients',
+  async (compile) => {
+    const fetch = vi.fn<(...args: Array<unknown>) => Promise<Response>>(async () =>
+      Response.json({ ok: true }),
+    );
+    const client = evaluateClient(compile, fetch, {}, new AsyncLocalStorage());
+    await client.fetch('/files/:id2/:id/:path{.+}', {
+      params: { id: 'one', id2: 'two', path: 'docs/start here' },
+    });
+    const req = fetch.mock.calls[0]![0] as Request;
+    expect(new URL(req.url).pathname).toBe('/files/two/one/docs/start%20here');
+  },
+);

@@ -16,6 +16,9 @@ declare module 'void/routes' {
     '/api/files/:name': {
       GET: { input: { params: { name: string } }; output: Record<string, never> };
     };
+    '/api/files/:path{.+}': {
+      GET: { input: { params: { path: string } }; output: unknown };
+    };
     '/api/items/:id': {
       GET: { input: {}; output: { id: string } };
       DELETE: { input: {}; output: undefined };
@@ -71,6 +74,15 @@ describe('typed fetch client', () => {
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/files/hello%20world.txt'),
+      expect.anything(),
+    );
+  });
+
+  it('expands complete catch-all tokens', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse({}));
+    await typedFetch('/api/files/:path{.+}', { params: { path: 'docs/start here' } });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/files/docs/start%20here',
       expect.anything(),
     );
   });

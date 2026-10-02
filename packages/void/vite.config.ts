@@ -89,6 +89,7 @@ export default defineConfig({
       'src/runtime/client-solid.ts',
       'src/runtime/fetch.ts',
       'src/runtime/fetch-stream.ts',
+      'src/runtime/route-url.ts',
       'src/runtime/sse.ts',
       'src/runtime/sse-client.ts',
       'src/runtime/live.ts',

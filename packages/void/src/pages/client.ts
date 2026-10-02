@@ -1,6 +1,7 @@
 /// <reference lib="dom" />
 
 import type { ActionUrl, ResolveActionBody, ResolveActionParams } from 'void/routes';
+import { interpolateRouteParams } from '../runtime/route-url.ts';
 import {
   VoidActionError,
   isAbortError,
@@ -369,22 +370,10 @@ export function createActionClient(): ActionClient {
     const data = options?.data;
     const method = options?.method || 'POST';
 
-    let resolvedUrl: string = url;
-    let actionQuery = '';
-
-    const qIdx = resolvedUrl.indexOf('?');
-    if (qIdx !== -1) {
-      actionQuery = resolvedUrl.slice(qIdx);
-      resolvedUrl = resolvedUrl.slice(0, qIdx);
-    }
-
-    if (options?.params) {
-      for (const [key, value] of Object.entries(options.params)) {
-        resolvedUrl = resolvedUrl.replace(`:${key}`, encodeURIComponent(value as string));
-      }
-    }
-
-    resolvedUrl = resolvedUrl + actionQuery;
+    const resolvedUrl = interpolateRouteParams(
+      url,
+      options?.params as Record<string, string> | undefined,
+    );
     return submitAction(_router, resolvedUrl, { method, data });
   }
 

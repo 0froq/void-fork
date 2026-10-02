@@ -9,6 +9,7 @@ import { INTERNAL_BINDING_EXACT_NAMES, INTERNAL_BINDING_PREFIXES } from '../runt
 import { DEFAULT_SANDBOX_CLASS_NAME } from '../sandbox/config.ts';
 import type { ScanResult } from './scan.ts';
 
+const ROUTE_URL_PATH = fileURLToPath(import.meta.resolve('#self/runtime/route-url'));
 const ROUTING_RUNTIME_PATH = fileURLToPath(import.meta.resolve('#self/runtime/routing'));
 
 function pushDefaultErrorPageHelpers(lines: Array<string>, options: CompileOptions): void {
@@ -1602,6 +1603,7 @@ export { auth, createAuthClient } from ${JSON.stringify(authClientPath)};`;
 
 export function compileNodeClient(authClientPath: string): string {
   return `import app, { requestContext } from "virtual:void-routes";
+import { interpolateRouteParams } from ${JSON.stringify(ROUTE_URL_PATH)};
 export { auth, createAuthClient } from ${JSON.stringify(authClientPath)};
 
 export class FetchError extends Error {
@@ -1615,12 +1617,7 @@ export class FetchError extends Error {
 }
 
 export async function fetch(path, options) {
-  let url = path;
-  if (options?.params) {
-    for (const [key, value] of Object.entries(options.params)) {
-      url = url.replace(":" + key, encodeURIComponent(value));
-    }
-  }
+  let url = interpolateRouteParams(path, options?.params);
 
   if (options?.query) {
     const qs = new URLSearchParams(options.query).toString();
@@ -1691,6 +1688,7 @@ function compileHeaderMiddleware(lines: Array<string>, rules: Array<HeaderRule>)
 
 export function compileWorkerClient(authClientPath: string): string {
   return `import app, { requestContext } from "virtual:void-routes";
+import { interpolateRouteParams } from ${JSON.stringify(ROUTE_URL_PATH)};
 import { env } from "cloudflare:workers";
 export { auth, createAuthClient } from ${JSON.stringify(authClientPath)};
 
@@ -1705,12 +1703,7 @@ export class FetchError extends Error {
 }
 
 export async function fetch(path, options) {
-  let url = path;
-  if (options?.params) {
-    for (const [key, value] of Object.entries(options.params)) {
-      url = url.replace(":" + key, encodeURIComponent(value));
-    }
-  }
+  let url = interpolateRouteParams(path, options?.params);
 
   if (options?.query) {
     const qs = new URLSearchParams(options.query).toString();

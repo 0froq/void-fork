@@ -3,6 +3,7 @@ import { isResourceName } from '../shared/resource-name.ts';
 import type { StandardSchemaV1 } from '../standard-schema.ts';
 import type { AuthUser } from './auth.ts';
 import type { CloudEnv } from './handler.ts';
+import { interpolateRouteParams } from './route-url.ts';
 
 type MaybePromise<T> = T | Promise<T>;
 type ParamsRecord = Record<string, string>;
@@ -286,16 +287,6 @@ function resolveBaseUrl(baseURL?: string): URL {
   return new URL(location.href);
 }
 
-function interpolateParams(path: string, params?: Record<string, string>): string {
-  let resolved = path;
-  if (params) {
-    for (const [key, value] of Object.entries(params)) {
-      resolved = resolved.replace(`:${key}`, encodeURIComponent(value));
-    }
-  }
-  return resolved;
-}
-
 export function connect<P extends keyof WebSocketRouteMap & string>(
   path: HasParams<P> extends false ? P : never,
 ): VoidSocket<P>;
@@ -308,7 +299,7 @@ export function connect(
   options: ConnectCommonOptions & { params?: Record<string, string> } = {},
 ) {
   const base = resolveBaseUrl(options.baseURL);
-  const resolvedPath = interpolateParams(path, options.params);
+  const resolvedPath = interpolateRouteParams(path, options.params);
   const url = new URL(resolvedPath, base);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return new VoidSocket(url.toString(), options);

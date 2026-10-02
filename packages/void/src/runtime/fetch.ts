@@ -1,5 +1,6 @@
 import { ofetch } from 'ofetch';
 import { FetchError } from './fetch-error.ts';
+import { interpolateRouteParams } from './route-url.ts';
 export { FetchError };
 
 import type { RouteMap } from 'void/routes';
@@ -81,13 +82,7 @@ export function fetch<P extends keyof RouteMap & string, M extends MethodsOf<P> 
   options: FetchOptions<P, M>,
 ): Promise<OutputOf<P, M>>;
 export async function fetch(path: string, options?: UntypedFetchOptions): Promise<unknown> {
-  // Interpolate :param segments
-  let url = path;
-  if (options?.params) {
-    for (const [key, value] of Object.entries(options.params as Record<string, string>)) {
-      url = url.replace(`:${key}`, encodeURIComponent(value));
-    }
-  }
+  const url = interpolateRouteParams(path, options?.params);
 
   return ofetch(url, {
     method: (options?.method ?? 'GET') as string,

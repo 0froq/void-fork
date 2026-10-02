@@ -13,6 +13,11 @@ declare module 'void/routes' {
       client: { type: 'notifications.ack'; id: string };
       server: { type: 'notifications.item'; title: string };
     };
+    '/files/:path{.+}': {
+      params: { path: string };
+      client: unknown;
+      server: unknown;
+    };
   }
 }
 
@@ -80,6 +85,11 @@ describe('typed websocket client', () => {
 
     expect(MockWebSocket.instances).toHaveLength(1);
     expect(MockWebSocket.instances[0]!.url).toBe('wss://void.test/chat/general');
+  });
+
+  it('expands complete catch-all tokens', () => {
+    connect('/files/:path{.+}', { params: { path: 'docs/start here' } });
+    expect(MockWebSocket.instances[0]!.url).toBe('wss://void.test/files/docs/start%20here');
   });
 
   it('buffers messages until the socket opens', () => {
