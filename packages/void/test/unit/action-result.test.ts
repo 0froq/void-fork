@@ -2,10 +2,21 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 import {
   VoidActionError,
   categorizeActionError,
+  createActionClient,
   isAbortError,
   submitAction,
   type VoidRouter,
 } from '../../src/pages/client.ts';
+
+declare module 'void/routes' {
+  interface PageActionMap {
+    '/__action-test/static': { body: { name: string } };
+    '/__action-test/users/:id': {
+      params: { id: string };
+      actions: { save: { body: { name: string } } };
+    };
+  }
+}
 
 function routerWithVisit(visit: VoidRouter['visit']): VoidRouter {
   return {
@@ -133,5 +144,65 @@ describe('action result handling', () => {
   it('detects abort errors', () => {
     expect(isAbortError(new DOMException('Navigation aborted', 'AbortError'))).toBe(true);
     expect(isAbortError(new Error('Boom'))).toBe(false);
+  });
+});
+
+describe('action clients', () => {
+  it('rejects calls before its router is initialized', async () => {
+    const client = createActionClient();
+    await expect(client.action('/__action-test/static')).rejects.toThrow(
+      'action(): called before router initialization.',
+    );
+  });
+
+  it('keeps adapters isolated and allows replacing an adapter router', async () => {
+    const first = createActionClient();
+    const second = createActionClient();
+    const firstVisit = vi.fn(async () => ({ props: { adapter: 'first' } }));
+    const secondVisit = vi.fn(async () => ({ props: { adapter: 'second' } }));
+    const replacementVisit = vi.fn(async () => ({ props: { adapter: 'replacement' } }));
+
+    first.setActionRouter(routerWithVisit(firstVisit));
+    await expect(second.action('/__action-test/static')).rejects.toThrow('router initialization');
+    second.setActionRouter(routerWithVisit(secondVisit));
+    await first.action('/__action-test/static');
+    await second.action('/__action-test/static');
+    first.setActionRouter(routerWithVisit(replacementVisit));
+    await first.action('/__action-test/static');
+
+    expect(firstVisit).toHaveBeenCalledTimes(1);
+    expect(secondVisit).toHaveBeenCalledTimes(1);
+    expect(replacementVisit).toHaveBeenCalledTimes(1);
+    expect(firstVisit).toHaveBeenCalledWith('/__action-test/static', {
+      method: 'POST',
+      data: undefined,
+    });
+  });
+
+  it('encodes path parameters while preserving named actions and submission options', async () => {
+    const client = createActionClient();
+    const visit = vi.fn(async () => ({ props: {} }));
+    client.setActionRouter(routerWithVisit(visit));
+
+    await client.action('/__action-test/users/:id?save', {
+      params: { id: 'a/b?c' },
+      method: 'PATCH',
+      data: { name: 'Alice' },
+    });
+
+    expect(visit).toHaveBeenCalledWith('/__action-test/users/a%2Fb%3Fc?save', {
+      method: 'PATCH',
+      data: { name: 'Alice' },
+    });
+  });
+
+  it('preserves validation errors as action results', async () => {
+    const client = createActionClient();
+    client.setActionRouter(routerWithVisit(vi.fn(async () => ({ errors: { name: 'Required' } }))));
+
+    expect(await client.action('/__action-test/static')).toMatchObject({
+      ok: false,
+      error: { status: 422, body: { errors: { name: 'Required' } } },
+    });
   });
 });
