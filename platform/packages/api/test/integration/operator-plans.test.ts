@@ -39,12 +39,18 @@ const counter = {
         request.method === 'POST' ? ((await request.json()) as Record<string, unknown>) : {};
       calls.push({ id, path, body });
       if (path === '/state') {
+        const [account] = await env.db
+          .select({ billingCycleStart: users.billing_cycle_start })
+          .from(users)
+          .where(eq(users.id, id));
         return Response.json({
           ownerUserId: id,
           totalRequests: totals[id] ?? 0,
           totalNeurons: 0,
           totalSandboxSeconds: 0,
-          billingPeriodStart: getCurrentBillingPeriodStart(new Date().toISOString()).toISOString(),
+          billingPeriodStart: getCurrentBillingPeriodStart(
+            account?.billingCycleStart,
+          ).toISOString(),
         });
       }
       if (failId === id && path === '/reevaluate-limits') {
@@ -194,6 +200,10 @@ describe('operator installation plans', () => {
 
   test('previews exact affected accounts and sampled current overages without mutating the catalog or audit', async () => {
     const owner = await createTestUser(env.db, 'owner');
+    await env.db
+      .update(users)
+      .set({ billing_cycle_start: '2025-01-15T00:00:00.000Z' })
+      .where(eq(users.id, owner.id));
     totals[owner.id] = 300;
     const preview = await req('/free/set', { dryRun: true, limits: { requestsPerMonth: 100 } });
     expect(preview.status).toBe(200);
