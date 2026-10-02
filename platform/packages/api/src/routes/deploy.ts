@@ -978,52 +978,6 @@ const CF_READINESS_RETRY = { maxRetries: 6, delayMs: 1000 };
 // Migration dispatch: propagation lag is handled by the readiness probe,
 // so this only retries genuine transient failures (e.g. network blips).
 const CF_MIGRATION_RETRY = { maxRetries: 2, delayMs: 1000 };
-// Container DELETE retry budget for catch-handler cleanup (pre-routing
-// failure + teardown-race rollback). One retry at 500ms covers transient CF
-// failures (502/503/network blips) during the cancellation window without
-// stretching cancellation latency. Errors are still swallowed by the caller
-// after the retry budget is exhausted because the orphan-recovery pass in
-// `cleanupCriticalResources` will reap any straggler on the next teardown.
-const CF_CONTAINER_DELETE_RETRY = { maxRetries: 1, delayMs: 500 };
-
-/**
- * Wrap `deleteContainerApplicationIdempotent` with a small retry budget for
- * catch-path cleanup. Returns `true` on success, `false` if every attempt
- * threw — the caller decides whether to swallow the failure (currently:
- * always swallow + log; teardown's orphan recovery is the safety net).
- */
-async function deleteContainerApplicationWithRetry(
-  accountId: string,
-  apiToken: string,
-  applicationId: string,
-): Promise<boolean> {
-  let lastErr: unknown;
-  try {
-    await retryWithBackoff(
-      async () => {
-        try {
-          await deleteContainerApplicationIdempotent(accountId, apiToken, applicationId);
-          return true;
-        } catch (err) {
-          lastErr = err;
-          return undefined; // signal retry
-        }
-      },
-      {
-        maxRetries: CF_CONTAINER_DELETE_RETRY.maxRetries,
-        delayMs: CF_CONTAINER_DELETE_RETRY.delayMs,
-        errorMessage: `failed to delete container application ${applicationId}`,
-      },
-    );
-    return true;
-  } catch {
-    if (lastErr) {
-      console.error(`[deploy] failed to clean up container application ${applicationId}:`, lastErr);
-    }
-    return false;
-  }
-}
-
 const app = new Hono<ApiEnv>();
 
 function sortUnique(values: ReadonlyArray<string> | undefined): ReadonlyArray<string> {
@@ -3265,8 +3219,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     };
     let workerUploaded = false;
     let workerUploadUrl: string | undefined;
-    let sandboxContainerAppId: string | undefined;
-    let sandboxContainerAppName: string | undefined;
     let sandboxControllerAttempted = false;
     let manifest: DeployManifest | undefined;
     let workerName: string | undefined;
@@ -4112,7 +4064,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           currentStep = 'sandbox_container';
           markPhase('sandbox_container');
           sandboxControllerAttempted = true;
-          const controller = await provisionSandboxController({
+          await provisionSandboxController({
             accountId: context.env.CF_ACCOUNT_ID,
             apiToken: context.env.CF_API_TOKEN,
             apiService: context.env.SANDBOX_CONTROL_SERVICE ?? 'void-api',
@@ -4124,7 +4076,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             },
             sandbox: manifest.sandbox,
           });
-          sandboxContainerAppId = controller.containerApplicationId;
           await assertDeploymentNotCanceled(context.get('db'), deployment.id);
           await assertProjectNotDeleting(context.get('db'), projectId);
         }
@@ -5331,31 +5282,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                 deploymentId: deployment?.id,
               }),
             );
-          } else if (sandboxContainerAppId) {
-            await deleteContainerApplicationWithRetry(
-              context.env.CF_ACCOUNT_ID,
-              context.env.CF_API_TOKEN,
-              sandboxContainerAppId,
-            );
-          } else if (sandboxContainerAppName) {
-            try {
-              const orphan = await findContainerApplication(
-                context.env.CF_ACCOUNT_ID,
-                context.env.CF_API_TOKEN,
-                sandboxContainerAppName,
-              );
-              if (orphan) {
-                await deleteContainerApplicationWithRetry(
-                  context.env.CF_ACCOUNT_ID,
-                  context.env.CF_API_TOKEN,
-                  orphan.id,
-                );
-              }
-            } catch (e) {
-              logger.error('catch', 'orphan_container_recovery_failed', e, {
-                sandboxContainerAppName,
-              });
-            }
           }
 
           if (needsProtectedClaim) {
@@ -5493,31 +5419,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                 deploymentId: deployment?.id,
               }),
             );
-          } else if (sandboxContainerAppId) {
-            await deleteContainerApplicationWithRetry(
-              context.env.CF_ACCOUNT_ID,
-              context.env.CF_API_TOKEN,
-              sandboxContainerAppId,
-            );
-          } else if (sandboxContainerAppName) {
-            try {
-              const orphan = await findContainerApplication(
-                context.env.CF_ACCOUNT_ID,
-                context.env.CF_API_TOKEN,
-                sandboxContainerAppName,
-              );
-              if (orphan) {
-                await deleteContainerApplicationWithRetry(
-                  context.env.CF_ACCOUNT_ID,
-                  context.env.CF_API_TOKEN,
-                  orphan.id,
-                );
-              }
-            } catch (e) {
-              logger.error('catch', 'orphan_container_recovery_failed', e, {
-                sandboxContainerAppName,
-              });
-            }
           }
           await clearIsrCache(context.env.ISR_CACHE, projectId, failedDeployment.id).catch((e) =>
             logger.error('catch', 'isr_cache_clear_failed', e, {
