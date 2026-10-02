@@ -8,7 +8,6 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
-    "@void/deploy-core": "workspace:*",
     "@void/edge": "workspace:*",
     "@void/isr": "workspace:*",
     "@voidcloud/api": "workspace:*",
