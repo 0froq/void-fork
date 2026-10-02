@@ -176,6 +176,59 @@ export function registerSharedClientTests({
     }
   });
 
+  it('Form preserves a draft and displays quota failures until retry is available', async () => {
+    const page = await newPage();
+    let submissions = 0;
+    const retryAt = new Date(Date.now() + 60_000).toISOString();
+    try {
+      await page.clock.install();
+      await page.route('**/users', async (route) => {
+        if (route.request().method() !== 'POST') {
+          await route.continue();
+          return;
+        }
+        submissions++;
+        await route.fulfill({
+          status: 429,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 'usage_limit',
+            resource: 'ai',
+            reason: 'rate_limit',
+            message: 'Your draft is still editable.',
+            retryAt,
+          }),
+        });
+      });
+      await page.goto(BASE + '/users');
+      await waitForHydration(page);
+      await page.locator('form input').nth(0).fill('Quota draft');
+      await page.locator('form input').nth(1).fill('quota@example.com');
+      await page.click('button[type="submit"]');
+      await page.waitForFunction(() =>
+        document
+          .querySelector('[data-void-form-error]')
+          ?.textContent?.includes('Your draft is still editable.'),
+      );
+      expect(await page.locator('form input').nth(0).inputValue()).toBe('Quota draft');
+      expect(await page.locator('form').getAttribute('aria-busy')).toBe('false');
+      expect(await page.locator('[role="alert"]').textContent()).toContain('Try again after');
+      await page.locator('form input').nth(0).fill('Edited draft');
+      await page.click('button[type="submit"]');
+      expect(submissions).toBe(1);
+      await page.clock.fastForward(61_000);
+      const retried = page.waitForRequest(
+        (request) => request.method() === 'POST' && request.url() === BASE + '/users',
+      );
+      await page.click('button[type="submit"]');
+      await retried;
+      expect(submissions).toBe(2);
+      expect(await page.locator('form input').nth(0).inputValue()).toBe('Edited draft');
+    } finally {
+      await page.context().close();
+    }
+  });
+
   it('form validation errors display', async () => {
     const page = await newPage();
 

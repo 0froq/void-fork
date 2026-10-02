@@ -37,7 +37,7 @@ Main runtime APIs live at `@void/svelte`:
 - `useParams()`
 - `useNavigation()`
 - `useShared()`
-- `useForm()`
+- `Form` and `useForm()`
 - `useIslandForm()`
 - `action()`
 
@@ -108,6 +108,12 @@ export const loader = defineHandler(() => ({ title: 'Home' }));
 Export `ssr = false` from a page's `.server.ts` file to skip server-rendered
 component HTML for that route while still running its loader on the first
 request.
+
+## Form
+
+Use `Form` with `useForm()` to display action and validation errors automatically. It preserves controlled input after a failed submission and announces errors accessibly. Structured usage-limit responses display the application's message and an optional retry time. Submissions are blocked while pending and before that deadline; inputs remain editable and requests are never retried automatically.
+
+`method` selects `post` (the default), `put`, `patch`, or `delete`. Use `renderError` to customize action-error presentation (a snippet in Svelte). Native forms remain available when you manage error presentation yourself.
 
 ## Tests
 

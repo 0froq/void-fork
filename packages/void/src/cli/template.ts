@@ -233,12 +233,18 @@ function getIndexServer(): string {
   return `import { defineHandler, type InferProps } from "void";
 import { db, desc } from "void/db";
 import { messages } from "@schema";
+import { createInsertSchema } from "void/drizzle-zod";
 
 export type Props = InferProps<typeof loader>;
 
 export const loader = defineHandler(async () => {
   const rows = await db.select().from(messages).orderBy(desc(messages.id));
   return { messages: rows };
+});
+export const action = defineHandler.withValidator({
+  body: createInsertSchema(messages, { text: schema => schema.trim().min(1).max(1000) }).pick({ text: true }),
+})(async (_c, { body }) => {
+  await db.insert(messages).values(body);
 });
 `;
 }
@@ -368,9 +374,11 @@ function getIndexPage(framework: ScaffoldFramework, starterMode: ScaffoldStarter
 
   switch (framework) {
     case 'react':
-      return `import type { Props } from "./index.server";
+      return `import { Form, useForm } from "${SCAFFOLD_FRAMEWORKS[framework].adapterPackage}";
+import type { Props } from "./index.server";
 
 export default function HomePage({ messages }: Props) {
+  const form = useForm("/", { text: "" });
   return (
     <main>
       <h1>Welcome to Void</h1>
@@ -397,6 +405,10 @@ export default function HomePage({ messages }: Props) {
           ))}
         </ul>
       )}
+      <Form form={form}>
+        <label>Message <input value={form.data.text} onChange={event => form.setData("text", event.target.value)} /></label>
+        <button disabled={form.pending}>Add message</button>
+      </Form>
     </main>
   );
 }
@@ -404,8 +416,10 @@ export default function HomePage({ messages }: Props) {
     case 'vue':
       return `<script setup lang="ts">
 import type { Props } from "./index.server";
+import { Form, useForm } from "@void/vue";
 
 defineProps<Props>();
+const form = useForm("/", { text: "" });
 </script>
 
 <template>
@@ -429,12 +443,18 @@ defineProps<Props>();
         <small>{{ String(message.createdAt) }}</small>
       </li>
     </ul>
+    <Form :form="form">
+      <label>Message <input v-model="form.data.text" /></label>
+      <button :disabled="form.pending">Add message</button>
+    </Form>
   </main>
 </template>
 `;
     case 'svelte':
       return `<script lang="ts">
   import type { Props } from "./index.server";
+  import { Form, useForm } from "@void/svelte";
+  const form = useForm("/", { text: "" });
 
   let { messages }: Props = $props();
 </script>
@@ -464,12 +484,18 @@ defineProps<Props>();
       {/each}
     </ul>
   {/if}
+  <Form {form}>
+    <label>Message <input bind:value={form.data.text} /></label>
+    <button disabled={form.pending}>Add message</button>
+  </Form>
 </main>
 `;
     case 'solid':
-      return `import type { Props } from "./index.server";
+      return `import { Form, useForm } from "${SCAFFOLD_FRAMEWORKS[framework].adapterPackage}";
+import type { Props } from "./index.server";
 
 export default function HomePage(props: Props) {
+  const form = useForm("/", { text: "" });
   return (
     <main>
       <h1>Welcome to Void</h1>
@@ -496,6 +522,10 @@ export default function HomePage(props: Props) {
           ))}
         </ul>
       )}
+      <Form form={form}>
+        <label>Message <input value={form.data.text} onInput={event => form.setData("text", event.target.value)} /></label>
+        <button disabled={form.pending}>Add message</button>
+      </Form>
     </main>
   );
 }

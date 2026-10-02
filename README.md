@@ -91,6 +91,7 @@ pnpm void deploy
 - **Typed production secrets** — schema-declared server keys are required in remote secret storage and rejected as plaintext Worker vars
 - **File-based routing** — drop a file in `routes/`, get an endpoint with method exports, dynamic params, middleware, and [Standard Schema](https://standardschema.dev/) validation
 - **Full-stack pages** — `pages/` directory for server-rendered UI with co-located data loading, SPA navigation, and typed forms (React, Vue, Svelte, Solid)
+- **Explicit limit handling** — AI and Sandbox operations require success and quota fallbacks; Pages forms display action errors and preserve input
 - **End-to-end type safety** — SQL migrations generate DB types, route handlers infer return types, typed fetch client checks everything at the call site
 - **Typed durable state** — modules in `durable-objects/` get inferred SQLite-backed bindings and typed RPC methods
 - **Local dev parity** — `vite dev` runs handlers in the real `workerd` runtime with local D1, KV, and R2

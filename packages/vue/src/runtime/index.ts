@@ -1,3 +1,4 @@
+export { Form } from './form.ts';
 export { Link } from './link.ts';
 export { useRouter } from './use-router.ts';
 export { useParams } from './use-params.ts';

@@ -1,3 +1,4 @@
+export { default as Form } from './Form.svelte';
 export { default as Link } from './Link.svelte';
 export { useRouter } from './use-router.ts';
 export { useParams } from './use-params.ts';

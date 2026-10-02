@@ -1,4 +1,4 @@
-import { Link, useForm } from '@void/solid';
+import { Link, Form, useForm } from '@void/solid';
 import { For, Show } from 'solid-js';
 import type { Props } from './index.server.ts';
 
@@ -26,12 +26,7 @@ export default function UsersPage(props: Props) {
       </ul>
 
       <h2>Add User</h2>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          return form.post();
-        }}
-      >
+      <Form form={form}>
         <div>
           <label>Name:</label>
           <input
@@ -55,7 +50,7 @@ export default function UsersPage(props: Props) {
         <button type="submit" disabled={form.pending}>
           {form.pending ? 'Saving...' : 'Add User'}
         </button>
-      </form>
+      </Form>
     </div>
   );
 }

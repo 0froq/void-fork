@@ -39,7 +39,7 @@ Main runtime APIs live at `@void/react`:
 - `useParams()`
 - `useNavigation()`
 - `useShared()`
-- `useForm()`
+- `Form` and `useForm()`
 - `useIslandForm()`
 - `action()`
 
@@ -110,7 +110,7 @@ export interface Props {
 inside the form for button pending state.
 
 ```tsx
-import { useForm } from '@void/react';
+import { Form, useForm } from '@void/react';
 import { useFormStatus } from 'react-dom';
 
 function SubmitButton() {
@@ -122,16 +122,15 @@ export default function CreateUser() {
   const form = useForm('/users', { name: '', email: '' });
 
   return (
-    <form action={form.post}>
+    <Form form={form}>
       <input
         name="name"
         value={form.data.name}
         onChange={(e) => form.setData('name', e.target.value)}
       />
       {form.errors.name && <span>{form.errors.name}</span>}
-      {form.error && <p>{form.error.message}</p>}
       <SubmitButton />
-    </form>
+    </Form>
   );
 }
 ```
@@ -216,6 +215,12 @@ import { defineHandler } from 'void';
 
 export const loader = defineHandler(() => ({ title: 'Home' }));
 ```
+
+## Form
+
+Use `Form` with `useForm()` to display action and validation errors automatically. It preserves controlled input after a failed submission and announces errors accessibly. Structured usage-limit responses display the application's message and an optional retry time. Submissions are blocked while pending and before that deadline; inputs remain editable and requests are never retried automatically.
+
+`method` selects `post` (the default), `put`, `patch`, or `delete`. Use `renderError` to customize action-error presentation (a snippet in Svelte). Native forms remain available when you manage error presentation yourself.
 
 ## Tests
 

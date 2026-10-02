@@ -1,3 +1,4 @@
+import { readUsageLimit, type UsageLimitData } from '@void/edge';
 import type { PageObject } from './protocol.ts';
 
 export type ActionErrorHandlingScope = 'callSite' | 'boundary';
@@ -8,6 +9,7 @@ export type ActionResult<T = PageObject | undefined> =
 
 export class VoidActionError extends Error {
   readonly body: unknown;
+  readonly limit: UsageLimitData | null;
   readonly status: number;
   readonly statusText: string;
   readonly url: string;
@@ -23,11 +25,16 @@ export class VoidActionError extends Error {
     statusText: string;
     url: string;
   }) {
+    const limit = status === 429 ? readUsageLimit(body) : null;
     super(
-      statusText ? `Action failed with ${status} ${statusText}` : `Action failed with ${status}`,
+      limit?.message ??
+        (statusText
+          ? `Action failed with ${status} ${statusText}`
+          : `Action failed with ${status}`),
     );
     this.name = 'VoidActionError';
     this.body = body;
+    this.limit = limit;
     this.status = status;
     this.statusText = statusText;
     this.url = url;

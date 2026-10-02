@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link, useForm } from '@void/vue';
+import { Link, Form, useForm } from '@void/vue';
 import type { Props } from './index.server.ts';
 
 const props = defineProps<Props>();
@@ -22,7 +22,7 @@ const form = useForm('/users', {
     </ul>
 
     <h2>Add User</h2>
-    <form @submit.prevent="form.post()">
+    <Form :form="form">
       <div>
         <label>Name:</label>
         <input v-model="form.data.name" />
@@ -36,6 +36,6 @@ const form = useForm('/users', {
       <button type="submit" :disabled="form.pending">
         {{ form.pending ? 'Saving...' : 'Add User' }}
       </button>
-    </form>
+    </Form>
   </div>
 </template>

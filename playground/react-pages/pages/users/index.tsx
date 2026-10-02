@@ -1,4 +1,4 @@
-import { Link, useForm } from '@void/react';
+import { Link, Form, useForm } from '@void/react';
 import { useFormStatus } from 'react-dom';
 import type { Props } from './index.server.ts';
 
@@ -33,7 +33,7 @@ export default function UsersPage({ users }: Props) {
       </ul>
 
       <h2>Add User</h2>
-      <form action={form.post}>
+      <Form form={form}>
         <div>
           <label>Name:</label>
           <input
@@ -53,7 +53,7 @@ export default function UsersPage({ users }: Props) {
           {form.errors.email && <span style={{ color: 'red' }}>{form.errors.email}</span>}
         </div>
         <SubmitButton />
-      </form>
+      </Form>
     </div>
   );
 }

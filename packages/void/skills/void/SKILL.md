@@ -81,3 +81,5 @@ project's existing framework and deployment destination.
 If the user invokes this skill without a task, inspect the app's local structure,
 configuration, and saved deployment destination, give a brief status, and ask
 what they want to work on.
+
+For AI and Sandbox operations, use `.match({ ok, limited })` and choose a useful quota fallback. In Pages, prefer the adapter’s `Form` with `useForm()` so action failures remain visible and entered data is preserved. See `docs/guide/ai.md`, `docs/guide/sandboxes.md`, and `docs/guide/pages-routing/actions-and-forms.md`.

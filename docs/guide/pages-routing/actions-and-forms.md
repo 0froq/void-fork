@@ -72,6 +72,14 @@ export const actions = {
 };
 ```
 
+## Form
+
+Pair `Form` with `useForm` for automatic error presentation. It preserves controlled input on failure, announces validation and action errors, and displays the message from structured quota responses. Known retry deadlines prevent premature resubmission without locking the fields. It never retries a submission automatically.
+
+Import `Form` from your adapter. Pass `form` and, optionally, `method="put"`, `"patch"`, or `"delete"`; the default is `"post"`. Use `renderError` for a custom action-error renderer (a snippet in Svelte).
+
+On the server, use `limit.response({ message: 'AI is temporarily unavailable. Your draft is still editable.' })` in an AI or Sandbox operation's required `limited` handler. It supplies the status and structured metadata consumed by `Form`.
+
 ## `useForm`
 
 `useForm` handles submissions, loading state, and validation errors. URLs, form values, and error fields are typed from your action.
@@ -82,7 +90,7 @@ Submit to the `/users` action defined above:
 
 ```tsx [React]
 // pages/users/index.tsx
-import { useForm } from '@void/react';
+import { Form, useForm } from '@void/react';
 import { useFormStatus } from 'react-dom';
 
 function SubmitButton() {
@@ -94,7 +102,7 @@ export default function CreateUser() {
   const form = useForm('/users', { name: '', email: '' });
 
   return (
-    <form action={form.post}>
+    <Form form={form}>
       <input
         name="name"
         value={form.data.name}
@@ -109,10 +117,8 @@ export default function CreateUser() {
       />
       {form.errors.email && <span>{form.errors.email}</span>}
 
-      {form.error && <p>{form.error.message}</p>}
-
       <SubmitButton />
-    </form>
+    </Form>
   );
 }
 ```
@@ -120,13 +126,13 @@ export default function CreateUser() {
 ```vue [Vue]
 <!-- pages/users/index.vue -->
 <script setup lang="ts">
-import { useForm } from '@void/vue';
+import { Form, useForm } from '@void/vue';
 
 const form = useForm('/users', { name: '', email: '' });
 </script>
 
 <template>
-  <form @submit.prevent="form.post()">
+  <Form :form="form">
     <input v-model="form.data.name" />
     <span v-if="form.errors.name">{{ form.errors.name }}</span>
 
@@ -134,19 +140,19 @@ const form = useForm('/users', { name: '', email: '' });
     <span v-if="form.errors.email">{{ form.errors.email }}</span>
 
     <button :disabled="form.pending">Create</button>
-  </form>
+  </Form>
 </template>
 ```
 
 ```svelte [Svelte]
 <!-- pages/users/index.svelte -->
 <script>
-  import { useForm } from "@void/svelte";
+  import { Form, useForm } from "@void/svelte";
 
   const form = useForm("/users", { name: "", email: "" });
 </script>
 
-<form onsubmit={(e) => { e.preventDefault(); return form.post(); }}>
+<Form {form}>
   <input bind:value={form.data.name} />
   {#if form.errors.name}<span>{form.errors.name}</span>{/if}
 
@@ -154,23 +160,18 @@ const form = useForm('/users', { name: '', email: '' });
   {#if form.errors.email}<span>{form.errors.email}</span>{/if}
 
   <button disabled={form.pending}>Create</button>
-</form>
+</Form>
 ```
 
 ```tsx [Solid]
 // pages/users/index.tsx
-import { useForm } from '@void/solid';
+import { Form, useForm } from '@void/solid';
 
 export default function CreateUser() {
   const form = useForm('/users', { name: '', email: '' });
 
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        return form.post();
-      }}
-    >
+    <Form form={form}>
       <input value={form.data.name} onInput={(e) => form.setData('name', e.target.value)} />
       {form.errors.name && <span>{form.errors.name}</span>}
 
@@ -178,7 +179,7 @@ export default function CreateUser() {
       {form.errors.email && <span>{form.errors.email}</span>}
 
       <button disabled={form.pending}>Create</button>
-    </form>
+    </Form>
   );
 }
 ```
@@ -205,14 +206,14 @@ The types are inferred from your action's `withValidator()` schema in the compan
 | `clearErrors(...fields)`         | Clear validation errors. Field names autocomplete.                                 |
 | `clearError()`                   | Clear `error`.                                                                     |
 
-In React, use `form.post`, `form.put`, `form.patch`, or `form.delete` as a native form action. For an awaitable mutation, use `action()`. In Vue, Svelte, and Solid, form submissions return `Promise<void>`; catch thrown errors or use your framework's error handling.
+For a native React form, use `form.post`, `form.put`, `form.patch`, or `form.delete` as a native form action. For an awaitable mutation, use `action()`. In Vue, Svelte, and Solid, form submissions return `Promise<void>`; catch thrown errors or use your framework's error handling.
 
 For dynamic routes, pass `params` in the options:
 
 ```ts
 // pages/users/[id].server.ts has an action
 const form = useForm('/users/:id', { name: '' }, { params: { id: '42' } });
-<form action={form.put}>{/* submits to /users/42 */}</form>
+<Form form={form} method="put">{/* submits to /users/42 */}</Form>
 ```
 
 ### Named Actions with `useForm`
@@ -221,7 +222,7 @@ When a page exports named actions, append `?actionName` to the URL:
 
 ```ts
 const form = useForm('/users/:id?update', { name: '' }, { params: { id } });
-<form action={form.put}>{/* submits to /users/42?update */}</form>
+<Form form={form} method="put">{/* submits to /users/42?update */}</Form>
 ```
 
 Each named action has its own validator schema, which supplies types for its URL, body, and error keys. See [Type Safety](../type-safety#action-%E2%86%92-useform) for an example.
@@ -279,17 +280,17 @@ Set a `File`, `Blob`, or `FileList` in form data and submit. `useForm` sends it 
 ::: code-group
 
 ```tsx [React]
-import { useForm } from '@void/react';
+import { Form, useForm } from '@void/react';
 
 export default function Upload() {
   const form = useForm('/photos', { title: '', photo: null as File | null });
 
   return (
-    <form action={form.post}>
+    <Form form={form}>
       <input value={form.data.title} onChange={(e) => form.setData('title', e.target.value)} />
       <input type="file" onChange={(e) => form.setData('photo', e.target.files?.[0] ?? null)} />
       <button disabled={form.pending}>Upload</button>
-    </form>
+    </Form>
   );
 }
 ```
@@ -297,7 +298,7 @@ export default function Upload() {
 ```vue [Vue]
 <script setup lang="ts">
 import { ref } from 'vue';
-import { useForm } from '@void/vue';
+import { Form, useForm } from '@void/vue';
 
 const form = useForm('/photos', { title: '', photo: null as File | null });
 const fileInput = ref<HTMLInputElement>();
@@ -308,45 +309,40 @@ function onFileChange() {
 </script>
 
 <template>
-  <form @submit.prevent="form.post()">
+  <Form :form="form">
     <input v-model="form.data.title" />
     <input type="file" ref="fileInput" @change="onFileChange" />
     <button :disabled="form.pending">Upload</button>
-  </form>
+  </Form>
 </template>
 ```
 
 ```svelte [Svelte]
 <script>
-  import { useForm } from "@void/svelte";
+  import { Form, useForm } from "@void/svelte";
 
   const form = useForm("/photos", { title: "", photo: null });
 </script>
 
-<form onsubmit={(e) => { e.preventDefault(); return form.post(); }}>
+<Form {form}>
   <input bind:value={form.data.title} />
   <input type="file" onchange={(e) => { form.data.photo = e.target.files?.[0] ?? null; }} />
   <button disabled={form.pending}>Upload</button>
-</form>
+</Form>
 ```
 
 ```tsx [Solid]
-import { useForm } from '@void/solid';
+import { Form, useForm } from '@void/solid';
 
 export default function Upload() {
   const form = useForm('/photos', { title: '', photo: null as File | null });
 
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        return form.post();
-      }}
-    >
+    <Form form={form}>
       <input value={form.data.title} onInput={(e) => form.setData('title', e.target.value)} />
       <input type="file" onChange={(e) => form.setData('photo', e.target.files?.[0] ?? null)} />
       <button disabled={form.pending}>Upload</button>
-    </form>
+    </Form>
   );
 }
 ```

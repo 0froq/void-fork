@@ -235,3 +235,7 @@ export default defineConfig({
 | `@void/md/theme-content.css` | Content-only Markdown styles for apps that provide their own shell/layout                |
 
 See [Markdown Pages](../../guide/pages-routing/markdown.md) for setup and framework-specific examples.
+
+## Form
+
+Each Pages adapter exports `Form`. Pass the object returned by `useForm()` as `form`; `method` defaults to `post`. It renders validation and action errors, preserves controlled input, and respects known quota retry deadlines without submitting automatically. `renderError` customizes action-error presentation; Svelte uses a snippet. See [Actions and Forms](../../guide/pages-routing/actions-and-forms.md).

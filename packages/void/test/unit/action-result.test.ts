@@ -206,3 +206,21 @@ describe('action clients', () => {
     });
   });
 });
+
+it('exposes the application message and retry deadline for structured quota responses', () => {
+  const error = new VoidActionError({
+    status: 429,
+    statusText: 'Too Many Requests',
+    url: '/summary',
+    body: {
+      code: 'usage_limit',
+      resource: 'ai',
+      reason: 'monthly_quota',
+      message: 'Your draft is still editable.',
+      retryAt: '2099-01-01T00:00:00Z',
+    },
+  });
+  expect(error.message).toBe('Your draft is still editable.');
+  expect(error.limit?.resource).toBe('ai');
+  expect(error.limit?.retryAt).toBe('2099-01-01T00:00:00Z');
+});

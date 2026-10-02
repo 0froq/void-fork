@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Link, useForm } from "@void/svelte";
+  import { Link, Form, useForm } from "@void/svelte";
   import type { Props } from "./index.server.ts";
 
   let { users }: Props = $props();
@@ -27,7 +27,7 @@
   </ul>
 
   <h2>Add User</h2>
-  <form onsubmit={handleSubmit}>
+  <Form {form}>
     <div>
       <label>Name: <input bind:value={form.data.name} /></label>
       {#if form.errors.name}
@@ -43,5 +43,5 @@
     <button type="submit" disabled={form.pending}>
       {form.pending ? "Saving..." : "Add User"}
     </button>
-  </form>
+  </Form>
 </div>
