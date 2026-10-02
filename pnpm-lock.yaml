@@ -298,7 +298,7 @@ importers:
 
   packages/create-void:
     devDependencies:
-      '@void/prompts':
+      '@voidzero-dev/vite-plus-prompts':
         specifier: workspace:*
         version: link:../prompts
       '@clack/prompts':
@@ -676,7 +676,7 @@ importers:
         specifier: npm:@voidzero-dev/vite-plus-core@1.0.0
         version: '@voidzero-dev/vite-plus-core@1.0.0(@types/node@26.6.3)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.99.0)(terser@5.51.2)(tsx@4.23.0)(typescript@7.0.2)(yaml@2.9.0)'
     devDependencies:
-      '@void/prompts':
+      '@voidzero-dev/vite-plus-prompts':
         specifier: workspace:*
         version: link:../prompts
       '@clack/core':

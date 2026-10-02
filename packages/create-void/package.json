@@ -23,7 +23,7 @@
   "devDependencies": {
     "@clack/prompts": "catalog:",
     "@types/node": "catalog:",
-    "@void/prompts": "workspace:*",
+    "@voidzero-dev/vite-plus-prompts": "workspace:*",
     "pathslash": "catalog:",
     "picocolors": "^1.1.1",
     "vite": "catalog:",

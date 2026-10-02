@@ -4,4 +4,4 @@ This private workspace contains the unmodified build of `@voidzero-dev/vite-plus
 
 Build the upstream `packages/prompts` package with tsdown, then copy `dist/index.mjs`, `dist/index.d.mts` and the upstream license here. Update the provenance and hashes together. Keep generated files byte-for-byte intact; make renderer changes in Vite+ so both projects retain the same visual identity.
 
-Once that PR is published, replace the two CLI dev dependencies and imports with the published `@voidzero-dev/vite-plus-prompts` version, update their `onlyBundle` entries, and remove this workspace. Run `vp install`, CLI tests, package builds and the full packed-consumer matrix.
+Once that PR is published, remove this workspace and change the consumer `workspace:*` dev dependencies to the published version. Imports and `onlyBundle` entries already use the official name. Run `vp install`, CLI tests, package builds and the full packed-consumer matrix.
