@@ -31,6 +31,10 @@ project's existing framework and deployment destination.
 | Authentication                             | `docs/guide/auth.md`, `docs/guide/env-vars.md`                                            |
 | Cloudflare runtime bindings and config     | `docs/integrations/cloudflare.md`, `docs/reference/config.md`, `docs/guide/env-vars.md`   |
 | AI inference (Workers AI, providers)       | `docs/guide/ai.md`                                                                        |
+| Durable State and WebSockets               | `docs/guide/durable-state.md`, `docs/guide/websockets.md`                                 |
+| Server-sent events and live streams        | `docs/guide/sse.md`, `docs/guide/live.md`                                                 |
+| Sandboxes                                  | `docs/guide/sandboxes.md`                                                                 |
+| Email                                      | `docs/guide/email.md`                                                                     |
 | KV / storage / queues / cron jobs          | `docs/guide/kv.md`, `docs/guide/storage.md`, `docs/guide/queues.md`, `docs/guide/jobs.md` |
 | SSR and caching                            | `docs/guide/ssr.md`, `docs/guide/edge/*.md`                                               |
 | Rewrites, redirects, fallbacks             | `docs/guide/edge/rewrites.md`, `docs/guide/edge/redirects.md`, `docs/reference/config.md` |
@@ -53,7 +57,7 @@ project's existing framework and deployment destination.
 | Meta framework integration                 | `docs/integrations/frameworks/*.md`                                                       |
 | Coding agent setup                         | `docs/integrations/agents.md`                                                             |
 | Node.js / Bun / Deno targets               | `docs/integrations/nodejs-bun-deno.md`                                                    |
-| ORMs and external databases                | `docs/integrations/orms-and-external-dbs.md`                                              |
+| ORMs and external databases                | `docs/guide/database.md`                                                                  |
 | Project structure and conventions          | `docs/reference/structure.md`                                                             |
 | Resource/binding inference                 | `docs/reference/resource-inference.md`                                                    |
 
