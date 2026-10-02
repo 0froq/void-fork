@@ -12,8 +12,8 @@ export function platformSetupLink(
   hyperlinks: boolean = supportsSetupLinks(),
 ): string {
   return hyperlinks
-    ? '\u001b]8;;' + page.url + '\u001b\\' + page.title + '\u001b]8;;\u001b\\'
-    : page.title + ': ' + page.url;
+    ? '\u001b]8;;' + page.url + '\u001b\\' + pc.underline(page.title) + '\u001b]8;;\u001b\\'
+    : page.title + ': ' + pc.underline(page.url);
 }
 
 export function platformSetupFieldHelp(
