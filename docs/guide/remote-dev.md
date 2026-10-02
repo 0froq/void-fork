@@ -44,11 +44,7 @@ VOID_REMOTE=1 vite dev
 
 AI inference is always routed through the proxy regardless of remote mode. There is no local AI emulation.
 
-## How It Works
-
-In remote mode, binding calls go through your platform's proxy, authenticated with your login token. The proxy uses the linked project's configuration to choose the D1 database, KV namespace, or R2 bucket.
-
-You don't need to change any code. Imports like `import { db } from "void/db"` and direct binding access via `c.env.KV` both work transparently.
+## Checking Remote Mode
 
 When the dev server starts with remote mode active, it prints:
 
@@ -63,7 +59,7 @@ When the dev server starts with remote mode active, it prints:
 
 - **Network latency:** each binding call makes a network request, so responses may be slower than local development.
 - **R2 multipart uploads:** `createMultipartUpload()` and `resumeMultipartUpload()` are not supported in remote mode.
-- **R2 conditional writes:** `put(..., { onlyIf })` requires a current Void platform and an active deployment with the native remote-binding handler. Update the platform and redeploy the project if this operation is unavailable. Failed preconditions return `null`; Void never retries a conditional write as an unconditional REST upload.
+- **R2 conditional writes:** `put(..., { onlyIf })` requires a current Void platform and an active deployment with the native remote-binding handler. Update the platform and redeploy the project if this operation is unavailable. Failed preconditions return `null`.
 - **D1 dump:** `db.dump()` is not supported in remote mode.
-- **D1 batch compatibility:** `db.batch()` requires an active deployment with the native remote-binding handler. Void does not split a batch into REST calls because that would lose D1's atomic all-or-nothing behavior.
+- **D1 batches:** `db.batch()` requires an updated platform and project deployment.
 - **Writes affect real data:** remote mode connects to your actual deployed resources. Inserts, updates, and deletes are real, so use it carefully or point it at a staging project.
