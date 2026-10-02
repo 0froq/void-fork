@@ -7,6 +7,7 @@ import {
   formatPlatformSetupPlan,
   openPlatformSetupPage,
   platformSetupPages,
+  platformManagementSetupPage,
   platformSetupFieldHelp,
 } from '../../src/cli/platform-setup.ts';
 
@@ -42,6 +43,59 @@ function plan(domain = ''): PlatformInstallPlan {
   };
 }
 describe('platform credential setup links', () => {
+  it('prefills a separate management token with account provisioning and zone permissions', () => {
+    const original = plan('example.com');
+    const page = platformManagementSetupPage(original);
+    const url = new URL(page.url);
+    expect(url.searchParams.get('to')).toBe('/account/api-tokens');
+    expect(url.searchParams.get('name')).toBe('Test & Team Management');
+    const permissions = JSON.parse(url.searchParams.get('permissionGroupKeys')!);
+    for (const key of [
+      'workers_scripts',
+      'workers_kv_storage',
+      'workers_r2',
+      'd1',
+      'queues',
+      'query_cache',
+      'aig',
+      'dns',
+      'workers_routes',
+    ]) {
+      expect(permissions).toContainEqual({ key, type: 'edit' });
+    }
+    expect(permissions).toContainEqual({ key: 'zone', type: 'read' });
+    expect(
+      permissions.some(({ key }: { key: string }) => ['cache', 'account_api_tokens'].includes(key)),
+    ).toBe(false);
+    expect(page.instructions).toContain('Browser login can preview DNS, but cannot change it.');
+    expect(page.instructions).toContain('Scope it to Account and zone example.com.');
+    const createZone = platformManagementSetupPage({
+      ...original,
+      actions: [
+        {
+          kind: 'zone',
+          key: 'zone',
+          action: 'create',
+          id: null,
+          name: 'example.com',
+          reason: 'test',
+        },
+      ],
+    });
+    expect(
+      JSON.parse(new URL(createZone.url).searchParams.get('permissionGroupKeys')!),
+    ).toContainEqual({ key: 'zone', type: 'edit' });
+    expect(createZone.instructions).toContain('allow zone creation');
+    const separateApi = platformManagementSetupPage({
+      ...original,
+      deployment: {
+        ...original.deployment,
+        controlPlane: { ...original.deployment.controlPlane, apiHostname: 'api.company.net' },
+      },
+    });
+    expect(separateApi.instructions).toContain('Also include the zone for api.company.net.');
+  });
+
   it('round-trips planned defaults, Hyperdrive, dashboard, and login choices into install arguments', () => {
     const command = formatPlatformInstallCommand({
       commandName: 'void',

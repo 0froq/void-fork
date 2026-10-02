@@ -15,7 +15,7 @@ export function assertPlatformOperatorCredentialCanApplyPlan(
   credential: PlatformCloudflareCredential,
   plan: Pick<PlatformInstallPlan, 'actions'>,
 ): void {
-  if (credential.source !== 'oauth') {
+  if (!platformOperatorNeedsManagementToken(credential, plan)) {
     return;
   }
   const createsZone = plan.actions.some(
@@ -24,15 +24,26 @@ export function assertPlatformOperatorCredentialCanApplyPlan(
   const writesDns = plan.actions.some(
     (action) => action.kind === 'dns-record' && action.action !== 'reuse',
   );
-  if (!createsZone && !writesDns) {
-    return;
-  }
   const permissions = [
     ...(createsZone ? ['Account → Zone → Edit'] : []),
     ...(writesDns ? ['Zone → DNS → Edit'] : []),
   ];
   throw new Error(
     `platform: Cloudflare browser OAuth grants Zone Read and cannot apply the planned zone or DNS changes. Set CLOUDFLARE_API_TOKEN with ${permissions.join(' and ')}, scoped to the selected account and application zone, then rerun the command.`,
+  );
+}
+
+export function platformOperatorNeedsManagementToken(
+  credential: PlatformCloudflareCredential,
+  plan: Pick<PlatformInstallPlan, 'actions'>,
+): boolean {
+  return (
+    credential.source === 'oauth' &&
+    plan.actions.some(
+      (action) =>
+        (action.kind === 'zone' && action.action === 'create') ||
+        (action.kind === 'dns-record' && action.action !== 'reuse'),
+    )
   );
 }
 

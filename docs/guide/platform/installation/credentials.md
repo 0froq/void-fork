@@ -8,7 +8,7 @@ Keep one password-manager entry for this platform. Paste the saved values into t
 
 ## Cloudflare API Tokens {#runtime-token-permissions}
 
-For a domain installation, create two custom tokens using Cloudflare's [API token setup](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/). Name them **Void Platform Management** and **Void Platform Runtime**. Scope them to your selected account and application zone.
+For a domain installation, the installer guides you through creating separate management and runtime tokens using Cloudflare's [API token setup](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/). Its links preselect the permissions and suggest names based on your platform's display name. Scope the tokens to your selected account and application zone, save them in your password manager, and paste them into the masked CLI prompts.
 
 For workers.dev testing with the default API hostname, browser login can authorize installation: you only need to create the runtime token and R2 credentials below. Skip the zone permissions until you add a domain.
 
@@ -16,7 +16,7 @@ Browser login does not grant AI Gateway access. Include **Account → AI Gateway
 
 The management token lets your CLI install and maintain the platform. The runtime token is stored as a Worker secret so the platform can deploy apps after you close your terminal. They are separate credentials.
 
-The installer’s runtime-token link preselects required account permissions. Compare the form with the checklist shown beside the link, and select the indicated zone for a domain installation.
+Compare each token's form with the permission checklist below, and select the indicated account and zone for a domain installation. The management token supplied at the prompt is used for the current CLI run; keep your saved copy for resume and maintenance. Scripts supply it through `CLOUDFLARE_API_TOKEN`.
 
 ::: details Permissions to select for each token
 

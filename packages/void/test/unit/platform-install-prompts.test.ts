@@ -29,7 +29,8 @@ vi.mock('@clack/prompts', async (original) => ({
   note: mocks.note,
   outro: vi.fn(),
 }));
-vi.mock('../../src/cli/platform-auth.ts', () => ({
+vi.mock('../../src/cli/platform-auth.ts', async (original) => ({
+  ...(await original<typeof import('../../src/cli/platform-auth.ts')>()),
   resolvePlatformCloudflareCredential: async () => ({ source: 'oauth', token: 'test-token' }),
   resolvePlatformCloudflareCredentialWithInput: async (input: () => Promise<unknown>) => ({
     input: await input(),

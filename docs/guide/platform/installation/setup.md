@@ -12,7 +12,11 @@ For workers.dev testing, start the interactive install and choose your login met
 void platform install --workers-dev
 ```
 
-For a domain installation, the management token is the one value the interactive installer needs in the shell. Browser login cannot create the application's DNS record. In Bash or zsh, read the token without displaying it or putting its value in command history:
+For a domain installation, Void guides you to create a management API token and paste it into a masked prompt. Browser login can preview DNS, but cannot change it. The token-creation link preselects the permissions; scope the token to your account and application zone. No shell environment variable is needed for interactive installation.
+
+::: details Use an existing management token from the shell
+
+Set `CLOUDFLARE_API_TOKEN` to use an existing token instead of the prompt. In Bash or zsh, read it without displaying it or putting its value in command history:
 
 ```sh
 printf 'Cloudflare management API token: '
@@ -22,7 +26,7 @@ export CLOUDFLARE_API_TOKEN
 void platform install
 ```
 
-::: details PowerShell equivalent
+In PowerShell:
 
 ```powershell
 $env:CLOUDFLARE_API_TOKEN = [System.Net.NetworkCredential]::new('', (Read-Host 'Cloudflare management API token' -AsSecureString)).Password
@@ -150,7 +154,7 @@ The installer collects your runtime token, PostgreSQL URL, login-provider creden
 
 Once installation finishes, open the printed admin dashboard link. For GitHub-only setup, sign in as the administrator selected during installation. For configurable login, use the one-time `/setup` code to confirm the administrator’s identity. Use the printed API URL to [connect and deploy an app](/guide/platform/installation/first-deployment).
 
-Remove the management token from the shell when finished:
+If you supplied a management token through the shell, remove it when finished:
 
 ```sh
 unset CLOUDFLARE_API_TOKEN
@@ -166,7 +170,7 @@ If Void created a zone, it stops in `waiting-for-dns` and prints nameservers. Se
 void platform install --resume --name <installation-id>
 ```
 
-Keep the management token available for any remaining DNS changes. When using a source build, also pass the same `--runtime` directory. Resume uses the saved checkpoint and original secrets; do not start a second installation or generate replacement keys. If setup failed before a checkpoint was saved, rerun the original command.
+Resume prompts for a management token if DNS changes still need one; you can also supply it through `CLOUDFLARE_API_TOKEN`. When using a source build, also pass the same `--runtime` directory. Resume uses the saved checkpoint and original secrets; do not start a second installation or generate replacement keys. If setup failed before a checkpoint was saved, rerun the original command.
 
 You can also rerun `void platform install` and choose **Continue setup** for an unfinished installation. For non-interactive recovery, use `--resume --name <id>`. Manage completed platforms with `platform status`, `repair`, or `upgrade`.
 

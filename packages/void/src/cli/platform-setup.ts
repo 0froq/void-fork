@@ -64,6 +64,61 @@ function supportsSetupLinks(): boolean {
 }
 
 /** Dashboard keys use permission-catalog labels, which can differ from product names. */
+function platformAccountTokenPermissions(includeAiGateway: boolean) {
+  return [
+    { key: 'account_settings', type: 'read' },
+    { key: 'workers_scripts', type: 'edit' },
+    { key: 'workers_kv_storage', type: 'edit' },
+    { key: 'workers_r2', type: 'edit' },
+    { key: 'd1', type: 'edit' },
+    { key: 'queues', type: 'edit' },
+    { key: 'account_analytics', type: 'read' },
+    { key: 'workers_tail', type: 'read' },
+    { key: 'query_cache', type: 'edit' },
+    ...(includeAiGateway ? [{ key: 'aig', type: 'edit' }] : []),
+  ];
+}
+
+export function platformManagementSetupPage(plan: PlatformInstallPlan): PlatformSetupPage {
+  const createsZone = plan.actions.some(
+    (action) => action.kind === 'zone' && action.action === 'create',
+  );
+  const zoneName = plan.deployment.application.zoneName;
+  const apiHostname = plan.deployment.controlPlane.apiHostname;
+  const permissions = [
+    ...platformAccountTokenPermissions(true),
+    { key: 'zone', type: createsZone ? 'edit' : 'read' },
+    { key: 'dns', type: 'edit' },
+    { key: 'workers_routes', type: 'edit' },
+    ...(zoneName && plan.deployment.application.baseDomain !== zoneName
+      ? [{ key: 'ssl_and_certificates', type: 'read' }]
+      : []),
+  ];
+  return {
+    title: 'Cloudflare management API token',
+    url:
+      'https://dash.cloudflare.com/?' +
+      new URLSearchParams({
+        to: '/' + plan.account.id + '/api-tokens',
+        name: plan.deployment.displayName + ' Management',
+        permissionGroupKeys: JSON.stringify(permissions),
+      }),
+    instructions: [
+      'Browser login can preview DNS, but cannot change it. This token lets the CLI install your platform.',
+      `Scope it to ${plan.account.name}${createsZone ? '; allow zone creation.' : ` and zone ${plan.deployment.application.zoneName}.`}`,
+      ...(apiHostname && apiHostname !== zoneName && !apiHostname.endsWith(`.${zoneName}`)
+        ? [`Also include the zone for ${apiHostname}.`]
+        : []),
+      'Create the token with the preselected permissions, then paste it here.',
+      'Permission checklist: ' +
+        platformSetupLink({
+          title: 'Void token permissions',
+          url: 'https://void.cloud/guide/platform/installation/credentials#runtime-token-permissions',
+        }),
+    ].join('\n'),
+  };
+}
+
 export function platformSetupPages(plan: PlatformInstallPlan): {
   runtime: PlatformSetupPage;
   github: PlatformSetupPage;
@@ -73,18 +128,7 @@ export function platformSetupPages(plan: PlatformInstallPlan): {
     (action) => action.kind === 'ai-gateway' && action.action === 'inspect',
   );
   const permissions = [
-    { key: 'account_settings', type: 'read' },
-    { key: 'workers_scripts', type: 'edit' },
-    { key: 'workers_kv_storage', type: 'edit' },
-    { key: 'workers_r2', type: 'edit' },
-    { key: 'd1', type: 'edit' },
-    { key: 'queues', type: 'edit' },
-    { key: 'account_analytics', type: 'read' },
-    { key: 'workers_tail', type: 'read' },
-    // Hyperdrive's catalog label is query_cache_write, not hyperdrive_write.
-    { key: 'query_cache', type: 'edit' },
-    // AI Gateway similarly uses aig_write in the permission catalog.
-    ...(needsGateway ? [{ key: 'aig', type: 'edit' }] : []),
+    ...platformAccountTokenPermissions(needsGateway),
     ...(plan.deployment.application.zoneName ? [{ key: 'cache', type: 'purge' }] : []),
     ...(plan.deployment.capabilities.customDomains
       ? [{ key: 'ssl_and_certificates', type: 'edit' }]
@@ -157,11 +201,20 @@ export function platformSetupPages(plan: PlatformInstallPlan): {
   };
 }
 
-export function formatPlatformSetupPlan(plan: PlatformInstallPlan): string {
+export function formatPlatformSetupPlan(
+  plan: PlatformInstallPlan,
+  options: { managementToken?: boolean } = {},
+): string {
   const pages = platformSetupPages(plan);
   // Keep URLs outside wrapping note boxes so terminal links remain intact.
   return [
     'Credentials needed during installation:',
+    ...(options.managementToken
+      ? [
+          platformSetupLink(platformManagementSetupPage(plan)),
+          'Browser login cannot change DNS. Installation will guide you to create and paste a management API token.',
+        ]
+      : []),
     'PostgreSQL database URL',
     platformSetupLink(pages.runtime),
     platformSetupLink(pages.r2),

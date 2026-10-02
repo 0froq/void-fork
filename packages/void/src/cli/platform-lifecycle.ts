@@ -10,6 +10,7 @@ import { cliCommandName, cliTitle, createSpinner, pc } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import {
   assertPlatformOperatorCredentialCanApplyPlan,
+  platformOperatorNeedsManagementToken,
   resolvePlatformCloudflareCredential,
   resolvePlatformCloudflareCredentialWithInput,
 } from './platform-auth.ts';
@@ -58,6 +59,7 @@ import {
   formatPlatformInstallCommand,
   formatPlatformSetupPlan,
   openPlatformSetupPage,
+  platformManagementSetupPage,
   platformSetupPages,
   platformSetupFieldHelp,
 } from './platform-setup.ts';
@@ -568,21 +570,27 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       zoneName,
       ...(workersDev ? { workersDev: true } : {}),
     };
-    let plan = await createPlatformInstallPlan(client, planInput, existing, {
+    const planOptions = {
       authoritativeProvisionIntents,
       allowUnverifiedAiGateway: true,
       includeEmailGateway: runtime.manifest.artifacts.emailGateway !== undefined,
       enableSandbox: runtime.manifest.safetyProtocols.sandboxDrain >= 3,
       deploymentExecution: runtime.manifest.deploymentExecution === 1,
-    });
+    };
+    let plan = await createPlatformInstallPlan(client, planInput, existing, planOptions);
     note(
       formatPlatformInstallPlan(plan),
       args.plan ? 'Read-only installation plan' : 'Installation plan',
     );
     note(formatPlatformRuntime(runtime), 'Platform runtime');
+    const needsManagementToken = platformOperatorNeedsManagementToken(operatorCredential, plan);
     if (args.plan) {
-      console.log(formatPlatformSetupPlan(plan));
-      outro('Plan complete and ready to execute.');
+      console.log(formatPlatformSetupPlan(plan, { managementToken: needsManagementToken }));
+      outro(
+        needsManagementToken
+          ? 'Plan complete. Management API token required.'
+          : 'Plan complete and ready to execute.',
+      );
       console.log(
         `\n${pc.bold(existing ? 'Next step: run this command to resume' : 'Next step: run this command to install')}\n\n${pc.cyan(
           formatPlatformInstallCommand({
@@ -610,12 +618,52 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       );
       return;
     }
-    assertPlatformOperatorCredentialCanApplyPlan(operatorCredential, plan);
+    if (!process.stdin.isTTY) {
+      assertPlatformOperatorCredentialCanApplyPlan(operatorCredential, plan);
+    }
     if (process.stdin.isTTY && !args.yes) {
       const proceed = await confirm({ message: 'Apply this plan?', initialValue: false });
       if (isCancel(proceed) || !proceed) {
         outro('No changes made.');
         return;
+      }
+    }
+
+    if (needsManagementToken) {
+      openPlatformSetupPage(platformManagementSetupPage(plan));
+      while (true) {
+        const token = (
+          await promptSecret('Paste management API token:', true, (value) =>
+            value.trim() ? undefined : 'A value is required.',
+          )
+        ).trim();
+        const management = new PlatformCloudflareClient(token, { apiBase: client.apiBaseUrl });
+        try {
+          const authorizedAccounts = await management.listAccounts();
+          if (!authorizedAccounts.some((account) => account.id === accountId)) {
+            log.warn(
+              `This token cannot access ${plan.account.name}. Check its account scope and try again.`,
+            );
+            continue;
+          }
+          const verified = await createPlatformInstallPlan(
+            management,
+            planInput,
+            existing,
+            planOptions,
+          );
+          assertPlatformInstallPlanUnchanged(plan, verified, 'management API token');
+          client = management;
+          plan = verified;
+          break;
+        } catch (error) {
+          if (!isPlatformTokenAuthorizationError(error)) {
+            throw error;
+          }
+          log.warn(
+            'Cloudflare rejected this token. Check its permissions and account/zone scope, then paste a replacement.',
+          );
+        }
       }
     }
 
@@ -701,7 +749,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         if (
           credentialSetup &&
           token === values.cloudflareApiToken &&
-          isRuntimeTokenAuthorizationError(
+          isPlatformTokenAuthorizationError(
             error,
             checkingRuntimePermissions ? undefined : '/ai-gateway/',
           )
@@ -1011,7 +1059,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   }
 }
 
-function isRuntimeTokenAuthorizationError(error: unknown, requestPathIncludes?: string): boolean {
+function isPlatformTokenAuthorizationError(error: unknown, requestPathIncludes?: string): boolean {
   for (let depth = 0; depth < 5 && error instanceof Error; depth++, error = error.cause) {
     if (
       error instanceof PlatformCloudflareApiError &&
@@ -1061,6 +1109,15 @@ export async function verifyPlatformAiGatewayPlan(
     }
     throw error;
   }
+  assertPlatformInstallPlanUnchanged(preview, verified, 'AI Gateway access');
+  return verified;
+}
+
+function assertPlatformInstallPlanUnchanged(
+  preview: Awaited<ReturnType<typeof createPlatformInstallPlan>>,
+  verified: Awaited<ReturnType<typeof createPlatformInstallPlan>>,
+  check: string,
+): void {
   const infrastructure = (plan: typeof preview) =>
     plan.actions
       .filter((action) => action.kind !== 'ai-gateway')
@@ -1071,10 +1128,9 @@ export async function verifyPlatformAiGatewayPlan(
     JSON.stringify(infrastructure(verified)) !== JSON.stringify(infrastructure(preview))
   ) {
     throw new Error(
-      'platform: Resources changed while checking AI Gateway access. Rerun the command to review the updated plan. No platform resources were created.',
+      `platform: Resources changed while checking ${check}. Rerun the command to review the updated plan. No platform resources were created.`,
     );
   }
-  return verified;
 }
 
 export function assertNoninteractivePlatformMutationAcknowledged(

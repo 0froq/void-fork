@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   select: vi.fn(),
   text: vi.fn(),
   password: vi.fn(),
+  operatorCredential: vi.fn(),
   open: vi.fn(),
   install: vi.fn(),
   preflight: vi.fn(),
@@ -67,13 +68,13 @@ vi.mock('../../src/cli/output.ts', async (original) => ({
   ...(await original<typeof import('../../src/cli/output.ts')>()),
   createSpinner: mocks.spinner,
 }));
-vi.mock('../../src/cli/platform-auth.ts', () => ({
-  resolvePlatformCloudflareCredential: async () => ({ source: 'oauth', token: 'operator-token' }),
+vi.mock('../../src/cli/platform-auth.ts', async (original) => ({
+  ...(await original<typeof import('../../src/cli/platform-auth.ts')>()),
+  resolvePlatformCloudflareCredential: mocks.operatorCredential,
   resolvePlatformCloudflareCredentialWithInput: async (input: () => Promise<unknown>) => ({
     input: await input(),
-    credential: { source: 'oauth', token: 'operator-token' },
+    credential: await mocks.operatorCredential(),
   }),
-  assertPlatformOperatorCredentialCanApplyPlan: vi.fn(),
 }));
 vi.mock('../../src/cli/platform-cloudflare.ts', async (original) => ({
   ...(await original<typeof import('../../src/cli/platform-cloudflare.ts')>()),
@@ -115,6 +116,7 @@ const environment = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.operatorCredential.mockResolvedValue({ source: 'oauth', token: 'operator-token' });
   mocks.multiselect.mockResolvedValue(['github']);
   directory = mkdtempSync(join(tmpdir(), 'void-credential-flow-'));
   vi.stubEnv('VOID_PLATFORM_REGISTRY_DIR', directory);
@@ -124,6 +126,8 @@ beforeEach(() => {
     ...Object.keys(environment),
     'VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON',
     'VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION',
+    'CLOUDFLARE_API_TOKEN',
+    'CF_API_TOKEN',
   ]) {
     vi.stubEnv(key, '');
   }
@@ -208,6 +212,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   if (tty) {
     Object.defineProperty(process.stdin, 'isTTY', tty);
   } else {
@@ -244,7 +249,155 @@ async function interruptedInstall() {
   return manifest;
 }
 
+function requireManagementToken() {
+  const original = mocks.plan.getMockImplementation()!;
+  mocks.plan.mockImplementation(async (...input) => {
+    const plan = await original(...input);
+    return {
+      ...plan,
+      deployment: createPlatformDeploymentManifest({
+        installationSlug: plan.deployment.installationSlug,
+        displayName: plan.deployment.displayName,
+        application: { baseDomain: 'example.com', zoneName: 'example.com' },
+      }),
+      actions: [
+        {
+          action: 'adopt',
+          kind: 'dns-record',
+          key: 'wildcard-dns',
+          id: 'dns-id',
+          name: '*.example.com',
+          reason: 'test',
+        },
+      ],
+    };
+  });
+}
+
 describe('platform credential onboarding', () => {
+  it('explains the management token requirement in a preview without collecting secrets', async () => {
+    requireManagementToken();
+    await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));
+    expect(outro).toHaveBeenCalledWith('Plan complete. Management API token required.');
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Browser login cannot change DNS. Installation will guide you'),
+    );
+    expect(mocks.password).not.toHaveBeenCalled();
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(listInstallationManifests()).toEqual([]);
+  });
+
+  it('collects a management token and continues with it without exporting or persisting it', async () => {
+    requireManagementToken();
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ success: true, result: {} }));
+    vi.stubGlobal('fetch', fetcher);
+    mocks.password.mockResolvedValueOnce('  management-secret  ');
+    await runPlatformLifecycleCommand(parsePlatformArgs(args));
+    expect(mocks.password.mock.calls[0]![0].message).toBe('Paste management API token:');
+    expect(mocks.plan).toHaveBeenCalledTimes(2);
+    const management = mocks.plan.mock.calls[1]![0] as PlatformCloudflareClient;
+    expect(management).not.toBe(mocks.plan.mock.calls[0]![0]);
+    expect(mocks.install.mock.calls[0]![3].client).toBe(management);
+    await management.request('/test');
+    expect(fetcher).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer management-secret' }),
+      }),
+    );
+    expect(mocks.open).toHaveBeenCalledWith(
+      expect.stringContaining('name=Test+Management'),
+      expect.any(Function),
+    );
+    const secrets = readPendingInstallationSecrets(listInstallationManifests()[0]!);
+    expect(secrets?.cloudflareApiToken).toBe(
+      environment.VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN,
+    );
+    expect(Object.values(secrets!)).not.toContain('management-secret');
+    expect(process.env.CLOUDFLARE_API_TOKEN).toBe('');
+    expect(vi.mocked(console.log).mock.calls.flat().join(' ')).not.toContain('management-secret');
+  });
+
+  it.each(['wrong account', 'rejected token'])(
+    'lets users replace a management token in the same run: %s',
+    async (failure) => {
+      requireManagementToken();
+      const accounts = vi.mocked(PlatformCloudflareClient.prototype.listAccounts);
+      accounts.mockResolvedValueOnce([{ id: 'account', name: 'Account' }]);
+      if (failure === 'wrong account') {
+        accounts.mockResolvedValueOnce([{ id: 'other', name: 'Other' }]);
+      } else {
+        accounts.mockRejectedValueOnce(new PlatformCloudflareApiError('denied', 403));
+      }
+      mocks.password.mockResolvedValueOnce('wrong-secret').mockResolvedValueOnce('correct-secret');
+      await runPlatformLifecycleCommand(parsePlatformArgs(args));
+      expect(
+        mocks.password.mock.calls.filter(
+          ([input]) => input.message === 'Paste management API token:',
+        ),
+      ).toHaveLength(2);
+      expect(mocks.plan).toHaveBeenCalledTimes(2);
+      expect(mocks.install).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('leaves no draft when management token input is cancelled', async () => {
+    requireManagementToken();
+    mocks.password.mockResolvedValueOnce(Symbol('cancel'));
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(args))).rejects.toThrow('Cancelled');
+    expect(listInstallationManifests()).toEqual([]);
+    expect(mocks.install).not.toHaveBeenCalled();
+  });
+
+  it('requires a management environment token for headless DNS changes', async () => {
+    requireManagementToken();
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    await expect(
+      runPlatformLifecycleCommand(parsePlatformArgs([...args, '--yes'])),
+    ).rejects.toThrow('Set CLOUDFLARE_API_TOKEN');
+    expect(mocks.password).not.toHaveBeenCalled();
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(listInstallationManifests()).toEqual([]);
+  });
+
+  it('does not replace tokens after a service failure or apply a changed plan', async () => {
+    requireManagementToken();
+    mocks.password.mockResolvedValueOnce('management-secret');
+    vi.mocked(PlatformCloudflareClient.prototype.listAccounts)
+      .mockResolvedValueOnce([{ id: 'account', name: 'Account' }])
+      .mockRejectedValueOnce(new PlatformCloudflareApiError('unavailable', 503));
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(args))).rejects.toThrow(
+      'unavailable',
+    );
+    expect(mocks.password).toHaveBeenCalledOnce();
+    expect(listInstallationManifests()).toEqual([]);
+    const original = mocks.plan.getMockImplementation()!;
+    mocks.plan.mockImplementationOnce(original).mockImplementationOnce(async (...input) => ({
+      ...(await original(...input)),
+      installationId: 'changed-installation',
+    }));
+    mocks.password.mockResolvedValueOnce('management-secret');
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(args))).rejects.toThrow(
+      'Resources changed while checking management API token',
+    );
+    expect(listInstallationManifests()).toEqual([]);
+    expect(mocks.install).not.toHaveBeenCalled();
+  });
+
+  it('keeps explicit environment credentials and declined plans out of management token setup', async () => {
+    requireManagementToken();
+    mocks.confirm.mockResolvedValueOnce(false);
+    await runPlatformLifecycleCommand(parsePlatformArgs(args));
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(mocks.password).not.toHaveBeenCalled();
+    mocks.operatorCredential.mockResolvedValue({ source: 'environment', token: 'explicit-token' });
+    await runPlatformLifecycleCommand(parsePlatformArgs(args));
+    expect(
+      mocks.password.mock.calls.some(([input]) => input.message === 'Paste management API token:'),
+    ).toBe(false);
+    expect(mocks.install).toHaveBeenCalledOnce();
+  });
+
   it('prints a command to install a fresh read-only plan without saving a draft', async () => {
     const colors = pc.createColors(true);
     vi.spyOn(pc, 'bold').mockImplementation(colors.bold);
