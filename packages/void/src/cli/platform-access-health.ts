@@ -77,9 +77,13 @@ export async function ensurePlatformAccessHealthChecks(input: {
   checkpoint: Readonly<Record<string, string>>;
   save: (encoded: string) => void;
 }): Promise<void> {
-  const appAccess = input.checkpoint.appAccessSetupJson
-    ? parsePlatformAppAccessSetup(JSON.parse(input.checkpoint.appAccessSetupJson))
-    : null;
+  // The server owns ongoing app access after setup. Its token may have been
+  // rotated or its settings changed by an administrator since installation.
+  const appAccess =
+    !input.manifest.steps.some((step) => step.key === 'app-access-initialized:v1') &&
+    input.checkpoint.appAccessSetupJson
+      ? parsePlatformAppAccessSetup(JSON.parse(input.checkpoint.appAccessSetupJson))
+      : null;
   if (appAccess && appAccess.accountId !== input.plan.account.id) {
     throw new Error('platform: App access recovery belongs to another Cloudflare account.');
   }

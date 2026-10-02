@@ -1722,10 +1722,10 @@ export async function installPlatform(
       });
     }
 
-    if (
-      plan.deployment.appAccess &&
-      !manifest.steps.some((step) => step.key === 'app-access-initialized:v1')
-    ) {
+    const appAccessSetupRequired =
+      !!plan.deployment.appAccess &&
+      !manifest.steps.some((step) => step.key === 'app-access-initialized:v1');
+    if (appAccessSetupRequired) {
       if (dependencies.prepareAppAccess) {
         try {
           const appAccessSetupJson = await dependencies.prepareAppAccess(manifest, secrets);
@@ -1798,7 +1798,9 @@ export async function installPlatform(
     }
     if (
       plan.deployment.authentication.accessProtection ||
-      (secrets.appAccessSetupJson && JSON.parse(secrets.appAccessSetupJson).managed === true)
+      (appAccessSetupRequired &&
+        secrets.appAccessSetupJson &&
+        JSON.parse(secrets.appAccessSetupJson).managed === true)
     ) {
       dependencies.onProgress?.('Preparing Access for authenticated platform health checks');
       try {
@@ -1819,6 +1821,7 @@ export async function installPlatform(
         });
       } catch (error) {
         if (
+          appAccessSetupRequired &&
           secrets.appAccessSetupJson &&
           JSON.parse(secrets.appAccessSetupJson).managed &&
           error instanceof PlatformCloudflareApiError &&

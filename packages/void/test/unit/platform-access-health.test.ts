@@ -1,6 +1,7 @@
 import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
+  recordInstallationStep,
 } from '@void/platform';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
@@ -68,6 +69,49 @@ afterEach(() => {
 });
 
 describe('protected platform health checks', () => {
+  it.each([false, true])(
+    'does not reuse completed app setup credentials during maintenance (platform protection: %s)',
+    async (protection) => {
+      const { env, input } = fixture();
+      const deployment = createPlatformDeploymentManifest({
+        ...input.plan.deployment,
+        appAccess: 'public',
+        authentication: {
+          providers: ['github'],
+          ...(protection ? { accessProtection: true } : {}),
+        },
+      });
+      const completedAt = new Date().toISOString();
+      const manifest = recordInstallationStep(
+        { ...input.manifest, deployment },
+        { key: 'app-access-initialized:v1', completedAt, resultHash: 'setup-complete' },
+        completedAt,
+      );
+      const retiredToken = vi
+        .spyOn(PlatformCloudflareClient.prototype, 'request')
+        .mockRejectedValue(new PlatformCloudflareApiError('retired app setup token', 403));
+      await ensurePlatformAccessHealthChecks({
+        ...input,
+        plan: { ...input.plan, deployment },
+        manifest,
+        checkpoint: {
+          ...input.checkpoint,
+          appAccessSetupJson: JSON.stringify({
+            version: 1,
+            accountId: 'account',
+            mode: 'public',
+            managed: true,
+            apiToken: 'retired-app-token',
+            identityProviderIds: [],
+            policyIds: [],
+          }),
+        },
+      });
+      expect(retiredToken).not.toHaveBeenCalled();
+      expect(env.apps.size).toBe(protection ? 1 : 0);
+    },
+  );
+
   it('uses app-management authority for scoped health access without platform Access protection', async () => {
     const { env, input } = fixture(true);
     const deployment = createPlatformDeploymentManifest({
