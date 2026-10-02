@@ -5,11 +5,14 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
+  realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import { describe, expect, it } from 'vite-plus/test';
 import {
   createIsolatedPlayground,
@@ -100,3 +103,48 @@ it('clears the shutdown deadline after a real child exits', () => {
   expect(result.status, result.stderr).toBe(0);
   expect(result.stdout.trim()).toBe('[]');
 }, 20_000);
+
+it('resolves installed dependency links absolutely at the isolated fixture depth', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'void-fixture-dependencies-'));
+  const source = join(workspace, 'playground', 'app');
+  const modules = join(source, 'node_modules');
+  mkdirSync(join(modules, '@fixture'), { recursive: true });
+  writeFileSync(join(source, 'package.json'), JSON.stringify({ name: 'dependency-app' }));
+  writeFileSync(
+    join(source, 'entry.mjs'),
+    'import plain from "plain"; import scoped from "@fixture/scoped"; console.log(JSON.stringify([plain, scoped]));',
+  );
+  for (const name of ['plain', '@fixture/scoped']) {
+    const installed = join(workspace, 'packages', name);
+    mkdirSync(installed, { recursive: true });
+    writeFileSync(
+      join(installed, 'package.json'),
+      JSON.stringify({ name, type: 'module', exports: './index.mjs' }),
+    );
+    writeFileSync(join(installed, 'index.mjs'), `export default ${JSON.stringify(name)};`);
+    const link = join(modules, name);
+    symlinkSync(
+      relative(join(link, '..'), installed),
+      link,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+  }
+  const fixture = createIsolatedPlayground(workspace, 'playground/app');
+  try {
+    for (const name of ['plain', '@fixture/scoped']) {
+      const link = join(fixture.root, 'node_modules', name);
+      expect(isAbsolute(readlinkSync(link))).toBe(true);
+      expect(realpathSync(link)).toBe(realpathSync(join(workspace, 'packages', name)));
+    }
+    const result = spawnSync(process.execPath, ['entry.mjs'], {
+      cwd: fixture.root,
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual(['plain', '@fixture/scoped']);
+  } finally {
+    fixture.cleanup();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});

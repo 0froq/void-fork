@@ -6,6 +6,8 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -80,18 +82,41 @@ export function createIsolatedPlayground(
     filter(path) {
       // `cpSync` reports native backslash paths on Windows, while these workspace paths are
       // normalized to forward slashes. Normalize before using the POSIX path helpers or the
-      // top-level `node_modules` junction is copied and the replacement junction already exists.
+      // top-level `node_modules` directory is copied into the isolated dependency tree.
       return shouldCopyPlaygroundPath(copySource, path);
     },
   });
 
   const sourceNodeModules = join(sourceRoot, 'node_modules');
   if (existsSync(sourceNodeModules)) {
-    symlinkSync(
-      sourceNodeModules,
-      join(root, 'node_modules'),
-      process.platform === 'win32' ? 'junction' : 'dir',
-    );
+    const fixtureNodeModules = join(root, 'node_modules');
+    mkdirSync(fixtureNodeModules);
+    const linkDependency = (source: string, destination: string) =>
+      symlinkSync(
+        realpathSync(source),
+        destination,
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+    // Linking the whole directory leaves pnpm's relative package links behind
+    // a Windows junction at a different depth. Pin each package's real target.
+    for (const entry of readdirSync(sourceNodeModules, { withFileTypes: true })) {
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) {
+        continue;
+      }
+      if (entry.name.startsWith('.') && entry.name !== '.bin') {
+        continue;
+      }
+      const source = join(sourceNodeModules, entry.name);
+      const destination = join(fixtureNodeModules, entry.name);
+      if (entry.name.startsWith('@')) {
+        mkdirSync(destination);
+        for (const name of readdirSync(source)) {
+          linkDependency(join(source, name), join(destination, name));
+        }
+      } else {
+        linkDependency(source, destination);
+      }
+    }
   }
 
   // Avoid duplicate workspace package names when multiple copies exist concurrently.

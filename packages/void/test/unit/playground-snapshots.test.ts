@@ -17,6 +17,8 @@ it('clones stable source snapshots while resolving dependencies from the actual 
   const source = join(root, 'playground/react-pages');
   const snapshot = join(root, 'snapshots/playground/react-pages');
   mkdirSync(join(source, 'node_modules'), { recursive: true });
+  mkdirSync(join(source, 'node_modules', 'fixture-dependency'));
+  writeFileSync(join(source, 'node_modules', 'fixture-dependency', 'index.js'), 'installed source');
   mkdirSync(snapshot, { recursive: true });
   for (const path of [source, snapshot]) {
     writeFileSync(join(path, 'package.json'), JSON.stringify({ name: 'test-app' }));
@@ -27,8 +29,8 @@ it('clones stable source snapshots while resolving dependencies from the actual 
 
   const fixture = createIsolatedPlayground(root, 'playground/react-pages');
   expect(readFileSync(join(fixture.root, 'page.ts'), 'utf8')).toBe('original source');
-  expect(realpathSync(join(fixture.root, 'node_modules'))).toBe(
-    realpathSync(join(source, 'node_modules')),
+  expect(realpathSync(join(fixture.root, 'node_modules', 'fixture-dependency'))).toBe(
+    realpathSync(join(source, 'node_modules', 'fixture-dependency')),
   );
   expect(readFileSync(join(source, 'page.ts'), 'utf8')).toBe('temporary HMR mutation');
   fixture.cleanup();
