@@ -175,6 +175,13 @@ function currentSharedCacheResponse(response: Response): Response {
 // ---------------------------------------------------------------------------
 const corruptCases: Array<{ name: string; seed: () => KvRecord }> = [
   {
+    name: 'entry admitted before Vary was checked',
+    seed: () => ({
+      value: packEntry({ vary: 'Accept-Language' }, 'English'),
+      metadata: { s: 200, c: BASE, t: 60, p: 2 } as unknown as IsrCacheMetadata,
+    }),
+  },
+  {
     name: 'legacy entry missing shared-cache policy version',
     seed: () => ({
       value: packEntry({}, 'x'),
@@ -762,6 +769,39 @@ describe('handleIsr', () => {
     expect([...store.keys()].filter((k) => k.startsWith(isrPrefix(DPL))).length).toBe(1);
   });
 
+  it.each(['Accept-Language', 'Origin', '*', 'X-VoidPages, ACCEPT-language'])(
+    'renders each request live when Vary is unsupported: %s',
+    async (vary) => {
+      const { store, kv } = createKvMock();
+      const env = makeEnv(kv);
+      const { render, spy } = createRender(
+        (request) =>
+          new Response(request.headers.get('Accept-Language'), {
+            headers: {
+              'Content-Type': 'text/html',
+              Vary: vary,
+              'x-void-page-data': '{"component":"Home","props":{}}',
+            },
+          }),
+      );
+      for (const language of ['en', 'ja']) {
+        const { ctx, flush } = createCtx();
+        const response = await handleIsr(
+          htmlRequest('/blog/post', { 'Accept-Language': language }),
+          env,
+          ctx,
+          OPTS,
+          render,
+        );
+        expect(await response!.text()).toBe(language);
+        await flush();
+        expect(store.size).toBe(0);
+        expect(edge.store.size).toBe(0);
+      }
+      expect(spy).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it('does not share a MISS whose render sets Set-Cookie', async () => {
     const { store, kv } = createKvMock();
     const env = makeEnv(kv);
@@ -1162,6 +1202,7 @@ describe('handleIsr', () => {
     ['no-store', { 'Cache-Control': 'no-store' }],
     ['no-cache', { 'Cache-Control': 'no-cache' }],
     ['Set-Cookie', { 'Set-Cookie': 'sid=private; Path=/; HttpOnly' }],
+    ['Vary', { Vary: 'Accept-Language' }],
   ])(
     'authoritative %s background response evicts previously public HTML, JSON, and KV',
     async (_policy, headers) => {

@@ -64,6 +64,26 @@ const mockRenderFn = vi.fn(async (pageObj: RenderPage) => `<html>${pageObj.compo
 const mockGetAssetTags = vi.fn(async () => ({ css: '', preloads: '', body: '' }));
 
 describe('handlePageGet', () => {
+  it.each([false, true])(
+    'preserves loader Vary headers on Pages JSON (deferred=%s)',
+    async (deferred) => {
+      const c = await createTestContext('GET', '/users', { headers: { 'x-voidpages': 'true' } });
+      const response = await handlePageGet(
+        (ctx) => {
+          ctx.header('Vary', 'Accept-Language');
+          return deferred ? { users: defer(async () => []) } : { users: [] };
+        },
+        undefined,
+        c,
+        'users',
+        mockRenderFn,
+        mockGetAssetTags,
+      );
+      expect(response.headers.get('Vary')).toBe('Accept-Language, X-VoidPages');
+      await response.text();
+    },
+  );
+
   it('returns JSON page object when X-VoidPages header present', async () => {
     const c = await createTestContext('GET', '/users', {
       headers: { 'x-voidpages': 'true' },

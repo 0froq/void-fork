@@ -84,9 +84,24 @@ function isPagesRequest(c: CloudContext): boolean {
 function pageResponseHeaders(c: CloudContext, headers: Record<string, string>): Headers {
   const out = new Headers(c.res.headers);
   for (const [key, value] of Object.entries(headers)) {
-    out.set(key, value);
+    if (key.toLowerCase() === 'vary') {
+      appendVary(out, value);
+    } else {
+      out.set(key, value);
+    }
   }
   return out;
+}
+
+function appendVary(headers: Headers, name: string): void {
+  const existing =
+    headers
+      .get('Vary')
+      ?.split(',')
+      .map((value) => value.trim().toLowerCase()) ?? [];
+  if (!existing.includes('*') && !existing.includes(name.toLowerCase())) {
+    headers.append('Vary', name);
+  }
 }
 
 function escapeHtmlAttr(value: string): string {
@@ -474,7 +489,9 @@ export async function handlePageGet(
     }
     // Stream NDJSON: first line is PageObject, subsequent lines are deferred groups
     c.header('X-VoidPages', 'true');
-    c.header('Vary', 'X-VoidPages');
+    const headers = new Headers(c.res.headers);
+    appendVary(headers, 'X-VoidPages');
+    c.header('Vary', headers.get('Vary')!);
     return streamDeferredResponse(
       JSON.stringify(pageObj) + '\n',
       deferredMap,

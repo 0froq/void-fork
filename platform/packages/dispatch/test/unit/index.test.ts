@@ -5479,6 +5479,42 @@ describe('static asset caching', () => {
     expect(edgeCacheStore.size).toBe(0);
   });
 
+  it.each(['Accept-Language', '*', 'X-VoidPages, Origin'])(
+    'does not share ISR responses with unsupported Vary: %s',
+    async (vary) => {
+      let renderedLanguage = 'en';
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'test-worker',
+          projectId: 'proj-1',
+          ssr: true,
+          revalidate: 60,
+          version: 'deploy-1',
+        },
+        workerFetchImpl: async () =>
+          new Response(renderedLanguage, {
+            headers: { 'Content-Type': 'text/html', Vary: vary },
+          }),
+      });
+      for (const language of ['en', 'ja']) {
+        renderedLanguage = language;
+        const ctx = createCtx();
+        const response = await app.fetch(
+          new Request('https://test.void.app/', { headers: { 'Accept-Language': language } }),
+          env,
+          ctx,
+        );
+        expect(await response.text()).toBe(language);
+        await Promise.all(
+          (ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]),
+        );
+        expect([...kvStore.keys()].filter((key) => key.includes('/isr/'))).toEqual([]);
+        expect(edgeCacheStore.size).toBe(0);
+      }
+      expect(workerFetch).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it('does not cache when worker sets Cache-Control: private', async () => {
     const routing: RoutingEntry = {
       workerName: 'test-worker',

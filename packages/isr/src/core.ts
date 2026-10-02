@@ -5,7 +5,7 @@ import { matchLiteralPattern, matchSegmentPattern } from '@void/edge';
  * proven safe to share. Readers reject entries from earlier policies instead
  * of replaying opaque bodies whose private headers were stripped at write time.
  */
-export const SHARED_CACHE_POLICY_VERSION = 2 as const;
+export const SHARED_CACHE_POLICY_VERSION = 3 as const;
 export const SHARED_CACHE_POLICY_HEADER = 'x-void-shared-cache-policy';
 
 /** Stamp an internal edge-cache representation with the policy that admitted it. */
@@ -280,6 +280,19 @@ export function isFrameworkDocumentRequest(request: Request): boolean {
 
 /** Return whether a response explicitly forbids storage in a shared cache. */
 export function hasSharedCacheOptOut(response: Response): boolean {
+  // Only the Pages protocol has a separate cache representation. Every other
+  // header-dependent response must render live, including Vary: *.
+  if (
+    response.headers
+      .get('Vary')
+      ?.split(',')
+      .some((name) => {
+        const header = name.trim().toLowerCase();
+        return header !== '' && header !== 'x-voidpages';
+      })
+  ) {
+    return true;
+  }
   if (response.headers.has('Set-Cookie')) {
     return true;
   }

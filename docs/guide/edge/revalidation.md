@@ -98,6 +98,8 @@ Only complete `200` responses are cached. A response with `Cache-Control: privat
 `no-store`, or `no-cache`, or any `Set-Cookie` header, stays private to that request.
 If a public page starts returning one of those headers, Void removes its cached response.
 
+Responses that vary by request headers, such as `Vary: Accept-Language` or `Vary: Origin`, are rendered live. `Vary: *` also disables shared caching. Void's `X-VoidPages` header is supported because HTML and Pages JSON have separate cached responses.
+
 ## Cache bypass
 
 Requests with `Cookie`, `Authorization`, or Cloudflare Access's `Cf-Access-Jwt-Assertion` header bypass the ISR cache entirely and always dispatch to the worker. Authenticated responses are not shared between users, including when Access authentication supplies no cookie.
