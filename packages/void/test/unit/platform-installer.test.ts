@@ -4373,9 +4373,11 @@ describe('platform installer', () => {
                 identityProviderIds: appAccess === 'public' ? [] : ['idp'],
                 policyIds: appAccess === 'public' ? [] : ['policy'],
               }),
-            initializeAppAccess: async ({ setupJson }) => {
+            initializeAppAccess: async ({ setupJson, setupToken }) => {
               expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
               expect(JSON.parse(setupJson).apiToken).toBe('app-management-only');
+              expect(setupToken).toMatch(/^[a-f0-9]{64}$/);
+              expect(apiSecrets?.PLATFORM_APP_ACCESS_SETUP_TOKEN).toBe(setupToken);
               lifecycleEvents.push('app-access');
               if (failAppAccess) {
                 throw new Error('app access not ready');

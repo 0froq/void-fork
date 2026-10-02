@@ -1546,10 +1546,6 @@ export async function installPlatform(
   ) {
     workerSecretUpdateIntent = null;
   }
-  let workerDeploymentSecrets: PlatformInstallationSecrets = {
-    ...secrets,
-    workerSecretUpdates: workerSecretUpdateIntent?.updates ?? {},
-  };
   try {
     assertPlatformRuntimeSafety(
       runtime,
@@ -1720,10 +1716,6 @@ export async function installPlatform(
           'platform: Prepared authentication does not match its administrator setup code.',
         );
       }
-      workerDeploymentSecrets = {
-        ...secrets,
-        workerSecretUpdates: workerSecretUpdateIntent?.updates ?? {},
-      };
       writePendingInstallationSecrets(manifest, {
         ...secretCheckpoint(secrets, workerSecretUpdateIntent),
         databaseClaimState: 'claimed',
@@ -2128,6 +2120,12 @@ export async function installPlatform(
             runtimeApiAssetsDirectory: join(runtimeDirectory, PLATFORM_ADMIN_ASSETS_DIRECTORY),
           }
         : {}),
+    };
+    // Preparation can generate new setup credentials. Snapshot only after all
+    // preparation has completed so the deployed API can verify the handoff.
+    const workerDeploymentSecrets: PlatformInstallationSecrets = {
+      ...secrets,
+      workerSecretUpdates: workerSecretUpdateIntent?.updates ?? {},
     };
     const requiresStagedCommit = !preserveDisabled && requiresTrafficGuard;
     const enabledConfigs = createPlatformWorkerConfigs({
