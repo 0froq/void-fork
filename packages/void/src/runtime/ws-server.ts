@@ -117,6 +117,12 @@ export function buildWebSocketInstanceId(
   if (route.params.length === 0) {
     return 'default';
   }
+  const entries = route.params.map((name) => [name, params[name] ?? ''] as const);
+  if (entries.length > 1 && entries.some(([, value]) => value.includes('&'))) {
+    // Keep unambiguous legacy identities. Ambiguous tuples must not adopt the
+    // old shared object's data, or collide with literal percent-encoded values.
+    return `v2:${JSON.stringify(entries)}`;
+  }
   return route.params.map((name) => `${name}=${params[name] ?? ''}`).join('&');
 }
 

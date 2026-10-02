@@ -3,6 +3,7 @@ import { defineDurableState } from '../../src/runtime/durable.ts';
 import {
   buildWebSocketInstanceId,
   createWebSocketDurableObject,
+  forwardWebSocketRequest,
 } from '../../src/runtime/ws-server.ts';
 import { defineRoom, defineWebSocket } from '../../src/runtime/ws.ts';
 import type { StandardSchemaV1 } from '../../src/standard-schema.ts';
@@ -70,6 +71,31 @@ describe('persistent resource runtime contracts', () => {
     expect(buildWebSocketInstanceId({ params: ['id'], key }, { id: 'general' })).toBe(
       'room=general',
     );
+  });
+
+  it('isolates ambiguous multi-parameter rooms without reusing legacy storage', async () => {
+    const keys: Array<string> = [];
+    const multiRoute = { ...route, pattern: '/teams/:team/rooms/:room', params: ['team', 'room'] };
+    const env = {
+      [route.bindingName]: {
+        idFromName(name: string) {
+          keys.push(name);
+          return name;
+        },
+        get: () => ({ fetch: async () => new Response('ok') }),
+      },
+    };
+    for (const path of ['/teams/a%26room%3Db/rooms/c', '/teams/a/rooms/b%26room%3Dc']) {
+      await forwardWebSocketRequest(new Request(`https://app.test${path}`), env, multiRoute);
+    }
+    expect(new Set(keys).size).toBe(2);
+    expect(keys).not.toContain('team=a&room=b&room=c');
+    expect(keys[0]).toBe(buildWebSocketInstanceId(multiRoute, { team: 'a&room=b', room: 'c' }));
+    expect(keys[1]).toBe(buildWebSocketInstanceId(multiRoute, { team: 'a', room: 'b&room=c' }));
+    expect(buildWebSocketInstanceId(multiRoute, { team: 'a', room: 'b%26room%3Dc' })).toBe(
+      'team=a&room=b%26room%3Dc',
+    );
+    expect(buildWebSocketInstanceId(route, { room: 'a&b=東京' })).toBe('room=a&b=東京');
   });
 
   it('rejects asynchronous or nonstring keys before selecting a namespace instance', () => {
