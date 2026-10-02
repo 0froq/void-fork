@@ -896,7 +896,9 @@ describe('platform credential onboarding', () => {
     expect(mocks.password).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'Secret Access Key:' }),
     );
-    const descriptions = info.mock.calls.map(([message]) => message).join('\n');
+    const descriptions = stripVTControlCharacters(
+      info.mock.calls.map(([message]) => message).join('\n'),
+    );
     expect(descriptions).toContain(
       'https://void.cloud/guide/platform/installation/prerequisites#platform-database',
     );

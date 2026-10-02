@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from 'node:util';
 import { createPlatformDeploymentManifest } from '@void/platform';
 import { describe, it, expect, vi } from 'vite-plus/test';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
@@ -155,11 +156,12 @@ describe('platform credential setup links', () => {
     );
     for (const key of ['jwtSecret', 'projectSecretKey']) {
       const help = platformSetupFieldHelp(key)!;
-      expect(help.description).toContain('Run openssl rand -base64 32');
-      expect(help.description).toContain(
+      const description = stripVTControlCharacters(help.description);
+      expect(description).toContain('Run openssl rand -base64 32');
+      expect(description).toContain(
         'https://void.cloud/guide/platform/installation/credentials#signing-and-encryption-keys',
       );
-      expect(help.description).not.toContain('\n');
+      expect(description).not.toContain('\n');
     }
     expect(platformSetupFieldHelp('jwtSecret')!.description).toContain(
       'Create a JWT signing key for platform login tokens',
