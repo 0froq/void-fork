@@ -14,15 +14,6 @@ export type ContainerApplicationInfo = Readonly<{
   max_instances?: number;
 }>;
 
-export type SandboxContainerConfig = Readonly<{
-  name: string;
-  image: string;
-  namespaceId: string;
-  instanceType?: string;
-  maxInstances?: number;
-  durableObjectManaged?: boolean;
-}>;
-
 type ScriptBinding = Readonly<{
   type: string;
   name?: string;
@@ -134,34 +125,19 @@ export async function getContainerApplication(
 export async function tryCreateContainerApplication(
   accountId: string,
   apiToken: string,
-  config: SandboxContainerConfig,
+  config: Readonly<{ name: string; namespaceId: string }>,
 ): Promise<ContainerApplicationInfo | undefined> {
-  const createBody = config.durableObjectManaged
-    ? {
-        name: config.name,
-        scheduling_policy: 'durable_object',
-        durable_objects: { namespace_id: config.namespaceId },
-      }
-    : {
-        name: config.name,
-        scheduling_policy: 'default',
-        configuration: {
-          image: config.image,
-          instance_type: config.instanceType ?? 'lite',
-        },
-        instances: 0,
-        max_instances: config.maxInstances ?? 20,
-        durable_objects: { namespace_id: config.namespaceId },
-        rollout_active_grace_period: 0,
-      };
-
   try {
     return await cfFetch<ContainerApplicationInfo>(
       `${containersUrl(accountId)}/applications`,
       apiToken,
       {
         method: 'POST',
-        body: JSON.stringify(createBody),
+        body: JSON.stringify({
+          name: config.name,
+          scheduling_policy: 'durable_object',
+          durable_objects: { namespace_id: config.namespaceId },
+        }),
       },
     );
   } catch (err) {

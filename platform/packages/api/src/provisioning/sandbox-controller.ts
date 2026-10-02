@@ -154,7 +154,7 @@ export async function provisionSandboxController(input: {
   apiService: string;
   identity: SandboxControllerIdentity;
   sandbox: NonNullable<DeployManifest['sandbox']>;
-}): Promise<{ workerName: string; containerApplicationId: string }> {
+}): Promise<void> {
   const { accountId, apiToken, apiService, identity, sandbox } = input;
   const workerName = sandboxControllerWorkerName(identity.projectId, identity.deploymentId);
   const source = getSandboxControllerSource();
@@ -261,16 +261,12 @@ export async function provisionSandboxController(input: {
   const created = await tryCreateContainerApplication(accountId, apiToken, {
     name: applicationName,
     namespaceId: namespace,
-    image: sandbox.image,
-    instanceType: sandbox.instanceType,
-    durableObjectManaged: true,
   });
   const application =
     created ?? (await findContainerApplication(accountId, apiToken, applicationName));
   if (!application || application.durable_objects?.namespace_id !== namespace) {
     throw new Error('Sandbox container application does not belong to this controller namespace.');
   }
-  return { workerName, containerApplicationId: application.id };
 }
 
 export async function verifySandboxController(
