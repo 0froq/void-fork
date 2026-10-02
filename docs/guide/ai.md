@@ -10,6 +10,14 @@ Void provides a typed AI client for Workers AI and Cloudflare's [AI Gateway](htt
 import { ai } from 'void/ai';
 ```
 
+## Handling usage limits
+
+Every AI operation is lazy and must be executed with `.match({ ok, limited })`. Both handlers are required, including for provider-native requests, model listing and document conversion. Return a useful fallback from `limited`, or use `limit.response({ message: 'AI is temporarily unavailable.' })` to send a structured HTTP 429. Limits expose `resource`, `reason`, and an optional `retryAt`. Other failures still reject.
+
+Do not await the operation itself; await its `.match()` call. TypeScript checks your handlers and the resulting success/fallback union.
+
+Streaming responses end with a `void:error` SSE event if generation is interrupted after the response starts. A recognized quota interruption calls your `limited` handler and emits `void:limit`, preserving the message from `limit.response()`. `fetchStream()` throws on either terminal event so your UI can exit its generating state. This also applies to streaming provider responses and `ai.run()` with `stream: true`.
+
 ## Basic Usage
 
 Call `ai.run()` with a model name and inputs. Model names and input types are fully typed from `@cloudflare/workers-types`.
@@ -21,9 +29,11 @@ import { ai } from 'void/ai';
 export const POST = defineHandler(async (c) => {
   const { prompt } = await c.req.json();
 
-  const result = await ai.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
-    messages: [{ role: 'user', content: prompt }],
-  });
+  const result = await ai
+    .run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+      messages: [{ role: 'user', content: prompt }],
+    })
+    .match({ ok: (result) => result, limited: (limit) => limit.response() });
 
   return c.json(result);
 });
@@ -42,9 +52,11 @@ import { ai } from 'void/ai';
 export const POST = defineHandler(async (c) => {
   const { prompt } = await c.req.json();
 
-  return ai.stream('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
-    messages: [{ role: 'user', content: prompt }],
-  });
+  return ai
+    .stream('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+      messages: [{ role: 'user', content: prompt }],
+    })
+    .match({ ok: (result) => result, limited: (limit) => limit.response() });
 });
 ```
 
@@ -53,10 +65,14 @@ export const POST = defineHandler(async (c) => {
 Use `ai.models()` to list available models:
 
 ```ts
-const models = await ai.models();
+const models = await ai
+  .models()
+  .match({ ok: (result) => result, limited: (limit) => limit.response() });
 
 // Filter by task
-const textModels = await ai.models({ task: 'Text Generation' });
+const textModels = await ai
+  .models({ task: 'Text Generation' })
+  .match({ ok: (result) => result, limited: (limit) => limit.response() });
 ```
 
 ## Markdown Conversion
@@ -64,7 +80,9 @@ const textModels = await ai.models({ task: 'Text Generation' });
 Use `ai.toMarkdown()` to convert documents to markdown:
 
 ```ts
-const result = await ai.toMarkdown([{ name: 'document.pdf', blob: pdfBytes }]);
+const result = await ai
+  .toMarkdown([{ name: 'document.pdf', blob: pdfBytes }])
+  .match({ ok: (result) => result, limited: (limit) => limit.response() });
 ```
 
 ## Local Development
@@ -97,38 +115,44 @@ A team platform uses its own Cloudflare account and may apply per-user limits. A
 `ai.run()` mirrors Cloudflare's `env.AI.run()` model naming and input schemas. Third-party models use Cloudflare model IDs and Cloudflare-managed credentials.
 
 ```ts
-const result = await ai.run('google/gemini-2.5-flash', {
-  contents: [
-    {
-      role: 'user',
-      parts: [{ text: 'Explain Durable Objects in one paragraph.' }],
-    },
-  ],
-});
+const result = await ai
+  .run('google/gemini-2.5-flash', {
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: 'Explain Durable Objects in one paragraph.' }],
+      },
+    ],
+  })
+  .match({ ok: (result) => result, limited: (limit) => limit.response() });
 ```
 
 OpenAI-compatible models use OpenAI-style `messages`:
 
 ```ts
-const result = await ai.run('openai/gpt-4.1-mini', {
-  messages: [{ role: 'user', content: 'Summarize this deploy.' }],
-});
+const result = await ai
+  .run('openai/gpt-4.1-mini', {
+    messages: [{ role: 'user', content: 'Summarize this deploy.' }],
+  })
+  .match({ ok: (result) => result, limited: (limit) => limit.response() });
 ```
 
 Pass Cloudflare AI Gateway options as the third argument:
 
 ```ts
-const result = await ai.run(
-  'openai/gpt-4.1-mini',
-  {
-    messages: [{ role: 'user', content: 'Summarize this deploy.' }],
-  },
-  {
-    gateway: {
-      skipCache: true,
+const result = await ai
+  .run(
+    'openai/gpt-4.1-mini',
+    {
+      messages: [{ role: 'user', content: 'Summarize this deploy.' }],
     },
-  },
-);
+    {
+      gateway: {
+        skipCache: true,
+      },
+    },
+  )
+  .match({ ok: (result) => result, limited: (limit) => limit.response() });
 ```
 
 For provider-native requests on a direct deployment, configure [`ai.gateway`](../integrations/cloudflare.md#ai-self-host).
@@ -149,13 +173,16 @@ import { ai } from 'void/ai';
 export const POST = defineHandler(async (c) => {
   const { prompt } = await c.req.json();
 
-  const response = await ai.provider('openai').fetch('/chat/completions', {
-    body: {
-      model: 'gpt-4o',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 512,
-    },
-  });
+  const response = await ai
+    .provider('openai')
+    .fetch('/chat/completions', {
+      body: {
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 512,
+      },
+    })
+    .match({ ok: (result) => result, limited: (limit) => limit.response() });
 
   const result = await response.json();
   return c.json(result);
@@ -176,7 +203,8 @@ const response = await ai
         },
       ],
     },
-  });
+  })
+  .match({ ok: (result) => result, limited: (limit) => limit.response() });
 
 const result = await response.json();
 ```
@@ -194,7 +222,8 @@ const response = await ai
   })
   .fetch('/v1/respond', {
     body: { prompt: 'Hello' },
-  });
+  })
+  .match({ ok: (result) => result, limited: (limit) => limit.response() });
 ```
 
 ### Image Generation
@@ -204,7 +233,9 @@ Use `ai.run()` or `ai.image()` for Cloudflare-native image models:
 ```ts
 export const POST = defineHandler(async (c) => {
   const { prompt } = await c.req.json();
-  return ai.image('@cf/black-forest-labs/flux-1-schnell', { prompt });
+  return ai
+    .image('@cf/black-forest-labs/flux-1-schnell', { prompt })
+    .match({ ok: (result) => result, limited: (limit) => limit.response() });
 });
 ```
 
@@ -214,13 +245,16 @@ Use `ai.provider().fetch()` for provider-native image APIs. Match the [provider'
 export const POST = defineHandler(async (c) => {
   const { prompt } = await c.req.json();
 
-  return ai.provider('openai').fetch('/images/generations', {
-    body: {
-      model: 'gpt-image-2.5-sunburst',
-      prompt,
-      size: '1024x1024',
-    },
-  });
+  return ai
+    .provider('openai')
+    .fetch('/images/generations', {
+      body: {
+        model: 'gpt-image-2.5-sunburst',
+        prompt,
+        size: '1024x1024',
+      },
+    })
+    .match({ ok: (result) => result, limited: (limit) => limit.response() });
 });
 ```
 
@@ -234,7 +268,10 @@ export const POST = defineHandler(async (c) => {
   form.set('prompt', String(body.prompt));
   form.set('image', body.image as Blob, 'source.png');
 
-  return ai.provider('openai').fetch('/images/edits', { body: form });
+  return ai
+    .provider('openai')
+    .fetch('/images/edits', { body: form })
+    .match({ ok: (result) => result, limited: (limit) => limit.response() });
 });
 ```
 

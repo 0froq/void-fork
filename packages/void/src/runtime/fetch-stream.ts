@@ -73,6 +73,22 @@ export async function* fetchStream<
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let event = '';
+  const terminal = (data: string) => {
+    if (event !== 'void:error' && event !== 'void:limit') {
+      return;
+    }
+    let message = 'Generation was interrupted.';
+    try {
+      const body = JSON.parse(data);
+      if (typeof body.message === 'string') {
+        message = body.message;
+      }
+    } catch {
+      /* Use the default interruption message for malformed events. */
+    }
+    throw new FetchError(message);
+  };
 
   try {
     while (true) {
@@ -89,12 +105,21 @@ export async function* fetchStream<
 
       for (const line of lines) {
         const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith(':')) {
+        if (trimmed.startsWith('event:')) {
+          event = trimmed.slice(6).trim();
+          continue;
+        }
+        if (!trimmed) {
+          event = '';
+          continue;
+        }
+        if (trimmed.startsWith(':')) {
           continue;
         }
 
         if (trimmed.startsWith('data: ')) {
           const data = trimmed.slice(6);
+          terminal(data);
           if (data === '[DONE]') {
             return;
           }
@@ -124,6 +149,7 @@ export async function* fetchStream<
       const trimmed = buffer.trim();
       if (trimmed.startsWith('data: ')) {
         const data = trimmed.slice(6);
+        terminal(data);
         if (data !== '[DONE]') {
           try {
             const parsed = JSON.parse(data);

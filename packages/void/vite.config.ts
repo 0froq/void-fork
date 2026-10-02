@@ -125,6 +125,7 @@ export default defineConfig({
       'src/runtime/isr.ts',
       'src/runtime/log.ts',
       'src/runtime/ai.ts',
+      'src/runtime/limits.ts',
       'src/runtime/email.ts',
       'src/runtime/email-protocol.ts',
       'src/runtime/email/testing.ts',

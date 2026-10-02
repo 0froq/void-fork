@@ -35,7 +35,14 @@ describe('runtime ai', () => {
     const { envContext } = await import('../../src/runtime/env-raw.ts');
     const { ai } = await import('../../src/runtime/ai.ts');
     await envContext.run({}, async () => {
-      expect(() => ai.run('@cf/meta/llama', {})).toThrow(
+      await expect(
+        ai.run('@cf/meta/llama', {}).match({
+          ok: (value) => value,
+          limited: (limit) => {
+            throw new Error(`Unexpected quota: ${limit.reason}`);
+          },
+        }),
+      ).rejects.toThrow(
         'Configure a Workers AI binding (env.AI) for direct Cloudflare development',
       );
     });
@@ -61,9 +68,16 @@ describe('runtime ai', () => {
         __VOID_PROXY_URL: 'https://proxy.test',
       },
       async () => {
-        const result = await ai.run('google/gemini-2.5-flash', {
-          contents: [{ role: 'user', parts: [{ text: 'Hello' }] }],
-        });
+        const result = await ai
+          .run('google/gemini-2.5-flash', {
+            contents: [{ role: 'user', parts: [{ text: 'Hello' }] }],
+          })
+          .match({
+            ok: (value) => value,
+            limited: (limit) => {
+              throw new Error(`Unexpected quota: ${limit.reason}`);
+            },
+          });
 
         expect(result).toEqual({ choices: [{ message: { content: 'Hi' } }] });
       },
@@ -102,13 +116,21 @@ describe('runtime ai', () => {
         OPENAI_API_KEY: 'sk-test',
       },
       async () => {
-        const response = await ai.provider('openai').fetch('/chat/completions', {
-          headers: { 'openai-beta': 'assistants=v2' },
-          body: {
-            model: 'gpt-4o',
-            messages: [{ role: 'user', content: 'Hello' }],
-          },
-        });
+        const response = await ai
+          .provider('openai')
+          .fetch('/chat/completions', {
+            headers: { 'openai-beta': 'assistants=v2' },
+            body: {
+              model: 'gpt-4o',
+              messages: [{ role: 'user', content: 'Hello' }],
+            },
+          })
+          .match({
+            ok: (value) => value,
+            limited: (limit) => {
+              throw new Error(`Unexpected quota: ${limit.reason}`);
+            },
+          });
 
         expect(await response.json()).toEqual({ id: 'chatcmpl_1' });
       },
@@ -157,9 +179,17 @@ describe('runtime ai', () => {
         OPENAI_API_KEY: 'sk-test',
       },
       async () => {
-        const response = await ai.provider('openai').fetch('/chat/completions', {
-          body: { model: 'gpt-4o', messages: [{ role: 'user', content: 'Hello' }] },
-        });
+        const response = await ai
+          .provider('openai')
+          .fetch('/chat/completions', {
+            body: { model: 'gpt-4o', messages: [{ role: 'user', content: 'Hello' }] },
+          })
+          .match({
+            ok: (value) => value,
+            limited: (limit) => {
+              throw new Error(`Unexpected quota: ${limit.reason}`);
+            },
+          });
 
         expect(response.status).toBe(401);
         expect(await response.json()).toEqual({ error: { message: 'Invalid API key' } });
@@ -188,9 +218,17 @@ describe('runtime ai', () => {
         OPENAI_API_KEY: 'sk-test',
       },
       async () => {
-        const response = await ai.provider('openai').fetch('/chat/completions', {
-          body: { model: 'gpt-4o', messages: [{ role: 'user', content: 'Hello' }] },
-        });
+        const response = await ai
+          .provider('openai')
+          .fetch('/chat/completions', {
+            body: { model: 'gpt-4o', messages: [{ role: 'user', content: 'Hello' }] },
+          })
+          .match({
+            ok: (value) => value,
+            limited: (limit) => {
+              throw new Error(`Unexpected quota: ${limit.reason}`);
+            },
+          });
 
         expect(response.status).toBe(401);
         expect(await response.json()).toEqual({ error: { message: 'Invalid API key' } });
@@ -233,7 +271,13 @@ describe('runtime ai', () => {
             apiKeyHeader: 'x-api-key',
             apiKeyPrefix: '',
           })
-          .fetch('/v1/respond', { body: 'hello' });
+          .fetch('/v1/respond', { body: 'hello' })
+          .match({
+            ok: (value) => value,
+            limited: (limit) => {
+              throw new Error(`Unexpected quota: ${limit.reason}`);
+            },
+          });
       },
     );
 
@@ -273,7 +317,15 @@ describe('runtime ai', () => {
         form.set('prompt', 'change the background');
         form.set('image', new Blob(['png-bytes'], { type: 'image/png' }), 'source.png');
 
-        await ai.provider('openai').fetch('/images/edits', { body: form });
+        await ai
+          .provider('openai')
+          .fetch('/images/edits', { body: form })
+          .match({
+            ok: (value) => value,
+            limited: (limit) => {
+              throw new Error(`Unexpected quota: ${limit.reason}`);
+            },
+          });
       },
     );
 
@@ -348,12 +400,19 @@ describe('runtime ai', () => {
         __VOID_PROXY_URL: 'https://proxy.test',
       },
       async () => {
-        const result = await ai.run(
-          '@cf/black-forest-labs/flux-1-schnell' as keyof AiModels,
-          {
-            prompt: 'a small robot',
-          } as never,
-        );
+        const result = await ai
+          .run(
+            '@cf/black-forest-labs/flux-1-schnell' as keyof AiModels,
+            {
+              prompt: 'a small robot',
+            } as never,
+          )
+          .match({
+            ok: (value) => value,
+            limited: (limit) => {
+              throw new Error(`Unexpected quota: ${limit.reason}`);
+            },
+          });
 
         expect(result).toBeInstanceOf(Blob);
         expect((result as Blob).type).toBe('image/png');
@@ -381,11 +440,20 @@ describe('runtime ai', () => {
       const direct = makeDirectAi();
 
       await envContext.run({ AI: direct.AI }, async () => {
-        const result = await ai.run('@cf/meta/llama', { prompt: 'Hi' });
+        const result = await ai.run('@cf/meta/llama', { prompt: 'Hi' }).match({
+          ok: (value) => value,
+          limited: (limit) => {
+            throw new Error(`Unexpected quota: ${limit.reason}`);
+          },
+        });
         expect(result).toEqual({ ok: true });
       });
 
-      expect(direct.run).toHaveBeenCalledWith('@cf/meta/llama', { prompt: 'Hi' });
+      expect(direct.run).toHaveBeenCalledWith(
+        '@cf/meta/llama',
+        { prompt: 'Hi' },
+        { returnRawResponse: true },
+      );
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
@@ -396,10 +464,21 @@ describe('runtime ai', () => {
       const direct = makeDirectAi();
 
       await envContext.run({ MY_AI: direct.AI, __VOID_AI_BINDING: 'MY_AI' }, async () => {
-        expect(await ai.run('@cf/meta/llama', { prompt: 'Hi' })).toEqual({ ok: true });
+        expect(
+          await ai.run('@cf/meta/llama', { prompt: 'Hi' }).match({
+            ok: (value) => value,
+            limited: (limit) => {
+              throw new Error(`Unexpected quota: ${limit.reason}`);
+            },
+          }),
+        ).toEqual({ ok: true });
       });
 
-      expect(direct.run).toHaveBeenCalledWith('@cf/meta/llama', { prompt: 'Hi' });
+      expect(direct.run).toHaveBeenCalledWith(
+        '@cf/meta/llama',
+        { prompt: 'Hi' },
+        { returnRawResponse: true },
+      );
     });
 
     it('provider().fetch hits the user gateway with provider auth and no metering header', async () => {
@@ -420,9 +499,17 @@ describe('runtime ai', () => {
       await envContext.run(
         { AI: direct.AI, __VOID_AI_GATEWAY: 'my-gw', OPENAI_API_KEY: 'sk-test' },
         async () => {
-          const response = await ai.provider('openai').fetch('/chat/completions', {
-            body: { model: 'gpt-4o', messages: [{ role: 'user', content: 'Hello' }] },
-          });
+          const response = await ai
+            .provider('openai')
+            .fetch('/chat/completions', {
+              body: { model: 'gpt-4o', messages: [{ role: 'user', content: 'Hello' }] },
+            })
+            .match({
+              ok: (value) => value,
+              limited: (limit) => {
+                throw new Error(`Unexpected quota: ${limit.reason}`);
+              },
+            });
           // Gateway response passes through untouched.
           expect(await response.json()).toEqual({ id: 'chatcmpl_direct' });
         },
@@ -471,9 +558,17 @@ describe('runtime ai', () => {
       await envContext.run(
         { AI: direct.AI, __VOID_AI_GATEWAY: 'my-gw', ANTHROPIC_API_KEY: 'sk-ant-test' },
         async () => {
-          await ai.provider('anthropic').fetch('/v1/messages', {
-            body: { model: 'claude-3-5-sonnet', messages: [{ role: 'user', content: 'Hi' }] },
-          });
+          await ai
+            .provider('anthropic')
+            .fetch('/v1/messages', {
+              body: { model: 'claude-3-5-sonnet', messages: [{ role: 'user', content: 'Hi' }] },
+            })
+            .match({
+              ok: (value) => value,
+              limited: (limit) => {
+                throw new Error(`Unexpected quota: ${limit.reason}`);
+              },
+            });
         },
       );
 
@@ -504,9 +599,17 @@ describe('runtime ai', () => {
       await envContext.run(
         { AI: direct.AI, __VOID_AI_GATEWAY: 'my-gw', PARALLEL_API_KEY: 'pk-test' },
         async () => {
-          await ai.provider('parallel').fetch('/v1/tasks/runs', {
-            body: { input: 'What is the capital of France?' },
-          });
+          await ai
+            .provider('parallel')
+            .fetch('/v1/tasks/runs', {
+              body: { input: 'What is the capital of France?' },
+            })
+            .match({
+              ok: (value) => value,
+              limited: (limit) => {
+                throw new Error(`Unexpected quota: ${limit.reason}`);
+              },
+            });
         },
       );
 
@@ -539,7 +642,13 @@ describe('runtime ai', () => {
         async () => {
           await ai
             .provider('deepgram')
-            .fetch('/v1/listen', { body: { url: 'https://example.com/a.wav' } });
+            .fetch('/v1/listen', { body: { url: 'https://example.com/a.wav' } })
+            .match({
+              ok: (value) => value,
+              limited: (limit) => {
+                throw new Error(`Unexpected quota: ${limit.reason}`);
+              },
+            });
         },
       );
 
@@ -562,9 +671,17 @@ describe('runtime ai', () => {
       const direct = makeDirectAi();
 
       await envContext.run({ AI: direct.AI, OPENAI_API_KEY: 'sk-test' }, async () => {
-        const response = await ai.provider('openai').fetch('/chat/completions', {
-          body: { model: 'gpt-4o' },
-        });
+        const response = await ai
+          .provider('openai')
+          .fetch('/chat/completions', {
+            body: { model: 'gpt-4o' },
+          })
+          .match({
+            ok: (value) => value,
+            limited: (limit) => {
+              throw new Error(`Unexpected quota: ${limit.reason}`);
+            },
+          });
         expect(response.status).toBe(501);
         const body = (await response.json()) as { error: string };
         expect(body.error).toMatch(/gateway/i);
@@ -589,9 +706,17 @@ describe('runtime ai', () => {
 
       // Gateway present + safe path, but OPENAI_API_KEY is absent.
       await envContext.run({ AI: direct.AI, __VOID_AI_GATEWAY: 'my-gw' }, async () => {
-        const response = await ai.provider('openai').fetch('/chat/completions', {
-          body: { model: 'gpt-4o' },
-        });
+        const response = await ai
+          .provider('openai')
+          .fetch('/chat/completions', {
+            body: { model: 'gpt-4o' },
+          })
+          .match({
+            ok: (value) => value,
+            limited: (limit) => {
+              throw new Error(`Unexpected quota: ${limit.reason}`);
+            },
+          });
         expect(response.status).toBe(400);
         const body = (await response.json()) as { error: string };
         expect(body.error).toContain('OPENAI_API_KEY');
@@ -621,9 +746,17 @@ describe('runtime ai', () => {
       await envContext.run(
         { AI: direct.AI, __VOID_AI_GATEWAY: 'my-gw', OPENAI_API_KEY: 'sk-test' },
         async () => {
-          const response = await ai.provider('openai').fetch('/chat/completions', {
-            body: { model: 'gpt-4o' },
-          });
+          const response = await ai
+            .provider('openai')
+            .fetch('/chat/completions', {
+              body: { model: 'gpt-4o' },
+            })
+            .match({
+              ok: (value) => value,
+              limited: (limit) => {
+                throw new Error(`Unexpected quota: ${limit.reason}`);
+              },
+            });
           expect(response.status).toBe(502);
           const body = (await response.json()) as { error: string };
           expect(body.error).toContain('my-gw');
@@ -651,7 +784,13 @@ describe('runtime ai', () => {
         async () => {
           const response = await ai
             .provider('openai')
-            .fetch('https://evil.example.com/v1/chat', { body: { model: 'gpt-4o' } });
+            .fetch('https://evil.example.com/v1/chat', { body: { model: 'gpt-4o' } })
+            .match({
+              ok: (value) => value,
+              limited: (limit) => {
+                throw new Error(`Unexpected quota: ${limit.reason}`);
+              },
+            });
           expect(response.status).toBe(400);
           const body = (await response.json()) as { error: string };
           expect(body.error).toMatch(/must be relative/);
@@ -678,9 +817,17 @@ describe('runtime ai', () => {
       await envContext.run(
         { AI: direct.AI, __VOID_AI_GATEWAY: 'my-gw', OPENAI_API_KEY: 'sk-test' },
         async () => {
-          await ai.provider('openai').fetch('/chat/completions', {
-            body: { model: 'gpt-4o', messages: [{ role: 'user', content: 'Hello' }] },
-          });
+          await ai
+            .provider('openai')
+            .fetch('/chat/completions', {
+              body: { model: 'gpt-4o', messages: [{ role: 'user', content: 'Hello' }] },
+            })
+            .match({
+              ok: (value) => value,
+              limited: (limit) => {
+                throw new Error(`Unexpected quota: ${limit.reason}`);
+              },
+            });
         },
       );
 
@@ -713,7 +860,15 @@ describe('runtime ai', () => {
           form.set('prompt', 'change the background');
           form.set('image', new Blob(['png-bytes'], { type: 'image/png' }), 'source.png');
 
-          await ai.provider('openai').fetch('/images/edits', { body: form });
+          await ai
+            .provider('openai')
+            .fetch('/images/edits', { body: form })
+            .match({
+              ok: (value) => value,
+              limited: (limit) => {
+                throw new Error(`Unexpected quota: ${limit.reason}`);
+              },
+            });
         },
       );
 
@@ -732,5 +887,118 @@ describe('runtime ai', () => {
       expect(image).toBeInstanceOf(Blob);
       expect(await (image as Blob).text()).toBe('png-bytes');
     });
+  });
+});
+
+describe('AI limit outcomes', () => {
+  it.each(['run', 'stream', 'image', 'models', 'toMarkdown', 'provider'] as const)(
+    'requires handling %s quota failures before producing a value',
+    async (method) => {
+      vi.resetModules();
+      const { envContext } = await import('../../src/runtime/env-raw.ts');
+      const { ai } = await import('../../src/runtime/ai.ts');
+      const fetch = vi.fn(async () =>
+        Response.json(
+          {
+            code: 'usage_limit',
+            resource: 'ai',
+            reason: 'monthly_quota',
+            message: 'AI allowance exhausted',
+          },
+          { status: 429 },
+        ),
+      );
+      await envContext.run(
+        {
+          __VOID_PROXY: { fetch },
+          __PROJECT_ID: 'p',
+          __VOID_PROXY_TOKEN: 't',
+          OPENAI_API_KEY: 'test',
+        },
+        async () => {
+          const op =
+            method === 'provider'
+              ? ai.provider('openai').fetch('/chat/completions')
+              : method === 'models'
+                ? ai.models()
+                : method === 'toMarkdown'
+                  ? ai.toMarkdown({ name: 'test.txt', blob: new Blob(['text']) })
+                  : ai[method]('model', {});
+          expect(fetch).not.toHaveBeenCalled();
+          const ok = vi.fn();
+          const response = await op.match({
+            ok,
+            limited: (limit) => limit.response({ message: 'Please try later' }),
+          });
+          expect(ok).not.toHaveBeenCalled();
+          expect(response.status).toBe(429);
+          expect(await response.json()).toMatchObject({
+            reason: 'monthly_quota',
+            message: 'Please try later',
+          });
+        },
+      );
+    },
+  );
+});
+
+it('handles a quota interruption after streaming has started and emits the application fallback', async () => {
+  vi.resetModules();
+  const { envContext } = await import('../../src/runtime/env-raw.ts');
+  const { ai } = await import('../../src/runtime/ai.ts');
+  const { UsageLimit } = await import('../../src/runtime/limits.ts');
+  const limit = new UsageLimit({ resource: 'ai', reason: 'rate_limit', message: 'Provider limit' });
+  const body = new ReadableStream({
+    pull(controller) {
+      controller.error(limit);
+    },
+  });
+  await envContext.run({ AI: makeDirectAi({ run: () => body }).AI }, async () => {
+    const limited = vi.fn((limit) => limit.response({ message: 'Your draft is still editable.' }));
+    const response = await ai.stream('model', {}).match({ ok: (response) => response, limited });
+    const text = await response.text();
+    expect(limited).toHaveBeenCalledOnce();
+    expect(text).toContain('event: void:limit');
+    expect(text).toContain('Your draft is still editable.');
+  });
+});
+
+it.each(['run', 'stream', 'image'] as const)(
+  'handles native %s quotas before the binding discards the HTTP status',
+  async (method) => {
+    vi.resetModules();
+    const { envContext } = await import('../../src/runtime/env-raw.ts');
+    const { ai } = await import('../../src/runtime/ai.ts');
+    const direct = makeDirectAi({
+      run: () =>
+        Response.json(
+          { errors: [{ code: 3036, message: 'Account limited' }] },
+          { status: 429, headers: { 'Retry-After': '60' } },
+        ),
+    });
+    await envContext.run({ AI: direct.AI }, async () => {
+      const ok = vi.fn();
+      const response = await ai[method]('model', {}).match({
+        ok,
+        limited: (limit) => limit.response(),
+      });
+      expect(response.status).toBe(429);
+      expect(response.headers.get('retry-after')).toBeTruthy();
+      expect(ok).not.toHaveBeenCalled();
+    });
+  },
+);
+
+it('decodes native JSON responses and preserves explicitly requested raw responses', async () => {
+  vi.resetModules();
+  const { envContext } = await import('../../src/runtime/env-raw.ts');
+  const { ai } = await import('../../src/runtime/ai.ts');
+  const direct = makeDirectAi({ run: () => Response.json({ response: 'hello' }) });
+  await envContext.run({ AI: direct.AI }, async () => {
+    const handlers = { ok: (value: unknown) => value, limited: () => null };
+    expect(await ai.run('model', {}).match(handlers)).toEqual({ response: 'hello' });
+    expect(await ai.run('model', {}, { returnRawResponse: true }).match(handlers)).toBeInstanceOf(
+      Response,
+    );
   });
 });

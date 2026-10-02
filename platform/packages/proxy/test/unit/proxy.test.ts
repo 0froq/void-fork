@@ -1069,7 +1069,12 @@ describe('proxy worker', () => {
       );
 
       expect(res.status).toBe(429);
-      expect(await res.json()).toEqual({ error: 'AI usage limit exceeded' });
+      expect(await res.json()).toEqual({
+        code: 'usage_limit',
+        resource: 'ai',
+        reason: 'monthly_quota',
+        message: 'AI usage limit exceeded',
+      });
       expect(res.headers.get('access-control-allow-origin')).toBe('*');
     });
 
@@ -1085,7 +1090,12 @@ describe('proxy worker', () => {
       );
 
       expect(res.status).toBe(429);
-      expect(await res.json()).toEqual({ error: 'AI usage limit exceeded' });
+      expect(await res.json()).toEqual({
+        code: 'usage_limit',
+        resource: 'ai',
+        reason: 'monthly_quota',
+        message: 'AI usage limit exceeded',
+      });
     });
 
     it('allows request when ai-block key does not exist', async () => {
@@ -1642,7 +1652,12 @@ describe('proxy worker', () => {
       );
 
       expect(res.status).toBe(429);
-      expect(await res.json()).toEqual({ error: 'AI usage limit exceeded' });
+      expect(await res.json()).toEqual({
+        code: 'usage_limit',
+        resource: 'ai',
+        reason: 'monthly_quota',
+        message: 'AI usage limit exceeded',
+      });
     });
   });
 

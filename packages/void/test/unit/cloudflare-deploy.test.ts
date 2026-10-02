@@ -6226,7 +6226,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       ...INIT_MIGRATION,
       'queues/jobs.ts': 'export default {};',
       'routes/ai.ts':
-        "import { ai } from 'void/ai';\nexport const GET = () => ai.run('@cf/x', {});",
+        "import { ai } from 'void/ai';\nexport const GET = () => ai.run('@cf/x', {}).match({ ok: result => result, limited: limit => limit.response() });",
     });
     const { deps, wranglerArgs, exitCalls } = harness({
       runBuild: () =>
@@ -6454,7 +6454,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
       ...INIT_MIGRATION,
       'queues/jobs.ts': 'export default {};',
       'routes/ai.ts':
-        "import { ai } from 'void/ai';\nexport const GET = () => ai.run('@cf/x', {});",
+        "import { ai } from 'void/ai';\nexport const GET = () => ai.run('@cf/x', {}).match({ ok: result => result, limited: limit => limit.response() });",
     });
     const { deps, wranglerArgs, exitCalls } = harness({
       runBuild: () =>

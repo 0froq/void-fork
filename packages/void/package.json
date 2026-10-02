@@ -323,6 +323,11 @@
     "./_sandbox-container": {
       "types": "./dist/runtime/sandbox-container.d.mts",
       "import": "./dist/runtime/sandbox-container.mjs"
+    },
+    "./limits": {
+      "types": "./dist/runtime/limits.d.mts",
+      "import": "./dist/runtime/limits.mjs",
+      "require": "./dist/runtime/limits.mjs"
     }
   },
   "scripts": {

@@ -6,6 +6,13 @@ import {
   type AiProviderOptions,
 } from './ai-types.ts';
 import { getRawRuntimeEnv, type RuntimeEnv } from './env-raw.ts';
+import {
+  readUsageLimit,
+  UsageLimit,
+  limitOperation,
+  limitFromResponse,
+  type LimitOperation,
+} from './limits.ts';
 
 const PROXY_URL = 'https://proxy.void.cloud/ai';
 const STAGING_PROXY_URL = 'https://proxy.staging.void.cloud/ai';
@@ -462,6 +469,10 @@ function makeServiceBindingBackend(proxy: Fetcher, runtimeEnv: RuntimeEnv): AiBa
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action, ...body }),
     });
+    const limit = await limitFromResponse(res, 'ai');
+    if (limit) {
+      throw limit;
+    }
     if (options.throwOnError !== false && !res.ok) {
       const text = await res.text();
       throw new Error(`ai: Proxy request failed with ${res.status}: '${text}'.`);
@@ -534,6 +545,10 @@ function makeHttpBackend(token: string, projectId: string, runtimeEnv: RuntimeEn
       body: JSON.stringify({ action, ...body, projectId }),
       redirect: 'manual',
     });
+    const limit = await limitFromResponse(res, 'ai');
+    if (limit) {
+      throw limit;
+    }
     if (options.throwOnError !== false && !res.ok) {
       const text = await res.text();
       throw new Error(`ai: Proxy request failed with ${res.status}: '${text}'.`);
@@ -577,13 +592,37 @@ function makeDirectBackend(
   runtimeEnv: RuntimeEnv,
   gatewayId: string | undefined,
 ): AiBackend {
+  // The binding normally throws an Error containing only a message. Inspect the
+  // raw response before its parser discards status and Retry-After metadata.
+  // https://github.com/cloudflare/workerd/blob/main/src/cloudflare/internal/ai-api.ts
+  const run = async (model: string, inputs: unknown, options?: unknown): Promise<unknown> => {
+    const opts = (options ?? {}) as AiOptions;
+    const response = await directAi.run(model, inputs as never, {
+      ...opts,
+      returnRawResponse: true,
+    });
+    if (!(response instanceof Response)) {
+      return response;
+    }
+    const limit = await limitFromResponse(response, 'ai');
+    if (limit) {
+      throw limit;
+    }
+    if (opts.returnRawResponse || opts.websocket) {
+      return response;
+    }
+    if (!response.ok) {
+      throw new Error(`ai: Request failed with ${response.status}: '${await response.text()}'.`);
+    }
+    return isJsonMediaType(mediaTypeFromContentType(response.headers.get('content-type')))
+      ? response.json()
+      : response.body;
+  };
   return {
-    run: directAi.run.bind(directAi),
+    run,
     async image(model, inputs, options) {
       const { runOptions } = splitImageOptions(options);
-      return responseFromResult(
-        await directAi.run(model as keyof AiModels, inputs as never, runOptions as AiOptions),
-      );
+      return responseFromResult(await run(model, inputs, runOptions));
     },
     async providerFetch(provider, path, init, options) {
       if (!gatewayId) {
@@ -649,33 +688,41 @@ function backend(): AiBackend {
  * `stream()` calls `ai.run()` with `stream: true` and wraps the result
  * in a `Response` with SSE headers — ready to return from a route handler.
  */
-export type VoidAi = Omit<Ai, 'run'> & {
+export type VoidAi = {
+  models(...args: Parameters<Ai['models']>): LimitOperation<Awaited<ReturnType<Ai['models']>>>;
+  toMarkdown(
+    files: Array<Parameters<Ai['toMarkdown']>[0]>,
+    options?: Parameters<Ai['toMarkdown']>[1],
+  ): LimitOperation<Array<Awaited<ReturnType<Ai['toMarkdown']>>>>;
+  toMarkdown(
+    ...args: Parameters<Ai['toMarkdown']>
+  ): LimitOperation<Awaited<ReturnType<Ai['toMarkdown']>>>;
   /** Workers AI inference (existing) */
   run<Name extends keyof AiModels>(
     model: Name,
     inputs: AiModels[Name]['inputs'],
     options?: AiOptions,
-  ): Promise<AiModels[Name]['postProcessedOutputs']>;
+  ): LimitOperation<AiModels[Name]['postProcessedOutputs']>;
 
   /** Cloudflare AI Gateway model inference. Accepts Cloudflare model IDs unchanged. */
-  run(model: string, inputs: unknown, options?: AiOptions): Promise<unknown>;
+  run(model: string, inputs: unknown, options?: AiOptions): LimitOperation<unknown>;
 
   /** Image generation. Returns the proxy response so callers can return or parse it. */
   image<Name extends keyof AiModels>(
     model: Name,
     inputs: AiModels[Name]['inputs'],
     options?: AiOptions,
-  ): Promise<Response>;
+  ): LimitOperation<Response>;
 
   /** Cloudflare AI Gateway model inference returned as a Response. */
-  image(model: string, inputs: unknown, options?: AiOptions): Promise<Response>;
+  image(model: string, inputs: unknown, options?: AiOptions): LimitOperation<Response>;
 
   /** Provider-native AI Gateway requests using a project secret for the provider API key. */
   provider(
     provider: AiProvider,
     options?: AiProviderOptions,
   ): {
-    fetch(path: string, init?: AiProviderFetchInit): Promise<Response>;
+    fetch(path: string, init?: AiProviderFetchInit): LimitOperation<Response>;
   };
 
   /** Stream Workers AI response as SSE */
@@ -683,39 +730,131 @@ export type VoidAi = Omit<Ai, 'run'> & {
     model: Name,
     inputs: Omit<AiModels[Name]['inputs'], 'stream'>,
     options?: AiOptions,
-  ): Promise<Response>;
+  ): LimitOperation<Response>;
 
   /** Stream any Cloudflare AI Gateway model response as SSE */
-  stream(model: string, inputs: Record<string, unknown>, options?: AiOptions): Promise<Response>;
+  stream(
+    model: string,
+    inputs: Record<string, unknown>,
+    options?: AiOptions,
+  ): LimitOperation<Response>;
 };
+
+/** Normalize provider 429 responses and binding quota failures before they reach callers. */
+function aiOperation<T>(execute: () => Promise<T>, rawStream = false): LimitOperation<T> {
+  return limitOperation(
+    async () => {
+      const value = await execute();
+      if (value instanceof Response) {
+        const limit = await limitFromResponse(value, 'ai');
+        if (limit) {
+          throw limit;
+        }
+      }
+      return value;
+    },
+    classifyAiLimit,
+    (value, limited) => {
+      if (
+        value instanceof Response &&
+        value.body &&
+        value.headers.get('content-type')?.includes('text/event-stream')
+      ) {
+        return new Response(streamResponse(value.body, limited).body, value) as T;
+      }
+      if (rawStream && value instanceof ReadableStream) {
+        return streamResponse(value, limited).body as T;
+      }
+      return value;
+    },
+  );
+}
+
+function classifyAiLimit(error: unknown): UsageLimit | null {
+  if (error instanceof UsageLimit) {
+    return error;
+  }
+  const e = error as {
+    status?: number;
+    statusCode?: number;
+    response?: { status?: number };
+  } | null;
+  return e && (e.status === 429 || e.statusCode === 429 || e.response?.status === 429)
+    ? new UsageLimit({
+        resource: 'ai',
+        reason: 'rate_limit',
+        message: 'AI usage limit exceeded.',
+      })
+    : null;
+}
+
+/** Streaming failures after headers are sent end with an explicit terminal SSE event. */
+function streamResponse(body: ReadableStream, limited: (limit: UsageLimit) => unknown): Response {
+  const reader = body.getReader();
+  return new Response(
+    new ReadableStream({
+      async pull(controller) {
+        try {
+          const chunk = await reader.read();
+          if (chunk.done) {
+            controller.close();
+          } else {
+            controller.enqueue(chunk.value);
+          }
+        } catch (error) {
+          const limit = classifyAiLimit(error);
+          let data: unknown = { message: 'Generation was interrupted. Please try again.' };
+          if (limit) {
+            data = await limit.response().json();
+            try {
+              const fallback = await limited(limit);
+              if (fallback instanceof Response) {
+                data = readUsageLimit(await fallback.json().catch(() => null)) ?? data;
+              }
+            } catch {
+              /* Preserve a terminal event even if application fallback code fails. */
+            }
+          }
+          controller.enqueue(
+            new TextEncoder().encode(
+              `event: ${limit ? 'void:limit' : 'void:error'}\ndata: ${JSON.stringify(data)}\n\n`,
+            ),
+          );
+          controller.close();
+        }
+      },
+      cancel(reason) {
+        return reader.cancel(reason);
+      },
+    }),
+    { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' } },
+  );
+}
 
 export const ai: VoidAi = new Proxy({} as VoidAi, {
   get(_, prop) {
     if (prop === 'stream') {
-      return async (model: string, inputs: Record<string, unknown>, options?: unknown) => {
-        const body = await backend().run(model, { ...inputs, stream: true }, options);
-        return new Response(body as ReadableStream, {
-          headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
-        });
-      };
-    }
-    if (prop === 'run') {
-      return backend().run;
-    }
-    if (prop === 'image') {
-      return backend().image;
+      return (model: string, inputs: Record<string, unknown>, options?: unknown) =>
+        aiOperation(
+          async () =>
+            new Response(
+              (await backend().run(model, { ...inputs, stream: true }, options)) as ReadableStream,
+              { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' } },
+            ),
+        );
     }
     if (prop === 'provider') {
       return (provider: string, options?: AiProviderOptions) => ({
         fetch: (path: string, init?: AiProviderFetchInit) =>
-          backend().providerFetch(provider, path, init, options),
+          aiOperation(() => backend().providerFetch(provider, path, init, options)),
       });
     }
-    if (prop === 'models') {
-      return backend().models;
-    }
-    if (prop === 'toMarkdown') {
-      return backend().toMarkdown;
+    if (prop === 'run' || prop === 'image' || prop === 'models' || prop === 'toMarkdown') {
+      return (...args: [string, unknown, unknown]) =>
+        aiOperation(
+          () => (backend()[prop] as (...args: Array<unknown>) => Promise<unknown>)(...args),
+          prop === 'run' && hasStreamFlag(args[1]) && args[1].stream === true,
+        );
     }
     return undefined;
   },

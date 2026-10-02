@@ -122,7 +122,7 @@ function createAiProjectRoot(platform: 'cloudflare' | 'void'): string {
   mkdirSync(join(root, 'routes/api'), { recursive: true });
   writeFileSync(
     join(root, 'routes/api/ai.ts'),
-    'import { ai } from "void/ai"; export const GET = () => ai.run("model", {});',
+    'import { ai } from "void/ai"; export const GET = () => ai.run("model", {}).match({ ok: result => result, limited: limit => limit.response() });',
   );
   mkdirSync(join(root, '.void'), { recursive: true });
   writeFileSync(

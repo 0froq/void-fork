@@ -35,10 +35,14 @@ export const POST = defineHandler(async (c) => {
     };
     const model = '@cf/meta/llama-3.2-1b-instruct';
     if (body.action === 'ai-stream') {
-      return ai.stream(model, inputs);
+      return ai
+        .stream(model, inputs)
+        .match({ ok: (response) => response, limited: (limit) => limit.response() });
     }
-    const result = await ai.run(model, inputs);
-    return c.json({ ok: true, result });
+    return ai.run(model, inputs).match({
+      ok: (result) => c.json({ ok: true, result }),
+      limited: (limit) => limit.response(),
+    });
   }
   return c.json({ error: 'invalid acceptance action' }, 400);
 });

@@ -1,3 +1,4 @@
+import { usageLimitResponse } from '@void/edge';
 import { verifyEmailReceipt } from '@void/platform/email-protocol';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -270,7 +271,12 @@ app.post('/*', async (context, next) => {
 // AI usage limit check — only applies to AI routes
 app.post('/ai/*', async (context, next) => {
   if (await context.env.ROUTING.get(`ai-block:${context.get('projectId')}`, { cacheTtl: 60 })) {
-    return context.json({ error: 'AI usage limit exceeded' }, 429);
+    return usageLimitResponse({
+      code: 'usage_limit',
+      resource: 'ai',
+      reason: 'monthly_quota',
+      message: 'AI usage limit exceeded',
+    });
   }
   await next();
 });

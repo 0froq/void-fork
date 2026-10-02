@@ -180,3 +180,15 @@ describe('fetchStream', () => {
     });
   });
 });
+
+it('rejects a terminal interruption instead of displaying it as generated text', async () => {
+  vi.mocked(ofetch.raw).mockResolvedValue({
+    _data: makeSSEStream([
+      'data: {"response":"partial"}\n\n',
+      'event: void:error\ndata: {"message":"Generation was interrupted."}\n\n',
+    ]),
+  } as never);
+  const stream = fetchStream('/api/stream');
+  expect(await stream.next()).toMatchObject({ value: 'partial' });
+  await expect(stream.next()).rejects.toThrow('Generation was interrupted.');
+});

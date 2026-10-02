@@ -57,8 +57,11 @@ async function submit() {
     });
 
     if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as { error?: string } | null;
-      error.value = body?.error ?? `${res.status} ${res.statusText}`;
+      const body = (await res.json().catch(() => null)) as {
+        message?: string;
+        error?: string;
+      } | null;
+      error.value = body?.message ?? body?.error ?? `${res.status} ${res.statusText}`;
       return;
     }
 
@@ -74,14 +77,25 @@ async function submit() {
     }
 
     const decoder = new TextDecoder();
+    let buffer = '';
+    let event = '';
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
         break;
       }
-      const chunk = decoder.decode(value, { stream: true });
-      // Parse SSE lines
-      for (const line of chunk.split('\n')) {
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop()!;
+      for (const line of lines) {
+        if (line.startsWith('event:')) {
+          event = line.slice(6).trim();
+          continue;
+        }
+        if (!line.trim()) {
+          event = '';
+          continue;
+        }
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
           if (data === '[DONE]') {
@@ -89,6 +103,12 @@ async function submit() {
           }
           try {
             const parsed = JSON.parse(data);
+            if (event === 'void:error' || event === 'void:limit') {
+              error.value =
+                typeof parsed.message === 'string' ? parsed.message : 'Generation was interrupted.';
+              await reader.cancel();
+              return;
+            }
             response.value += textFromAiResult(parsed);
           } catch {
             // skip unparseable chunks

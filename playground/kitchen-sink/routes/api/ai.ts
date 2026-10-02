@@ -31,10 +31,18 @@ export const POST = defineHandler(async (c) => {
   try {
     const inputs = textInputForModel(model, prompt);
     if (model.startsWith('google/')) {
-      return c.json(await ai.run(model, inputs));
+      return ai.run(model, inputs).match({
+        ok: (result) => c.json(result),
+        limited: (limit) =>
+          limit.response({
+            message: 'AI is temporarily unavailable. Your prompt has been kept.',
+          }),
+      });
     }
 
-    return ai.stream(model, inputs);
+    return ai
+      .stream(model, inputs)
+      .match({ ok: (response) => response, limited: (limit) => limit.response() });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ error: message }, 400);
