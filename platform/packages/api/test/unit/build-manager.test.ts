@@ -731,6 +731,7 @@ describe('BuildManager.startBuild', () => {
       PLATFORM_ENV: 'staging',
       CF_ACCESS_CLIENT_ID_STAGING: 'svc-id.access',
       CF_ACCESS_CLIENT_SECRET_STAGING: 'svc-secret',
+      PROXY_URL: 'https://proxy.staging.void.cloud',
     });
     const m = makeManager(ctx, env);
     await m.startBuild(makeConfig());
@@ -738,6 +739,7 @@ describe('BuildManager.startBuild', () => {
     // The CLI reads the un-suffixed names; the worker holds the *_STAGING secrets.
     expect(envVars.CF_ACCESS_CLIENT_ID).toBe('svc-id.access');
     expect(envVars.CF_ACCESS_CLIENT_SECRET).toBe('svc-secret');
+    expect(envVars.VOID_PROXY_URL).toBe('https://proxy.staging.void.cloud');
   });
 
   it('does NOT forward CF Access creds on production builds (api.void.cloud is not Access-gated)', async () => {
@@ -6286,6 +6288,7 @@ describe('build-agent sanitizeChildEnv (env scrub)', () => {
     VOID_TOKEN: 'deploy-jwt',
     CF_ACCESS_CLIENT_ID: 'svc-id.access',
     CF_ACCESS_CLIENT_SECRET: 'svc-secret',
+    VOID_ACCESS_CREDENTIALS: '{"https://proxy.example.com":{"CF_ACCESS_TOKEN":"private"}}',
     VOID_API_URL: 'https://api.void.cloud',
     VOID_PROJECT: 'my-app',
   };
@@ -6304,6 +6307,7 @@ describe('build-agent sanitizeChildEnv (env scrub)', () => {
     // pair reaches every Access-gated staging host — so it's scrubbed too.
     expect(child.CF_ACCESS_CLIENT_ID).toBeUndefined();
     expect(child.CF_ACCESS_CLIENT_SECRET).toBeUndefined();
+    expect(child.VOID_ACCESS_CREDENTIALS).toBeUndefined();
     // The scrub list is exactly these secrets.
     expect([...SCRUBBED_ENV_VARS].sort()).toEqual([
       'AGENT_TOKEN',
@@ -6311,6 +6315,7 @@ describe('build-agent sanitizeChildEnv (env scrub)', () => {
       'CF_ACCESS_CLIENT_SECRET',
       'DO_LOG_URL',
       'SOURCE_TOKEN',
+      'VOID_ACCESS_CREDENTIALS',
       'VOID_TOKEN',
     ]);
   });
@@ -6796,7 +6801,14 @@ describe('parseProcStatusUid', () => {
 // timeout alarm). Previously a non-zero install exit `return`ed out of the
 // driver, bypassing `process.exit` and `server.close`.
 describe('build-agent lifecycle (container must always exit)', () => {
-  const REQUIRED_ENV = ['VOID_TOKEN', 'VOID_API_URL', 'VOID_PROJECT'] as const;
+  const REQUIRED_ENV = [
+    'VOID_TOKEN',
+    'VOID_API_URL',
+    'VOID_PROJECT',
+    'VOID_PROXY_URL',
+    'CF_ACCESS_CLIENT_ID',
+    'CF_ACCESS_CLIENT_SECRET',
+  ] as const;
   let savedEnv: Record<string, string | undefined>;
 
   beforeEach(() => {
@@ -6872,6 +6884,37 @@ describe('build-agent lifecycle (container must always exit)', () => {
       expect(calls.some(([, args]) => args.includes('deploy'))).toBe(connectExit === 0);
     },
   );
+
+  it('scopes captured Access credentials to the configured API and proxy only for deployment', async () => {
+    process.env.VOID_PROXY_URL = 'https://proxy.example.com';
+    process.env.CF_ACCESS_CLIENT_ID = 'service-id';
+    process.env.CF_ACCESS_CLIENT_SECRET = 'service-secret';
+    const runChild = vi.fn(
+      async (_cmd: string, _args: ReadonlyArray<string>, _opts?: { env?: NodeJS.ProcessEnv }) => 0,
+    );
+    expect(
+      await runBuild({
+        downloadSource: vi.fn(async () => {}),
+        resolveInstall: () => ({ manager: 'npm', cmd: 'npm', args: ['ci'] }),
+        runChild,
+        reportStatus: vi.fn(async () => {}),
+        hasLocalVoid: () => true,
+      }),
+    ).toBe(0);
+    const [install, connect, deploy] = runChild.mock.calls;
+    expect(install?.[2]?.env?.VOID_ACCESS_CREDENTIALS).toBeUndefined();
+    expect(connect?.[2]?.env?.VOID_ACCESS_CREDENTIALS).toBeUndefined();
+    expect(JSON.parse(deploy?.[2]?.env?.VOID_ACCESS_CREDENTIALS ?? 'null')).toEqual({
+      'https://api.void.cloud': {
+        CF_ACCESS_CLIENT_ID: 'service-id',
+        CF_ACCESS_CLIENT_SECRET: 'service-secret',
+      },
+      'https://proxy.example.com': {
+        CF_ACCESS_CLIENT_ID: 'service-id',
+        CF_ACCESS_CLIENT_SECRET: 'service-secret',
+      },
+    });
+  });
 
   it('passes VOID_TOKEN to the DEPLOY child but NOT the INSTALL child', async () => {
     // Capture the env each spawned child receives. runChild is called first for

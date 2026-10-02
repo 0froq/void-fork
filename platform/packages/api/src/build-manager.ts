@@ -1773,6 +1773,7 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         SOURCE_TOKEN: sourceToken,
         VOID_TOKEN: voidToken,
         VOID_API_URL: voidApiUrl,
+        ...(this.env.PROXY_URL ? { VOID_PROXY_URL: this.env.PROXY_URL } : {}),
         VOID_PROJECT: config.projectSlug,
         VOID_CLI_VERSION: PINNED_VOID_CLI_VERSION,
         DO_LOG_URL: 'https://manager/logs',
