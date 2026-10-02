@@ -130,6 +130,8 @@ import { createDefaultRunWrangler, resolvePinnedApiBaseUrl } from './provision.t
 export const REMOTE_INSTALLATION_MANIFEST_KEY: string = PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY;
 
 export type PlatformInstallationSecrets = Readonly<{
+  /** Retain external selection details until an adoption receipt can identify the resource. */
+  externalHyperdriveJson?: string;
   authenticationPreparation?: Readonly<Record<string, string>>;
   accessProvisioningJson?: string;
   accessCredentialsJson?: string;
@@ -538,6 +540,9 @@ export function createPlatformInstallationSecrets(input: {
     authenticationPreparation: Object.fromEntries(
       Object.entries(checkpoint).filter(([name]) => isPlatformAuthenticationPreparationKey(name)),
     ),
+    ...(checkpoint.externalHyperdriveJson
+      ? { externalHyperdriveJson: checkpoint.externalHyperdriveJson }
+      : {}),
     ...(modernAuthentication ? { authenticationSetupJson, authSetupToken, authBootstrapCode } : {}),
     ...(checkpoint.accessProvisioningJson
       ? { accessProvisioningJson: checkpoint.accessProvisioningJson }
@@ -731,6 +736,9 @@ function secretCheckpoint(
   workerSecretUpdateIntent?: PlatformWorkerSecretUpdateIntent | null,
 ): Record<string, string> {
   return {
+    ...(secrets.externalHyperdriveJson
+      ? { externalHyperdriveJson: secrets.externalHyperdriveJson }
+      : {}),
     ...Object.fromEntries(
       Object.entries(secrets.authenticationPreparation ?? {}).filter(([name]) =>
         isPlatformAuthenticationPreparationKey(name),
@@ -1432,6 +1440,9 @@ export async function installPlatform(
     // Reject a URL Hyperdrive can never accept before the claim binds it to this installation.
     parsePostgresConnectionString(secrets.databaseUrl);
     assertVoidCreatedHyperdriveTrustsDatabase(secrets.databaseUrl);
+  }
+  if (plan.externalHyperdrive) {
+    secrets = { ...secrets, externalHyperdriveJson: JSON.stringify(plan.externalHyperdrive) };
   }
   const pendingSecrets = secretCheckpoint(secrets, workerSecretUpdateIntent);
   writePendingInstallationSecrets(manifest, {

@@ -4786,6 +4786,10 @@ describe('platform installer', () => {
     ).rejects.toThrow('stop after claim');
 
     expect(claimedUrls).toEqual([databaseUrl]);
+    const manifest = listInstallationManifests()[0]!;
+    const checkpoint = readPendingInstallationSecrets(manifest)!;
+    expect(checkpoint.databaseClaimState).toBe('failed');
+    expect(JSON.parse(checkpoint.externalHyperdriveJson!)).toEqual(plan.externalHyperdrive);
   });
 
   it('resumes a claimed verify-full database URL by creating Hyperdrive with its TLS mode', async () => {

@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { log, note, outro } from '@clack/prompts';
-import { createPlatformDeploymentManifest, transitionInstallation } from '@void/platform';
+import {
+  createPlatformDeploymentManifest,
+  recordInstallationResource,
+  transitionInstallation,
+} from '@void/platform';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { pc } from '../../src/cli/output.ts';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
@@ -117,6 +121,7 @@ const environment = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.database.mockReset();
   mocks.operatorCredential.mockResolvedValue({ source: 'oauth', token: 'operator-token' });
   mocks.multiselect.mockResolvedValue(['github']);
   directory = mkdtempSync(join(tmpdir(), 'void-credential-flow-'));
@@ -250,6 +255,52 @@ async function interruptedInstall() {
   return manifest;
 }
 
+async function externalHyperdrivePlanner() {
+  const actual = await vi.importActual<typeof import('../../src/cli/platform-plan.ts')>(
+    '../../src/cli/platform-plan.ts',
+  );
+  mocks.plan.mockImplementation(actual.createPlatformInstallPlan);
+  mocks.database.mockResolvedValue(null);
+  vi.spyOn(PlatformCloudflareClient.prototype, 'getWorkersSubdomain').mockResolvedValue('account');
+  for (const method of [
+    'listAiGateways',
+    'listKvNamespaces',
+    'listR2Buckets',
+    'listQueues',
+    'listDispatchNamespaces',
+    'listWorkerNames',
+  ] as const) {
+    vi.spyOn(PlatformCloudflareClient.prototype, method).mockResolvedValue([]);
+  }
+  const selected = {
+    id: 'managed-drive',
+    name: 'company-managed-postgres',
+    database: 'platform',
+    host: 'tunnel.example.com/cluster/primary',
+    user: 'runtime_user',
+  };
+  vi.mocked(PlatformCloudflareClient.prototype.listHyperdriveConfigs).mockResolvedValue([
+    { id: selected.id, name: selected.name },
+  ]);
+  const config = {
+    id: selected.id,
+    name: selected.name,
+    cachingDisabled: true,
+    origin: {
+      scheme: 'postgresql' as const,
+      host: selected.host,
+      user: selected.user,
+      database: selected.database,
+      port: null,
+      accessClientId: 'tunnel-client',
+    },
+  };
+  const getConfig = vi
+    .spyOn(PlatformCloudflareClient.prototype, 'getHyperdriveConfig')
+    .mockResolvedValue(config);
+  return { selected, config, getConfig };
+}
+
 function requireManagementToken() {
   const original = mocks.plan.getMockImplementation()!;
   mocks.plan.mockImplementation(async (...input) => {
@@ -276,6 +327,141 @@ function requireManagementToken() {
 }
 
 describe('platform credential onboarding', () => {
+  it.each([false, true])(
+    'resumes external Hyperdrive before adoption with a saved selection: %s',
+    async (savedSelection) => {
+      const { selected, getConfig } = await externalHyperdrivePlanner();
+      mocks.install.mockRejectedValueOnce(new Error('interrupted before adoption'));
+      const originalArgs = [...args, '--hyperdrive', selected.id];
+      await expect(runPlatformLifecycleCommand(parsePlatformArgs(originalArgs))).rejects.toThrow(
+        'interrupted before adoption',
+      );
+      const manifest = listInstallationManifests()[0]!;
+      expect(isPlatformSetupDraft(manifest)).toBe(false);
+      expect(manifest.resources).toEqual([]);
+      const checkpoint = readPendingInstallationSecrets(manifest)!;
+      expect(JSON.parse(checkpoint.externalHyperdriveJson!)).toEqual(selected);
+      if (!savedSelection) {
+        delete checkpoint.externalHyperdriveJson;
+        writePendingInstallationSecrets(manifest, checkpoint);
+        await runPlatformLifecycleCommand(parsePlatformArgs([...originalArgs, '--plan']));
+        expect(console.log).toHaveBeenLastCalledWith(
+          expect.stringContaining(`--hyperdrive ${selected.id}`),
+        );
+        expect(readPendingInstallationSecrets(manifest)?.externalHyperdriveJson).toBeUndefined();
+      }
+      vi.clearAllMocks();
+      await runPlatformLifecycleCommand(
+        parsePlatformArgs(
+          savedSelection ? ['install', '--resume', '--name', manifest.id] : originalArgs,
+        ),
+      );
+      expect(getConfig).toHaveBeenCalledExactlyOnceWith('account', selected.id);
+      expect(mocks.install).toHaveBeenCalledOnce();
+      expect(mocks.install.mock.calls[0]![0].actions).toContainEqual(
+        expect.objectContaining({ key: 'hyperdrive', action: 'adopt', id: selected.id }),
+      );
+      expect(mocks.install.mock.calls[0]![2].id).toBe(manifest.id);
+      expect(mocks.password).not.toHaveBeenCalled();
+      expect(JSON.parse(readPendingInstallationSecrets(manifest)!.externalHyperdriveJson!)).toEqual(
+        selected,
+      );
+    },
+  );
+
+  it('keeps the selected Hyperdrive when credential collection is cancelled', async () => {
+    const { selected, getConfig } = await externalHyperdrivePlanner();
+    mocks.password.mockResolvedValueOnce(Symbol('cancel'));
+    await expect(
+      runPlatformLifecycleCommand(parsePlatformArgs([...args, '--hyperdrive', selected.id])),
+    ).rejects.toThrow('Cancelled');
+    const manifest = listInstallationManifests()[0]!;
+    expect(isPlatformSetupDraft(manifest)).toBe(true);
+    expect(JSON.parse(readPendingInstallationSecrets(manifest)!.externalHyperdriveJson!)).toEqual(
+      selected,
+    );
+    vi.clearAllMocks();
+    await runPlatformLifecycleCommand(
+      parsePlatformArgs(['install', '--resume', '--name', manifest.id, '--plan']),
+    );
+    expect(getConfig).toHaveBeenCalledExactlyOnceWith('account', selected.id);
+    expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.install).not.toHaveBeenCalled();
+    expect(mocks.plan.mock.calls[0]![1].externalHyperdrive).toEqual(selected);
+  });
+
+  it.each(['id', 'origin', 'caching'] as const)(
+    'rejects changed external Hyperdrive %s before resuming',
+    async (change) => {
+      const { selected, config, getConfig } = await externalHyperdrivePlanner();
+      mocks.install.mockRejectedValueOnce(new Error('interrupted before adoption'));
+      await expect(
+        runPlatformLifecycleCommand(parsePlatformArgs([...args, '--hyperdrive', selected.id])),
+      ).rejects.toThrow('interrupted before adoption');
+      const manifest = listInstallationManifests()[0]!;
+      const checkpoint = readPendingInstallationSecrets(manifest);
+      vi.clearAllMocks();
+      if (change === 'origin') {
+        getConfig.mockResolvedValue({
+          ...config,
+          origin: { ...config.origin, database: 'different-database' },
+        });
+      }
+      if (change === 'caching') {
+        getConfig.mockResolvedValue({ ...config, cachingDisabled: false });
+      }
+      await expect(
+        runPlatformLifecycleCommand(
+          parsePlatformArgs([
+            'install',
+            '--resume',
+            '--name',
+            manifest.id,
+            ...(change === 'id' ? ['--hyperdrive', 'another-drive'] : []),
+          ]),
+        ),
+      ).rejects.toThrow(
+        change === 'caching' ? 'Disable SQL result caching' : 'differs from the saved installation',
+      );
+      expect(mocks.plan).not.toHaveBeenCalled();
+      expect(mocks.install).not.toHaveBeenCalled();
+      expect(readPendingInstallationSecrets(manifest)).toEqual(checkpoint);
+    },
+  );
+
+  it('checks the authoritative Hyperdrive receipt before accepting a resume selection', async () => {
+    const { selected, getConfig } = await externalHyperdrivePlanner();
+    mocks.install.mockRejectedValueOnce(new Error('interrupted before adoption'));
+    await expect(
+      runPlatformLifecycleCommand(parsePlatformArgs([...args, '--hyperdrive', selected.id])),
+    ).rejects.toThrow('interrupted before adoption');
+    const manifest = listInstallationManifests()[0]!;
+    mocks.database.mockResolvedValue(
+      recordInstallationResource(
+        manifest,
+        {
+          key: 'hyperdrive',
+          kind: 'hyperdrive',
+          id: 'different-drive',
+          name: selected.name,
+          ownership: 'adopted',
+          state: 'ready',
+          configHash: 'a'.repeat(64),
+        },
+        new Date().toISOString(),
+      ),
+    );
+    vi.clearAllMocks();
+    await expect(
+      runPlatformLifecycleCommand(
+        parsePlatformArgs(['install', '--resume', '--name', manifest.id]),
+      ),
+    ).rejects.toThrow('differs from the saved installation');
+    expect(getConfig).not.toHaveBeenCalled();
+    expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.install).not.toHaveBeenCalled();
+  });
+
   it('explains the management token requirement in a preview without collecting secrets', async () => {
     requireManagementToken();
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));

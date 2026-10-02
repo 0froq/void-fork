@@ -6,6 +6,45 @@ import {
   type CloudflareHyperdriveConfig,
   type PlatformCloudflareClient,
 } from './platform-cloudflare.ts';
+import type { PlatformExternalHyperdrive } from './platform-plan.ts';
+
+/** Restore the selected external origin before an adoption receipt exists. */
+export function readPlatformHyperdriveSelection(
+  checkpoint: Readonly<Record<string, string>> | null,
+): PlatformExternalHyperdrive | undefined {
+  if (!checkpoint?.externalHyperdriveJson) {
+    return undefined;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(checkpoint.externalHyperdriveJson);
+  } catch {
+    throw new Error('platform: The saved Hyperdrive selection is invalid.');
+  }
+  const selected = value as Partial<PlatformExternalHyperdrive> | null;
+  const nonempty = (value: unknown): value is string =>
+    typeof value === 'string' && value.trim() !== '';
+  if (
+    !selected ||
+    typeof selected !== 'object' ||
+    Array.isArray(selected) ||
+    !nonempty(selected.id) ||
+    !nonempty(selected.host) ||
+    !nonempty(selected.user) ||
+    (selected.name !== undefined && (typeof selected.name !== 'string' || !selected.name)) ||
+    (selected.database !== undefined &&
+      (typeof selected.database !== 'string' || !selected.database))
+  ) {
+    throw new Error('platform: The saved Hyperdrive selection is invalid.');
+  }
+  return {
+    id: selected.id,
+    host: selected.host,
+    user: selected.user,
+    ...(selected.name ? { name: selected.name } : {}),
+    ...(selected.database ? { database: selected.database } : {}),
+  };
+}
 
 /** Read the database name from an owner URL without applying Hyperdrive origin restrictions. */
 export function platformDatabaseNameFromOwnerUrl(databaseUrl: string): string {

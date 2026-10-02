@@ -9,6 +9,7 @@ import {
 import { resolve } from 'pathslash';
 import { cliCommandName, cliTitle, createSpinner, pc } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
+import { readPlatformHyperdriveSelection } from './platform-auth-database.ts';
 import {
   assertPlatformOperatorCredentialCanApplyPlan,
   platformOperatorNeedsManagementToken,
@@ -457,123 +458,6 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
     }
     const checkpoint = existing ? readPendingInstallationSecrets(existing) : null;
     const databaseUrl = resolvePlatformInstallDatabaseUrl(checkpoint, existing);
-    const externalHyperdriveId = process.env.VOID_PLATFORM_HYPERDRIVE_ID?.trim() || '';
-    const externalHyperdriveHost = process.env.VOID_PLATFORM_HYPERDRIVE_ORIGIN_HOST?.trim() || '';
-    const externalHyperdriveUser = process.env.VOID_PLATFORM_HYPERDRIVE_ORIGIN_USER?.trim() || '';
-    if (
-      [externalHyperdriveId, externalHyperdriveHost, externalHyperdriveUser].some(Boolean) &&
-      ![externalHyperdriveId, externalHyperdriveHost, externalHyperdriveUser].every(Boolean)
-    ) {
-      throw new Error(
-        'platform: VOID_PLATFORM_HYPERDRIVE_ID, VOID_PLATFORM_HYPERDRIVE_ORIGIN_HOST, and VOID_PLATFORM_HYPERDRIVE_ORIGIN_USER must be set together.',
-      );
-    }
-    let externalHyperdrive: PlatformExternalHyperdrive | undefined = externalHyperdriveId
-      ? {
-          id: externalHyperdriveId,
-          host: externalHyperdriveHost,
-          user: externalHyperdriveUser,
-        }
-      : undefined;
-    if (args.hyperdrive && externalHyperdrive && args.hyperdrive !== externalHyperdrive.id) {
-      throw new Error('platform: --hyperdrive conflicts with VOID_PLATFORM_HYPERDRIVE_ID.');
-    }
-    if (
-      !externalHyperdrive &&
-      args.hyperdrive !== 'create' &&
-      (process.stdin.isTTY || args.hyperdrive) &&
-      (!existing || isPlatformSetupDraft(existing)) &&
-      !existing?.resources.some((resource) => resource.key === 'hyperdrive')
-    ) {
-      const suggestedName =
-        existing?.deployment.resources.hyperdrive ??
-        createPlatformResourceNames(installationSlug).hyperdrive;
-      const configurations = await client.listHyperdriveConfigs(accountId);
-      const suggestedNameAvailable = !configurations.some(
-        (resource) => resource.name === suggestedName,
-      );
-      const choice = args.hyperdrive
-        ? 'existing'
-        : await select({
-            message: 'How should Void set up Hyperdrive?',
-            options: [
-              ...(configurations.length > 0
-                ? [{ value: 'existing', label: 'Use an existing Hyperdrive' }]
-                : []),
-              ...(suggestedNameAvailable
-                ? [{ value: 'create', label: 'Let Void create Hyperdrive', hint: 'recommended' }]
-                : []),
-              { value: 'setup', label: 'Set up a separately managed Hyperdrive' },
-            ],
-          });
-      if (isCancel(choice)) {
-        throw new Error('platform: Cancelled.');
-      }
-      if (choice === 'setup') {
-        note(
-          `Create a Hyperdrive in account ${accountId} with any unused name${suggestedNameAvailable ? ` such as ${suggestedName}` : ''}. Point it at the same dedicated PostgreSQL database you will give Void, use a runtime database user, and disable SQL result caching. If your organization manages Hyperdrive, ask its administrator to create it. Then rerun this command and select it from the list.\nSetup: https://developers.cloudflare.com/hyperdrive/get-started/`,
-          pc.bold('Set up Hyperdrive first'),
-        );
-        outro('No Cloudflare or local installation state was changed.');
-        return;
-      }
-      if (choice === 'existing') {
-        const selectedId =
-          args.hyperdrive ??
-          (await select({
-            message: 'Which Hyperdrive should Void use?',
-            options: [...configurations]
-              .sort(
-                (a, b) =>
-                  Number(b.name === suggestedName) - Number(a.name === suggestedName) ||
-                  a.name.localeCompare(b.name) ||
-                  a.id.localeCompare(b.id),
-              )
-              .map((resource) => ({
-                value: resource.id,
-                label: resource.name,
-                hint: resource.name === suggestedName ? `suggested · ${resource.id}` : resource.id,
-              })),
-          }));
-        if (isCancel(selectedId)) {
-          throw new Error('platform: Cancelled.');
-        }
-        const selected = configurations.find((resource) => resource.id === selectedId);
-        if (!selected) {
-          throw new Error('platform: The selected Hyperdrive is no longer available.');
-        }
-        const live = await client.getHyperdriveConfig(accountId, selected.id);
-        if (live.id !== selected.id || live.name !== selected.name || !live.origin.user) {
-          throw new Error(
-            `platform: Could not verify the database user for existing Hyperdrive ${selected.name}.`,
-          );
-        }
-        if (!args.hyperdrive) {
-          note(
-            [
-              `${pc.bold('Database:')} ${live.origin.database}`,
-              `${pc.bold('Host:')} ${live.origin.host}`,
-              `${pc.bold('Port:')} ${live.origin.port ?? 'configured by Cloudflare Tunnel'}`,
-              `${pc.bold('User:')} ${live.origin.user}`,
-              `${pc.bold('SQL result caching:')} ${live.cachingDisabled ? 'disabled' : 'enabled'}`,
-            ].join('\n'),
-            pc.bold(`Existing Hyperdrive ${live.name}`),
-          );
-        }
-        if (!live.cachingDisabled) {
-          throw new Error(
-            `platform: Disable SQL result caching on existing Hyperdrive ${live.name} before installing.`,
-          );
-        }
-        externalHyperdrive = {
-          id: live.id,
-          name: live.name,
-          database: live.origin.database,
-          host: live.origin.host,
-          user: live.origin.user,
-        };
-      }
-    }
     let authoritativeProvisionIntents = false;
     if (existing && !isPlatformSetupDraft(existing)) {
       if (!databaseUrl) {
@@ -602,6 +486,173 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
             `platform: Installation ${existing.id} is no longer unfinished. Run \`void platform status ${existing.id}\` to inspect it.`,
           );
         }
+      }
+    }
+    const savedHyperdrive = readPlatformHyperdriveSelection(checkpoint);
+    const requestedHyperdriveId = args.hyperdrive || savedHyperdrive?.id;
+    const recordedHyperdrive = existing?.resources.find(
+      (resource) => resource.key === 'hyperdrive',
+    );
+    if (
+      (savedHyperdrive && requestedHyperdriveId !== savedHyperdrive.id) ||
+      (recordedHyperdrive &&
+        requestedHyperdriveId &&
+        (requestedHyperdriveId === 'create'
+          ? recordedHyperdrive.ownership === 'adopted'
+          : recordedHyperdrive.id !== requestedHyperdriveId)) ||
+      (savedHyperdrive &&
+        recordedHyperdrive &&
+        (recordedHyperdrive.ownership !== 'adopted' ||
+          recordedHyperdrive.id !== savedHyperdrive.id))
+    ) {
+      throw new Error(
+        'platform: The selected Hyperdrive differs from the saved installation. Resume with its original Hyperdrive.',
+      );
+    }
+    const externalHyperdriveId = process.env.VOID_PLATFORM_HYPERDRIVE_ID?.trim() || '';
+    const externalHyperdriveHost = process.env.VOID_PLATFORM_HYPERDRIVE_ORIGIN_HOST?.trim() || '';
+    const externalHyperdriveUser = process.env.VOID_PLATFORM_HYPERDRIVE_ORIGIN_USER?.trim() || '';
+    if (
+      [externalHyperdriveId, externalHyperdriveHost, externalHyperdriveUser].some(Boolean) &&
+      ![externalHyperdriveId, externalHyperdriveHost, externalHyperdriveUser].every(Boolean)
+    ) {
+      throw new Error(
+        'platform: VOID_PLATFORM_HYPERDRIVE_ID, VOID_PLATFORM_HYPERDRIVE_ORIGIN_HOST, and VOID_PLATFORM_HYPERDRIVE_ORIGIN_USER must be set together.',
+      );
+    }
+    let externalHyperdrive: PlatformExternalHyperdrive | undefined = externalHyperdriveId
+      ? {
+          id: externalHyperdriveId,
+          host: externalHyperdriveHost,
+          user: externalHyperdriveUser,
+        }
+      : undefined;
+    if (
+      requestedHyperdriveId &&
+      externalHyperdrive &&
+      requestedHyperdriveId !== externalHyperdrive.id
+    ) {
+      throw new Error('platform: --hyperdrive conflicts with VOID_PLATFORM_HYPERDRIVE_ID.');
+    }
+    if (
+      savedHyperdrive &&
+      externalHyperdrive &&
+      (savedHyperdrive.host.toLowerCase() !== externalHyperdrive.host.toLowerCase() ||
+        savedHyperdrive.user !== externalHyperdrive.user)
+    ) {
+      throw new Error('platform: The Hyperdrive origin differs from the saved installation.');
+    }
+    if (savedHyperdrive) {
+      externalHyperdrive = recordedHyperdrive ? savedHyperdrive : undefined;
+    }
+    if (
+      !externalHyperdrive &&
+      requestedHyperdriveId !== 'create' &&
+      (process.stdin.isTTY || requestedHyperdriveId) &&
+      (!existing || isPlatformSetupDraft(existing) || requestedHyperdriveId) &&
+      !recordedHyperdrive
+    ) {
+      const suggestedName =
+        existing?.deployment.resources.hyperdrive ??
+        createPlatformResourceNames(installationSlug).hyperdrive;
+      const configurations = await client.listHyperdriveConfigs(accountId);
+      const suggestedNameAvailable = !configurations.some(
+        (resource) => resource.name === suggestedName,
+      );
+      const choice = requestedHyperdriveId
+        ? 'existing'
+        : await select({
+            message: 'How should Void set up Hyperdrive?',
+            options: [
+              ...(configurations.length > 0
+                ? [{ value: 'existing', label: 'Use an existing Hyperdrive' }]
+                : []),
+              ...(suggestedNameAvailable
+                ? [{ value: 'create', label: 'Let Void create Hyperdrive', hint: 'recommended' }]
+                : []),
+              { value: 'setup', label: 'Set up a separately managed Hyperdrive' },
+            ],
+          });
+      if (isCancel(choice)) {
+        throw new Error('platform: Cancelled.');
+      }
+      if (choice === 'setup') {
+        note(
+          `Create a Hyperdrive in account ${accountId} with any unused name${suggestedNameAvailable ? ` such as ${suggestedName}` : ''}. Point it at the same dedicated PostgreSQL database you will give Void, use a runtime database user, and disable SQL result caching. If your organization manages Hyperdrive, ask its administrator to create it. Then rerun this command and select it from the list.\nSetup: https://developers.cloudflare.com/hyperdrive/get-started/`,
+          pc.bold('Set up Hyperdrive first'),
+        );
+        outro('No Cloudflare or local installation state was changed.');
+        return;
+      }
+      if (choice === 'existing') {
+        const selectedId =
+          requestedHyperdriveId ??
+          (await select({
+            message: 'Which Hyperdrive should Void use?',
+            options: [...configurations]
+              .sort(
+                (a, b) =>
+                  Number(b.name === suggestedName) - Number(a.name === suggestedName) ||
+                  a.name.localeCompare(b.name) ||
+                  a.id.localeCompare(b.id),
+              )
+              .map((resource) => ({
+                value: resource.id,
+                label: resource.name,
+                hint: resource.name === suggestedName ? `suggested · ${resource.id}` : resource.id,
+              })),
+          }));
+        if (isCancel(selectedId)) {
+          throw new Error('platform: Cancelled.');
+        }
+        const selected = configurations.find((resource) => resource.id === selectedId);
+        if (!selected) {
+          throw new Error('platform: The selected Hyperdrive is no longer available.');
+        }
+        const live = await client.getHyperdriveConfig(accountId, selected.id);
+        if (live.id !== selected.id || live.name !== selected.name || !live.origin.user) {
+          throw new Error(
+            `platform: Could not verify the database user for existing Hyperdrive ${selected.name}.`,
+          );
+        }
+        if (
+          (savedHyperdrive &&
+            (live.origin.host !== savedHyperdrive.host.toLowerCase() ||
+              live.origin.user !== savedHyperdrive.user ||
+              (savedHyperdrive.name && live.name !== savedHyperdrive.name) ||
+              (savedHyperdrive.database && live.origin.database !== savedHyperdrive.database))) ||
+          (existing &&
+            !isPlatformSetupDraft(existing) &&
+            live.name !== existing.deployment.resources.hyperdrive)
+        ) {
+          throw new Error(
+            'platform: The Hyperdrive origin or name differs from the saved installation.',
+          );
+        }
+        if (!requestedHyperdriveId) {
+          note(
+            [
+              `${pc.bold('Database:')} ${live.origin.database}`,
+              `${pc.bold('Host:')} ${live.origin.host}`,
+              `${pc.bold('Port:')} ${live.origin.port ?? 'configured by Cloudflare Tunnel'}`,
+              `${pc.bold('User:')} ${live.origin.user}`,
+              `${pc.bold('SQL result caching:')} ${live.cachingDisabled ? 'disabled' : 'enabled'}`,
+            ].join('\n'),
+            pc.bold(`Existing Hyperdrive ${live.name}`),
+          );
+        }
+        if (!live.cachingDisabled) {
+          throw new Error(
+            `platform: Disable SQL result caching on existing Hyperdrive ${live.name} before installing.`,
+          );
+        }
+        externalHyperdrive = {
+          id: live.id,
+          name: live.name,
+          database: live.origin.database,
+          host: live.origin.host,
+          user: live.origin.user,
+        };
       }
     }
     const authenticationSelection = await selectInstallationAuthentication(
@@ -650,7 +701,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       authConfig: args.authConfig,
       authentication: authenticationSelection.authentication,
       hyperdrive:
-        !existing || isPlatformSetupDraft(existing)
+        !existing || isPlatformSetupDraft(existing) || (externalHyperdrive && !recordedHyperdrive)
           ? (externalHyperdrive?.id ?? 'create')
           : undefined,
       runtime: args.runtime,
@@ -746,6 +797,10 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
     const setupManifest = existing;
     const credentialSetup = isPlatformSetupDraft(existing);
     const values: Record<string, string> = { ...checkpoint };
+    if (externalHyperdrive) {
+      values.externalHyperdriveJson = JSON.stringify(externalHyperdrive);
+      writePendingInstallationSecrets(setupManifest, values);
+    }
     const saveValues = (updates: Record<string, string>) => {
       Object.assign(values, updates);
       if (credentialSetup) {
