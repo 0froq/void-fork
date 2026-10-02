@@ -94,6 +94,10 @@ with GitHub or another login method. With company-approved signup, a colleague
 who passes the company gate can create an ordinary account using GitHub even
 when their GitHub email differs from their company email.
 
+Your identity provider determines how employees sign in, such as through Okta or
+Google Workspace. Your Access policies determine who can reach the platform and
+which MFA or device requirements apply.
+
 Automatic setup uses an existing Zero Trust organization, selected identity
 providers, and existing company policies. Void creates dedicated applications
 and a scoped service token for protected installation checks. It preserves your
@@ -102,9 +106,10 @@ company policies, including device and MFA requirements.
 The setup credential needs **Access: Apps and Policies Write** and
 **Access: Organizations, Identity Providers, and Groups Read** in the identity
 account. Creating protection also needs **Access: Service Tokens Write**.
-Provide a separate setup token through `VOID_PLATFORM_ACCESS_SETUP_TOKEN` if
-your Cloudflare management credential lacks these permissions. These permissions
-are not required by the platform's runtime token. See Cloudflare's
+If your Cloudflare management credential lacks these permissions, the installer
+links to this guide and asks for an Access setup API token. Scripts can supply it
+through `VOID_PLATFORM_ACCESS_SETUP_TOKEN`. These permissions are not required by
+the platform's runtime token. See Cloudflare's
 [Access API](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/)
 and [service-token permissions](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/service_tokens/methods/create/).
 
@@ -125,7 +130,9 @@ Keep the file's `connections` list from the example above, or use a connection
 with `{"id":"access","kind":"cloudflare-access","label":"Company Access"}`
 to create Access login as well. Omit `protection` for login-only setup.
 
-To connect applications managed elsewhere, select **Connect existing applications**.
+To connect applications managed elsewhere, select **Use Access applications your company already manages**.
+Enter the account that owns the Access applications; it can differ from the
+account hosting Void.
 Scripts use `mode: "existing"`, optional `accountId`, and `loginApplicationId`
 and/or `protectionApplicationId`. For login, set `loginClientSecretEnv`. For
 protection, supply `serviceToken` with `id`, `clientIdEnv`, and `clientSecretEnv`

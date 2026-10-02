@@ -4,13 +4,16 @@ import {
   type CANCEL_SYMBOL,
   confirm,
   isCancel,
+  log,
   multiselect,
+  note,
   password,
   select,
   text,
 } from '@clack/prompts';
 import type { PlatformInstallationManifest } from '@void/platform';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
+import { pc } from './output.ts';
 import {
   PlatformAccessClient,
   platformAccessIdentityProvider,
@@ -20,6 +23,14 @@ import {
 } from './platform-access-provision.ts';
 import { PlatformCloudflareApiError, PlatformCloudflareClient } from './platform-cloudflare.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
+import { platformSetupLink } from './platform-setup.ts';
+
+function accessSetupGuide(): string {
+  return platformSetupLink({
+    title: 'Setup guide and required permissions',
+    url: 'https://void.cloud/guide/platform/installation/setup#cloudflare-access',
+  });
+}
 
 export function platformAccessResourceInventory(
   encoded: string | undefined,
@@ -252,6 +263,21 @@ export async function preparePlatformAccessSetup(input: {
   if (!input.login && !input.protection) {
     return undefined;
   }
+  if (process.stdin.isTTY) {
+    note(
+      [
+        input.login && input.protection
+          ? 'Access lets employees sign in with your company login and controls who can reach the platform’s UI and APIs.'
+          : input.login
+            ? 'Access lets employees sign in to the platform with your company login.'
+            : 'Access controls who can reach the platform’s UI and APIs.',
+        '',
+        'Void can create dedicated Access applications using your company’s existing login providers and policies, or use Access applications your company already manages.',
+      ].join('\n'),
+      pc.bold('Set up Cloudflare Access'),
+    );
+    console.log(accessSetupGuide());
+  }
   let spec =
     input.spec ??
     (input.checkpoint.accessSetupSpecJson
@@ -272,9 +298,14 @@ export async function preparePlatformAccessSetup(input: {
         options: [
           {
             value: 'create',
-            label: 'Create applications automatically in this Cloudflare account',
+            label: 'Create Access applications for this platform',
+            hint: 'Use this account’s existing Zero Trust setup',
           },
-          { value: 'existing', label: 'Connect existing applications (including another account)' },
+          {
+            value: 'existing',
+            label: 'Use Access applications your company already manages',
+            hint: 'May use another account',
+          },
           ...(!input.protection
             ? [
                 {
@@ -291,6 +322,9 @@ export async function preparePlatformAccessSetup(input: {
     }
     spec = { mode: mode as 'create' | 'existing' };
     if (mode === 'existing') {
+      log.info(
+        'Enter the account that owns your company’s Access configuration. This may differ from the account hosting Void.',
+      );
       spec.accountId = answer(
         await text({
           message: 'Cloudflare identity account ID:',
@@ -298,11 +332,15 @@ export async function preparePlatformAccessSetup(input: {
         }),
       );
       if (input.login) {
+        log.info('Enter the ID of the Access application that provides company sign-in to Void.');
         spec.loginApplicationId = answer(
           await text({ message: 'Existing Access OIDC application ID:' }),
         );
       }
       if (input.protection) {
+        log.info(
+          'Enter the ID of the Access application that protects the platform’s UI and APIs.',
+        );
         spec.protectionApplicationId = answer(
           await text({ message: 'Existing Access protection application ID:' }),
         );
@@ -333,18 +371,22 @@ export async function preparePlatformAccessSetup(input: {
     ) {
       throw error;
     }
-    console.error(
-      `Access setup for account ${accountId} needs Access applications/policies permissions and organization/identity-provider/group read access${input.protection ? ', plus service-token permissions' : ''}.`,
+    log.info(
+      `Your current token lacks the required Access permissions for account ${accountId}. Create a token for that account using the permissions in the setup guide.`,
     );
-    const token = answer(
-      await password({ message: 'Access setup API token (kept out of the platform runtime):' }),
-    );
+    console.log(accessSetupGuide());
+    const token = answer(await password({ message: 'Access setup API token:' }));
     input.save({ accessManagementToken: token });
     management = new PlatformCloudflareClient(token, { apiBase: input.client.apiBaseUrl });
     client = new PlatformAccessClient(management, accountId);
     await client.get('organizations');
     providers = await client.list('identity_providers');
     policies = await client.list('policies');
+  }
+  if (!spec.identityProviderIds && process.stdin.isTTY) {
+    log.info(
+      'Choose how employees sign in—for example, your company’s Okta or Google Workspace connection.',
+    );
   }
   const identityProviderIds =
     spec.identityProviderIds ??
@@ -363,13 +405,17 @@ export async function preparePlatformAccessSetup(input: {
           }),
         )
       : []);
+  if (!spec.policyIds && process.stdin.isTTY) {
+    log.info(
+      'Choose which existing access rules apply to this platform, including MFA and device requirements.',
+    );
+  }
   const policyIds =
     spec.policyIds ??
     (process.stdin.isTTY
       ? answer(
           await multiselect({
-            message:
-              'Existing company Access policies (MFA and device requirements are preserved):',
+            message: 'Company Access policies:',
             required: true,
             options: policies
               .filter(
@@ -409,6 +455,9 @@ export async function preparePlatformAccessSetup(input: {
     if (input.checkpoint.accessExistingServiceTokenJson) {
       serviceToken = JSON.parse(input.checkpoint.accessExistingServiceTokenJson);
     } else if (process.stdin.isTTY) {
+      log.info(
+        'This lets the installer reach the protected platform during setup. Use a service token allowed by the existing Access application.',
+      );
       serviceToken = {
         id: answer(await text({ message: 'Existing admitted Access service token ID:' })),
         clientId: answer(await password({ message: 'Access service token client ID:' })),
@@ -458,6 +507,7 @@ export async function preparePlatformAccessSetup(input: {
     ? secretReference(spec.loginClientSecretEnv)
     : input.checkpoint.accessExistingLoginSecret;
   if (input.login && spec.mode === 'existing' && !loginClientSecret && process.stdin.isTTY) {
+    log.info('Enter the client secret from the existing Access login application’s OIDC settings.');
     loginClientSecret = answer(await password({ message: 'Existing Access OIDC client secret:' }));
     input.save({ accessExistingLoginSecret: loginClientSecret });
   }
