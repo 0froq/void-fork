@@ -56,34 +56,7 @@ Void asks you to choose Vite+ or Vite, a UI framework, a starter, and a deployme
 
 With pnpm, you can start with `pnpm create void my-app`. It configures native build permissions before installing Void.
 
-If a manual pnpm install reports blocked build scripts, run `pnpm approve-builds` for `esbuild`, `sharp`, and `workerd`. Set `better-sqlite3: false` in `pnpm-workspace.yaml`'s `allowBuilds`; Void uses its bundled binaries.
-
 The examples below use `void` for brevity. Outside package scripts, run the local binary with `npx void`, `pnpm void`, `yarn void`, or `bunx void`. Keep Void installed in the project so the CLI and app use the same version.
-
-## Using with Coding Agents
-
-`void init` detects your coding agent and installs its instructions and skills. If no agent is detected, use the bundled docs linked in `AGENTS.md`. In agents that support it, load the `/void` skill and describe the app you want to build. See [Coding Agents](../integrations/agents) for setup details.
-
-## Meta Frameworks
-
-Use Void's [Pages routing](./pages-routing/overview) or keep a framework such as TanStack Start, React Router, or SvelteKit. Follow the [framework guides](../integrations/frameworks/overview) for setup.
-
-## Adding to an Existing Vite App
-
-Install Void using the package manager command [above](#start-in-an-empty-directory).
-
-Enable the plugin in `vite.config.ts`:
-
-```ts
-import { defineConfig } from 'vite';
-import { voidPlugin } from 'void';
-
-export default defineConfig({
-  plugins: [voidPlugin()],
-});
-```
-
-Then run `void init` with your package manager to configure the remaining project files.
 
 ## Run and deploy
 
@@ -135,6 +108,35 @@ void deploy
 Void builds the app, provisions its resources, applies pending migrations, and prints the deployed URL. If a production secret is missing, [set it](./env-vars.md) and deploy again. Later deploys use the saved target.
 
 See [Deployment](./deployment.md) for CI setup and rollback.
+
+## Using with Coding Agents
+
+`void init` detects your coding agent and installs its instructions and skills. If no agent is detected, use the bundled docs linked in `AGENTS.md`. In agents that support it, load the `/void` skill and describe the app you want to build. See [Coding Agents](../integrations/agents) for setup details.
+
+## Meta Frameworks
+
+Use Void's [Pages routing](./pages-routing/overview) or keep a framework such as TanStack Start, React Router, or SvelteKit. Follow the [framework guides](../integrations/frameworks/overview) for setup.
+
+## Adding to an Existing Vite App
+
+Install Void using the package manager command [above](#start-in-an-empty-directory).
+
+Enable the plugin in `vite.config.ts`:
+
+```ts
+import { defineConfig } from 'vite';
+import { voidPlugin } from 'void';
+
+export default defineConfig({
+  plugins: [voidPlugin()],
+});
+```
+
+Then run `void init` with your package manager to configure the remaining project files.
+
+## Troubleshooting pnpm installs
+
+If a manual pnpm install reports blocked build scripts, run `pnpm approve-builds` for `esbuild`, `sharp`, and `workerd`. Set `better-sqlite3: false` in `pnpm-workspace.yaml`'s `allowBuilds`; Void uses its bundled binaries.
 
 ## Next steps
 
