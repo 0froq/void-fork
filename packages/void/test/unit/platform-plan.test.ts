@@ -248,6 +248,7 @@ describe('platform installation planning', () => {
     const externalHyperdrive = {
       id: 'terraform-id',
       name: 'company-managed-postgres',
+      database: 'void_platform',
       host: 'hyperdrive-productiondb.databases.cfdata.org/itdb/primary',
       user: 'hyperdrive_void_platform_service',
     };
@@ -258,6 +259,9 @@ describe('platform installation planning', () => {
       name: 'company-managed-postgres',
     });
     expect(plan.deployment.resources.hyperdrive).toBe('company-managed-postgres');
+    expect(formatPlatformInstallPlan(plan)).toContain(
+      'Database: void_platform via Hyperdrive company-managed-postgres',
+    );
     const recorded = recordInstallationResource(
       createPlatformInstallationManifest({
         account: plan.account,
@@ -563,6 +567,16 @@ describe('platform installation planning', () => {
           `\u001b[1mControl plane:\u001b[22m ${plan.apiUrl}`,
           `\u001b[1mResource proxy:\u001b[22m ${plan.proxyUrl}`,
         ]);
+        expect(output).toContain(
+          `\u001b[1mLogin methods:\u001b[22m ${plan.deployment.authentication.providers.join(', ')}`,
+        );
+        expect(output).toContain('\u001b[1mAccess protection:\u001b[22m Not enabled');
+        expect(output).toContain(`\u001b[1mLogin callback:\u001b[22m ${plan.apiUrl}/auth/callback`);
+        expect(output).toContain(
+          `\u001b[1mDatabase:\u001b[22m PostgreSQL via Hyperdrive ${plan.deployment.resources.hyperdrive}`,
+        );
+        expect(output).not.toContain('Access login:');
+        expect(output).not.toContain('Access protection: verify');
       } finally {
         bold.mockRestore();
       }

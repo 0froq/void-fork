@@ -169,6 +169,7 @@ describe('interactive platform installation prompts', () => {
         externalHyperdrive: {
           id: 'terraform-id',
           name: 'company-managed-postgres',
+          database: 'void_platform',
           host: 'hyperdrive-productiondb.databases.cfdata.org/itdb/primary',
           user: 'hyperdrive_void_platform_service',
         },

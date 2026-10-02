@@ -289,7 +289,16 @@ describe('platform credential onboarding', () => {
       'Platform runtime',
       'Required Credentials',
     ]);
-    expect(JSON.stringify(vi.mocked(note).mock.calls)).not.toContain('/auth/callback');
+    expect(note).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `Login callback: ${(await mocks.plan.mock.results[0]!.value).apiUrl}/auth/callback`,
+      ),
+      'Read-only installation plan',
+    );
+    const credentialSummary = vi
+      .mocked(note)
+      .mock.calls.find(([, title]) => title === 'Required Credentials')![0];
+    expect(credentialSummary).not.toContain('/auth/callback');
     expect(mocks.password).not.toHaveBeenCalled();
     expect(mocks.open).not.toHaveBeenCalled();
     expect(listInstallationManifests()).toEqual([]);

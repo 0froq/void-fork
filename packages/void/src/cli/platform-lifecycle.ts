@@ -562,6 +562,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
         externalHyperdrive = {
           id: live.id,
           name: live.name,
+          database: live.origin.database,
           host: live.origin.host,
           user: live.origin.user,
         };

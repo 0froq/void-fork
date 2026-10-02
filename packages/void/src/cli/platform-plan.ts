@@ -52,6 +52,7 @@ export type PlatformInstallPlan = Readonly<{
 export type PlatformExternalHyperdrive = Readonly<{
   id: string;
   name?: string;
+  database?: string;
   host: string;
   user: string;
 }>;
@@ -1351,7 +1352,8 @@ export function formatPlatformInstallPlan(plan: PlatformInstallPlan): string {
       : []),
     `${pc.bold('Login methods:')} ${plan.deployment.authentication.providers.join(', ')}`,
     `${pc.bold('Access protection:')} ${plan.deployment.authentication.accessProtection ? 'Enabled' : 'Not enabled'}`,
-    `${pc.bold('Database:')} Verify uncached Hyperdrive reads for authentication`,
+    `${pc.bold('Login callback:')} ${plan.apiUrl}/auth/callback`,
+    `${pc.bold('Database:')} ${plan.externalHyperdrive?.database || 'PostgreSQL'} via Hyperdrive ${plan.deployment.resources.hyperdrive}`,
     '',
   ];
   for (const action of plan.actions) {
