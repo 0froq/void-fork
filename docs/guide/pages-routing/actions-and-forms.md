@@ -195,7 +195,7 @@ The types are inferred from your action's `withValidator()` schema in the compan
 | -------------------------------- | ---------------------------------------------------------------------------------- |
 | `data` / `setData`               | Current form values, typed to match the action's body schema.                      |
 | `errors`                         | Field-level validation errors, keys typed to body field names.                     |
-| `error`                          | Non-validation call-site action error, or `null`.                                  |
+| `error`                          | Action error, or `null`.                                                           |
 | `post`, `put`, `patch`, `delete` | Submit the form with that method. In React these are native form action callbacks. |
 | `pending`                        | `true` while the submission is in flight.                                          |
 | `hasChanges`                     | `true` if form data differs from initial values.                                   |
@@ -203,7 +203,7 @@ The types are inferred from your action's `withValidator()` schema in the compan
 | `recentlySuccessful`             | `true` for 2 seconds after a successful submission. Useful for flash messages.     |
 | `reset(...fields)`               | Reset form data to initial values. Field names autocomplete.                       |
 | `clearErrors(...fields)`         | Clear validation errors. Field names autocomplete.                                 |
-| `clearError()`                   | Clear the non-validation call-site error.                                          |
+| `clearError()`                   | Clear `error`.                                                                     |
 
 In React, use `form.post`, `form.put`, `form.patch`, or `form.delete` as a native form action. For an awaitable mutation, use `action()`. In Vue, Svelte, and Solid, form submissions return `Promise<void>`; catch thrown errors or use your framework's error handling.
 
@@ -252,7 +252,7 @@ A successful call returns `{ ok: true, pageData }`. Expected errors, such as val
 
 Expected errors such as `400`, `404`, `409`, `422`, and `429` stay with the form or action call. `useForm` stores them in `form.errors` or `form.error`; `action()` returns `{ ok: false, error }`.
 
-Authentication errors (`401`, `403`), server errors (`500`, `502`), and unknown network or protocol failures are thrown. Handle them with your framework's error boundary or error handling.
+Authentication errors (`401`, `403`), server errors (`500`, `502`), and unexpected failures are thrown. Handle them with your framework's error boundary or error handling.
 
 Actions can throw `ValidationError` for custom validation logic:
 
@@ -270,7 +270,7 @@ export const action = defineHandler(async (c) => {
 
 ## File Uploads
 
-`useForm` automatically detects `File`, `Blob`, and `FileList` values in form data and sends the request as `multipart/form-data` instead of JSON. No extra configuration is needed. Set a file on the form data and submit.
+Set a `File`, `Blob`, or `FileList` in form data and submit. `useForm` sends it as `multipart/form-data`:
 
 ::: code-group
 
