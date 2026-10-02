@@ -731,6 +731,10 @@ describe('per-deploy sandbox integration', () => {
     const user = await createTestUser(env.db, 'sb-td-user', 'github', undefined, 'solo');
     const project = await createTestProject(env.db, user.id, 'sb-teardown');
     const cf = mockCfApi();
+    await env.ROUTING.put(
+      `project:${project.id}`,
+      JSON.stringify({ userId: user.id, plan: 'solo' }),
+    );
 
     // Deploy v1.
     const res1 = await deploy(project.id, user.jwt);
@@ -765,6 +769,7 @@ describe('per-deploy sandbox integration', () => {
       env,
     );
     expect(delRes.status).toBe(200);
+    expect(await env.ROUTING.get(`project:${project.id}`)).toBeNull();
 
     // Both per-deploy container apps are gone.
     expect(
@@ -785,10 +790,7 @@ describe('per-deploy sandbox integration', () => {
   });
 
   // ----------------------------------------------------------------------
-  // deploy-pipeline integration — sandbox-using user worker uploads
-  // exclude platform queue + account identity bindings, and the routing-switch
-  // step writes the per-project `{userId, plan}` entry the proxy's sandbox
-  // gate reads (packages/proxy/src/sandbox.ts).
+  // Sandbox tenant uploads exclude platform usage and account authority.
   // ----------------------------------------------------------------------
   it('sandbox deploy keeps the usage queue and account identity out of the tenant while injecting one __VOID_PROXY', async () => {
     const user = await createTestUser(env.db, 'sb-p6-user', 'github', undefined, 'pro');
@@ -812,8 +814,7 @@ describe('per-deploy sandbox integration', () => {
     );
     expect(queueBindings).toHaveLength(0);
 
-    // `__VOID_PROXY` is injected once by `provisionBindings` (AI / revalidation
-    // / sandbox gate all share the same service binding).
+    // AI, revalidation, and email share one `__VOID_PROXY` service binding.
     const proxyBindings = bindings.filter((b) => b.type === 'service' && b.name === '__VOID_PROXY');
     expect(proxyBindings).toHaveLength(1);
 
@@ -833,7 +834,7 @@ describe('per-deploy sandbox integration', () => {
     ]);
   });
 
-  it('sandbox deploy writes `project:{projectId}` routing entry with { userId, plan } shape', async () => {
+  it('managed Sandbox deploy does not publish the retired proxy account mirror', async () => {
     const user = await createTestUser(env.db, 'sb-p6-kv-user', 'github', undefined, 'pro');
     const project = await createTestProject(env.db, user.id, 'sb-p6-kv');
     mockCfApi();
@@ -844,11 +845,10 @@ describe('per-deploy sandbox integration', () => {
     expect(done).toBeDefined();
 
     const raw = await env.ROUTING.get(`project:${project.id}`);
-    expect(raw).not.toBeNull();
-    expect(JSON.parse(raw!)).toEqual({ userId: user.id, plan: 'pro' });
+    expect(raw).toBeNull();
   });
 
-  it('non-sandbox WfP deploy still writes `project:{projectId}` (entry tracks user plan, not sandbox usage)', async () => {
+  it('ordinary Worker deploy does not publish the retired proxy account mirror', async () => {
     const user = await createTestUser(env.db, 'sb-p6-nosb-user', 'github', undefined, 'solo');
     const project = await createTestProject(env.db, user.id, 'sb-p6-nosb');
     mockCfApi();
@@ -885,8 +885,7 @@ describe('per-deploy sandbox integration', () => {
     expect(done).toBeDefined();
 
     const raw = await env.ROUTING.get(`project:${project.id}`);
-    expect(raw).not.toBeNull();
-    expect(JSON.parse(raw!)).toEqual({ userId: user.id, plan: 'solo' });
+    expect(raw).toBeNull();
   });
 
   it('rejects manifest.sandbox for static/spa deployments at validation time', async () => {

@@ -275,18 +275,6 @@ app.post('/ai/*', async (context, next) => {
   await next();
 });
 
-// Managed Sandbox is unavailable; retain its authenticated error response.
-app.post('/sandbox/*', (context) =>
-  context.json(
-    {
-      error: 'platform capability unavailable',
-      capability: 'sandbox',
-      message: 'This Void platform does not enable sandbox.',
-    },
-    501,
-  ),
-);
-
 // Same gate for the email group. A deployed worker on a platform without
 // the email module still holds `__VOID_PROXY` and a valid project token, so
 // an explicit-`from` `sendEmail()` reaches `/email/send` and would otherwise

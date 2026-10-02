@@ -529,10 +529,7 @@ describe('operator tenant mutations', () => {
       userId: target.id,
       suspended: 'operator_review',
     });
-    expect(JSON.parse((await env.ROUTING.get(`project:${project.id}`))!)).toEqual({
-      userId: target.id,
-      plan: 'pro',
-    });
+    expect(await env.ROUTING.get(`project:${project.id}`)).toBeNull();
 
     counterCalls.length = 0;
     const retry = await req(
@@ -653,10 +650,7 @@ describe('operator tenant mutations', () => {
       suspended: 'operator_review',
       limits: { cpuMs: 50, subRequests: 1000 },
     });
-    expect(JSON.parse((await env.ROUTING.get(`project:${project.id}`))!)).toEqual({
-      userId: target.id,
-      plan: 'pro',
-    });
+    expect(await env.ROUTING.get(`project:${project.id}`)).toBeNull();
 
     const retryDetachStarted = deferred();
     const resumeRetry = deferred();

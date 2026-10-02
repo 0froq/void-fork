@@ -516,10 +516,7 @@ describe('POST /projects/:id/deploy', () => {
           : { staticDeploymentId: expect.any(String) }),
       });
       expect(await env.ROUTING.get('domain:late-policy.example.com', 'json')).toEqual(routing);
-      expect(await env.ROUTING.get(`project:${project.id}`, 'json')).toEqual({
-        userId: user.id,
-        plan: changePlan ? 'team' : 'free',
-      });
+      expect(await env.ROUTING.get(`project:${project.id}`)).toBeNull();
     },
   );
 
@@ -1106,6 +1103,13 @@ describe('POST /projects/:id/deploy', () => {
       hasCrons: true,
     });
     await env.ROUTING.put(project.slug, previousRouting);
+    await env.db.insert(domains).values({
+      id: 'dom_compensation_failure',
+      project_id: project.id,
+      hostname: 'undo-failure.example.com',
+      cf_hostname_id: 'ch-compensation-failure',
+      status: 'active',
+    });
     const previousCronState = {
       workerName: 'user-cron-sync-failure-dpl_live',
       schedules: [{ name: 'old', cron: '0 * * * *' }],
@@ -1129,11 +1133,11 @@ describe('POST /projects/:id/deploy', () => {
       }),
     } as unknown as DurableObjectNamespace;
     const originalDelete = env.ROUTING.delete.bind(env.ROUTING);
-    const projectAccountKey = `project:${project.id}`;
-    let projectAccountRestoreFailed = false;
+    const domainKey = 'domain:undo-failure.example.com';
+    let domainRestoreFailed = false;
     vi.spyOn(env.ROUTING, 'delete').mockImplementation(async (key) => {
-      if (key === projectAccountKey && !projectAccountRestoreFailed) {
-        projectAccountRestoreFailed = true;
+      if (key === domainKey && !domainRestoreFailed) {
+        domainRestoreFailed = true;
         throw new Error('injected first compensation failure');
       }
       return originalDelete(key);
@@ -1153,8 +1157,8 @@ describe('POST /projects/:id/deploy', () => {
 
     expect(events.some((event) => (event as DeployEvent).event === 'done')).toBe(false);
     expect(events.some((event) => (event as DeployEvent).event === 'error')).toBe(true);
-    expect(projectAccountRestoreFailed).toBe(true);
-    // The failed project-account undo is first in reverse order. The slug
+    expect(domainRestoreFailed).toBe(true);
+    // The failed custom-domain undo is first in reverse order. The slug
     // restoration must still run instead of being skipped after that error.
     expect(await env.ROUTING.get(project.slug)).toBe(previousRouting);
     expect(syncedStates.at(-1)).toEqual(previousCronState);
@@ -4070,7 +4074,7 @@ describe('ambiguous go-live commit outcomes', () => {
     const originalPut = env.ROUTING.put.bind(env.ROUTING);
     let injected = false;
     const putSpy = vi.spyOn(env.ROUTING, 'put').mockImplementation(async (key, value, options) => {
-      if (key === `project:${project.id}` && !injected) {
+      if (key === project.slug && !injected) {
         injected = true;
         throw new Error('injected stale replay surface failure');
       }
@@ -4125,7 +4129,7 @@ describe('ambiguous go-live commit outcomes', () => {
     const originalPut = env.ROUTING.put.bind(env.ROUTING);
     let failuresRemaining = 2;
     const putSpy = vi.spyOn(env.ROUTING, 'put').mockImplementation(async (key, value, options) => {
-      if (key === `project:${project.id}` && failuresRemaining > 0) {
+      if (key === project.slug && failuresRemaining > 0) {
         failuresRemaining--;
         throw new Error('injected replay and compensation failure');
       }

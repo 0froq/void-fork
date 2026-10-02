@@ -8,24 +8,6 @@ import {
   withProjectZeroTrustRouting,
 } from './zero-trust/routing.ts';
 
-/**
- * KV key + payload shape for the per-project routing entry consumed by the
- * proxy's `/sandbox/acquire` lookup (`packages/proxy/src/sandbox.ts`). The
- * proxy parses `{ userId, plan }` to resolve the sandbox concurrency cap +
- * runtime-block lookup for the authenticated `projectId`. Field casing is
- * camelCase to match the rest of the routing-entry conventions in this
- * module — `buildRoutingJson` and `buildStaticRoutingJson` both emit
- * `projectId` / `userId`.
- */
-export type ProjectAccountEntry = Readonly<{
-  userId: string;
-  plan: string;
-}>;
-
-export function projectAccountKey(projectId: string): string {
-  return `project:${projectId}`;
-}
-
 export { computeDispatchLimits } from './routing-limits.ts';
 
 export function sandboxBlockKey(userId: string): string {
@@ -71,10 +53,6 @@ export async function setProjectAiBlock(
       await routing.delete(`ai-block:${projectId}`);
     }
   });
-}
-
-export function buildProjectAccountJson(entry: ProjectAccountEntry): string {
-  return JSON.stringify({ userId: entry.userId, plan: entry.plan });
 }
 
 /**

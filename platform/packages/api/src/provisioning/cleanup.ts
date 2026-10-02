@@ -443,10 +443,10 @@ async function cleanupBestEffortResources(
     cleanupJob(projectId, 'routing-key', `ai-block:${projectId}`, { key: `ai-block:${projectId}` }),
   );
 
-  // NOTE: `projectAccountKey(projectId)` (`project:{projectId}`) is intentionally
-  // NOT deleted here — the sandbox gate's release path in `packages/proxy/src/sandbox.ts`
-  // needs `{userId, plan}` to address the per-account SandboxConcurrencyCounter DO.
-  // Leaving it durable across project deletion prevents lease leaks until the 1h stale-slot sweep.
+  // Retire any account mirror left by the removed tenant-owned Sandbox proxy.
+  cleanup.push(
+    cleanupJob(projectId, 'routing-key', `project:${projectId}`, { key: `project:${projectId}` }),
+  );
 
   // Queue routing KV entries
   for (const q of resources.filter((r) => r.type === 'queue')) {

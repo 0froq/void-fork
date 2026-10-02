@@ -46,9 +46,7 @@ import {
   ZERO_USAGE,
 } from '../routes/usage.ts';
 import {
-  buildProjectAccountJson,
   computeDispatchLimits,
-  projectAccountKey,
   sandboxBlockKey,
   setProjectsRoutingSuspension,
 } from '../routing.ts';
@@ -691,10 +689,6 @@ async function republishProjectOwnerState(
         }),
       );
     }
-    await context.env.ROUTING.put(
-      projectAccountKey(project.id),
-      buildProjectAccountJson({ userId: owner.id, plan: owner.plan }),
-    );
     return owner;
   });
 }
@@ -745,7 +739,6 @@ export async function previewOperatorProjectOwner(
       routingUpdates: [
         inspection.project.slug,
         ...inspection.domains.map((domain) => `domain:${domain.hostname}`),
-        projectAccountKey(inspection.project.id),
       ],
       counterUpdates: {
         detachUserId:

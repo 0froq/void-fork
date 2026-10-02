@@ -2,11 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import * as dbModule from '../../src/db.ts';
 import {
   applyRoutingSuspension,
-  buildProjectAccountJson,
   buildRoutingJson,
   buildStaticRoutingJson,
   computeDispatchLimits,
-  projectAccountKey,
   resolveRoutingUndo,
   setProjectAiBlock,
   setProjectsRoutingSuspension,
@@ -362,20 +360,6 @@ describe('buildStaticRoutingJson', () => {
     expect(parsed.staticDeploymentId).toBe('dep_1');
     expect(parsed.assetConfig).toEqual({ not_found_handling: 'single-page-application' });
     expect(parsed.assetManifestId).toBeUndefined();
-  });
-});
-
-describe('projectAccountKey', () => {
-  it('namespaces the project id under the `project:` prefix the proxy reads', () => {
-    expect(projectAccountKey('proj_1')).toBe('project:proj_1');
-  });
-});
-
-describe('buildProjectAccountJson', () => {
-  it('emits camelCase `userId` and `plan` so packages/proxy/src/sandbox.ts can parse it', () => {
-    expect(buildProjectAccountJson({ userId: 'user_1', plan: 'pro' })).toBe(
-      JSON.stringify({ userId: 'user_1', plan: 'pro' }),
-    );
   });
 });
 

@@ -466,7 +466,7 @@ describe('POST /email/send — platform capability', () => {
     expect(kv.put).not.toHaveBeenCalled();
   });
 
-  it('still authenticates first, like the sandbox gate', async () => {
+  it('still authenticates before checking email capabilities', async () => {
     const env = createMockEnv(kv, { PLATFORM_CAPABILITIES: JSON.stringify({ email: false }) });
     const res = await postSend(env, await sendBody({ aiToken: 'nope' }));
     expect(res.status).toBe(403);

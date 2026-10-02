@@ -144,9 +144,7 @@ import { RESERVED_BINDING_NAMES } from '../reserved-bindings.ts';
 import {
   buildRoutingJson,
   buildStaticRoutingJson,
-  buildProjectAccountJson,
   computeDispatchLimits,
-  projectAccountKey,
   resolveRoutingUndo,
 } from '../routing.ts';
 import { builds, deployments, deploymentOperations } from '../schema.ts';
@@ -382,10 +380,6 @@ async function replayDeploymentCutover(
     : null;
 
   await env.ROUTING.put(project.slug, routingJson);
-  await env.ROUTING.put(
-    projectAccountKey(project.id),
-    buildProjectAccountJson({ userId: currentOwner.id, plan: currentOwner.plan }),
-  );
   await reconcileProjectDomainRoutes(env, domains, routingJson);
   if (!isStatic && manifest.schedules?.length) {
     await syncCronScheduler(env, project.id, {
@@ -463,7 +457,6 @@ async function clearProjectExternalState(
   }
 
   await env.ROUTING.delete(project.slug);
-  await env.ROUTING.delete(projectAccountKey(project.id));
   await reconcileProjectDomainRoutes(env, domains, null);
   await clearCronScheduler(env, project.id);
   const dispatchWorkerName = env.DISPATCH_WORKER_NAME ?? 'void-dispatch';
@@ -3201,11 +3194,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                       zeroTrust,
                     })
                   : withProjectZeroTrustRouting(value, zeroTrust, projectId);
-              } else if (refreshPolicy && key === projectAccountKey(projectId)) {
-                value = buildProjectAccountJson({
-                  userId: currentOwner.id,
-                  plan: currentOwner.plan,
-                });
               }
               await context.env.ROUTING.put(key, value);
             }
@@ -3676,10 +3664,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             });
             const cutoverDomains = await getDomainsByProjectId(txDb, projectId);
             await putTrackedRouting(project.slug, routingJson);
-            await putTrackedRouting(
-              projectAccountKey(projectId),
-              buildProjectAccountJson({ userId: currentOwner.id, plan: currentOwner.plan }),
-            );
             routingSwitched = true;
             logger = logger.with({ routingSwitched: true });
             logger.info('routing_switch', 'slug_routed', { slug: project.slug });
@@ -4768,10 +4752,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           });
           const cutoverDomains = await getDomainsByProjectId(txDb, projectId);
           await putTrackedRouting(project.slug, routingJson);
-          await putTrackedRouting(
-            projectAccountKey(projectId),
-            buildProjectAccountJson({ userId: currentOwner.id, plan: currentOwner.plan }),
-          );
           routingSwitched = true;
           logger = logger.with({ routingSwitched: true });
           logger.info('routing_switch', 'slug_routed', { slug: project.slug });

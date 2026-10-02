@@ -1112,7 +1112,7 @@ describe('POST /admin/users/:id/plan', () => {
     expect(res.headers.get('Location')).toBe(`/admin/users/${user.id}`);
   });
 
-  test('refreshes project:{projectId} KV entries so the proxy sandbox gate sees the new plan without a redeploy', async () => {
+  test('updates the serving policy without publishing retired Sandbox proxy account mirrors', async () => {
     const admin = await createTestUser(
       env.db,
       'admin-plan-kv',
@@ -1125,9 +1125,12 @@ describe('POST /admin/users/:id/plan', () => {
     const p1 = await createTestProject(env.db, user.id, 'plan-kv-a');
     const p2 = await createTestProject(env.db, user.id, 'plan-kv-b');
 
-    // Seed stale entries that reflect the pre-change plan.
-    await env.ROUTING.put(`project:${p1.id}`, JSON.stringify({ userId: user.id, plan: 'free' }));
-    await env.ROUTING.put(`project:${p2.id}`, JSON.stringify({ userId: user.id, plan: 'free' }));
+    for (const project of [p1, p2]) {
+      await env.ROUTING.put(
+        project.slug,
+        JSON.stringify({ projectId: project.id, userId: user.id, workerName: 'test-worker' }),
+      );
+    }
 
     const body = new URLSearchParams({ plan: 'pro' });
     const res = await req(`/admin/users/${user.id}/plan`, admin.adminJwt, {
@@ -1137,10 +1140,13 @@ describe('POST /admin/users/:id/plan', () => {
     });
     expect(res.status).toBe(302);
 
-    const v1 = JSON.parse((await env.ROUTING.get(`project:${p1.id}`))!);
-    expect(v1).toEqual({ userId: user.id, plan: 'pro' });
-    const v2 = JSON.parse((await env.ROUTING.get(`project:${p2.id}`))!);
-    expect(v2).toEqual({ userId: user.id, plan: 'pro' });
+    for (const project of [p1, p2]) {
+      expect(await env.ROUTING.get(project.slug, 'json')).toMatchObject({
+        userId: user.id,
+        limits: { cpuMs: 50, subRequests: 1000 },
+      });
+      expect(await env.ROUTING.get(`project:${project.id}`)).toBeNull();
+    }
   });
 
   test('clears sandbox-block KV and sandbox_runtime_exceeded DB suspension on plan change', async () => {

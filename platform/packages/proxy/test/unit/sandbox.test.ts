@@ -42,23 +42,18 @@ function createEnv(capabilities?: string) {
   return { env, get };
 }
 
-describe.each(['acquire', 'refresh', 'release'])('unavailable Sandbox %s', (path) => {
+describe.each(['acquire', 'refresh', 'release'])('retired Sandbox %s', (path) => {
   it.each([undefined, '{"sandbox":false}', '{"sandbox":true}'])(
     'rejects an authenticated request without accessing Sandbox resources (%s)',
     async (capabilities) => {
       const { env, get } = createEnv(capabilities);
       const response = await worker.fetch(request(path, aiToken), env);
-      expect(response.status).toBe(501);
-      expect(await response.json()).toEqual({
-        error: 'platform capability unavailable',
-        capability: 'sandbox',
-        message: 'This Void platform does not enable sandbox.',
-      });
+      expect(response.status).toBe(404);
       expect(get).not.toHaveBeenCalled();
     },
   );
 
-  it('still authenticates before returning the capability response', async () => {
+  it('still authenticates before returning not found', async () => {
     const { env, get } = createEnv();
     const response = await worker.fetch(request(path, 'invalid-token'), env);
     expect(response.status).toBe(403);
