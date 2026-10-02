@@ -424,9 +424,9 @@ describe('platform credential onboarding', () => {
     vi.spyOn(pc, 'cyan').mockImplementation(colors.cyan);
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));
     const lastOutput = vi.mocked(console.log).mock.calls.at(-1)![0] as string;
-    expect(lastOutput).toContain(colors.bold('Next step: run this command to install'));
+    expect(lastOutput).toContain(colors.bold('Next, run this command to install the platform'));
     expect(stripVTControlCharacters(lastOutput)).toMatch(
-      /Next step: run this command to install\n\nvoid platform install /,
+      /Next, run this command to install the platform\n\nvoid platform install /,
     );
     expect(vi.mocked(outro).mock.invocationCallOrder.at(-1)).toBeLessThan(
       vi.mocked(console.log).mock.invocationCallOrder.at(-1)!,

@@ -684,7 +684,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       }
       outro('Plan complete and ready to execute.');
       console.log(
-        `\n${pc.bold(existing ? 'Next step: run this command to resume' : 'Next step: run this command to install')}\n\n${pc.cyan(
+        `\n${pc.bold(existing ? 'Next step: run this command to resume' : 'Next, run this command to install the platform')}\n\n${pc.cyan(
           formatPlatformInstallCommand(commandOptions),
         )}\n`,
       );
