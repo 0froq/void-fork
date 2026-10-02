@@ -289,6 +289,7 @@ describe('platform credential onboarding', () => {
       'Platform runtime',
       'Required Credentials',
     ]);
+    expect(JSON.stringify(vi.mocked(note).mock.calls)).not.toContain('/auth/callback');
     expect(mocks.password).not.toHaveBeenCalled();
     expect(mocks.open).not.toHaveBeenCalled();
     expect(listInstallationManifests()).toEqual([]);

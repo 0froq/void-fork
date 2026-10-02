@@ -45,7 +45,7 @@ path, query, or fragment. Void permits that origin's login callbacks and saves
 it for later maintenance; it does not deploy a dashboard Worker. Omission keeps
 an existing installation's saved dashboard origin.
 
-`--plan` previews resource names, login methods, callback URLs, and credential requirements. Completed previews save nonsecret installation choices locally. Rerun `void platform install` to choose a saved plan and review a fresh check of Cloudflare state, or run the install or resume command printed at the end. Started installations use their saved checkpoints; completed installations are excluded from the chooser. For login configuration, use either `--auth-config` or `--login-methods` with the Access protection flags.
+`--plan` previews resource names, login methods, and credential requirements. Setup links and login callback URLs are shown during guided credential setup. Completed previews save nonsecret installation choices locally. Rerun `void platform install` to choose a saved plan and review a fresh check of Cloudflare state, or run the install or resume command printed at the end. Started installations use their saved checkpoints; completed installations are excluded from the chooser. For login configuration, use either `--auth-config` or `--login-methods` with the Access protection flags.
 
 New resources use `void-<name>-<role>` names; choose an unused installation name. The installer opens setup pages for missing credentials and reuses values already supplied.
 
