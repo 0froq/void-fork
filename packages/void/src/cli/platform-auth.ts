@@ -3,13 +3,15 @@ import type { PlatformCloudflareClient } from './platform-cloudflare.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
 
 export type PlatformCloudflareCredential = Readonly<{
-  source: 'environment' | 'oauth';
+  source: 'environment' | 'saved' | 'oauth';
   token: string;
 }>;
 
 export type PlatformCloudflareAuthDependencies = Readonly<{
   interactive?: boolean;
   runWrangler?: CloudflareAuthRunner;
+  /** Account management authority recovered for the selected installation. */
+  savedManagementToken?: string;
 }>;
 
 export type PlatformManagementAccess = Readonly<{
@@ -160,6 +162,10 @@ async function readExistingCredential(
     process.env.CLOUDFLARE_API_TOKEN?.trim() || process.env.CF_API_TOKEN?.trim() || '';
   if (environmentToken) {
     return { source: 'environment', token: environmentToken };
+  }
+  const savedManagementToken = dependencies.savedManagementToken?.trim();
+  if (savedManagementToken) {
+    return { source: 'saved', token: savedManagementToken };
   }
 
   if (!(dependencies.interactive ?? process.stdin.isTTY === true)) {

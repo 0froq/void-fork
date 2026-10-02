@@ -201,7 +201,9 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     timingPrevious = current;
   };
   const manifest = await resolveInstalledPlatformManifest(args.selector);
-  const operatorCredential = await resolvePlatformCloudflareCredential();
+  const operatorCredential = await resolvePlatformCloudflareCredential({
+    savedManagementToken: readInstallationRecoverySecrets(manifest)?.managementApiToken,
+  });
   const operatorClient = new PlatformCloudflareClient(operatorCredential.token);
   const runtime =
     args.subcommand === 'uninstall' || args.subcommand === 'disable'

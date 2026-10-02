@@ -16,7 +16,7 @@ Browser login does not grant AI Gateway access. Include **Account → AI Gateway
 
 The management token lets your CLI install and maintain the platform. The runtime token is stored as a Worker secret so the platform can deploy apps after you close your terminal. They are separate credentials.
 
-Compare each token's form with the permission checklist below, and select the indicated account and zone for a domain installation. The installer saves a management token entered at the prompt in this installation’s encrypted local checkpoint and reuses it on resume. If Cloudflare rejects it, the installer asks for a replacement. An explicit `CLOUDFLARE_API_TOKEN` or `CF_API_TOKEN` takes precedence. Keep your password-manager copy for maintenance or another machine; scripts supply it through `CLOUDFLARE_API_TOKEN`.
+Compare each token's form with the permission checklist below, and select the indicated account and zone for a domain installation. The installer saves a management token entered at the prompt in this installation’s encrypted local checkpoint and reuses it on resume. Upgrades, repairs, and other lifecycle maintenance also use that saved management token. During installation, a rejected token can be replaced at the prompt. An explicit `CLOUDFLARE_API_TOKEN` or `CF_API_TOKEN` takes precedence. Keep your password-manager copy for maintenance or another machine; scripts supply it through `CLOUDFLARE_API_TOKEN`.
 
 ::: details Permissions to select for each token
 

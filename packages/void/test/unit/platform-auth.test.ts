@@ -104,6 +104,46 @@ describe('platform Cloudflare authentication', () => {
     expect(runWrangler).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])(
+    'uses saved management authority before browser login (interactive: %s)',
+    async (interactive) => {
+      const runWrangler = vi.fn();
+      const credential = await resolvePlatformCloudflareCredential({
+        interactive,
+        runWrangler,
+        savedManagementToken: ' saved-manager ',
+      });
+      expect(credential).toEqual({ source: 'saved', token: 'saved-manager' });
+      expect(runWrangler).not.toHaveBeenCalled();
+      expect(() =>
+        assertPlatformOperatorCredentialCanApplyPlan(
+          credential,
+          { actions: [] },
+          {
+            protection: true,
+            readOnly: false,
+          },
+        ),
+      ).not.toThrow();
+    },
+  );
+
+  it.each(['CLOUDFLARE_API_TOKEN', 'CF_API_TOKEN'])(
+    'keeps explicit %s ahead of the saved token',
+    async (name) => {
+      process.env[name] = 'explicit-manager';
+      const runWrangler = vi.fn();
+      await expect(
+        resolvePlatformCloudflareCredential({
+          interactive: false,
+          runWrangler,
+          savedManagementToken: 'saved-manager',
+        }),
+      ).resolves.toEqual({ source: 'environment', token: 'explicit-manager' });
+      expect(runWrangler).not.toHaveBeenCalled();
+    },
+  );
+
   it('reads OAuth through the Cloudflare session command', async () => {
     await expect(
       readWranglerOAuthCredential(() => ({

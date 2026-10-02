@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 const state = vi.hoisted(() => ({
   createSecrets: vi.fn(),
+  clientTokens: [] as Array<string>,
+  requiredGatewayToken: '',
   events: [] as Array<string>,
   manifest: undefined as PlatformInstallationManifest | undefined,
   prepareDatabase: vi.fn(),
@@ -37,9 +39,9 @@ vi.mock('@clack/prompts', () => ({
   select: vi.fn(),
 }));
 
-vi.mock('../../src/cli/platform-auth.ts', () => ({
+vi.mock('../../src/cli/platform-auth.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/cli/platform-auth.ts')>()),
   assertPlatformOperatorCredentialCanApplyPlan: vi.fn(),
-  resolvePlatformCloudflareCredential: async () => ({ token: 'token' }),
 }));
 
 vi.mock('../../src/cli/platform-cloudflare.ts', async (importOriginal) => {
@@ -47,11 +49,21 @@ vi.mock('../../src/cli/platform-cloudflare.ts', async (importOriginal) => {
   return {
     ...actual,
     PlatformCloudflareClient: class {
+      constructor(private readonly token: string) {
+        state.clientTokens.push(token);
+      }
       async getKvValue() {
         return JSON.stringify(state.manifest);
       }
 
       async listAiGateways() {
+        if (state.requiredGatewayToken && this.token !== state.requiredGatewayToken) {
+          throw new actual.PlatformCloudflareApiError(
+            'Authentication error',
+            403,
+            '/accounts/account/ai-gateway/gateways',
+          );
+        }
         return [];
       }
 
@@ -193,10 +205,18 @@ import {
 } from '../../src/cli/platform-installer.ts';
 import { runInstalledPlatformCommand } from '../../src/cli/platform-management.ts';
 import { createPlatformInstallPlan } from '../../src/cli/platform-plan.ts';
+import { readInstallationRecoverySecrets } from '../../src/cli/platform-registry.ts';
 
 describe('installed platform upgrade', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv('CLOUDFLARE_API_TOKEN', 'token');
+    vi.stubEnv('CF_API_TOKEN', '');
+    state.clientTokens.length = 0;
+    state.requiredGatewayToken = '';
+    vi.mocked(readInstallationRecoverySecrets).mockReturnValue({
+      databaseUrl: 'postgres://database',
+    });
     state.spinner.mockReturnValue(state.progress);
     state.releaseDatabase.mockReset().mockResolvedValue(undefined);
     state.createSecrets.mockReset().mockReturnValue({});
@@ -264,6 +284,38 @@ describe('installed platform upgrade', () => {
     delete process.env.VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION;
     delete process.env.VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON;
   });
+
+  it.each([false, true])(
+    'plans an upgrade with management authority instead of its runtime token (environment override: %s)',
+    async (override) => {
+      vi.stubEnv('CLOUDFLARE_API_TOKEN', override ? 'explicit-manager' : '');
+      state.requiredGatewayToken = override ? 'explicit-manager' : 'saved-manager';
+      vi.mocked(readInstallationRecoverySecrets).mockReturnValue({
+        databaseUrl: 'postgres://database',
+        managementApiToken: 'saved-manager',
+        cloudflareApiToken: 'runtime-without-ai-gateway',
+      });
+      const original = vi.mocked(createPlatformInstallPlan).getMockImplementation()!;
+      vi.mocked(createPlatformInstallPlan).mockImplementationOnce(async (...args) => {
+        await args[0].listAiGateways(args[1].accountId);
+        return original(...args);
+      });
+      await runInstalledPlatformCommand({
+        plan: false,
+        runtime: '',
+        selector: state.manifest!.id,
+        subcommand: 'upgrade',
+        yes: true,
+      });
+      expect(state.clientTokens).toEqual([state.requiredGatewayToken]);
+      expect(state.events).toContain('installer-finish');
+      expect(state.createSecrets).toHaveBeenCalledWith(
+        expect.objectContaining({
+          checkpoint: expect.objectContaining({ managementApiToken: 'saved-manager' }),
+        }),
+      );
+    },
+  );
 
   it('includes shared email configuration when planning an upgrade', async () => {
     vi.stubEnv('VOID_EMAIL_SHARED_ZONE_ID', 'mail-zone');
