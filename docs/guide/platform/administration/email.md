@@ -38,7 +38,15 @@ void platform email policy-set any
 void platform email policy-set verified
 ```
 
-`domains` lets every project mail any address on the listed domains in addition to its verified recipients; `any` lifts the check. Cloudflare still refuses a recipient it has not verified until your mail domain is onboarded for Email Sending, which needs Workers Paid on the platform's account. Until then such sends come back as `UNVERIFIED_DESTINATION` for that recipient, whatever the policy says. Two things the policy never changes: sends from a project's own custom domain, and mail to any address on the platform's own mail domain — those stay verified-recipient-only, so no project reaches another project's inbox without its consent. A tightening applies to new send admissions as soon as it commits; previously admitted attempts may finish. The same setting is on the admin UI's **Email** page.
+Choose a policy in the admin UI's **Email** page or with the commands above:
+
+- `verified`: only each project's verified recipients.
+- `domains`: verified recipients plus any address on the listed domains.
+- `any`: any recipient.
+
+Unverified recipients still require Cloudflare Email Sending onboarding and [Workers Paid](https://dash.cloudflare.com/?to=/:account/workers/plans). Otherwise those sends return `UNVERIFIED_DESTINATION`. Mail from a project's custom domain, and mail to the platform's own mail domain, always requires recipient verification.
+
+Policy changes apply to new sends; admitted attempts may finish.
 
 ### Project caps
 
