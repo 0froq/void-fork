@@ -675,11 +675,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       if (!existing) {
         log.info('Plan saved locally for your next install.');
       }
-      outro(
-        needsManagementToken
-          ? 'Plan complete. Management API token required.'
-          : 'Plan complete and ready to execute.',
-      );
+      outro('Plan complete and ready to execute.');
       console.log(
         `\n${pc.bold(existing ? 'Next step: run this command to resume' : 'Next step: run this command to install')}\n\n${pc.cyan(
           formatPlatformInstallCommand(commandOptions),

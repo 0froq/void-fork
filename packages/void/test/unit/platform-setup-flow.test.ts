@@ -279,7 +279,7 @@ describe('platform credential onboarding', () => {
   it('explains the management token requirement in a preview without collecting secrets', async () => {
     requireManagementToken();
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));
-    expect(outro).toHaveBeenCalledWith('Plan complete. Management API token required.');
+    expect(outro).toHaveBeenCalledWith('Plan complete and ready to execute.');
     expect(note).toHaveBeenCalledWith(
       expect.stringContaining('• Cloudflare management API token for DNS changes'),
       'Required Credentials',
