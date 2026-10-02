@@ -108,7 +108,11 @@ app.post('/preview', async (context) => {
     selectedAction === 'add' || selectedAction === 'default' ? undefined : target,
     { ...body, dryRun: true },
   );
-  if (!('overLimitAccounts' in result) || typeof result.expectedRevision !== 'number') {
+  if (
+    !('overLimitAccounts' in result) ||
+    !('expectedRevision' in result) ||
+    typeof result.expectedRevision !== 'number'
+  ) {
     throw new Error('Plan preview is unavailable.');
   }
   const preview: AdminPlanPreview = {

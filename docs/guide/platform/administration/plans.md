@@ -110,6 +110,8 @@ void platform config plans remove team --replacement pro --yes
 
 Removing the default also requires a replacement. An unused plan that is not the default can be removed without one. Accounts keep their usage when moved to a replacement plan. Restore the original limits and build size of a built-in plan with `void platform config plans reset <plan-id>`; custom plans have no built-in reset values.
 
+The removal review shows the replacement plan and any changes to its limits, build size, and short-slug permission before you confirm.
+
 ## Complete Pending Updates
 
 After applying a change, the CLI continues account updates until complete. If an update fails or stops making progress, the configuration remains saved, the result reports pending work, and the command exits with a nonzero status. Inspect the catalog, then continue:

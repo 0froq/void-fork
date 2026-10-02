@@ -108,6 +108,25 @@ function showPreview(
   for (const plan of before.plans) {
     if (!after.plans.some((entry) => entry.id === plan.id)) {
       write(`Remove ${label(plan)}`);
+      const replacement = after.plans.find((entry) => entry.id === preview.replacementPlanId);
+      if (replacement) {
+        write(`Move accounts to ${label(replacement)}`);
+        if (plan.buildInstanceType !== replacement.buildInstanceType) {
+          write(`Build size: ${plan.buildInstanceType} → ${replacement.buildInstanceType}`);
+        }
+        if (plan.allowShortSlugs !== replacement.allowShortSlugs) {
+          write(
+            `Short project slugs: ${plan.allowShortSlugs ? 'allowed' : 'not allowed'} → ${replacement.allowShortSlugs ? 'allowed' : 'not allowed'}`,
+          );
+        }
+        for (const key of PLAN_EDITABLE_LIMIT_KEYS) {
+          if (plan.limits[key] !== replacement.limits[key]) {
+            write(
+              `${limitLabels[key]}: ${limitValue(plan.limits[key], key)} → ${limitValue(replacement.limits[key], key)}`,
+            );
+          }
+        }
+      }
     }
   }
   for (const account of (preview.overLimitAccounts ?? []) as Array<{

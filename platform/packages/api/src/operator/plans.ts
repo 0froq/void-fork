@@ -356,6 +356,12 @@ export async function mutateOperatorPlanCatalog(
         affectedAccounts,
         loweredLimits: proposal.loweredLimits,
         warnings,
+        ...(proposal.removedPlanId
+          ? {
+              removedPlanId: proposal.removedPlanId,
+              replacementPlanId: proposal.replacementPlanId ?? null,
+            }
+          : {}),
       };
     }
     if (proposal.removedPlanId && proposal.replacementPlanId) {
@@ -372,6 +378,12 @@ export async function mutateOperatorPlanCatalog(
       affectedAccounts,
       loweredLimits: proposal.loweredLimits,
       warnings,
+      ...(proposal.removedPlanId
+        ? {
+            removedPlanId: proposal.removedPlanId,
+            replacementPlanId: proposal.replacementPlanId ?? null,
+          }
+        : {}),
     };
   });
   if (preview) {

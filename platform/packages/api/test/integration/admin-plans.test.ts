@@ -98,6 +98,25 @@ async function editFields(id: string) {
 }
 
 describe('administrator plan dashboard', () => {
+  test('reviews the replacement policy before removing an assigned plan', async () => {
+    await createTestUser(env.db, 'replacement-owner', 'github', undefined, 'pro');
+    const response = await request(home + '/preview', {
+      action: 'remove',
+      id: 'pro',
+      revision: '0',
+      replacementPlanId: 'free',
+    });
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('Move accounts to');
+    expect(html).toContain('Maximum app CPU per request (ms)');
+    expect(html).toContain('100,000,000');
+    expect(html).toContain('3,000,000');
+    expect(html).toContain('Short project slugs');
+    expect(html).toContain('Not allowed');
+    expect((await readPlanCatalog(env.db)).revision).toBe(0);
+  });
+
   test('requires an administrator and same-origin writes before changing the catalog', async () => {
     expect((await request(home, undefined, { Cookie: '' })).status).toBe(302);
     const regular = await createTestUser(env.db, 'regular');

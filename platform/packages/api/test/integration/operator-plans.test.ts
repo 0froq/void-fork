@@ -293,6 +293,8 @@ describe('operator installation plans', () => {
     const periods = await env.db.select().from(projectOwnershipPeriods);
     expect((await change('/pro/remove', {})).status).toBe(409);
     expect((await change('/pro/remove', { replacementPlanId: 'pro' })).status).toBe(400);
+    const preview = await req('/pro/remove', { dryRun: true, replacementPlanId: 'solo' });
+    expect(await preview.json()).toMatchObject({ removedPlanId: 'pro', replacementPlanId: 'solo' });
     const response = await change('/pro/remove', { replacementPlanId: 'solo' });
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ affectedAccounts: 1, ok: true });
@@ -304,7 +306,10 @@ describe('operator installation plans', () => {
       created_at: before.created_at,
     });
     expect(await env.db.select().from(projectOwnershipPeriods)).toEqual(periods);
-    expect(calls[0].body).toMatchObject({ userId: owner.id, plan: 'solo' });
+    expect(calls.find((call) => call.path === '/init')?.body).toMatchObject({
+      userId: owner.id,
+      plan: 'solo',
+    });
   });
 
   test('resets built-in enforced settings but keeps names and blocks default removal without a replacement', async () => {

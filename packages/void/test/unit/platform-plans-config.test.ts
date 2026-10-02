@@ -88,6 +88,44 @@ afterEach(async () => {
 });
 
 describe('platform config plans', () => {
+  it('shows the replacement and changed limits in a removal preview', async () => {
+    const catalog = createDefaultPlanCatalog('custom');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        if (init?.method === 'GET') {
+          return Response.json({ catalog, accounts: [{ planId: 'custom', count: 2 }] });
+        }
+        return Response.json({
+          dryRun: true,
+          action: 'plans.remove',
+          target: 'custom',
+          expectedRevision: 0,
+          removedPlanId: 'custom',
+          replacementPlanId: 'free',
+          affectedAccounts: 2,
+          catalog: {
+            ...catalog,
+            revision: 1,
+            defaultPlanId: 'free',
+            plans: catalog.plans.filter((plan) => plan.id !== 'custom'),
+          },
+        });
+      }),
+    );
+    await runPlatformPlansConfig(
+      parsePlatformPlansArgs(['plans', 'remove', 'custom', '--replacement', 'free', '--plan']),
+    );
+    const output = vi
+      .mocked(console.log)
+      .mock.calls.map((call) => call[0])
+      .join('\n');
+    expect(output).toContain('Move accounts to free (free)');
+    expect(output).toContain('Requests per billing month: unlimited → 3,000,000');
+    expect(output).toContain('Build size: standard-4 → standard-3');
+    expect(output).toContain('Short project slugs: allowed → not allowed');
+  });
+
   it('routes plan configuration independently from authentication and operator account assignment', () => {
     expect(parsePlatformArgs(['config', 'plans'])).toMatchObject({
       configGroup: 'plans',

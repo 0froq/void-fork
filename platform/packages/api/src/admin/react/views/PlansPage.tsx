@@ -395,6 +395,15 @@ export function PlanPreviewPage({
       before: target,
       after: String(preview.body.replacementPlanId),
     });
+    const replacement = after.plans.find((p) => p.id === preview.body.replacementPlanId);
+    if (replacement) {
+      changes.push(
+        ...differences(
+          before.plans.find((p) => p.id === target),
+          replacement,
+        ).filter((row) => row.label !== 'Display name'),
+      );
+    }
   }
   return (
     <Layout platformName={platformName} username={username} title="Review plan change">

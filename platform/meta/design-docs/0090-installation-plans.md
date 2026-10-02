@@ -90,6 +90,8 @@ its exact revision. A result page advances the saved cursor in bounded batches,
 stops on errors or lack of progress, and exposes a resumable action in Plans.
 Fate reads the catalog and account counts through the lightweight shared reader;
 its browser generation does not import deployment or Sandbox mutation code.
+Removal previews compare the departing plan with its replacement's limits,
+build size, and short-slug permission in both the CLI and dashboard.
 
 Deploy cutover and compensation resolve current owner policy behind project
 fences. A policy update cannot publish stale limits after reconciliation or make
@@ -122,3 +124,9 @@ with an unhandled Node `setTypeOfService EINVAL` socket error during the Solid
 playground suite. Its isolated rerun passed all 26 tests without that error.
 The upgraded e2e installation passed browser catalog, edit, preview and cancel
 checks without browser errors or changes to its catalog and application pointers.
+
+Follow-up review reproduced and fixed billing-period relabeling during plan
+reconciliation and missing replacement policy details in removal previews.
+Regressions use the production counter and actual operator/admin handlers.
+Workspace typechecking, lint, formatting, documentation rendering and the final
+full suite passed: 661 files, 12,334 tests passed and 25 skipped, with a clean exit.
