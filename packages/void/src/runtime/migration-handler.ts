@@ -202,10 +202,16 @@ async function createAttemptTables(db: D1Database): Promise<void> {
         acquired_at TEXT NOT NULL
       )`,
     ),
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS _void_migration_fences (
+        attempt_id TEXT PRIMARY KEY,
+        owned INTEGER NOT NULL CHECK (owned = 1)
+      )`,
+    ),
   ]);
 }
 
-async function upgradeTrackingTable(db: D1Database): Promise<void> {
+async function upgradeTrackingTable(db: D1Database, fencedAttemptId?: string): Promise<void> {
   const { results } = await db
     .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_migrations'")
     .all();
@@ -213,6 +219,7 @@ async function upgradeTrackingTable(db: D1Database): Promise<void> {
     return;
   }
   await db.batch([
+    ...ownershipFence(db, fencedAttemptId),
     db.prepare(
       `CREATE TABLE IF NOT EXISTS _void_migrations (
         name TEXT PRIMARY KEY,
@@ -241,15 +248,13 @@ async function runD1AppMigrations(
   await createAttemptTables(db);
 
   const now = new Date().toISOString();
-  const lock = await acquireAttemptLock(db, attempt.attemptId, now);
-  if (lock !== 'acquired') {
-    return lock;
-  }
-
   const plannedNames = migrations.map((migration) => migration.name);
   const planHashes = verified.plans.map((plan) => plan.planHash);
-  try {
-    await db
+  // Raw legacy exec cannot share a transaction with an ownership check. Such
+  // attempts retain their lock until their executor finishes.
+  const fenced = verified.plans.every((plan) => plan.kind !== 'legacy-unsplit-multi-statement');
+  const lock = await acquireAttemptLock(db, attempt.attemptId, now, [
+    db
       .prepare(
         `INSERT INTO _void_migration_attempts
           (attempt_id, deployment_id, migration_list_hash, planned_names_json, plan_hashes_json, status, started_at)
@@ -262,11 +267,17 @@ async function runD1AppMigrations(
         JSON.stringify(plannedNames),
         JSON.stringify(planHashes),
         now,
-      )
-      .run();
-  } catch {
-    await releaseAttemptLock(db, attempt.attemptId);
-    return reconcileAttempt(db, attempt.attemptId);
+      ),
+    ...(fenced
+      ? [
+          db
+            .prepare('INSERT INTO _void_migration_fences (attempt_id, owned) VALUES (?, 1)')
+            .bind(attempt.attemptId),
+        ]
+      : []),
+  ]);
+  if (lock !== 'acquired') {
+    return lock;
   }
 
   const migrationResults: Array<MigrationResult> = [];
@@ -277,7 +288,7 @@ async function runD1AppMigrations(
 
   try {
     await createTrackingTable(db);
-    await upgradeTrackingTable(db);
+    await upgradeTrackingTable(db, fenced ? attempt.attemptId : undefined);
     const applied = await readAppliedSet(db);
 
     for (let index = 0; index < migrations.length; index++) {
@@ -301,7 +312,7 @@ async function runD1AppMigrations(
 
       const start = Date.now();
       try {
-        await executeMigrationPlan(db, migration, plan);
+        await executeMigrationPlan(db, migration, plan, fenced ? attempt.attemptId : undefined);
         applied.add(migration.name);
         confirmedApplied.push(migration.name);
         migrationResults.push({
@@ -371,32 +382,32 @@ async function acquireAttemptLock(
   db: D1Database,
   attemptId: string,
   acquiredAt: string,
+  initialize: Array<D1PreparedStatement>,
 ): Promise<'acquired' | MigrationResponse> {
   for (let tries = 0; tries < 2; tries++) {
     try {
-      await db
-        .prepare(
-          'INSERT INTO _void_migration_lock (name, attempt_id, acquired_at) VALUES (?, ?, ?)',
-        )
-        .bind('app', attemptId, acquiredAt)
-        .run();
+      // Publish the attempt and its lock together. A missing attempt row must
+      // never be mistaken for an orphan in between these writes.
+      await db.batch([
+        db
+          .prepare(
+            'INSERT INTO _void_migration_lock (name, attempt_id, acquired_at) VALUES (?, ?, ?)',
+          )
+          .bind('app', attemptId, acquiredAt),
+        ...initialize,
+      ]);
       return 'acquired';
     } catch {
       const existing = await db
         .prepare('SELECT attempt_id FROM _void_migration_lock WHERE name = ?')
         .bind('app')
         .first<{ attempt_id: string }>();
-      if (existing?.attempt_id === attemptId) {
-        return reconcileAttempt(db, attemptId);
+      if (!existing && (await readAttempt(db, attemptId))) {
+        return reconcileAttempt(db, attemptId, false);
       }
       if (existing?.attempt_id) {
         const row = await readAttempt(db, existing.attempt_id);
-        if (
-          !row ||
-          row.status === 'completed' ||
-          row.status === 'failed' ||
-          row.status === 'unknown'
-        ) {
+        if (row?.status === 'completed' || row?.status === 'failed') {
           await releaseAttemptLock(db, existing.attempt_id).catch(() => {});
           continue;
         }
@@ -423,10 +434,12 @@ async function executeMigrationPlan(
   db: D1Database,
   migration: MigrationEntry,
   plan: MigrationExecutionPlan,
+  fencedAttemptId?: string,
 ): Promise<void> {
   const appliedAt = new Date().toISOString();
   if (plan.kind === 'single-statement') {
     await db.batch([
+      ...ownershipFence(db, fencedAttemptId),
       db.prepare(migration.sql),
       db
         .prepare('INSERT INTO _void_migrations (name, applied_at) VALUES (?, ?)')
@@ -436,6 +449,7 @@ async function executeMigrationPlan(
   }
   if (plan.kind === 'breakpoint-framed') {
     await db.batch([
+      ...ownershipFence(db, fencedAttemptId),
       ...plan.statements.map((statement) => db.prepare(statement)),
       db
         .prepare('INSERT INTO _void_migrations (name, applied_at) VALUES (?, ?)')
@@ -451,20 +465,44 @@ async function executeMigrationPlan(
     .run();
 }
 
+/** Fail the whole D1 batch if recovery has revoked this executor's ownership. */
+function ownershipFence(db: D1Database, attemptId?: string): Array<D1PreparedStatement> {
+  if (!attemptId) {
+    return [];
+  }
+  return [
+    db
+      .prepare(
+        `INSERT INTO _void_migration_fences (attempt_id, owned)
+     VALUES (?, EXISTS(SELECT 1 FROM _void_migration_lock WHERE name = 'app' AND attempt_id = ?))
+     ON CONFLICT(attempt_id) DO UPDATE SET owned = excluded.owned`,
+      )
+      .bind(attemptId, attemptId),
+  ];
+}
+
+function attemptUpdate(
+  db: D1Database,
+  attemptId: string,
+  status: 'completed' | 'failed' | 'unknown',
+  error?: string,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE _void_migration_attempts
+       SET status = ?, completed_at = ?, error = ?
+       WHERE attempt_id = ? AND status ${status === 'completed' ? "IN ('running', 'unknown')" : "= 'running'"}`,
+    )
+    .bind(status, new Date().toISOString(), error ?? null, attemptId);
+}
+
 async function markAttempt(
   db: D1Database,
   attemptId: string,
   status: 'completed' | 'failed' | 'unknown',
   error?: string,
 ): Promise<void> {
-  await db
-    .prepare(
-      `UPDATE _void_migration_attempts
-       SET status = ?, completed_at = ?, error = ?
-       WHERE attempt_id = ?`,
-    )
-    .bind(status, new Date().toISOString(), error ?? null, attemptId)
-    .run();
+  await attemptUpdate(db, attemptId, status, error).run();
 }
 
 async function releaseAttemptLock(db: D1Database, attemptId: string): Promise<void> {
@@ -481,12 +519,15 @@ async function readAttempt(db: D1Database, attemptId: string): Promise<AttemptRo
     .first<AttemptRow>();
 }
 
-async function reconcileAttempt(db: D1Database, attemptId: string): Promise<MigrationResponse> {
+async function reconcileAttempt(
+  db: D1Database,
+  attemptId: string,
+  recover = true,
+): Promise<MigrationResponse> {
   await createAttemptTables(db);
   await createTrackingTable(db);
   const row = await readAttempt(db, attemptId);
   if (!row) {
-    await releaseAttemptLock(db, attemptId).catch(() => {});
     return {
       ok: false,
       protocolVersion: 2,
@@ -495,6 +536,22 @@ async function reconcileAttempt(db: D1Database, attemptId: string): Promise<Migr
       error: 'migration attempt not found',
     };
   }
+  const fenced = await db
+    .prepare('SELECT attempt_id FROM _void_migration_fences WHERE attempt_id = ?')
+    .bind(attemptId)
+    .first();
+  if (recover && fenced) {
+    // Revocation and status move together. Any already submitted migration is
+    // ordered before this transaction or fails its fence after it; read the
+    // confirmed prefix only AFTER revocation. Never revoke older executors or
+    // raw exec attempts, which cannot enforce a fence in their SQL transaction.
+    await db.batch([
+      attemptUpdate(db, attemptId, 'unknown', 'migration outcome unknown'),
+      db
+        .prepare('DELETE FROM _void_migration_lock WHERE name = ? AND attempt_id = ?')
+        .bind('app', attemptId),
+    ]);
+  }
   const plannedNames = JSON.parse(row.planned_names_json) as Array<string>;
   const applied = await readAppliedSet(db);
   const confirmed = plannedNames.filter((name) => applied.has(name));
@@ -502,12 +559,10 @@ async function reconcileAttempt(db: D1Database, attemptId: string): Promise<Migr
   if (complete && row.status !== 'completed') {
     await markAttempt(db, attemptId, 'completed').catch(() => {});
   }
-  if (!complete && row.status === 'running') {
-    await markAttempt(db, attemptId, 'unknown', row.error ?? 'migration outcome unknown').catch(
-      () => {},
-    );
+  const inProgress = !fenced && !complete && (row.status === 'running' || row.status === 'unknown');
+  if (complete || row.status === 'completed' || row.status === 'failed') {
+    await releaseAttemptLock(db, attemptId);
   }
-  await releaseAttemptLock(db, attemptId).catch(() => {});
   return {
     ok: complete,
     protocolVersion: 2,
@@ -520,7 +575,11 @@ async function reconcileAttempt(db: D1Database, attemptId: string): Promise<Migr
       name,
       status: applied.has(name) ? 'skipped' : 'failed',
     })),
-    error: complete ? undefined : (row.error ?? 'migration outcome unknown'),
+    error: complete
+      ? undefined
+      : inProgress
+        ? `migration already in progress for attempt ${attemptId}; wait for this migration to finish before retrying recovery`
+        : (row.error ?? 'migration outcome unknown'),
     stability: 'stable',
   };
 }

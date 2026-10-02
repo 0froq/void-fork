@@ -363,13 +363,11 @@ describe('createMigrationHandler D1 execution', () => {
     let lockAttemptId = options?.lockAttemptId;
 
     const db = {
-      async batch(statements: Array<{ __sql?: string; __bound?: Array<unknown> }>) {
+      async batch(statements: Array<{ __sql?: string; run(): Promise<unknown> }>) {
         calls.batch++;
         calls.batchSql.push(statements.map((statement) => statement.__sql ?? ''));
         for (const statement of statements) {
-          if (statement.__sql?.startsWith('INSERT INTO _void_migrations')) {
-            applied.add(statement.__bound?.[0] as string);
-          }
+          await statement.run();
         }
         return [];
       },
@@ -446,7 +444,10 @@ describe('createMigrationHandler D1 execution', () => {
                 attempt.error = bound[2] as string | null;
               }
             }
-            if (sql.startsWith('INSERT OR IGNORE INTO _void_migrations')) {
+            if (
+              sql.startsWith('INSERT OR IGNORE INTO _void_migrations') ||
+              sql.startsWith('INSERT INTO _void_migrations ')
+            ) {
               applied.add(bound[0] as string);
             }
             return {};
@@ -653,13 +654,14 @@ describe('createMigrationHandler D1 execution', () => {
     expect(body.confirmedApplied).toEqual(['0001_users.sql']);
     expect(calls.exec).toEqual([]);
     expect(calls.batchSql).toContainEqual([
+      expect.stringContaining('INSERT INTO _void_migration_fences'),
       'CREATE TABLE users (id TEXT PRIMARY KEY);',
       'CREATE INDEX users_id_idx ON users (id);',
       'INSERT INTO _void_migrations (name, applied_at) VALUES (?, ?)',
     ]);
   });
 
-  it('releases an incomplete attempt lock during reconciliation', async () => {
+  it('retains an incomplete lock owned by an older executor without fencing', async () => {
     const attempts = new Map<string, Record<string, unknown>>([
       [
         'attempt_old',
@@ -702,9 +704,11 @@ describe('createMigrationHandler D1 execution', () => {
 
     expect(reconcile.status).toBe(409);
     expect(reconcileBody.ok).toBe(false);
-    expect(reconcileBody.error).toBe('migration outcome unknown');
-    expect(storedAttempts.get('attempt_old')?.status).toBe('unknown');
-    expect(getLockAttemptId()).toBeUndefined();
+    expect(reconcileBody.error).toContain(
+      'wait for this migration to finish before retrying recovery',
+    );
+    expect(storedAttempts.get('attempt_old')?.status).toBe('running');
+    expect(getLockAttemptId()).toBe('attempt_old');
 
     const retry = await handler(
       new Request('https://example.com/__void/migrate/app', {
@@ -714,11 +718,11 @@ describe('createMigrationHandler D1 execution', () => {
       }),
     );
     const retryBody = (await retry.json()) as MigrationResponse;
-    expect(retry.status).toBe(200);
-    expect(retryBody.ok).toBe(true);
+    expect(retry.status).toBe(409);
+    expect(retryBody.ok).toBe(false);
   });
 
-  it('recovers an orphan lock whose attempt row was never written', async () => {
+  it('does not steal a lock when an older executor has not published its attempt', async () => {
     const migrations: Array<MigrationFile> = [];
     const { db, getLockAttemptId } = createMockD1({ lockAttemptId: 'attempt_orphan' });
     const handler = createMigrationHandler(
@@ -738,9 +742,9 @@ describe('createMigrationHandler D1 execution', () => {
     );
     const body = (await response.json()) as MigrationResponse;
 
-    expect(response.status).toBe(200);
-    expect(body.ok).toBe(true);
-    expect(getLockAttemptId()).toBeUndefined();
+    expect(response.status).toBe(409);
+    expect(body.ok).toBe(false);
+    expect(getLockAttemptId()).toBe('attempt_orphan');
   });
 });
 
