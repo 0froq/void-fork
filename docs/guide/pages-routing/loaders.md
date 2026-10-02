@@ -109,7 +109,7 @@ export default function UsersPage(props: Props) {
 
 ## Deferred Props
 
-Loaders sometimes need to fetch slower data such as analytics, external API responses, or AI inference. `defer()` lets you return a placeholder immediately so the page renders quickly, then streams the real data when it resolves:
+Use `defer()` for slow data. The page renders immediately and receives the result when it is ready:
 
 ```ts
 // pages/dashboard.server.ts
@@ -235,16 +235,10 @@ export default function Dashboard(props: Props) {
 
 :::
 
-### How Streaming Works
-
-On the first request, React renders the nearest Suspense fallback for deferred props; the other adapters render their loading state. As data becomes available, the server sends it in inline scripts on the same response.
-
-A route with `ssr = false` still receives those scripts, even though its component mounts in the browser. During client-side navigation, deferred data arrives as newline-delimited JSON on the navigation response.
-
 ### Deferred Props After Mutations
 
 ::: info
-When a mutation runs, the loader runs again to provide fresh props, but deferred props cannot stream over a mutation response. The client preserves the last resolved value for each deferred prop, so the UI keeps showing the previous data until the next full page load or SPA navigation.
+After an action, deferred props keep their last resolved values until the next page load or client-side navigation. Other loader props refresh immediately.
 :::
 
 ### Grouped Deferred Props
