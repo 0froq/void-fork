@@ -20,7 +20,6 @@ import type {
   AdminEmailProject,
   AdminZeroTrust,
   AdminBuildLogs,
-  AdminBuildStatus,
   AdminDeploymentLogs,
 } from './server.ts';
 
@@ -64,12 +63,9 @@ export const BuildLogsView = view<AdminBuildLogs>()({
   terminal: true,
   logsComplete: true,
 });
-export const BuildStatusView = view<AdminBuildStatus>()({ id: true, status: true, terminal: true });
 export const DeploymentLogsView = view<AdminDeploymentLogs>()({ id: true, data: true });
 export const buildLogsRequest = (id: string, since: number) =>
   ({ buildLogs: { view: BuildLogsView, args: { id, since } } }) as const;
-export const buildStatusRequest = (id: string) =>
-  ({ buildStatus: { view: BuildStatusView, args: { id } } }) as const;
 export const deploymentLogsRequest = (id: string, since: string, limit: number) =>
   ({ deploymentLogs: { view: DeploymentLogsView, args: { id, since, limit } } }) as const;
 
