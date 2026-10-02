@@ -1,11 +1,17 @@
 import {
-  S_STEP_ACTIVE,
   S_STEP_SUBMIT,
   S_BAR,
   S_BAR_END,
   S_RADIO_ACTIVE,
   S_RADIO_INACTIVE,
-  S_CHECKBOX_ACTIVE,
+  S_CHECKBOX_SELECTED,
+  getGuide,
+  promptTitle,
+  optionText,
+  wrapTextWithPrefix,
+  formatInstructionFooter,
+  SELECT_INSTRUCTIONS,
+  MULTISELECT_INSTRUCTIONS,
   S_CHECKBOX_INACTIVE,
 } from '@voidzero-dev/vite-plus-prompts';
 import { wrapAnsi } from 'fast-wrap-ansi';
@@ -106,17 +112,41 @@ export function promptSubcommand(
       return `${lines[0]}…`;
     }
 
+    function guidePrefix(): string {
+      return getGuide() ? pc.gray(S_BAR) + ' ' : '  ';
+    }
+
+    function renderOption(marker: string, label: string, focused: boolean, suffix = ''): string {
+      return (
+        guidePrefix() +
+        optionText(
+          stdout,
+          marker + ' ',
+          label,
+          focused ? (value) => pc.blue(pc.bold(value)) : pc.dim,
+          suffix,
+        )
+      );
+    }
+
+    function instructions(items: Array<string>): Array<string> {
+      return formatInstructionFooter(items, getGuide(), stdout);
+    }
+
     function writeFrame(header: string, options: Array<string>, footer: Array<string>) {
-      // Show at most seven single-line options, keeping the current selection in view.
-      const count = Math.max(1, Math.min(7, (stdout.rows || 24) - footer.length - 5));
+      const heading = header.trimEnd().split('\n');
+      const end = getGuide() ? [pc.gray(S_BAR_END)] : [];
+      // Keep each option on one row, with focus visible in short terminals.
+      const count = Math.max(
+        1,
+        Math.min(7, (stdout.rows || 24) - heading.length - footer.length - end.length - 1),
+      );
       const start = Math.max(0, Math.min(cursor - Math.floor(count / 2), options.length - count));
       const lines = [
-        truncate(header),
-        pc.gray(S_BAR),
+        ...heading.map((line) => truncate(line)),
         ...options.slice(start, start + count).map((option) => truncate(option)),
-        pc.gray(S_BAR),
         ...footer.map((line) => truncate(line)),
-        pc.gray(S_BAR_END),
+        ...end,
       ];
       previousFrame = lines.join('\n');
       stdout.write(previousFrame + '\n');
@@ -143,7 +173,11 @@ export function promptSubcommand(
     // Header for post-select phases
     function headerLine(): string {
       const argPart = selectedArg ? ` ${selectedArg}` : '';
-      return `${pc.cyan(S_STEP_ACTIVE)}  ${pc.cyan(title)} ${pc.dim('·')} ${pc.cyan(`${selectedSub!.name}${argPart}`)}`;
+      return promptTitle(
+        `${pc.blue(title)} ${pc.dim('·')} ${selectedSub!.name}${argPart}`,
+        'active',
+        { output: stdout },
+      );
     }
 
     // --- Renderers ---
@@ -157,38 +191,37 @@ export function promptSubcommand(
       for (let i = 0; i < subcommands.length; i++) {
         const sub = subcommands[i];
         const isFocused = i === cursor;
-        const radio = isFocused ? pc.green(S_RADIO_ACTIVE) : pc.dim(S_RADIO_INACTIVE);
+        const radio = isFocused ? pc.blue(S_RADIO_ACTIVE) : pc.dim(S_RADIO_INACTIVE);
         const name = sub.name.padEnd(maxName);
 
         let suffix = '';
-        if (sub.arg) {
+        if (isFocused && sub.arg) {
           if (isFocused && input.length > 0) {
-            suffix = `  ${pc.cyan(truncate(input, (stdout.columns || 80) - maxName - 9, true))}`;
+            suffix = `  ${pc.blue(truncate(input, (stdout.columns || 80) - maxName - 9, true))}`;
           } else {
             suffix = `  ${pc.dim(sub.arg)}`;
           }
-        } else if (sub.hint) {
+        } else if (isFocused && sub.hint) {
           suffix = `  ${pc.dim(sub.hint)}`;
         }
 
-        if (isFocused) {
-          lines.push(`${pc.gray(S_BAR)}  ${radio} ${pc.reset(name)}${suffix}`);
-        } else {
-          lines.push(`${pc.gray(S_BAR)}  ${radio} ${pc.dim(name)}${suffix}`);
-        }
+        lines.push(renderOption(radio, name, isFocused, suffix));
       }
 
-      const footer = [`${pc.gray(S_BAR)}  ${pc.dim(focused.description)}`];
+      const footer = [
+        guidePrefix() + pc.dim(focused.description),
+        ...instructions(SELECT_INSTRUCTIONS),
+      ];
       if (focused.arg) {
         if (focused.arg.startsWith('<')) {
-          footer.push(`${pc.gray(S_BAR)}  ${pc.dim(`Type ${focused.arg}, then press Enter`)}`);
+          footer.push(`${guidePrefix()}${pc.dim(`Type ${focused.arg}, then press Enter`)}`);
         } else {
           footer.push(
-            `${pc.gray(S_BAR)}  ${pc.dim(`Type ${focused.arg}, then press Enter, or press Enter to skip`)}`,
+            `${guidePrefix()}${pc.dim(`Type ${focused.arg}, then press Enter, or press Enter to skip`)}`,
           );
         }
       }
-      writeFrame(`${pc.cyan(S_STEP_ACTIVE)}  ${pc.cyan(title)}`, lines, footer);
+      writeFrame(promptTitle(pc.blue(title), 'active', { output: stdout }), lines, footer);
     }
 
     function renderFlags() {
@@ -204,9 +237,9 @@ export function promptSubcommand(
         const isFocused = i === cursor;
 
         const checkbox = state.enabled
-          ? pc.green(S_CHECKBOX_ACTIVE)
+          ? pc.blue(S_CHECKBOX_SELECTED)
           : isFocused
-            ? S_CHECKBOX_INACTIVE
+            ? pc.blue(S_CHECKBOX_INACTIVE)
             : pc.dim(S_CHECKBOX_INACTIVE);
         const name = flag.name.padEnd(maxFlag);
 
@@ -214,20 +247,20 @@ export function promptSubcommand(
         if (flag.arg) {
           if (state.enabled && state.value.length > 0) {
             const value = truncate(state.value, (stdout.columns || 80) - maxFlag - 9, true);
-            valueText = `  ${isFocused ? pc.cyan(value) : pc.dim(value)}`;
+            valueText = `  ${isFocused ? pc.blue(value) : pc.dim(value)}`;
           } else {
             valueText = `  ${pc.dim(flag.arg)}`;
           }
         }
 
-        if (isFocused) {
-          lines.push(`${pc.gray(S_BAR)}  ${checkbox} ${pc.reset(name)}${valueText}`);
-        } else {
-          lines.push(`${pc.gray(S_BAR)}  ${checkbox} ${pc.dim(name)}${valueText}`);
-        }
+        const pointer = isFocused ? pc.blue(S_RADIO_ACTIVE) : S_RADIO_INACTIVE;
+        lines.push(renderOption(pointer + ' ' + checkbox, name, isFocused, valueText));
       }
 
-      writeFrame(headerLine(), lines, [`${pc.gray(S_BAR)}  ${pc.dim(focused.description)}`]);
+      writeFrame(headerLine(), lines, [
+        guidePrefix() + pc.dim(focused.description),
+        ...instructions(MULTISELECT_INSTRUCTIONS),
+      ]);
     }
 
     function renderMultiSelect() {
@@ -243,22 +276,17 @@ export function promptSubcommand(
         const isFocused = i === cursor;
 
         const checkbox = selected
-          ? pc.green(S_CHECKBOX_ACTIVE)
+          ? pc.blue(S_CHECKBOX_SELECTED)
           : isFocused
-            ? S_CHECKBOX_INACTIVE
+            ? pc.blue(S_CHECKBOX_INACTIVE)
             : pc.dim(S_CHECKBOX_INACTIVE);
         const label = opt.label.padEnd(maxLabel);
 
-        if (isFocused) {
-          lines.push(`${pc.gray(S_BAR)}  ${checkbox} ${pc.reset(label)}`);
-        } else {
-          lines.push(`${pc.gray(S_BAR)}  ${checkbox} ${pc.dim(label)}`);
-        }
+        const pointer = isFocused ? pc.blue(S_RADIO_ACTIVE) : S_RADIO_INACTIVE;
+        lines.push(renderOption(pointer + ' ' + checkbox, label, isFocused));
       }
 
-      writeFrame(headerLine(), lines, [
-        `${pc.gray(S_BAR)}  ${pc.dim('space to toggle, enter to confirm')}`,
-      ]);
+      writeFrame(headerLine(), lines, instructions(MULTISELECT_INSTRUCTIONS));
     }
 
     function renderRepeatInput() {
@@ -266,21 +294,19 @@ export function promptSubcommand(
       const lines: Array<string> = [];
 
       for (const entry of repeatEntries) {
-        lines.push(`${pc.gray(S_BAR)}  ${pc.dim(entry)}`);
+        lines.push(`${guidePrefix()}${pc.dim(entry)}`);
       }
 
       if (repeatInput.length > 0) {
         lines.push(
-          `${pc.gray(S_BAR)}  ${pc.cyan(truncate(repeatInput, (stdout.columns || 80) - 4, true))}`,
+          `${guidePrefix()}${pc.blue(truncate(repeatInput, (stdout.columns || 80) - 4, true))}`,
         );
       } else {
-        lines.push(`${pc.gray(S_BAR)}  ${pc.dim(followUp.placeholder)}`);
+        lines.push(`${guidePrefix()}${pc.dim(followUp.placeholder)}`);
       }
 
       cursor = lines.length - 1;
-      writeFrame(headerLine(), lines, [
-        `${pc.gray(S_BAR)}  ${pc.dim('enter to add, empty to finish')}`,
-      ]);
+      writeFrame(headerLine(), lines, instructions(['Enter add', 'Empty input finish']));
     }
 
     // --- Lifecycle ---
@@ -319,7 +345,12 @@ export function promptSubcommand(
           summary += ` ${result.extraArgs.join(' ')}`;
         }
         stdout.write(
-          `${pc.gray(S_STEP_SUBMIT)}  ${pc.dim(title)} ${pc.dim('·')} ${pc.dim(summary)}\n`,
+          wrapTextWithPrefix(
+            stdout,
+            `${pc.dim(title)} ${pc.dim('·')} ${pc.dim(summary)}`,
+            '  ',
+            `${pc.gray(S_STEP_SUBMIT)} `,
+          ) + '\n',
         );
       }
 

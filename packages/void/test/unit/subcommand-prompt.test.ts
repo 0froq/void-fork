@@ -1,6 +1,12 @@
 import { PassThrough, Writable } from 'node:stream';
 import { stripVTControlCharacters } from 'node:util';
-import { S_RADIO_ACTIVE, S_RADIO_INACTIVE, S_STEP_ACTIVE } from '@voidzero-dev/vite-plus-prompts';
+import {
+  S_RADIO_ACTIVE,
+  S_STEP_ACTIVE,
+  S_CHECKBOX_SELECTED,
+  S_CHECKBOX_INACTIVE,
+  updateSettings,
+} from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
 import { promptSubcommand, type SubcommandDef } from '../../src/cli/subcommand-prompt.ts';
 
@@ -14,6 +20,7 @@ afterEach(async () => {
   await cleanup?.();
   cleanup = undefined;
   vi.restoreAllMocks();
+  updateSettings({ withGuide: false });
 });
 
 function openPrompt(commands: Array<SubcommandDef>, columns = 80, rows = 24) {
@@ -48,7 +55,7 @@ function openPrompt(commands: Array<SubcommandDef>, columns = 80, rows = 24) {
       writes
         .map(stripVTControlCharacters)
         .reverse()
-        .find((text) => text.startsWith(S_STEP_ACTIVE))!,
+        .find((text) => text.includes(S_STEP_ACTIVE + ' '))!,
   };
 }
 
@@ -68,10 +75,9 @@ it.each([
     for (const command of commands) {
       const frame = prompt.frame();
       const lines = frame.trimEnd().split('\n');
-      expect(
-        lines.filter((line) => line.includes(S_RADIO_ACTIVE) || line.includes(S_RADIO_INACTIVE))
-          .length,
-      ).toBeLessThanOrEqual(7);
+      expect(lines.filter((line) => /^ {2}[›> ] command-/.test(line)).length).toBeLessThanOrEqual(
+        7,
+      );
       expect(lines.length).toBeLessThan(rows);
       expect(lines.every((line) => line.length < columns)).toBe(true);
       expect(frame).toContain(`${S_RADIO_ACTIVE} ${command.name}`);
@@ -123,4 +129,74 @@ it('bounds repeat-input history while retaining every submitted entry', async ()
   }
   prompt.key('\r');
   expect(await prompt.result).toEqual({ subcommand: 'allow', arg: undefined, extraArgs: entries });
+});
+
+it('keeps flag selection, typed values, and focus distinct', async () => {
+  const prompt = openPrompt([
+    {
+      name: 'export',
+      description: 'Export data',
+      flags: [
+        { name: '--output', description: 'Output path', arg: '<path>' },
+        { name: '--remote', description: 'Use remote data' },
+      ],
+    },
+  ]);
+  expect(prompt.frame()).not.toContain('│');
+  prompt.key('\r');
+  expect(prompt.frame()).toContain(S_RADIO_ACTIVE + ' ' + S_CHECKBOX_INACTIVE + ' --output');
+  prompt.key('data.sql');
+  expect(prompt.frame()).toContain(S_RADIO_ACTIVE + ' ' + S_CHECKBOX_SELECTED + ' --output');
+  prompt.key('\x1B[B');
+  prompt.key(' ');
+  prompt.key('\r');
+  expect(await prompt.result).toEqual({
+    subcommand: 'export',
+    arg: undefined,
+    flags: { '--output': 'data.sql', '--remote': true },
+  });
+});
+
+it('preserves required multiselect choices and the shared checkbox markers', async () => {
+  const prompt = openPrompt([
+    {
+      name: 'features',
+      description: 'Select features',
+      followUp: {
+        type: 'multi-select',
+        flag: '--features',
+        options: [
+          { value: 'db', label: 'Database', selected: true },
+          { value: 'storage', label: 'Storage' },
+        ],
+      },
+    },
+  ]);
+  prompt.key('\r');
+  expect(prompt.frame()).toContain(S_RADIO_ACTIVE + ' ' + S_CHECKBOX_SELECTED + ' Database');
+  prompt.key(' ');
+  prompt.key('\r');
+  expect(prompt.output.listenerCount('resize')).toBe(1);
+  prompt.key('\x1B[B');
+  prompt.key(' ');
+  prompt.key('\r');
+  expect(await prompt.result).toEqual({
+    subcommand: 'features',
+    arg: undefined,
+    flags: { '--features': 'storage' },
+  });
+});
+
+it('follows the shared guide setting and shows hints only on the focused command', () => {
+  updateSettings({ withGuide: true });
+  const prompt = openPrompt([
+    { name: 'init', description: 'Create an app', hint: '--react' },
+    { name: 'deploy', description: 'Deploy an app', hint: '--platform' },
+  ]);
+  expect(prompt.frame()).toContain('│');
+  expect(prompt.frame()).toContain('--react');
+  expect(prompt.frame()).not.toContain('--platform');
+  prompt.key('\x1B[B');
+  expect(prompt.frame()).toContain('--platform');
+  expect(prompt.frame()).not.toContain('--react');
 });
