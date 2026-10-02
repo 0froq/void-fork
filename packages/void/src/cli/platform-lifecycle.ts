@@ -1117,9 +1117,14 @@ async function selectAccount(
     const matches = accounts.filter(
       (account) => account.id === selector || account.name.toLowerCase() === selector.toLowerCase(),
     );
-    if (matches.length !== 1) {
+    if (matches.length === 0) {
       throw new Error(
-        `platform: Cloudflare account ${JSON.stringify(selector)} is ambiguous or unavailable.`,
+        `platform: Cloudflare account ${JSON.stringify(selector)} is unavailable through the current access token. Run ${pc.blue('void cloudflare status')} to see which accounts have access, and re-authenticate if necessary.`,
+      );
+    }
+    if (matches.length > 1) {
+      throw new Error(
+        `platform: Cloudflare account ${JSON.stringify(selector)} is ambiguous. Use --account <id> to select a specific account.`,
       );
     }
     return matches[0]!.id;
