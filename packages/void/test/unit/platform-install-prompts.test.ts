@@ -307,8 +307,8 @@ describe('interactive platform installation prompts', () => {
     );
   });
 
-  it('uses a placeholder, not a prefilled installation name', async () => {
-    mocks.text.mockResolvedValueOnce('my-team');
+  it('preserves the entered name in the display name suggestion', async () => {
+    mocks.text.mockResolvedValueOnce('My Team');
     await runPlatformLifecycleCommand(
       parsePlatformArgs(['install', '--plan', '--account', 'account', '--workers-dev']),
     );
@@ -316,7 +316,7 @@ describe('interactive platform installation prompts', () => {
     expect(prompt).toMatchObject({ message: 'Installation name:', placeholder: 'company' });
     expect(prompt).not.toHaveProperty('initialValue');
     expect(prompt.validate('')).toBe('A value is required.');
-    expect(prompt.validate('my-team')).toBeUndefined();
+    expect(prompt.validate('My Team')).toBeUndefined();
     expect(mocks.plan).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ installationSlug: 'my-team' }),
@@ -326,7 +326,7 @@ describe('interactive platform installation prompts', () => {
     expect(mocks.text).toHaveBeenCalledWith(
       expect.objectContaining({
         message: 'Platform display name:',
-        initialValue: 'my-team Void',
+        initialValue: 'My Team Void',
       }),
     );
   });

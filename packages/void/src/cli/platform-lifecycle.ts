@@ -149,6 +149,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   let existing = args.resume ? resolveInstallationManifest(args.name) : null;
   let selectedInstall = false;
   let selectedDraft = false;
+  let installationName = args.name;
   const { input: installationSlug, credential: operatorCredential } =
     await resolvePlatformCloudflareCredentialWithInput(async () => {
       let requestedName = args.name;
@@ -264,6 +265,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
           continue;
         }
         assertNewNameAvailable(slug);
+        installationName = name.trim();
         return slug;
       }
       if (existing.endpoints.apiUrl && !readPendingInstallationSecrets(existing)) {
@@ -339,7 +341,8 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         ));
   const displayName =
     recorded?.displayName ??
-    (args.displayName || (await promptText('Platform display name:', `${installationSlug} Void`)));
+    (args.displayName ||
+      (await promptText('Platform display name:', `${installationName || installationSlug} Void`)));
   const controlPlaneDomain = recorded
     ? (recorded.controlPlane.apiHostname ?? '')
     : args.controlPlaneDomain ||
