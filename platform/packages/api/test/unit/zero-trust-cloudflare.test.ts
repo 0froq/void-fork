@@ -27,6 +27,10 @@ function applicationFixture() {
   let nextId = 1;
   const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const path = new URL(input.toString()).pathname;
+    const policyId = path.match(/\/apps\/([^/]+)\/policies$/)?.[1];
+    if (policyId && !init?.method) {
+      return envelope(applications.get(policyId)?.policies ?? []);
+    }
     const id = path.match(/\/apps\/([^/]+)$/)?.[1];
     if (path.endsWith('/apps') && !init?.method) {
       return envelope([...applications.values()]);
@@ -62,6 +66,118 @@ afterEach(() => {
 });
 
 describe('ZeroTrustCloudflareClient', () => {
+  const healthHostname = 'void-platform-health.apps.example.com';
+  const healthDestination = `${healthHostname}/health`;
+  function existingHealthApplication() {
+    return {
+      id: 'installer-health',
+      name: 'void-installation-health-dispatch-nonce',
+      type: 'self_hosted',
+      aud: 'health-audience',
+      domain: healthDestination,
+      destinations: [{ type: 'public', uri: healthDestination }],
+      // Installer defaults need not match project Access session/IdP settings.
+      session_duration: '24h',
+      policies: bypassPolicy('Void platform health check'),
+    };
+  }
+
+  it('reuses and rechecks an installer health exception without taking ownership or writing', async () => {
+    const { applications, client, fetcher } = applicationFixture();
+    const existing = existingHealthApplication();
+    applications.set(existing.id, existing);
+    const expected = {
+      id: existing.id,
+      name: existing.name,
+      audience: existing.aud,
+      destinations: [healthDestination],
+    };
+
+    await expect(
+      client.ensureHealthApplication('project-health', healthHostname, null),
+    ).resolves.toEqual(expected);
+    await expect(
+      client.ensureHealthApplication('project-health', healthHostname, expected),
+    ).resolves.toEqual(expected);
+    await expect(
+      client.inspectHealthApplication(expected, 'project-health', healthHostname),
+    ).resolves.toEqual({ present: true, drifted: false });
+    expect(fetcher.mock.calls.every(([, init]) => !init?.method)).toBe(true);
+    expect(applications.get(existing.id)).toEqual(existing);
+  });
+
+  it.each([
+    [
+      'extra hostname',
+      {
+        destinations: [
+          { type: 'public', uri: healthDestination },
+          { type: 'public', uri: '*.apps.example.com' },
+        ],
+      },
+    ],
+    [
+      'private destination',
+      {
+        destinations: [
+          { type: 'public', uri: healthDestination },
+          { type: 'private', hostname: 'internal.example.com' },
+        ],
+      },
+    ],
+    [
+      'Worker target',
+      { target_criteria: [{ target_attributes: [{ name: 'worker_name', value: ['dispatch'] }] }] },
+    ],
+    ['allow policy', { policies: [{ decision: 'allow', include: [{ everyone: {} }] }] }],
+    ['extra policy', { policies: [...bypassPolicy('Health'), ...bypassPolicy('Other')] }],
+    [
+      'require rule',
+      {
+        policies: [
+          { ...bypassPolicy('Health')[0], require: [{ email_domain: { domain: 'example.com' } }] },
+        ],
+      },
+    ],
+    ['exclude rule', { policies: [{ ...bypassPolicy('Health')[0], exclude: [{ everyone: {} }] }] }],
+  ])(
+    'rejects an external health exception with %s without changing it',
+    async (_label, changes) => {
+      const { applications, client, fetcher } = applicationFixture();
+      const existing = { ...existingHealthApplication(), ...changes };
+      applications.set(existing.id, existing);
+      await expect(
+        client.ensureHealthApplication('project-health', healthHostname, null),
+      ).rejects.toThrow('existing Access');
+      expect(fetcher.mock.calls.every(([, init]) => !init?.method)).toBe(true);
+      expect(applications.get(existing.id)).toEqual(existing);
+    },
+  );
+
+  it('rejects ambiguous health exceptions and detects changes to a saved external reference', async () => {
+    const { applications, client, fetcher } = applicationFixture();
+    const existing = existingHealthApplication();
+    applications.set(existing.id, existing);
+    applications.set('duplicate', { ...existing, id: 'duplicate', name: 'other-health' });
+    await expect(
+      client.ensureHealthApplication('project-health', healthHostname, null),
+    ).rejects.toThrow('Multiple Access applications');
+    applications.delete('duplicate');
+    const reference = await client.ensureHealthApplication('project-health', healthHostname, null);
+    applications.set(existing.id, { ...existing, aud: 'changed-audience' });
+    await expect(
+      client.ensureHealthApplication('project-health', healthHostname, reference),
+    ).rejects.toThrow('recorded identity');
+    applications.delete(existing.id);
+    await expect(
+      client.ensureHealthApplication('project-health', healthHostname, reference),
+    ).rejects.toThrow('missing');
+    await expect(
+      client.inspectHealthApplication(reference, 'project-health', healthHostname),
+    ).resolves.toEqual({ present: false, drifted: true });
+    expect(fetcher.mock.calls.every(([, init]) => !init?.method)).toBe(true);
+  });
+
   it('calls the global fetch without binding it to the client by default', async () => {
     const requests: Array<string> = [];
     // Workers rejects a host fetch invoked with any receiver other than the global object.

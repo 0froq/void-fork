@@ -496,6 +496,114 @@ export class ZeroTrustCloudflareClient {
     }
   }
 
+  /** An installer/operator-owned health exception is verified, never modified or adopted. */
+  private async verifyExistingHealthApplication(
+    application: ObjectValue,
+    hostname: string,
+    current?: ManagedAccessApplication,
+  ): Promise<ManagedAccessApplication> {
+    const id = text(application.id, 'application id');
+    const name = text(application.name, 'application name');
+    const audience = text(application.aud, 'application audience');
+    const destination = `${hostname}/health`;
+    if (
+      (current && (id !== current.id || name !== current.name || audience !== current.audience)) ||
+      application.type !== 'self_hosted' ||
+      application.domain !== destination ||
+      !sameDestinations(application, [destination]) ||
+      (application.destinations !== undefined &&
+        (!Array.isArray(application.destinations) ||
+          application.destinations.some((entry) => {
+            const value = object(entry, 'Access application destination');
+            return value.type !== 'public' || value.uri !== destination;
+          }))) ||
+      (application.target_criteria != null &&
+        (!Array.isArray(application.target_criteria) || application.target_criteria.length > 0))
+    ) {
+      throw new Error(
+        `The existing Access health application must cover only ${destination} and retain its recorded identity.`,
+      );
+    }
+    // Read policies directly: application inventory may contain only policy references.
+    // Two entries are enough to reject anything other than a single exact bypass.
+    const policies = await this.request<ReadonlyArray<ObjectValue>>(
+      `apps/${encodeURIComponent(id)}/policies?page=1&per_page=2`,
+    );
+    const policy = policies?.[0];
+    if (
+      !Array.isArray(policies) ||
+      policies.length !== 1 ||
+      policy?.decision !== 'bypass' ||
+      JSON.stringify(policy.include) !== '[{"everyone":{}}]' ||
+      (policy.require !== undefined &&
+        (!Array.isArray(policy.require) || policy.require.length > 0)) ||
+      (policy.exclude !== undefined &&
+        (!Array.isArray(policy.exclude) || policy.exclude.length > 0))
+    ) {
+      throw new Error(
+        `The existing Access policy for ${destination} must remain the reserved health-check exception.`,
+      );
+    }
+    return { id, name, audience, destinations: [destination] };
+  }
+
+  async ensureHealthApplication(
+    name: string,
+    hostname: string,
+    current: ManagedAccessApplication | null,
+  ): Promise<ManagedAccessApplication> {
+    if (current && current.name !== name) {
+      const application = await this.application(current.id);
+      if (!application) {
+        throw new Error(
+          'The existing Access health application is missing. Restore it before reconciling project Zero Trust.',
+        );
+      }
+      return this.verifyExistingHealthApplication(application, hostname, current);
+    }
+    const { application, inventory } = await this.locateOwnedApplication(current?.id, name);
+    if (application) {
+      return this.ensureApplication(healthCheckApplication(name, hostname), {
+        id: text(application.id, 'application id'),
+        name,
+      });
+    }
+    const matches = [...inventory!.values()].filter((entry) =>
+      destinationList(entry).includes(`${hostname}/health`),
+    );
+    if (matches.length > 1) {
+      throw new Error(
+        `Multiple Access applications cover ${hostname}/health. Reconcile them before retrying.`,
+      );
+    }
+    if (matches[0]) {
+      const existing = await this.application(text(matches[0].id, 'application id'));
+      if (!existing) {
+        throw new Error(
+          'The existing Access health application disappeared. Inspect Access before retrying.',
+        );
+      }
+      return this.verifyExistingHealthApplication(existing, hostname);
+    }
+    return this.ensureApplication(healthCheckApplication(name, hostname), { name });
+  }
+
+  async inspectHealthApplication(
+    current: ManagedAccessApplication,
+    managedName: string | null,
+    hostname: string,
+  ): Promise<{ present: boolean; drifted: boolean }> {
+    if (current.name === managedName) {
+      return this.inspectApplication(current, healthCheckApplication(current.name, hostname));
+    }
+    const application = await this.application(current.id);
+    if (!application) {
+      return { present: false, drifted: true };
+    }
+    await this.verifyExistingHealthApplication(application, hostname, current);
+    return { present: true, drifted: false };
+  }
+
   async deleteApplication(
     id: string | null | undefined,
     expectedName?: string | null,

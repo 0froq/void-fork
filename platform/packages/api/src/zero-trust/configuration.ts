@@ -48,6 +48,7 @@ export type ZeroTrustConfiguration = Readonly<{
    * dispatch through the wildcard. Its name is committed before it is created.
    */
   healthApplicationName: string | null;
+  /** A name different from healthApplicationName is an external reference, never ours to mutate. */
   healthApplication: ManagedAccessApplication | null;
   operation: ZeroTrustOperation | null;
   lastError: string | null;

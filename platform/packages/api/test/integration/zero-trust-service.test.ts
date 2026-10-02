@@ -89,6 +89,12 @@ function accessApi(options?: {
     if (path === 'apps' && init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
       await options?.beforeCreateApplication?.(body);
+      if ([...applications.values()].some((app) => app.domain === body.domain)) {
+        return Response.json(
+          { success: false, errors: [{ message: 'access.api.error.application_already_exists' }] },
+          { status: 409 },
+        );
+      }
       const id = `app-${nextApplication++}`;
       const application = { ...body, id, aud: `aud-${id}` };
       applications.set(id, application);
@@ -101,6 +107,13 @@ function accessApi(options?: {
       return Response.json({
         success: true,
         result: [...applications.values()].slice(start, start + perPage),
+      });
+    }
+    const policyMatch = path.match(/^apps\/([^/]+)\/policies$/);
+    if (policyMatch) {
+      return Response.json({
+        success: true,
+        result: applications.get(policyMatch[1]!)?.policies ?? [],
       });
     }
     const match = path.match(/^apps\/([^/]+)$/);
@@ -130,6 +143,82 @@ function accessApi(options?: {
 }
 
 describe('project Zero Trust reconciliation', () => {
+  it('resumes using the installer health exception, protects existing and new projects, and preserves it on disable', async () => {
+    let failWildcard = true;
+    const cloudflare = accessApi({
+      beforeCreateApplication: (app) => {
+        if (failWildcard && app.domain === '*.apps.example.com') {
+          throw new Error('interrupted wildcard creation');
+        }
+      },
+    });
+    const existing = {
+      id: 'installer-health',
+      name: 'void-installation-health-dispatch-nonce',
+      aud: 'installer-audience',
+      type: 'self_hosted',
+      domain: 'void-platform-health.apps.example.com/health',
+      destinations: [{ type: 'public', uri: 'void-platform-health.apps.example.com/health' }],
+      session_duration: '24h',
+      policies: [{ decision: 'bypass', include: [{ everyone: {} }], require: [], exclude: [] }],
+    };
+    cloudflare.applications.set(existing.id, existing);
+    vi.stubGlobal('fetch', cloudflare.fetcher);
+    const bindings = {
+      ...env,
+      SITE_DOMAIN: 'apps.example.com',
+      PLATFORM_INSTALLATION_ID: 'installation-test',
+    } as unknown as ApiEnv['Bindings'];
+    const owner = await createTestUser(env.db, 'installer-health-owner');
+    const project = await createTestProject(env.db, owner.id, 'existing-protected-app');
+    await expect(
+      configurePlatformZeroTrust(bindings, env.db, {
+        apiToken: 'access-management-token',
+        identityProviderIds: ['idp-1'],
+        policyIds: ['policy-1'],
+        protectNewProjects: true,
+        existingProjects: 'protected',
+      }),
+    ).rejects.toThrow('interrupted wildcard creation');
+    expect(await readZeroTrustConfigurationStrict(env.db)).toMatchObject({
+      enabled: false,
+      operation: { phase: 'wildcard' },
+      healthApplication: null,
+    });
+
+    failWildcard = false;
+    await reconcilePlatformZeroTrust(bindings, env.db);
+    const configured = (await readZeroTrustConfigurationStrict(env.db))!;
+    expect(configured.operation).toBeNull();
+    expect(configured.healthApplication).toMatchObject({ id: existing.id, name: existing.name });
+    expect(configured.healthApplicationName).not.toBe(existing.name);
+    expect(await getProjectZeroTrustState(env.db, project.id)).toMatchObject({
+      desired_protected: true,
+      effective_protected: true,
+      status: 'ready',
+    });
+    const newProject = await createTestProject(env.db, owner.id, 'new-protected-app');
+    await initializeNewProjectZeroTrust(bindings, env.db, newProject.id);
+    expect(await getProjectZeroTrustState(env.db, newProject.id)).toMatchObject({
+      desired_protected: true,
+      effective_protected: true,
+      status: 'ready',
+    });
+    await expect(zeroTrustStatus(bindings, env.db, { check: true })).resolves.toMatchObject({
+      live: { present: true, drifted: false },
+    });
+
+    await reconcilePlatformZeroTrust(bindings, env.db);
+    await disablePlatformZeroTrust(bindings, env.db);
+    expect(cloudflare.applications.get(existing.id)).toEqual(existing);
+    expect(
+      cloudflare.fetcher.mock.calls.some(
+        ([input, init]) => init?.method && input.toString().includes(`/apps/${existing.id}`),
+      ),
+    ).toBe(false);
+    expect(cloudflare.applications.size).toBe(1);
+  });
+
   it('fails closed when saved routing configuration is malformed', async () => {
     const owner = await createTestUser(env.db, 'zero-trust-malformed-owner');
     const project = await createTestProject(env.db, owner.id, 'zero-trust-malformed-app');

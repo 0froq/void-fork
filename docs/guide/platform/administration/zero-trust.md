@@ -125,6 +125,10 @@ Void creates and owns these self-hosted applications in your Zero Trust organiza
 
 Custom domains of a public project need no Access application.
 
+If the installer already configured the same health-check exception, Zero Trust
+reuses it. Disabling project Zero Trust leaves that existing exception in place
+so platform health checks continue to work.
+
 The number of applications Void needs is:
 
 ```text

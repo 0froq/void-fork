@@ -4,7 +4,7 @@ import type { Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { projectZeroTrust } from '../schema.ts';
 import { resolveZeroTrustApplicationEnvironment } from './application.ts';
-import { healthCheckApplication, reusablePolicyReferences } from './cloudflare.ts';
+import { reusablePolicyReferences } from './cloudflare.ts';
 import {
   type ZeroTrustConfiguration,
   ZeroTrustConfigurationError,
@@ -83,9 +83,10 @@ export async function zeroTrustStatus(
         // A missing health exception sends platform health probes to Access;
         // one that covers more than `/health` leaves project paths outside it.
         const health = configuration.healthApplication
-          ? await client.inspectApplication(
+          ? await client.inspectHealthApplication(
               configuration.healthApplication,
-              healthCheckApplication(configuration.healthApplication.name, healthHostname),
+              configuration.healthApplicationName,
+              healthHostname,
             )
           : { present: false, drifted: true };
         live = {

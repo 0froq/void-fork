@@ -354,6 +354,11 @@ URL. The binding is attached only during enabled cutover, after the proxy exists
 so API/proxy bootstrap does not introduce a circular provisioning dependency.
 Older deployments without the binding retain the HTTP probe fallback.
 
+Project Zero Trust verifies and reuses an existing exact dispatch `/health`
+Access exception without taking ownership. Its saved application name differs
+from the committed project-owned creation name; reconciliation never updates
+that external application, and disabling project protection never deletes it.
+
 The browser uses `POST /admin/fate` for administrator page data. It runs under the
 existing admin-cookie and same-origin middleware, while the CLI/operator API
 stays on `/operator/v1`. First loads hydrate a request-scoped Fate snapshot into
