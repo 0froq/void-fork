@@ -578,7 +578,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       console.log(formatPlatformSetupPlan(plan));
       outro('Plan complete. No installation changes were made.');
       console.log(
-        `\n${pc.bold(pc.cyan(existing ? 'Next step: run this command to resume' : 'Next step: run this command to install'))}\n\n${pc.cyan(
+        `\n${pc.bold(existing ? 'Next step: run this command to resume' : 'Next step: run this command to install')}\n\n${pc.cyan(
           formatPlatformInstallCommand({
             commandName: cliCommandName(),
             accountId,
