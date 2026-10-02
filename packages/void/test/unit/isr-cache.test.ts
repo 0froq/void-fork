@@ -1197,6 +1197,48 @@ describe('handleIsr', () => {
     expect(edge.delete).toHaveBeenCalledWith(htmlEdgeKey(HOST, '/blog/post', DPL));
   });
 
+  describe.each([handleIsr, handleFrameworkIsr])('%s removal convergence', (handle) => {
+    describe.each(['text/plain', 'text/event-stream'])('with %s', (contentType) => {
+      it.each([
+        [404, 60, 30 * 86_400, true],
+        [410, 60, 30 * 86_400, true],
+        [404, 60, 120, false],
+        [410, 60, 86_460, false],
+        [404, 25 * 3600, 25 * 3600 + 60, false],
+        [503, 60, 30 * 86_400, false],
+        [429, 60, 30 * 86_400, false],
+      ])('handles status %i with TTL %i and age %i', async (status, ttl, age, evicted) => {
+        const { store, kv } = createKvMock();
+        const env = makeEnv(kv);
+        seedEntry(store, '/blog/post', { createdAt: BASE, ttl });
+        vi.setSystemTime(BASE + age * 1000);
+        const jsonKey = jsonEdgeKey(HOST, '/blog/post', DPL);
+        edge.store.set(jsonKey, new Response('{"cached":true}'));
+        const render: RenderFn = async () =>
+          new Response('removed or unavailable', {
+            status,
+            headers: {
+              'content-type': contentType,
+              ...(status >= 429 ? { 'cache-control': 'no-store', 'x-revalidate': '0' } : {}),
+            },
+          });
+        const first = createCtx();
+        const request = htmlRequest('/blog/post', { Accept: 'text/html' });
+        const stale = await handle(request, env, first.ctx, OPTS, render);
+        expect(stale!.headers.get('x-isr-cache')).toBe('STALE');
+        await first.flush();
+        expect(store.has(isrKey(DPL, HOST, '/blog/post'))).toBe(!evicted);
+        expect(edge.store.has(jsonKey)).toBe(!evicted);
+        if (evicted) {
+          expect(edge.delete).toHaveBeenCalledWith(htmlEdgeKey(HOST, '/blog/post', DPL));
+          const second = createCtx();
+          expect((await handle(request, env, second.ctx, OPTS, render))!.status).toBe(status);
+          await second.flush();
+        }
+      });
+    });
+  });
+
   it.each([
     ['private', { 'Cache-Control': 'private' }],
     ['no-store', { 'Cache-Control': 'no-store' }],

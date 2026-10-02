@@ -101,6 +101,8 @@ export type HandleIsrOptions = Readonly<{
 }>;
 
 export const MAX_ISR_VARIANTS_PER_PATH = 200;
+// Match managed ISR: tolerate removal responses for 24 hours after expiry.
+const ISR_STALE_EVICT_GRACE_MS = 86_400_000;
 
 // ---------------------------------------------------------------------------
 // Collapsed single-tenant cache keys
@@ -514,13 +516,14 @@ async function revalidateInBackground(
   render: RenderFn,
   variantUrl: string | null,
   htmlOnly: boolean,
+  staleSinceMs: number,
 ): Promise<void> {
   try {
     const cleanRequest = cloneWithoutVoidPages(request);
     const response = await render(cleanRequest);
     const ttl = resolveRevalidateTtl(response, defaultTtl);
     const cache = edgeCache();
-    if (isEventStreamResponse(response)) {
+    if (response.status === 200 && isEventStreamResponse(response)) {
       if (ttl === 0 || hasSharedCacheOptOut(response)) {
         await deleteSharedIsrVariants(env, cache, host, pathname, keys, variantUrl);
       }
@@ -545,11 +548,13 @@ async function revalidateInBackground(
       );
       await populateJsonEdgeCache(cache, keys.jsonKey, response, ttl, 'HIT');
     } else if (
-      ttl === 0 ||
-      hasSharedCacheOptOut(response) ||
-      (htmlOnly && !isHtmlResponse(response))
+      (response.status === 200 &&
+        (ttl === 0 || hasSharedCacheOptOut(response) || (htmlOnly && !isHtmlResponse(response)))) ||
+      ((response.status === 404 || response.status === 410) &&
+        Date.now() - staleSinceMs > ISR_STALE_EVICT_GRACE_MS)
     ) {
-      // An authoritative opt-out invalidates every previously public variant.
+      // Preserve the last good render during transient failures. Confirmed
+      // removals converge after the grace measured from expiry, not creation.
       await deleteSharedIsrVariants(env, cache, host, pathname, keys, variantUrl);
     }
   } catch (err) {
@@ -729,6 +734,7 @@ async function handleIsrInternal(
             render,
             variantUrl,
             htmlOnly,
+            cached.createdAt + cached.ttl * 1000,
           ),
         );
       }
