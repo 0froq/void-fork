@@ -26,6 +26,12 @@ is sequenced, bounded and authorized against current project access. A page is
 terminal only after it contains the persisted terminal result. Observation does
 not own execution; stopping observation does not cancel deployment.
 
+Intermediate progress writes retry once and are best effort after that. A failed
+progress write is logged without suppressing subsequent events or authoritative
+terminal settlement. An acknowledgement lost after an intermediate write may
+produce repeated progress; it never causes execution or application SQL to repeat.
+Terminal journal failures still retain the recovery fence.
+
 ## Execution and recovery
 
 An API Queue consumer claims an admitted operation once and executes the existing

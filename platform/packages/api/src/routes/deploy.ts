@@ -2835,12 +2835,21 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         terminalEvent = event;
         return;
       }
-      persistedEvents = persistedEvents.then(() =>
-        appendDeploymentEvent(context.get('db'), preDeployment.id, cutoverOwnerId, event),
-      );
-      // Avoid an unhandled rejection while the pipeline is still running; the
-      // final await rejects and leaves the invocation for durable recovery.
-      void persistedEvents.catch(() => {});
+      persistedEvents = persistedEvents.then(async () => {
+        // Intermediate progress is best effort. Retry a transient database
+        // failure once, but never let it poison later events or prevent the
+        // authoritative terminal result from being committed after execution.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            await appendDeploymentEvent(context.get('db'), preDeployment.id, cutoverOwnerId, event);
+            return;
+          } catch (error) {
+            if (attempt === 1) {
+              logger.warn('progress', 'persist_failed', { event: event.event, err: String(error) });
+            }
+          }
+        }
+      });
       return;
     }
     logger.info('emit', 'ndjson_event', event as unknown as Record<string, unknown>);

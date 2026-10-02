@@ -619,6 +619,98 @@ describe('durable execution claim and revocation', () => {
     expect(await countUserDeploymentsToday(env.db, user.id)).toBe(1);
   });
 
+  it.each(['transient', 'persistent', 'lost acknowledgement'])(
+    'settles a queued Worker deployment after a %s intermediate progress failure',
+    async (failure) => {
+      const migrations = {
+        dialect: 'sqlite',
+        pending: 1,
+        protocolVersion: 2,
+        classifierVersion: 1,
+        migrationListHash: `sha256:${'1'.repeat(64)}`,
+        stability: 'stable',
+      };
+      const migrate = vi.fn(() =>
+        Response.json({
+          ok: true,
+          migrations: [{ name: '001_create_table.sql', applied: true, durationMs: 1 }],
+        }),
+      );
+      queuedEnv.DISPATCH = {
+        get: () => ({
+          fetch: async (request: Request) => {
+            const pathname = new URL(request.url).pathname;
+            if (pathname === '/__void/migrate/capabilities') {
+              return Response.json({
+                ...migrations,
+                destructiveValidation: 'passed',
+                endpoints: {
+                  app: '/__void/migrate/app',
+                  reconcile: '/__void/migrate/app/attempt/:attemptId',
+                },
+              });
+            }
+            if (pathname === '/__void/migrate/app') {
+              return migrate();
+            }
+            if (pathname === '/__void/ready') {
+              return Response.json({ ready: true });
+            }
+            return new Response('<h1>durable</h1>', {
+              headers: { 'content-type': 'text/html' },
+            });
+          },
+        }),
+      } as unknown as DispatchNamespace;
+      const response = await post(crypto.randomUUID(), {
+        ...payload(),
+        manifest: {
+          version: 3,
+          assetManifestVersion: 2,
+          bindings: { d1: ['DB'] },
+          type: 'void',
+          queues: [{ name: 'demo-queue', bindingName: 'QUEUE_DEMO_QUEUE' }],
+          revalidate: 60,
+          prerender: ['/'],
+          migrations,
+        },
+        workerFiles: { 'index.js': btoa('export default {};') },
+      });
+      expect(response.status).toBe(200);
+      const id = response.headers.get('x-void-deployment-id')!;
+      const execute = vi.spyOn(deploy, 'executeQueuedDeployment');
+      const originalAppend = execution.appendDeploymentEvent;
+      let failures = 0;
+      vi.spyOn(execution, 'appendDeploymentEvent').mockImplementation(async (...args) => {
+        if (args[3].event === 'prerender' && (failure === 'persistent' || failures === 0)) {
+          failures++;
+          if (failure === 'lost acknowledgement') {
+            await originalAppend(...args);
+          }
+          throw new Error('Intermediate progress write interrupted');
+        }
+        return originalAppend(...args);
+      });
+
+      const first = await run(id);
+      expect(first.ack).toHaveBeenCalledOnce();
+      expect(first.retry).not.toHaveBeenCalled();
+      const operation = await getDeploymentOperation(env.db, id);
+      expect(operation).toMatchObject({ status: 'terminal', inputs_deleted: true });
+      expect(operation?.events.at(-1)?.event).toMatchObject({ event: 'done', deployment: id });
+      expect(operation?.events.some(({ event }) => event.event === 'prerender_done')).toBe(true);
+      if (failure === 'transient') {
+        expect(operation?.events.some(({ event }) => event.event === 'prerender')).toBe(true);
+      }
+      expect(failures).toBeGreaterThan(0);
+      const duplicate = await run(id);
+      expect(duplicate.ack).toHaveBeenCalledOnce();
+      expect(execute).toHaveBeenCalledOnce();
+      expect(migrate).toHaveBeenCalledOnce();
+      expect(await countUserDeploymentsToday(env.db, user.id)).toBe(1);
+    },
+  );
+
   it('stages Worker bytes before acknowledgement and executes the verified modules after disconnect', async () => {
     queuedEnv.DISPATCH = {
       get: () => ({ fetch: async () => Response.json({ ready: true }) }),
