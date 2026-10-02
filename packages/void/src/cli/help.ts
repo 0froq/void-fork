@@ -99,17 +99,19 @@ function operatorHelpTree(): HelpTree {
                         ? 'Poll new logs until interrupted or the build ends'
                         : flag === 'ended'
                           ? 'Attest that the original provider execution has ended'
-                          : flag === 'protect-new-projects'
-                            ? 'Protect newly created projects by default'
-                            : flag === 'check' && group === 'zero-trust'
-                              ? 'Also check the saved settings against Cloudflare Access (several API calls)'
-                              : flag === 'token-stdin' && group === 'zero-trust'
-                                ? 'Read the Access management API token from stdin'
-                                : flag === 'token-stdin' && group === 'email'
-                                  ? entry.action === 'domain-remove'
-                                    ? 'Read a replacement Cloudflare token for blocked project cleanup from stdin'
-                                    : 'Read a scoped Cloudflare API token from stdin'
-                                  : 'Read a full API session from stdin for explicit operator session exchange',
+                          : flag === 'public-apps'
+                            ? 'Manage public app rules without identity policies'
+                            : flag === 'protect-new-projects'
+                              ? 'Protect newly created projects by default'
+                              : flag === 'check' && group === 'zero-trust'
+                                ? 'Also check the saved settings against Cloudflare Access (several API calls)'
+                                : flag === 'token-stdin' && group === 'zero-trust'
+                                  ? 'Read the Access management API token from stdin'
+                                  : flag === 'token-stdin' && group === 'email'
+                                    ? entry.action === 'domain-remove'
+                                      ? 'Read a replacement Cloudflare token for blocked project cleanup from stdin'
+                                      : 'Read a scoped Cloudflare API token from stdin'
+                                    : 'Read a full API session from stdin for explicit operator session exchange',
                   })),
                 ],
               },
@@ -499,6 +501,11 @@ const HELP_TREE: HelpTree = {
             description: 'Protect platform UI and APIs with Cloudflare Access',
           },
           { command: '--no-access-protection', description: 'Skip Cloudflare Access protection' },
+          {
+            command: '--app-access <public|platform|custom>',
+            description:
+              'Choose public apps, reuse platform Access, or select separate app policies',
+          },
           {
             command: '--hyperdrive <create|id>',
             description: 'Create Hyperdrive or use the specified existing configuration',

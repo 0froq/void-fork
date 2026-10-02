@@ -7,7 +7,10 @@ import {
   ensurePlatformAccessHealthChecks,
   platformAccessHealthTargets,
 } from '../../src/cli/platform-access-health.ts';
-import { PlatformCloudflareApiError } from '../../src/cli/platform-cloudflare.ts';
+import {
+  PlatformCloudflareApiError,
+  PlatformCloudflareClient,
+} from '../../src/cli/platform-cloudflare.ts';
 import type { PlatformInstallPlan } from '../../src/cli/platform-plan.ts';
 import { platformAccessFixture } from '../fixtures/platform-access.ts';
 
@@ -59,9 +62,45 @@ function fixture(workersDev = false) {
 }
 
 beforeEach(() => vi.stubEnv('VOID_PLATFORM_ACCESS_SETUP_TOKEN', ''));
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
 
 describe('protected platform health checks', () => {
+  it('uses app-management authority for scoped health access without platform Access protection', async () => {
+    const { env, input } = fixture(true);
+    const deployment = createPlatformDeploymentManifest({
+      ...input.plan.deployment,
+      appAccess: 'public',
+      authentication: { providers: ['github'] },
+    });
+    const appAccessSetupJson = JSON.stringify({
+      version: 1,
+      accountId: 'account',
+      mode: 'public',
+      managed: true,
+      apiToken: 'app-management',
+      identityProviderIds: [],
+      policyIds: [],
+    });
+    vi.spyOn(PlatformCloudflareClient.prototype, 'request').mockImplementation(
+      env.transport.request,
+    );
+    await ensurePlatformAccessHealthChecks({
+      ...input,
+      plan: { ...input.plan, deployment },
+      manifest: { ...input.manifest, deployment },
+      checkpoint: { appAccessSetupJson },
+    });
+    expect([...env.apps.values()]).toMatchObject([
+      {
+        domain: `${deployment.resources.dispatchWorker}.account.workers.dev/health`,
+        policies: [{ decision: 'bypass', include: [{ everyone: {} }] }],
+      },
+    ]);
+    expect(env.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+  });
   it.each([false, true])(
     'creates and reuses only the reserved health path (workers.dev: %s)',
     async (workersDev) => {

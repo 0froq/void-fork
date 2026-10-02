@@ -34,7 +34,10 @@ vi.mock('@voidzero-dev/vite-plus-prompts', async (original) => ({
       ? Promise.resolve(false)
       : mocks.confirm(input),
   multiselect: mocks.multiselect,
-  select: mocks.select,
+  select: (input: { message: string }) =>
+    input.message === 'Who should be able to access deployed apps?'
+      ? Promise.resolve('public')
+      : mocks.select(input),
   text: mocks.text,
   intro: vi.fn(),
   note: mocks.note,
@@ -380,7 +383,7 @@ describe('interactive platform installation prompts', () => {
     expect(apiPrompt).toMatchObject({
       message:
         'Where do you want to host the Void Platform API? Leave empty for a workers.dev fallback.',
-      placeholder: 'api.apps.example.com',
+      placeholder: 'apps.example.com',
     });
     expect(apiPrompt).not.toHaveProperty('initialValue');
     expect(apiPrompt).not.toHaveProperty('defaultValue');
@@ -407,7 +410,7 @@ describe('interactive platform installation prompts', () => {
       expect.objectContaining({
         message:
           'Where do you want to host the Void Platform API? Leave empty for a workers.dev fallback.',
-        placeholder: 'api.example.com',
+        placeholder: 'platform.example.com',
       }),
     );
     expect(mocks.plan).toHaveBeenCalledWith(

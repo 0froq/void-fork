@@ -45,6 +45,56 @@ The installer offers GitHub, Google, generic OIDC, and Cloudflare Access login. 
 Cloudflare Access protection is a separate choice from Access login. The
 GitHub OAuth steps below apply when you select GitHub login.
 
+## Choose who can access apps
+
+The installer asks **Who should be able to access deployed apps?**
+
+- **Same people allowed by the platform’s Access policy** reuses your selected company identities and policies. This is recommended when platform Access protection is enabled.
+- **Anyone — public apps** allows public visits.
+- **Choose a different Access policy** selects separate company rules for apps. Without platform protection, this option is **Set up Cloudflare Access protection**.
+
+The plan shows the default app access. Void finishes and verifies app access before
+opening application traffic; new projects inherit the selected default automatically.
+If setup stops, use the printed resume command. Existing installations retain their
+administrator settings during upgrades.
+
+App protection uses the account hosting your platform. If platform login or
+protection uses another account, select equivalent identity providers and policies
+in the hosting account when prompted. Use the app domain’s apex or a workers.dev
+hostname for the API so it stays outside the app wildcard.
+
+Void checks account-wide Default-Deny during setup. For public apps in an account
+that requires Access rules, it creates rules for each app and its verified custom
+domains. Other subdomains keep their existing access rules. It leaves account-wide
+Default-Deny enabled and does not bypass the platform API or proxy.
+
+App rules need **Access: Apps and Policies Edit** and **Organizations, Identity
+Providers, and Groups Read**. Void stores this management token encrypted for future
+apps and domain changes. The installer asks before retaining a setup-only token for
+that purpose, or guides you to create a dedicated token. Public apps without
+Default-Deny need no ongoing Access-management credential.
+
+For scripts, use `--app-access public|platform|custom`. Supply
+`VOID_PLATFORM_APP_ACCESS_TOKEN` when app rules are needed, or add an `appAccess`
+section to your `--auth-config` file:
+
+```json
+{
+  "appAccess": {
+    "mode": "custom",
+    "identityProviderIds": ["hosting-account-identity-provider-id"],
+    "policyIds": ["hosting-account-company-policy-id"],
+    "tokenEnv": "APP_ACCESS_API_TOKEN"
+  }
+}
+```
+
+Keep the file’s existing `connections` configuration. For `mode: "platform"`,
+same-account identity and policy selections are reused. Headless setup requires an
+explicit app-management token; it never silently retains an installer-only token.
+
+## Finish login configuration
+
 For Google, create an OAuth client and register the printed callback URL. You
 can restrict it to named Google Workspace domains. For OIDC or Access login,
 provide the issuer URL, client ID, and client secret. Select **Company-approved

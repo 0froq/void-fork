@@ -43,7 +43,11 @@ export type PlatformResourceNames = Readonly<{
   usageQueue: string;
 }>;
 
+export type PlatformAppAccess = 'public' | 'platform' | 'custom';
+
 export type PlatformDeploymentManifest = Readonly<{
+  /** Initial app-access choice. Omitted on installations created before guided setup. */
+  appAccess?: PlatformAppAccess;
   application: PlatformApplication;
   /** Zone that owns the installation's shared sender mail domain. */
   emailSharedZoneId?: string;
@@ -59,10 +63,11 @@ export type PlatformDeploymentManifest = Readonly<{
   displayName: string;
   installationSlug: string;
   resources: PlatformResourceNames;
-  schemaVersion: typeof PLATFORM_DEPLOYMENT_SCHEMA_VERSION | 2 | 3;
+  schemaVersion: typeof PLATFORM_DEPLOYMENT_SCHEMA_VERSION | 2 | 3 | 4;
 }>;
 
 export type PlatformDeploymentManifestInput = Readonly<{
+  appAccess?: PlatformAppAccess;
   application: Readonly<{
     baseDomain: string;
     dedicatedZone?: boolean;
@@ -268,6 +273,12 @@ export function createPlatformDeploymentManifest(
   if (capabilities.managedBuilds && !capabilities.githubActions) {
     throw new Error('Managed builds require the GitHub Actions capability.');
   }
+  if (
+    input.appAccess !== undefined &&
+    !['public', 'platform', 'custom'].includes(input.appAccess)
+  ) {
+    throw new Error('appAccess must be public, platform, or custom.');
+  }
   const providers = input.authentication?.providers ?? ['github'];
   if (
     providers.some((provider) => !PLATFORM_LOGIN_KINDS.includes(provider)) ||
@@ -293,6 +304,7 @@ export function createPlatformDeploymentManifest(
       ? undefined
       : normalizePlatformDashboardUrl(input.controlPlane.dashboardUrl);
   const manifest: PlatformDeploymentManifest = {
+    ...(input.appAccess !== undefined ? { appAccess: input.appAccess } : {}),
     application: {
       baseDomain,
       dedicatedZone: input.application.dedicatedZone ?? false,
@@ -328,7 +340,14 @@ export function createPlatformDeploymentManifest(
     displayName: requiredString(input.displayName, 'displayName').trim(),
     installationSlug,
     resources,
-    schemaVersion: configurable ? 3 : workersDev ? 2 : PLATFORM_DEPLOYMENT_SCHEMA_VERSION,
+    schemaVersion:
+      input.appAccess !== undefined
+        ? 4
+        : configurable
+          ? 3
+          : workersDev
+            ? 2
+            : PLATFORM_DEPLOYMENT_SCHEMA_VERSION,
   };
   createApplicationRoutes(manifest.application);
   for (const [key, value] of Object.entries(manifest.controlPlane)) {
@@ -359,7 +378,8 @@ export function parsePlatformDeploymentManifest(value: unknown): PlatformDeploym
   if (
     value.schemaVersion !== PLATFORM_DEPLOYMENT_SCHEMA_VERSION &&
     value.schemaVersion !== 2 &&
-    value.schemaVersion !== 3
+    value.schemaVersion !== 3 &&
+    value.schemaVersion !== 4
   ) {
     throw new Error(
       `Unsupported platform deployment schema version: ${String(value.schemaVersion)}.`,
@@ -374,7 +394,8 @@ export function parsePlatformDeploymentManifest(value: unknown): PlatformDeploym
   let workersDev: PlatformApplication['workersDev'];
   if (
     value.schemaVersion === 2 ||
-    (value.schemaVersion === 3 && application.workersDev !== undefined)
+    ((value.schemaVersion === 3 || value.schemaVersion === 4) &&
+      application.workersDev !== undefined)
   ) {
     assertRecord(application.workersDev, 'application.workersDev');
     workersDev = {
@@ -406,7 +427,10 @@ export function parsePlatformDeploymentManifest(value: unknown): PlatformDeploym
     providers.some(
       (provider) =>
         !PLATFORM_LOGIN_KINDS.includes(provider as PlatformLoginKind) ||
-        (value.schemaVersion !== 3 && provider !== 'github' && provider !== 'google'),
+        (value.schemaVersion !== 3 &&
+          value.schemaVersion !== 4 &&
+          provider !== 'github' &&
+          provider !== 'google'),
     )
   ) {
     throw new Error('authentication.providers must contain only github or google.');
@@ -414,11 +438,24 @@ export function parsePlatformDeploymentManifest(value: unknown): PlatformDeploym
   if (
     (value.schemaVersion === 3 && authentication.configurable !== true) ||
     (value.schemaVersion !== 3 &&
+      value.schemaVersion !== 4 &&
       (authentication.configurable !== undefined ||
         authentication.accessProtection !== undefined)) ||
     (authentication.accessProtection !== undefined && authentication.accessProtection !== true)
   ) {
     throw new Error('Configurable authentication requires deployment schema version 3.');
+  }
+  if (
+    value.schemaVersion === 4
+      ? !['public', 'platform', 'custom'].includes(String(value.appAccess))
+      : value.appAccess !== undefined
+  ) {
+    throw new Error(
+      'Guided app access requires deployment schema version 4 and a valid appAccess choice.',
+    );
+  }
+  if (authentication.configurable !== undefined && authentication.configurable !== true) {
+    throw new Error('Invalid configurable authentication flag.');
   }
   const resourceDefaults = createPlatformResourceNames(
     requiredString(value.installationSlug, 'installationSlug'),
@@ -440,6 +477,7 @@ export function parsePlatformDeploymentManifest(value: unknown): PlatformDeploym
     return hostname === null ? null : requiredString(hostname, `controlPlane.${key}`);
   };
   return createPlatformDeploymentManifest({
+    ...(value.schemaVersion === 4 ? { appAccess: value.appAccess as PlatformAppAccess } : {}),
     application: {
       baseDomain: requiredString(application.baseDomain, 'application.baseDomain'),
       dedicatedZone: application.dedicatedZone === true,

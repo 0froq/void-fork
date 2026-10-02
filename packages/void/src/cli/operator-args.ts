@@ -144,7 +144,7 @@ export const operatorCommands: Array<OperatorCommand> = [
       policies: 'Comma-separated reusable Access policy IDs',
       'existing-projects': 'Required when enabling: protected or public for existing projects',
     },
-    booleans: ['token-stdin', 'protect-new-projects'],
+    booleans: ['token-stdin', 'protect-new-projects', 'public-apps'],
     method: 'POST',
   },
   {
@@ -783,7 +783,19 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
       .map((entry) => entry.trim())
       .filter(Boolean);
     const existingProjects = values['existing-projects'];
-    if (!identityProviderIds?.length || !policyIds?.length) {
+    const publicAccess = flags.has('public-apps');
+    if (
+      publicAccess &&
+      (identityProviderIds?.length ||
+        policyIds?.length ||
+        flags.has('protect-new-projects') ||
+        existingProjects === 'protected')
+    ) {
+      throw new Error(
+        'platform: --public-apps cannot include identity policies or protected project choices.',
+      );
+    }
+    if (!publicAccess && (!identityProviderIds?.length || !policyIds?.length)) {
       throw new Error(
         'platform: zero-trust configure requires --identity-providers and --policies.',
       );
@@ -797,8 +809,9 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
       throw new Error('platform: --existing-projects must be protected or public.');
     }
     parsed.body = {
-      identityProviderIds,
-      policyIds,
+      identityProviderIds: identityProviderIds ?? [],
+      policyIds: policyIds ?? [],
+      ...(publicAccess ? { publicAccess: true } : {}),
       ...(existingProjects ? { existingProjects } : {}),
       protectNewProjects: flags.has('protect-new-projects'),
     };

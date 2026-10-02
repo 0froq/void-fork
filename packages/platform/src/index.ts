@@ -1,4 +1,9 @@
 export {
+  PLATFORM_APP_ACCESS_SETUP_PROOF_PREFIX,
+  parsePlatformAppAccessSetup,
+  type PlatformAppAccessSetup,
+} from './app-access.ts';
+export {
   platformAuthenticationRecoveryMessage,
   type PlatformAuthenticationRecovery,
 } from './authentication-recovery.ts';
@@ -38,6 +43,7 @@ export {
   platformDashboardUrl,
   parsePlatformDeploymentManifest,
   type PlatformApplicationRoute,
+  type PlatformAppAccess,
   type PlatformCapabilities,
   type PlatformControlPlane,
   type PlatformDeploymentManifest,

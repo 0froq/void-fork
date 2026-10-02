@@ -106,6 +106,8 @@ export type ApiEnv = Env & {
     DEPLOYMENTS_QUEUE_NAME?: string;
     SITE_DOMAIN?: string;
     PLATFORM_APPLICATION?: string;
+    PLATFORM_APP_ACCESS?: 'public' | 'platform' | 'custom';
+    PLATFORM_APP_ACCESS_SETUP_TOKEN?: string;
     DASHBOARD_URL?: string;
     USAGE_COUNTER: DurableObjectNamespace;
     CRON_SCHEDULER: DurableObjectNamespace;

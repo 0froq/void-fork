@@ -594,7 +594,9 @@ describe('admin Zero Trust', () => {
     expect(html).toContain('action="/admin/zero-trust/configure"');
     expect(html).toContain('action="/admin/zero-trust/reconcile"');
     expect(html).toContain('action="/admin/zero-trust/disable"');
-    expect(html).toContain('data-confirm="Disable Zero Trust and make every project public?"');
+    expect(html).toContain(
+      'data-confirm="Remove Void-managed Access protection? Apps may become public or be blocked by account-wide Default-Deny."',
+    );
     expect(html).toContain('name="apiToken"');
     expect(html.toLowerCase()).toContain('autocomplete="new-password"');
     expect(checkedValues(html, 'existingProjects')).toEqual(['public']);

@@ -5,6 +5,7 @@ import type { DbOrTx } from '../db.ts';
 import { getPlatformSetting, setPlatformSetting } from '../platform-settings.ts';
 import type { EncryptedPlatformCredential } from '../project-secrets.ts';
 import { platformSettings } from '../schema.ts';
+import { publicAppManagementDestination } from './cloudflare.ts';
 
 const ZERO_TRUST_SETTING = 'zeroTrust.configuration';
 export const ZERO_TRUST_CREDENTIAL_ID = 'zero-trust-cloudflare-api-token';
@@ -30,6 +31,10 @@ export type ZeroTrustOperation = Readonly<{
 }>;
 
 export type ZeroTrustConfiguration = Readonly<{
+  publicAccess?: true;
+  /** Public-only setups reserve a dispatch check path; the shared application never bypasses a wildcard. */
+  publicAccessGuardDestination?: string;
+  managePublicCustomDomains?: true;
   version: 1;
   /** Compare-and-swap token; every write increments it. */
   revision: number;
@@ -71,6 +76,9 @@ export function zeroTrustConfigurationStatus(
 }
 
 export type ZeroTrustConfigureInput = Readonly<{
+  /** Installer-only public rules for accounts with Default-Deny. */
+  publicAccess?: true;
+  managePublicCustomDomains?: true;
   apiToken: string;
   identityProviderIds: ReadonlyArray<string>;
   policyIds: ReadonlyArray<string>;
@@ -121,8 +129,8 @@ function timestamp(value: unknown, label: string): string {
   return result;
 }
 
-function ids(value: unknown, label: string): ReadonlyArray<string> {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 16) {
+function ids(value: unknown, label: string, minimum = 1): ReadonlyArray<string> {
+  if (!Array.isArray(value) || value.length < minimum || value.length > 16) {
     throw new ZeroTrustConfigurationError(`${label} must contain between 1 and 16 ids`);
   }
   const result = value.map((entry) => requiredText(entry, `${label} id`, 128));
@@ -272,6 +280,13 @@ function parseZeroTrustConfiguration(value: unknown): ZeroTrustConfiguration | n
   if (typeof input.enabled !== 'boolean' || typeof input.protectNewProjects !== 'boolean') {
     throw new ZeroTrustConfigurationError('Zero Trust configuration flags are invalid');
   }
+  if (
+    (input.publicAccess !== undefined && input.publicAccess !== true) ||
+    (input.managePublicCustomDomains !== undefined && input.managePublicCustomDomains !== true) ||
+    (input.publicAccess && input.protectNewProjects)
+  ) {
+    throw new ZeroTrustConfigurationError('invalid public app access configuration');
+  }
   const teamDomain = requiredText(input.teamDomain, 'Access team domain', 512).replace(/\/+$/, '');
   let parsedTeamDomain: URL;
   try {
@@ -290,10 +305,38 @@ function parseZeroTrustConfiguration(value: unknown): ZeroTrustConfiguration | n
       'Access team domain must be an HTTPS cloudflareaccess.com origin',
     );
   }
+  let publicAccessGuardDestination: string | undefined;
+  if (input.publicAccess) {
+    publicAccessGuardDestination = requiredText(
+      input.publicAccessGuardDestination,
+      'public app management destination',
+      512,
+    );
+    try {
+      if (
+        publicAppManagementDestination('https://' + publicAccessGuardDestination) !==
+        publicAccessGuardDestination
+      ) {
+        throw new Error('invalid destination');
+      }
+    } catch {
+      throw new ZeroTrustConfigurationError('Invalid public app management destination');
+    }
+  }
   const wildcardApplication = parseApplication(input.wildcardApplication);
   // Configurations saved before the health exception existed have neither field.
   const healthApplication = parseApplication(input.healthApplication ?? null);
   const operation = parseOperation(input.operation);
+  if (
+    input.publicAccess &&
+    (operation?.existingProjects === 'protected' ||
+      (Array.isArray(input.identityProviderIds) && input.identityProviderIds.length > 0) ||
+      (Array.isArray(input.policyIds) && input.policyIds.length > 0))
+  ) {
+    throw new ZeroTrustConfigurationError(
+      'Public app access cannot contain identity policies or protected project choices',
+    );
+  }
   if (operation?.phase === 'bypass-delete' && (input.enabled || wildcardApplication)) {
     throw new ZeroTrustConfigurationError('Zero Trust bypass cleanup requires wildcard removal');
   }
@@ -309,8 +352,18 @@ function parseZeroTrustConfiguration(value: unknown): ZeroTrustConfiguration | n
     protectNewProjects: input.protectNewProjects,
     accountId: requiredText(input.accountId, 'Cloudflare account id', 128),
     teamDomain,
-    identityProviderIds: ids(input.identityProviderIds, 'identity providers'),
-    policyIds: ids(input.policyIds, 'policies'),
+    ...(input.publicAccess === true
+      ? { publicAccess: true as const, publicAccessGuardDestination }
+      : {}),
+    ...(input.managePublicCustomDomains === true
+      ? { managePublicCustomDomains: true as const }
+      : {}),
+    identityProviderIds: ids(
+      input.identityProviderIds,
+      'identity providers',
+      input.publicAccess ? 0 : 1,
+    ),
+    policyIds: ids(input.policyIds, 'policies', input.publicAccess ? 0 : 1),
     credential: parseCredential(input.credential),
     wildcardApplicationName: requiredText(
       input.wildcardApplicationName,
@@ -345,8 +398,15 @@ export function normalizeZeroTrustConfigureInput(input: unknown): ZeroTrustConfi
   const apiToken = requiredText(value.apiToken, 'Cloudflare API token', 8192);
   return {
     apiToken,
-    identityProviderIds: ids(value.identityProviderIds, 'identity providers'),
-    policyIds: ids(value.policyIds, 'policies'),
+    ...(value.publicAccess === true
+      ? { publicAccess: true as const, managePublicCustomDomains: true as const }
+      : {}),
+    identityProviderIds: ids(
+      value.identityProviderIds,
+      'identity providers',
+      value.publicAccess === true ? 0 : 1,
+    ),
+    policyIds: ids(value.policyIds, 'policies', value.publicAccess === true ? 0 : 1),
     protectNewProjects: value.protectNewProjects,
     ...(existingProjects ? { existingProjects } : {}),
   };

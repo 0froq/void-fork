@@ -93,6 +93,11 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
     operation?.existingProjects === 'public' ? 'public' : 'protected',
   );
   const badge = statusBadge(configured, enabled, status ?? null);
+  const publicOnly =
+    configured &&
+    status !== 'invalid_configuration' &&
+    identityProviderIds.length === 0 &&
+    policyIds.length === 0;
   return (
     <Layout platformName={platformName} title="Zero Trust" username={username}>
       <div className="void-admin-zero-trust">
@@ -200,6 +205,13 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
               )}
             </div>
             <form method="post" action={`${HOME}/configure`} className="void-admin-zero-trust-form">
+              {publicOnly && (
+                <p>
+                  Void manages public app rules for this account. Leave policy fields blank to
+                  replace its token, or enter company identities and policies to configure
+                  protection.
+                </p>
+              )}
               <FormTextInput
                 label="API token"
                 name="apiToken"
@@ -212,8 +224,12 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
                 label="Identity provider IDs"
                 name="identityProviderIds"
                 initialValue={identityProviderIds.join(', ')}
-                description="Separate IDs with commas or spaces."
-                required
+                description={
+                  publicOnly
+                    ? 'Leave blank to keep public app rules, or enter company IDs to configure protection.'
+                    : 'Separate IDs with commas or spaces.'
+                }
+                required={!publicOnly}
                 width={480}
               />
               <FormTextInput
@@ -221,7 +237,7 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
                 name="policyIds"
                 initialValue={policyIds.join(', ')}
                 description="Separate IDs with commas or spaces."
-                required
+                required={!publicOnly}
                 width={480}
               />
               <FormCheckbox
@@ -264,7 +280,7 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
                   <form
                     method="post"
                     action={`${HOME}/disable`}
-                    data-confirm="Disable Zero Trust and make every project public?"
+                    data-confirm="Remove Void-managed Access protection? Apps may become public or be blocked by account-wide Default-Deny."
                   >
                     <Button
                       type="submit"

@@ -29,6 +29,7 @@ import {
 } from '@void/platform/installer';
 import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { PlatformCloudflareApiError } from '../../src/cli/platform-cloudflare.ts';
 import {
   hyperdriveOriginConfigHash,
   hyperdriveOriginFromConnectionString,
@@ -4284,15 +4285,23 @@ describe('platform installer', () => {
     expect(released).toBe(true);
   });
 
-  it.each([false, true])(
-    'checkpoints every resource and removes pending secrets only after verification (legacy runtime: %s)',
-    async (legacyRuntime) => {
+  it.each([
+    { legacyRuntime: false },
+    { legacyRuntime: true },
+    { legacyRuntime: false, appAccess: 'public' as const },
+    { legacyRuntime: false, appAccess: 'custom' as const },
+    { legacyRuntime: false, appAccess: 'custom' as const, failAppAccess: true },
+    { legacyRuntime: false, appAccess: 'custom' as const, failHealthToken: true },
+  ])(
+    'checkpoints app access and resource readiness before traffic opens: %j',
+    async ({ legacyRuntime, appAccess, failAppAccess, failHealthToken }) => {
       const directory = mkdtempSync(join(tmpdir(), 'void-platform-installer-test-'));
       directories.push(directory);
       process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
       const plan = await createPlatformInstallPlan(
         planningClient(),
         {
+          appAccess,
           accountId: 'account',
           applicationDomain: 'apps.example.com',
           controlPlaneDomain: '',
@@ -4330,88 +4339,147 @@ describe('platform installer', () => {
       const lifecycleEvents: Array<string> = [];
       let remoteManifest = '';
       const databaseClaims: Array<[string, string]> = [];
-      const result = await installPlatform(
-        plan,
-        createPlatformInstallationSecrets({
-          bootstrapGitHubId: '583231',
-          bootstrapGitHubLogin: 'octocat',
-          cloudflareApiToken: 'cf-token',
-          databaseUrl: 'postgres://user:password@db.example.com/void',
-          githubClientId: 'github-id',
-          githubClientSecret: 'github-secret',
-          jwtSecret: TEST_PLATFORM_JWT_SECRET,
-          projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
-          r2AccessKeyId: 'r2-id',
-          r2SecretAccessKey: 'r2-secret',
-        }),
-        null,
-        {
-          runtime: selectedRuntime,
-          acquireDatabaseLifecycleLock,
-          claimDatabase: async (_url, installationId, ownershipNonce) => {
-            databaseClaims.push([installationId, ownershipNonce]);
-          },
-          client: {
-            createAiGateway: created,
-            createDnsRecord: async (_zone, name) => ({
-              content: '100::',
-              id: `resource-${resourceIndex++}`,
-              name,
-              proxied: true,
-              type: 'AAAA',
-            }),
-            createZone: async () => {
-              throw new Error('existing zone must not be created');
-            },
-            createKvNamespace: created,
-            createR2Bucket: created,
-            createQueue: created,
-            createDispatchNamespace: created,
-            createHyperdrive: async (account, name) => created(account, name),
-            deleteKvValue: async (_account, _namespace, key) => {
-              lifecycleEvents.push(`delete:${key}`);
-              routingValues.delete(key);
-            },
-            putKvValue: async (_account, _namespace, key, value) => {
-              routingValues.set(key, value);
-              if (key === PLATFORM_DISABLED_KEY) {
-                lifecycleEvents.push(`put:${key}`);
-              }
-              if (key === '__void/platform/installation/v1') {
-                remoteManifest = value;
+      let result;
+      try {
+        result = await installPlatform(
+          plan,
+          createPlatformInstallationSecrets({
+            bootstrapGitHubId: '583231',
+            bootstrapGitHubLogin: 'octocat',
+            cloudflareApiToken: 'cf-token',
+            databaseUrl: 'postgres://user:password@db.example.com/void',
+            githubClientId: 'github-id',
+            githubClientSecret: 'github-secret',
+            jwtSecret: TEST_PLATFORM_JWT_SECRET,
+            projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
+            r2AccessKeyId: 'r2-id',
+            r2SecretAccessKey: 'r2-secret',
+          }),
+          null,
+          {
+            runtime: selectedRuntime,
+            prepareHealthAccess: async () => {
+              if (failHealthToken) {
+                throw new PlatformCloudflareApiError('rejected', 403);
               }
             },
-            putR2Object: async (_account, _bucket, _key, value) => {
-              r2OwnershipMarker = value;
+            prepareAppAccess: async () =>
+              JSON.stringify({
+                version: 1,
+                accountId: 'account',
+                mode: appAccess === 'public' ? 'public' : 'protected',
+                managed: true,
+                apiToken: 'app-management-only',
+                identityProviderIds: appAccess === 'public' ? [] : ['idp'],
+                policyIds: appAccess === 'public' ? [] : ['policy'],
+              }),
+            initializeAppAccess: async ({ setupJson }) => {
+              expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
+              expect(JSON.parse(setupJson).apiToken).toBe('app-management-only');
+              lifecycleEvents.push('app-access');
+              if (failAppAccess) {
+                throw new Error('app access not ready');
+              }
+            },
+            acquireDatabaseLifecycleLock,
+            claimDatabase: async (_url, installationId, ownershipNonce) => {
+              databaseClaims.push([installationId, ownershipNonce]);
+            },
+            client: {
+              createAiGateway: created,
+              createDnsRecord: async (_zone, name) => ({
+                content: '100::',
+                id: `resource-${resourceIndex++}`,
+                name,
+                proxied: true,
+                type: 'AAAA',
+              }),
+              createZone: async () => {
+                throw new Error('existing zone must not be created');
+              },
+              createKvNamespace: created,
+              createR2Bucket: created,
+              createQueue: created,
+              createDispatchNamespace: created,
+              createHyperdrive: async (account, name) => created(account, name),
+              deleteKvValue: async (_account, _namespace, key) => {
+                lifecycleEvents.push(`delete:${key}`);
+                routingValues.delete(key);
+              },
+              putKvValue: async (_account, _namespace, key, value) => {
+                routingValues.set(key, value);
+                if (key === PLATFORM_DISABLED_KEY) {
+                  lifecycleEvents.push(`put:${key}`);
+                }
+                if (key === '__void/platform/installation/v1') {
+                  remoteManifest = value;
+                }
+              },
+              putR2Object: async (_account, _bucket, _key, value) => {
+                r2OwnershipMarker = value;
+              },
+            },
+            deployWorker: async (config, secrets) => {
+              expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
+              expect(routingValues.has(PLATFORM_SANDBOX_DRAIN_KEY)).toBe(false);
+              lifecycleEvents.push(`deploy:${String(config.name)}`);
+              deployed.push(String(config.name));
+              deployedTrafficStates.push(
+                (config.vars as Record<string, unknown>).PLATFORM_TRAFFIC_STATE,
+              );
+              if (String(config.name).endsWith('-api')) {
+                apiSecrets = secrets;
+              }
+            },
+            migrateDatabase: async () => {},
+            prepareSandboxDrain: async () => sandboxDrainPreparation('complete'),
+            revalidateBeforeWorkerDeploy: async () => {},
+            verifyHealth: async () => {
+              expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(
+                lifecycleEvents.includes('verify') ? undefined : PLATFORM_DISABLED_VALUE,
+              );
+              lifecycleEvents.push('verify');
+            },
+            verifySandboxDrain: async () => {
+              throw new Error('an empty fresh installation must not require a manual drain');
             },
           },
-          deployWorker: async (config, secrets) => {
-            expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
-            expect(routingValues.has(PLATFORM_SANDBOX_DRAIN_KEY)).toBe(false);
-            lifecycleEvents.push(`deploy:${String(config.name)}`);
-            deployed.push(String(config.name));
-            deployedTrafficStates.push(
-              (config.vars as Record<string, unknown>).PLATFORM_TRAFFIC_STATE,
-            );
-            if (String(config.name).endsWith('-api')) {
-              apiSecrets = secrets;
-            }
-          },
-          migrateDatabase: async () => {},
-          prepareSandboxDrain: async () => sandboxDrainPreparation('complete'),
-          revalidateBeforeWorkerDeploy: async () => {},
-          verifyHealth: async () => {
-            expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(
-              lifecycleEvents.includes('verify') ? undefined : PLATFORM_DISABLED_VALUE,
-            );
-            lifecycleEvents.push('verify');
-          },
-          verifySandboxDrain: async () => {
-            throw new Error('an empty fresh installation must not require a manual drain');
-          },
-        },
-      );
-
+        );
+      } catch (error) {
+        if (failHealthToken) {
+          expect(String(error)).toContain('App access token rejected');
+          expect(deployed).toEqual([]);
+          const failed = listInstallationManifests(directory)[0]!;
+          expect(readPendingInstallationSecrets(failed)?.appAccessTokenRejected).toBe('true');
+          return;
+        }
+        if (!failAppAccess) {
+          throw error;
+        }
+        expect(String(error)).toContain('app access not ready');
+        expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
+        expect(lifecycleEvents).not.toContain(`delete:${PLATFORM_DISABLED_KEY}`);
+        expect(
+          listInstallationManifests(directory)[0]?.steps.some(
+            (step) => step.key === 'app-access-initialized:v1',
+          ),
+        ).toBe(false);
+        return;
+      }
+      expect(failAppAccess).not.toBe(true);
+      expect(failHealthToken).not.toBe(true);
+      if (appAccess) {
+        expect(lifecycleEvents.indexOf('app-access')).toBeLessThan(
+          lifecycleEvents.indexOf(`delete:${PLATFORM_DISABLED_KEY}`),
+        );
+        expect(result.manifest.steps.some((step) => step.key === 'app-access-initialized:v1')).toBe(
+          true,
+        );
+        expect(JSON.stringify(apiSecrets)).not.toContain('app-management-only');
+        expect(readInstallationRecoverySecrets(result.manifest)?.appAccessSetupJson).toContain(
+          'app-management-only',
+        );
+      }
       expect(result.manifest.status).toBe('installed');
       expect(result.manifest.steps.some((step) => step.key === 'adoption-intent:zone')).toBe(true);
       expect(databaseClaims).toEqual([[result.manifest.id, result.manifest.ownershipNonce]]);

@@ -2,7 +2,10 @@ import { Hono } from 'hono';
 import type { ApiEnv } from '../../env.ts';
 import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
 import { zeroTrustOperatorError } from '../../operator/zero-trust-routes.ts';
-import { normalizeZeroTrustConfigureInput } from '../../zero-trust/configuration.ts';
+import {
+  normalizeZeroTrustConfigureInput,
+  readZeroTrustConfigurationStrict,
+} from '../../zero-trust/configuration.ts';
 import {
   configurePlatformZeroTrust,
   disablePlatformZeroTrust,
@@ -40,7 +43,12 @@ app.post('/configure', async (context) => {
   const form = await context.req.parseBody();
   let input;
   try {
+    const saved = await readZeroTrustConfigurationStrict(context.get('db'));
     input = normalizeZeroTrustConfigureInput({
+      publicAccess:
+        !!saved?.publicAccess &&
+        !values(form.identityProviderIds).length &&
+        !values(form.policyIds).length,
       apiToken: form.apiToken,
       identityProviderIds: values(form.identityProviderIds),
       policyIds: values(form.policyIds),

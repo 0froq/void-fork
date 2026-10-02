@@ -29,7 +29,15 @@ import type { PlatformManagementAccess } from './platform-auth.ts';
 import type { PlatformCloudflareClient } from './platform-cloudflare.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
 
+export type AppAccessFile = {
+  mode: import('@void/platform').PlatformAppAccess;
+  tokenEnv?: string;
+  identityProviderIds?: Array<string>;
+  policyIds?: Array<string>;
+};
+
 type AuthFile = {
+  appAccess?: AppAccessFile;
   connections: Array<{ configuration: Record<string, unknown>; clientSecretEnv?: string }>;
   administratorConnectionId?: string;
   admission?: unknown;

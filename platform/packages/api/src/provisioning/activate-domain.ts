@@ -109,7 +109,7 @@ export async function tryActivateDomain(
     // audience in dispatch routing before this custom hostname can become
     // reachable. Reconciliation is idempotent and fails closed: a Cloudflare
     // API failure leaves the domain pending with no routing entry.
-    await reconcileProjectZeroTrustDomains(env, db, project.id);
+    await reconcileProjectZeroTrustDomains(env, db, project.id, { verifiedDomainId: domain.id });
     await db.transaction(async (tx) => {
       await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${project.id} FOR UPDATE`);
       const txDb = tx as unknown as Db;

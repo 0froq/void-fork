@@ -97,6 +97,8 @@ export function platformManagementSetupPage(
       ? { protection: !!plan.deployment.authentication.accessProtection, readOnly: false }
       : undefined);
   const accessLevel = access && access.readOnly ? 'read' : 'edit';
+  const appAccess = !!plan.deployment.appAccess;
+  const appAccessLevel = appAccess ? 'edit' : accessLevel;
   const permissions = [
     ...platformAccountTokenPermissions(true),
     ...(zoneName || apiHostname || createsZone
@@ -106,11 +108,13 @@ export function platformManagementSetupPage(
           { key: 'workers_routes', type: 'edit' },
         ]
       : []),
-    ...(access
+    ...(access || appAccess
       ? [
-          { key: 'access', type: accessLevel },
+          { key: 'access', type: appAccessLevel },
           { key: 'access_acct', type: 'read' },
-          ...(access.protection ? [{ key: 'access_service_token', type: accessLevel }] : []),
+          ...(access && access.protection
+            ? [{ key: 'access_service_token', type: accessLevel }]
+            : []),
         ]
       : []),
     ...(zoneName && plan.deployment.application.baseDomain !== zoneName
@@ -135,9 +139,9 @@ export function platformManagementSetupPage(
         ? [`Also include the zone for ${apiHostname}.`]
         : []),
       'Create the token with the preselected permissions, then paste it here.',
-      ...(access
+      ...(access || appAccess
         ? [
-            `Access: Apps and Policies ${accessLevel === 'edit' ? 'Edit' : 'Read'}, Organizations/Identity Providers/Groups Read${access.protection ? `, Service Tokens ${accessLevel === 'edit' ? 'Edit' : 'Read'}` : ''}.`,
+            `Access: Apps and Policies ${appAccessLevel === 'edit' ? 'Edit' : 'Read'}, Organizations/Identity Providers/Groups Read${access && access.protection ? `, Service Tokens ${accessLevel === 'edit' ? 'Edit' : 'Read'}` : ''}.`,
           ]
         : []),
       'Permission checklist: ' +
@@ -267,6 +271,9 @@ export function formatPlatformSetupPlan(
     ...(plan.deployment.authentication.accessProtection
       ? ['Cloudflare Access application and installer credentials']
       : []),
+    ...(plan.deployment.appAccess
+      ? ['Cloudflare Access check and app-management token when needed (stored encrypted)']
+      : []),
     'JWT signing key and project encryption key',
   ];
   return [
@@ -289,6 +296,7 @@ export type PlatformInstallCommandOptions = {
   workersDev: boolean;
   authConfig?: string;
   authentication?: PlatformDeploymentManifest['authentication'];
+  appAccess?: PlatformDeploymentManifest['appAccess'];
   hyperdrive?: string;
   runtime: string;
   resumeId?: string;
@@ -329,6 +337,9 @@ export function platformInstallCommandArguments(
   }
   flag('--hyperdrive', options.hyperdrive ?? '');
   flag('--auth-config', options.authConfig ?? '');
+  if (!options.resumeId && options.appAccess) {
+    flag('--app-access', options.appAccess);
+  }
   if (!options.authConfig && !options.resumeId && options.authentication) {
     flag('--login-methods', options.authentication.providers.join(','));
     parts.push(

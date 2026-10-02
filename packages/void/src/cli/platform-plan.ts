@@ -38,6 +38,7 @@ export type PlatformInstallPlanAction = Readonly<{
 }>;
 
 export type PlatformInstallPlan = Readonly<{
+  appAccessSetupRequired?: boolean;
   account: CloudflareAccount;
   actions: ReadonlyArray<PlatformInstallPlanAction>;
   apiUrl: string;
@@ -58,6 +59,7 @@ export type PlatformExternalHyperdrive = Readonly<{
 }>;
 
 export type PlatformInstallPlanInput = Readonly<{
+  appAccess?: import('@void/platform').PlatformAppAccess;
   authentication?: import('@void/platform').PlatformDeploymentManifest['authentication'];
   accountId: string;
   applicationDomain: string;
@@ -199,8 +201,21 @@ export async function createPlatformInstallPlan(
       'platform: Email-enabled installations require VOID_EMAIL_SENDER_DOMAIN and VOID_EMAIL_SHARED_ZONE_ID before deploying this runtime.',
     );
   }
+  if (
+    input.appAccess &&
+    input.appAccess !== 'public' &&
+    input.controlPlaneDomain
+      .toLowerCase()
+      .replace(/\.$/, '')
+      .endsWith(`.${input.applicationDomain.toLowerCase()}`)
+  ) {
+    throw new Error(
+      'platform: The API hostname must be outside the app Access wildcard. Use the application domain apex or workers.dev for the API, then plan again.',
+    );
+  }
   const deployment = createPlatformDeploymentManifest({
     authentication: input.authentication ?? existing?.deployment.authentication,
+    appAccess: input.appAccess ?? existing?.deployment.appAccess,
     ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
     application: {
       baseDomain: testing ? `${accountSubdomain}.workers.dev` : input.applicationDomain,
@@ -723,6 +738,13 @@ export async function createPlatformInstallPlan(
     actions,
     apiUrl,
     deployment: resolvedDeployment,
+    ...(resolvedDeployment.appAccess
+      ? {
+          appAccessSetupRequired: !existing?.steps.some(
+            (step) => step.key === 'app-access-initialized:v1',
+          ),
+        }
+      : {}),
     ...(input.externalHyperdrive ? { externalHyperdrive: input.externalHyperdrive } : {}),
     installationId,
     proxyUrl,
@@ -1352,6 +1374,13 @@ export function formatPlatformInstallPlan(plan: PlatformInstallPlan): string {
       : []),
     `${pc.bold('Login methods:')} ${plan.deployment.authentication.providers.join(', ')}`,
     `${pc.bold('Access protection:')} ${plan.deployment.authentication.accessProtection ? 'Enabled' : 'Not enabled'}`,
+    ...(plan.deployment.appAccess
+      ? [
+          plan.appAccessSetupRequired === false
+            ? `${pc.bold('App access:')} Preserve administrator settings`
+            : `${pc.bold('Default app access:')} ${{ public: 'Public apps', platform: 'Same as platform Access policy', custom: 'Selected Access policy' }[plan.deployment.appAccess]}`,
+        ]
+      : []),
     `${pc.bold('Login callback:')} ${plan.apiUrl}/auth/callback`,
     `${pc.bold('Database:')} ${plan.externalHyperdrive?.database || 'PostgreSQL'} via Hyperdrive ${plan.deployment.resources.hyperdrive}`,
     '',

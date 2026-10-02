@@ -32,7 +32,7 @@ function accessSetupGuide(): string {
   });
 }
 
-async function selectCompanyAccessPolicies(
+export async function selectCompanyAccessPolicies(
   client: PlatformAccessClient,
   initialPolicies: Array<Record<string, unknown>>,
   accountId: string,
@@ -192,6 +192,10 @@ export function isPlatformAuthenticationPreparationKey(name: string): boolean {
   return (
     name.startsWith('authenticationConnection:') ||
     [
+      'appAccessToken',
+      'appAccessTokenRejected',
+      'appAccessIdentityProviderIds',
+      'appAccessPolicyIds',
       'accessManagementToken',
       'accessSetupSpecJson',
       'accessExistingServiceTokenJson',

@@ -653,3 +653,30 @@ export function healthCheckApplication(name: string, hostname: string): AccessAp
     policies: bypassPolicy('Void platform health check'),
   };
 }
+
+/** Prove app-management write authority without making an app namespace public. */
+export function publicAppManagementDestination(apiUrl: string): string {
+  const url = new URL(apiUrl);
+  if (url.protocol !== 'https:' || url.username || url.password) {
+    throw new Error('Public app management requires an HTTPS dispatch origin.');
+  }
+  return url.host + '/__void/app-access-management';
+}
+
+export function publicAppManagementApplication(
+  name: string,
+  destination: string,
+): AccessApplicationSpec {
+  return {
+    name,
+    destinations: [destination],
+    policies: [
+      {
+        name: 'App access management check',
+        decision: 'deny',
+        precedence: 1,
+        include: [{ everyone: {} }],
+      },
+    ],
+  };
+}

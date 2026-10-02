@@ -51,6 +51,8 @@ function completedProjectOperation(
 }
 
 type ProjectReconciliationOptions = {
+  /** Internal proof from the custom-hostname activation gate, never from request input. */
+  verifiedDomainId?: string;
   /** Snapshot owned by an installation operation; it must still match under the lock. */
   configuration?: ZeroTrustConfiguration;
   client?: ZeroTrustCloudflareClient;
@@ -106,7 +108,18 @@ async function checkpointProjectReconciliation(
       options?.desiredProtection ??
       existing?.desired_protected ??
       initialProjectProtection(configuration, project);
-    const destinations = await projectDestinations(env, lockedDb, project, desired);
+    if (desired && configuration.publicAccess) {
+      throw new ZeroTrustUnavailableError(
+        'Choose company identity providers and policies in Admin → Zero Trust before protecting a project.',
+      );
+    }
+    const destinations = await projectDestinations(
+      env,
+      lockedDb,
+      project,
+      desired,
+      options?.verifiedDomainId,
+    );
     const values: Partial<typeof projectZeroTrust.$inferInsert> = {
       desired_protected: desired,
       status: 'reconciling',
@@ -116,7 +129,11 @@ async function checkpointProjectReconciliation(
     if (!desired && !existing?.bypass_application_name) {
       values.bypass_application_name = await applicationName(env, `public-${project.id}`);
     }
-    if (desired && destinations.custom.length > 0 && !existing?.protected_application_name) {
+    if (
+      (desired || configuration.managePublicCustomDomains) &&
+      destinations.custom.length > 0 &&
+      !existing?.protected_application_name
+    ) {
       values.protected_application_name = await applicationName(env, `protected-${project.id}`);
     }
     return putProjectState(lockedDb, projectId, values);
@@ -134,6 +151,7 @@ async function reconcilePublicProjectLocked(
   project: Project,
   current: ProjectZeroTrust,
   platformDestinations: ReadonlyArray<string>,
+  customDestinations: ReadonlyArray<string>,
   client: ZeroTrustCloudflareClient,
   configuration: ZeroTrustConfiguration,
   routingBudget?: RoutingBudget,
@@ -153,18 +171,39 @@ async function reconcilePublicProjectLocked(
     bypass_application_id: bypass.id,
     bypass_application_name: bypass.name,
   });
+  let publicCustom: ManagedAccessApplication | null = null;
+  if (configuration.managePublicCustomDomains && customDestinations.length) {
+    if (!current.protected_application_name) {
+      throw new Error('The custom-domain Access checkpoint is missing.');
+    }
+    publicCustom = await client.ensureApplication(
+      {
+        name: current.protected_application_name,
+        destinations: customDestinations,
+        policies: bypassPolicy('Void project is public'),
+      },
+      projectApplicationReference(current, 'protected'),
+    );
+    await updateProjectState(lockedDb, project.id, {
+      protected_application_id: publicCustom.id,
+      protected_application_name: publicCustom.name,
+      protected_application_audience: publicCustom.audience,
+    });
+  }
   if (!(await publishProjectZeroTrustRoutingLocked(env, lockedDb, project, null, routingBudget))) {
     return (await getProjectZeroTrustState(lockedDb, project.id))!;
   }
   const row = await updateProjectState(lockedDb, project.id, { effective_protected: false });
-  await client.deleteApplication(row.protected_application_id, row.protected_application_name);
+  if (!publicCustom) {
+    await client.deleteApplication(row.protected_application_id, row.protected_application_name);
+  }
   return updateProjectState(lockedDb, project.id, {
     effective_protected: false,
     status: 'ready',
     reconciled_operation: completedProjectOperation(configuration, true),
-    protected_application_id: null,
-    protected_application_name: null,
-    protected_application_audience: null,
+    protected_application_id: publicCustom?.id ?? null,
+    protected_application_name: publicCustom?.name ?? null,
+    protected_application_audience: publicCustom?.audience ?? null,
     last_error: null,
   });
 }
@@ -203,6 +242,7 @@ async function reconcileProjectZeroTrustLocked(
     lockedDb,
     project,
     existing.desired_protected,
+    options?.verifiedDomainId,
   );
 
   return recordErrors(async () => {
@@ -214,6 +254,7 @@ async function reconcileProjectZeroTrustLocked(
         project,
         row,
         destinations.platform,
+        destinations.custom,
         client,
         configuration,
         options?.routingBudget,
@@ -372,6 +413,7 @@ export async function reconcilePublicProjectForOperation(
         project,
         row,
         destinations.platform,
+        destinations.custom,
         client,
         configuration,
         routingBudget,
@@ -487,6 +529,7 @@ export async function reconcileProjectZeroTrustDomains(
   env: ApiEnv['Bindings'],
   db: Db,
   projectId: string,
+  options?: { verifiedDomainId: string },
 ): Promise<ProjectZeroTrust | null> {
   const [configuration, row] = await Promise.all([
     readZeroTrustConfigurationStrict(db),
@@ -497,5 +540,8 @@ export async function reconcileProjectZeroTrustDomains(
   }
   // Operation heartbeats advance the saved revision, so this unlocked read
   // only filters. Reconciliation uses the configuration saved under the lock.
-  return reconcileProjectZeroTrust(env, db, projectId, { duringOperation: true });
+  return reconcileProjectZeroTrust(env, db, projectId, {
+    duringOperation: true,
+    verifiedDomainId: options?.verifiedDomainId,
+  });
 }

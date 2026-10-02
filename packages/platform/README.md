@@ -4,6 +4,14 @@ Public, target-neutral contracts and packaged runtime artifacts for installing a
 
 For a first installation, follow [Install a Void Platform](../../docs/guide/self-hosted-platform.md). It explains how to prepare the Cloudflare account, domain, PostgreSQL database, and credentials before deploying. Void creates the platform resources and database tables.
 
+The installer also chooses default app access, reuses eligible company Access
+selections, and detects account-wide Default-Deny. App rules are configured and
+verified before traffic opens. An app-management token is stored encrypted;
+reusing an installer token requires explicit consent. Initial setup is resumable,
+and later upgrades preserve administrator changes. Deployment schema 4 and the
+runtime's `appAccessSetup` capability keep older installers or runtimes from skipping
+this handoff.
+
 Plans list required credentials in a dedicated box. The CLI opens missing-credential setup pages during an approved interactive install. The runtime-token link preselects all required account permissions, including Workers Tail, Hyperdrive, and AI Gateway when needed, with a readable fallback summary. Local credential drafts preserve the final Worker names and OAuth callback before provisioning, with partial secrets encrypted by the existing recovery store. This includes prompted management API tokens, which are validated and reused on resume; rejected tokens can be replaced in the same run. A completed credential-setup marker separates these drafts from database-claimed installation recovery.
 
 Interactive installation lists saved plans and unfinished installs, including interrupted provisioning, and offers to continue one or start a new platform install. Entering an existing unfinished name asks to resume it; declining returns to name entry. New installs leave previous setup, credentials, and resources untouched. Completed platforms are excluded. Explicit `--resume` skips the choice; non-interactive recovery requires it. Completed `--plan` previews save choices locally without secrets or Cloudflare changes. Selecting a saved plan checks the current Cloudflare state before confirmation. Once setup starts, its checkpoint takes precedence over the preview. The printed install command also preserves the API hostname choice, Hyperdrive selection, login methods, Access protection, and domain settings.

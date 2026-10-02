@@ -12,6 +12,7 @@ import {
   ZERO_TRUST_CREDENTIAL_ID,
   type ZeroTrustConfiguration,
   zeroTrustConfigurationStatus,
+  readZeroTrustConfigurationStrict,
 } from './configuration.ts';
 import { errorMessage, ZeroTrustUnavailableError } from './errors.ts';
 
@@ -181,22 +182,47 @@ export async function projectDestinations(
   db: Db,
   project: Pick<Project, 'id' | 'slug'>,
   protectedProject: boolean,
+  verifiedDomainId?: string,
 ): Promise<{ platform: ReadonlyArray<string>; custom: ReadonlyArray<string> }> {
   const application = readPlatformApplication(
     await resolveZeroTrustApplicationEnvironment(env, db),
   );
   const platform = [...new Set(platformProjectHostnames(project, application))];
-  if (!protectedProject) {
+  const reserved = [env.AUTH_REDIRECT_URI, env.PROXY_URL, env.EMAIL_GATEWAY_ORIGIN]
+    .filter((value): value is string => !!value && URL.canParse(value))
+    .map((value) => new URL(value).hostname.toLowerCase());
+  const checkHostnames = (values: ReadonlyArray<string>) => {
+    if (values.some((hostname) => reserved.includes(hostname.toLowerCase()))) {
+      throw new ZeroTrustUnavailableError(
+        'The project hostname overlaps a platform API, proxy, or email endpoint. Choose another hostname.',
+      );
+    }
+  };
+  checkHostnames(platform);
+  if (
+    !protectedProject &&
+    !(await readZeroTrustConfigurationStrict(db))?.managePublicCustomDomains
+  ) {
     return { platform, custom: [] };
   }
   const custom = [
-    ...new Set((await getDomainsByProjectId(db, project.id)).map((domain) => domain.hostname)),
+    ...new Set(
+      (await getDomainsByProjectId(db, project.id))
+        // Public rules must never authorize an unverified hostname. Activation passes
+        // its freshly verified domain while the durable row is still pending.
+        .filter(
+          (domain) =>
+            protectedProject || domain.status === 'active' || domain.id === verifiedDomainId,
+        )
+        .map((domain) => domain.hostname),
+    ),
   ];
   if (custom.length > MAX_ZERO_TRUST_CUSTOM_DOMAINS_PER_PROJECT) {
     throw new ZeroTrustUnavailableError(
       `Project Zero Trust supports at most ${MAX_ZERO_TRUST_CUSTOM_DOMAINS_PER_PROJECT} custom domains per project.`,
     );
   }
+  checkHostnames(custom);
   return { platform, custom };
 }
 

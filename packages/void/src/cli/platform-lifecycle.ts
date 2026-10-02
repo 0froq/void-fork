@@ -18,6 +18,10 @@ import {
 } from '@voidzero-dev/vite-plus-prompts';
 import { resolve } from 'pathslash';
 import { cliCommandName, cliTitle, createSpinner, pc } from './output.ts';
+import {
+  selectInstallationAppAccess,
+  prepareInstallationAppAccess,
+} from './platform-app-access.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import { readPlatformHyperdriveSelection } from './platform-auth-database.ts';
 import {
@@ -220,6 +224,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
           !args.loginMethods &&
           !args.runtime &&
           args.accessProtection === undefined &&
+          args.appAccess === undefined &&
           !args.dedicatedZoneSpecified &&
           args.dashboardUrl === undefined
             ? listSavedPlatformInstallPlans().filter(
@@ -409,13 +414,13 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
     recorded?.displayName ??
     (args.displayName ||
       (await promptText('Platform display name:', `${installationName || installationSlug} Void`)));
-  const controlPlaneDomain = recorded
+  let controlPlaneDomain = recorded
     ? (recorded.controlPlane.apiHostname ?? '')
     : args.controlPlaneDomain ||
       (process.stdin.isTTY && !args.noControlPlaneDomain
         ? await promptText(
             'Where do you want to host the Void Platform API? Leave empty for a workers.dev fallback.',
-            { placeholder: applicationDomain ? `api.${applicationDomain}` : 'api.example.com' },
+            { placeholder: applicationDomain || 'platform.example.com' },
             true,
           )
         : '');
@@ -672,7 +677,38 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       existing?.deployment.authentication,
       args,
     );
+    const appAccess = await selectInstallationAppAccess(
+      authenticationSelection,
+      existing?.deployment,
+      args.appAccess,
+    );
+    while (
+      !existing &&
+      process.stdin.isTTY &&
+      !args.controlPlaneDomain &&
+      appAccess &&
+      appAccess !== 'public' &&
+      controlPlaneDomain
+        .toLowerCase()
+        .replace(/\.$/, '')
+        .endsWith(`.${applicationDomain.toLowerCase()}`)
+    ) {
+      log.info(
+        'App Access covers subdomains. Use the domain apex or workers.dev for the platform API.',
+      );
+      controlPlaneDomain = await promptText(
+        'Platform API hostname. Leave empty for workers.dev:',
+        { placeholder: applicationDomain },
+        true,
+      );
+    }
+    if (appAccess && runtime.manifest.appAccessSetup !== 1) {
+      throw new Error(
+        'platform: This runtime does not support guided app access. Use the current packaged runtime.',
+      );
+    }
     const planInput = {
+      appAccess,
       authentication: authenticationSelection.authentication,
       accountId,
       applicationDomain,
@@ -711,6 +747,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       dedicatedZone,
       workersDev,
       authConfig: args.authConfig,
+      appAccess,
       authentication: authenticationSelection.authentication,
       hyperdrive:
         !existing || isPlatformSetupDraft(existing) || (externalHyperdrive && !recordedHyperdrive)
@@ -1150,6 +1187,26 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
                 accessProvisioningJson: values.accessProvisioningJson,
                 accessCredentialsJson: values.accessCredentialsJson,
               };
+            },
+          }
+        : {}),
+      ...(appAccess
+        ? {
+            prepareAppAccess: async () => {
+              progress?.stop('Preparing deployed-app access.');
+              progress = undefined;
+              const setupJson = await prepareInstallationAppAccess({
+                plan,
+                authentication: authenticationSelection,
+                client,
+                managementToken:
+                  values.managementApiToken ||
+                  (operatorCredential.source !== 'oauth' ? operatorCredential.token : undefined),
+                checkpoint: values,
+                save: saveAuthenticationValues,
+              });
+              progress = startProgress('Continuing platform installation');
+              return setupJson;
             },
           }
         : {}),

@@ -27,6 +27,7 @@ import {
   ZeroTrustCloudflareClient,
   ZeroTrustCloudflareError,
   reusablePolicyReferences,
+  publicAppManagementApplication,
 } from './cloudflare.ts';
 import {
   type ZeroTrustConfiguration,
@@ -373,10 +374,12 @@ export async function runConfigureOperation(
     const client = suppliedClient ?? (await clientForConfiguration(env, configuration));
     const selection =
       suppliedSelection ??
-      (await client.validateSelection({
-        identityProviderIds: configuration.identityProviderIds,
-        policyIds: configuration.policyIds,
-      }));
+      (await (configuration.publicAccess
+        ? client.getOrganization()
+        : client.validateSelection({
+            identityProviderIds: configuration.identityProviderIds,
+            policyIds: configuration.policyIds,
+          })));
     if (selection.teamDomain !== configuration.teamDomain) {
       configuration = await patchConfiguration(db, configuration, {
         teamDomain: selection.teamDomain,
@@ -491,12 +494,14 @@ export async function runConfigureOperation(
                 )
               : configuration.healthApplication;
           const wildcard = await client.ensureApplication(
-            {
-              name,
-              destinations: zeroTrustWildcardDestinations(readPlatformApplication(env)),
-              allowedIdentityProviderIds: configuration.identityProviderIds,
-              policies: reusablePolicyReferences(configuration.policyIds),
-            },
+            configuration.publicAccess
+              ? publicAppManagementApplication(name, configuration.publicAccessGuardDestination!)
+              : {
+                  name,
+                  destinations: zeroTrustWildcardDestinations(readPlatformApplication(env)),
+                  allowedIdentityProviderIds: configuration.identityProviderIds,
+                  policies: reusablePolicyReferences(configuration.policyIds),
+                },
             { id: configuration.wildcardApplication?.id, name },
           );
           return advanceOperation(lockedDb, configuration, 'projects', {

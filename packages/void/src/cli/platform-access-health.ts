@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
-import { PLATFORM_HEALTH_HOSTNAME_LABEL, type PlatformInstallationManifest } from '@void/platform';
+import {
+  PLATFORM_HEALTH_HOSTNAME_LABEL,
+  parsePlatformAppAccessSetup,
+  type PlatformInstallationManifest,
+} from '@void/platform';
 import {
   PlatformAccessClient,
   platformAccessPublicDestinations,
@@ -73,16 +77,23 @@ export async function ensurePlatformAccessHealthChecks(input: {
   checkpoint: Readonly<Record<string, string>>;
   save: (encoded: string) => void;
 }): Promise<void> {
-  if (!input.plan.deployment.authentication.accessProtection) {
+  const appAccess = input.checkpoint.appAccessSetupJson
+    ? parsePlatformAppAccessSetup(JSON.parse(input.checkpoint.appAccessSetupJson))
+    : null;
+  if (appAccess && appAccess.accountId !== input.plan.account.id) {
+    throw new Error('platform: App access recovery belongs to another Cloudflare account.');
+  }
+  if (!input.plan.deployment.authentication.accessProtection && !appAccess?.managed) {
     return;
   }
-  const spec = parsePlatformAccessSetupSpec(
-    JSON.parse(input.checkpoint.accessSetupSpecJson || 'null'),
-  );
+  const spec = appAccess?.managed
+    ? { mode: 'create' as const, accountId: input.plan.account.id }
+    : parsePlatformAccessSetupSpec(JSON.parse(input.checkpoint.accessSetupSpecJson || 'null'));
   const accountId = input.plan.account.id;
   const identityAccountId = spec.accountId ?? accountId;
-  const token =
-    identityAccountId === accountId
+  const token = appAccess?.managed
+    ? appAccess.apiToken
+    : identityAccountId === accountId
       ? process.env.VOID_PLATFORM_ACCESS_SETUP_TOKEN || input.checkpoint.accessManagementToken
       : undefined;
   if (!token && !input.client.request) {

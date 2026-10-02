@@ -56,9 +56,11 @@ vi.mock('@voidzero-dev/vite-plus-prompts', async (original) => ({
       : mocks.confirm(input),
   multiselect: mocks.multiselect,
   select: (input: { message: string; options: Array<{ value: string }> }) =>
-    input.message === 'How should Void set up Hyperdrive?'
-      ? Promise.resolve(input.options[0]!.value)
-      : mocks.select(input),
+    input.message === 'Who should be able to access deployed apps?'
+      ? Promise.resolve('public')
+      : input.message === 'How should Void set up Hyperdrive?'
+        ? Promise.resolve(input.options[0]!.value)
+        : mocks.select(input),
   text: mocks.text,
   password: mocks.password,
   intro: vi.fn(),
@@ -155,6 +157,7 @@ beforeEach(() => {
   mocks.plan.mockImplementation(async (_client, input, existing) => {
     const id = existing?.id ?? `${input.installationSlug}-123456abcdef`;
     const deployment = createPlatformDeploymentManifest({
+      appAccess: input.appAccess ?? existing?.deployment.appAccess,
       installationSlug: input.installationSlug,
       displayName: input.displayName,
       ...(input.emailSharedZoneId && input.emailSenderDomain

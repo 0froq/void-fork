@@ -1,6 +1,7 @@
 import {
   PLATFORM_APPLICATION_KEY,
   readPlatformApplication,
+  platformHealthHostname,
   type PlatformApplication,
 } from '@void/platform';
 import type { Db } from '../db.ts';
@@ -12,7 +13,7 @@ import {
   PLATFORM_APPLICATION_SETTING,
   resolveZeroTrustApplicationEnvironment,
 } from './application.ts';
-import { ZeroTrustCloudflareClient } from './cloudflare.ts';
+import { ZeroTrustCloudflareClient, publicAppManagementDestination } from './cloudflare.ts';
 import {
   ZERO_TRUST_CREDENTIAL_ID,
   type ZeroTrustConfiguration,
@@ -75,7 +76,9 @@ export async function activatePlatformApplication(
     if (!current) {
       throw new ZeroTrustUnavailableError('Project Zero Trust configuration is unavailable.');
     }
-    assertWildcardExcludesControlPlane(env, zeroTrustWildcardDestinations(target));
+    if (!current.publicAccess) {
+      assertWildcardExcludesControlPlane(env, zeroTrustWildcardDestinations(target));
+    }
     const now = new Date().toISOString();
     const configuration: ZeroTrustConfiguration = {
       ...current,
@@ -151,6 +154,22 @@ export function assertExistingProjectsChoice(
   current: ZeroTrustConfiguration | null,
   input: ZeroTrustConfigureInput,
 ): void {
+  if (
+    input.publicAccess &&
+    (input.existingProjects === 'protected' ||
+      input.protectNewProjects ||
+      input.identityProviderIds.length ||
+      input.policyIds.length)
+  ) {
+    throw new ZeroTrustUnavailableError(
+      'Public app access cannot require identities or protect new projects.',
+    );
+  }
+  if (input.publicAccess && current?.enabled && !current.publicAccess) {
+    throw new ZeroTrustUnavailableError(
+      'Disable the existing protected configuration before enabling public-only app rules.',
+    );
+  }
   const operation = current?.operation;
   if (operation) {
     if (
@@ -198,15 +217,30 @@ export async function configurePlatformZeroTrust(
   const replacingDisableCredential = previous?.operation?.kind === 'disable';
   // A disable removes the wildcard, so a replacement credential for it must
   // not be blocked by hostnames that moved under the wildcard afterwards.
-  if (!replacingDisableCredential) {
+  if (!replacingDisableCredential && !input.publicAccess) {
     assertWildcardExcludesControlPlane(env, destinations, options.requestUrl);
   }
+  const application = readPlatformApplication(env);
+  const publicGuardHostname =
+    platformHealthHostname(application) ??
+    (application.workersDev && env.DISPATCH_WORKER_NAME
+      ? `${env.DISPATCH_WORKER_NAME}.${application.workersDev.subdomain}.workers.dev`
+      : null);
+  if (input.publicAccess && !publicGuardHostname) {
+    throw new ZeroTrustUnavailableError(
+      'The installation’s reserved dispatch hostname is unavailable. Repair the installation before configuring public app rules.',
+    );
+  }
+  const publicAccessGuardDestination = input.publicAccess
+    ? publicAppManagementDestination('https://' + publicGuardHostname)
+    : undefined;
   const client = new ZeroTrustCloudflareClient(accountId, input.apiToken);
   // Teardown needs the account credential, not the IdPs/policies being removed.
   // Those selections may themselves have disappeared while cleanup was pending.
-  const selection = replacingDisableCredential
-    ? await client.getOrganization()
-    : await client.validateSelection(input);
+  const selection =
+    replacingDisableCredential || input.publicAccess
+      ? await client.getOrganization()
+      : await client.validateSelection(input);
   const credential = await encryptPlatformCredential(
     env,
     installationId(env),
@@ -228,6 +262,7 @@ export async function configurePlatformZeroTrust(
         left.length === right.length && left.every((id) => right.includes(id));
       if (
         current.accountId !== accountId ||
+        !!current.publicAccess !== !!input.publicAccess ||
         current.protectNewProjects !== input.protectNewProjects ||
         !sameIds(current.identityProviderIds, input.identityProviderIds) ||
         !sameIds(current.policyIds, input.policyIds)
@@ -249,6 +284,10 @@ export async function configurePlatformZeroTrust(
     const now = new Date().toISOString();
     return {
       version: 1,
+      ...(input.publicAccess ? { publicAccess: true as const, publicAccessGuardDestination } : {}),
+      ...(input.managePublicCustomDomains || current?.managePublicCustomDomains
+        ? { managePublicCustomDomains: true as const }
+        : {}),
       revision: (current?.revision ?? 0) + 1,
       enabled: current?.enabled ?? false,
       protectNewProjects: input.protectNewProjects,

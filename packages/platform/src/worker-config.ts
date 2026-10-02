@@ -181,6 +181,7 @@ export function createPlatformWorkerConfigs(input: {
       PLATFORM_DISPLAY_NAME: deployment.displayName,
       PLATFORM_ENV: 'production',
       PLATFORM_HEALTH_PROBE_TOKEN: healthProbeToken,
+      ...(deployment.appAccess ? { PLATFORM_APP_ACCESS: deployment.appAccess } : {}),
       PLATFORM_INSTALLATION_ID: installationId,
       PLATFORM_TRAFFIC_STATE: trafficState,
       ...ownershipVars('api-worker', names.apiWorker),

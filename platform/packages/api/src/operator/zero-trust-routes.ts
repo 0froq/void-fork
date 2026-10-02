@@ -85,6 +85,7 @@ zeroTrustOperatorRoutes.post('/zero-trust/configure', async (context) => {
     return context.json(
       preview('zero-trust.configure', 'platform', {
         accountId: context.env.CF_ACCOUNT_ID,
+        ...(input.publicAccess ? { appAccess: 'public' } : {}),
         identityProviderIds: input.identityProviderIds,
         policyIds: input.policyIds,
         protectNewProjects: input.protectNewProjects,

@@ -10,7 +10,12 @@ Keep one password-manager entry for this platform. Paste the saved values into t
 
 For a domain installation or Cloudflare Access setup, the installer guides you through creating separate management and runtime tokens using Cloudflare's [API token setup](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/). Its links preselect the permissions and suggest names based on your platform's display name. Scope the tokens to your selected account and, when using a domain, its zone, save them in your password manager, and paste them into the masked CLI prompts.
 
-For workers.dev testing with the default API hostname and no managed Access setup, browser login can authorize installation: you only need to create the runtime token and R2 credentials below. Access setup requires the management token even on workers.dev. Skip the zone permissions until you add a domain.
+For workers.dev testing with the default API hostname, browser login can authorize
+infrastructure setup. Void also checks account-wide Access requirements; if the
+current credential cannot read them, the installer asks for a scoped Access token.
+Protected apps and public apps under Default-Deny need an ongoing app-management
+token, stored encrypted. Access setup requires a management token even on
+workers.dev. Skip zone permissions until you add a domain.
 
 Browser login does not grant AI Gateway access. Include **Account → AI Gateway → Edit** on the runtime token so Void can verify and create that resource.
 

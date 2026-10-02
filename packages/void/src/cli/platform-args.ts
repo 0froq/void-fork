@@ -2,6 +2,7 @@ import {
   normalizePlatformDashboardUrl,
   PLATFORM_LOGIN_KINDS,
   type PlatformLoginKind,
+  type PlatformAppAccess,
 } from '@void/platform';
 import { operatorGroups, parseOperatorArgs, type OperatorArgs } from './operator-args.ts';
 import { parsePlatformConfigArgs, type PlatformConfigArgs } from './platform-config-args.ts';
@@ -38,7 +39,7 @@ export const platformSubcommands: Array<SubcommandDef> = [
   {
     name: 'install',
     hint: 'Preview and save choices with --plan, then select the saved plan to install',
-    description: 'Install a Void platform with a domain or workers.dev for testing',
+    description: 'Install a Void platform and choose who can access its apps',
   },
   { name: 'upgrade', arg: '[id]', description: 'Upgrade an installed Void platform' },
   { name: 'rollback', arg: '[id]', description: 'Restore a compatible earlier platform runtime' },
@@ -75,6 +76,7 @@ export type PlatformArgs =
       authConfig?: string;
       loginMethods?: Array<PlatformLoginKind>;
       accessProtection?: boolean;
+      appAccess?: PlatformAppAccess;
       hyperdrive?: string;
       noControlPlaneDomain?: true;
       dedicatedZoneSpecified?: true;
@@ -364,6 +366,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
       '--account',
       '--auth-config',
       '--login-methods',
+      '--app-access',
       '--hyperdrive',
       '--application-domain',
       '--control-plane-domain',
@@ -420,6 +423,10 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
         'platform: --auth-config cannot be combined with login or Access protection options.',
       );
     }
+    const appAccess = values.get('--app-access');
+    if (appAccess !== undefined && !['public', 'platform', 'custom'].includes(appAccess)) {
+      throw new Error('platform: --app-access accepts public, platform, or custom.');
+    }
     const loginMethods = values.get('--login-methods')?.split(',');
     if (
       loginMethods &&
@@ -446,6 +453,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
         ? { loginMethods: [...new Set(loginMethods)] as Array<PlatformLoginKind> }
         : {}),
       ...(accessProtection !== undefined ? { accessProtection } : {}),
+      ...(appAccess !== undefined ? { appAccess: appAccess as PlatformAppAccess } : {}),
       ...(workersDev ? { workersDev: true } : {}),
       ...(values.has('--auth-config') ? { authConfig: values.get('--auth-config')! } : {}),
       account: values.get('--account') ?? '',
