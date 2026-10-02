@@ -217,21 +217,19 @@ The types are inferred from your action's `withValidator()` schema in the compan
 
 `useForm` returns a reactive object with:
 
-| Property / Method                | Purpose                                                                                       |
-| -------------------------------- | --------------------------------------------------------------------------------------------- |
-| Property / Method                | Purpose                                                                                       |
-| -------------------------------- | --------------------------------------------------------------------------------------------- |
-| `data` / `setData`               | Current form values, typed to match the action's body schema.                                 |
-| `errors`                         | Field-level validation errors, keys typed to body field names.                                |
-| `error`                          | Non-validation call-site action error, or `null`.                                             |
-| `post`, `put`, `patch`, `delete` | Submit the form with that method. In React these are native form action callbacks.            |
-| `pending`                        | `true` while the submission is in flight.                                                     |
-| `hasChanges`                     | `true` if form data differs from initial values.                                              |
-| `wasSuccessful`                  | `true` after a successful submission. Stays `true` until the next submission.                 |
-| `recentlySuccessful`             | `true` for 2 seconds after a successful submission. Useful for flash messages.                |
-| `reset(...fields)`               | Reset form data to initial values. Field names autocomplete.                                  |
-| `clearErrors(...fields)`         | Clear validation errors. Field names autocomplete.                                            |
-| `clearError()`                   | Clear the non-validation call-site error.                                                     |
+| Property / Method                | Purpose                                                                            |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| `data` / `setData`               | Current form values, typed to match the action's body schema.                      |
+| `errors`                         | Field-level validation errors, keys typed to body field names.                     |
+| `error`                          | Non-validation call-site action error, or `null`.                                  |
+| `post`, `put`, `patch`, `delete` | Submit the form with that method. In React these are native form action callbacks. |
+| `pending`                        | `true` while the submission is in flight.                                          |
+| `hasChanges`                     | `true` if form data differs from initial values.                                   |
+| `wasSuccessful`                  | `true` after a successful submission. Stays `true` until the next submission.      |
+| `recentlySuccessful`             | `true` for 2 seconds after a successful submission. Useful for flash messages.     |
+| `reset(...fields)`               | Reset form data to initial values. Field names autocomplete.                       |
+| `clearErrors(...fields)`         | Clear validation errors. Field names autocomplete.                                 |
+| `clearError()`                   | Clear the non-validation call-site error.                                          |
 
 In React, prefer the native Action form:
 
