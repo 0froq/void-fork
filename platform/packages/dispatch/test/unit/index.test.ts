@@ -3408,9 +3408,11 @@ describe('suspension check', () => {
     );
 
     expect(response.status).toBe(429);
-    const body = (await response.json()) as { error: string; reason: string };
-    expect(body.error).toBe('usage limit exceeded');
-    expect(body.reason).toBe('requests_exceeded');
+    expect(await response.json()).toMatchObject({
+      code: 'usage_limit',
+      resource: 'requests',
+      reason: 'monthly_quota',
+    });
   });
 });
 
@@ -3472,8 +3474,11 @@ describe('custom limits', () => {
     );
 
     expect(response.status).toBe(429);
-    const body = (await response.json()) as { error: string };
-    expect(body.error).toBe('CPU limit exceeded');
+    expect(await response.json()).toMatchObject({
+      code: 'usage_limit',
+      resource: 'execution',
+      reason: 'cpu',
+    });
   });
 
   it('passes limits to DISPATCH.get for SSR routes', async () => {
@@ -3815,7 +3820,11 @@ describe('hashed asset caching', () => {
 
     const res = await app.fetch(new Request('https://test.void.app/assets/main-abc.js'), env, ctx);
     expect(res.status).toBe(429);
-    expect(await res.json()).toEqual({ error: 'CPU limit exceeded' });
+    expect(await res.json()).toMatchObject({
+      code: 'usage_limit',
+      resource: 'execution',
+      reason: 'cpu',
+    });
   });
 });
 
@@ -6203,3 +6212,38 @@ describe('worker timeout explains itself in the project log stream', () => {
     expect(logWrites).toHaveLength(0);
   });
 });
+
+it.each(['requests', 'execution'] as const)(
+  'serves a custom %s page from assets independently of application execution',
+  async (resource) => {
+    const filename = resource === 'requests' ? '/usage-limit.html' : '/execution-limit.html';
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        assetManifestId: 'deploy_1',
+        ...(resource === 'requests' ? { suspended: 'requests_exceeded' } : {}),
+      },
+      assetManifest: { [filename]: '!custom-page' },
+      workerFetchImpl: async () => {
+        throw new Error('Worker exceeded CPU limit');
+      },
+    });
+    const get = vi.fn(async () => ({
+      body: new Blob(['<h1>We will be back</h1>']).stream(),
+      httpMetadata: { contentType: 'text/html' },
+      httpEtag: '"page"',
+    }));
+    Object.assign(env, { STATIC_ASSETS_R2: { get } });
+    const res = await app.fetch(
+      new Request('https://my-app.void.app/', { headers: { accept: 'text/html' } }),
+      env,
+      createCtx(),
+    );
+    expect(res.status).toBe(429);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(await res.text()).toContain('We will be back');
+    expect(get).toHaveBeenCalledWith('assets/proj_1/custom-page');
+    expect(workerFetch).toHaveBeenCalledTimes(resource === 'requests' ? 0 : 1);
+  },
+);

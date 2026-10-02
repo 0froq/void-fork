@@ -31,6 +31,7 @@ import {
   extractPageDataFromHtml,
   normalizePageDataForJsonCache,
 } from './isr.ts';
+import { createLimitResponse } from './limit-response.ts';
 import {
   recordPlatformLog,
   recordRequest,
@@ -746,7 +747,36 @@ export default {
       });
     }
 
+    const limitResponse = (resource: 'requests' | 'execution') =>
+      createLimitResponse(
+        request,
+        {
+          code: 'usage_limit',
+          resource,
+          reason: resource === 'requests' ? 'monthly_quota' : 'cpu',
+          message:
+            resource === 'requests'
+              ? 'This app has reached its usage allowance. Please contact the app owner or try again later.'
+              : 'This request exceeded its execution limit. Please try again.',
+        },
+        async () => {
+          const deploymentId = routing.staticDeploymentId ?? routing.assetManifestId;
+          if (!deploymentId) {
+            return null;
+          }
+          const path = resource === 'requests' ? '/usage-limit.html' : '/execution-limit.html';
+          const manifest = await fetchAssetManifest(env, deploymentId, routing.projectId, 2000);
+          const hash = manifest?.[path];
+          return hash
+            ? fetchStaticAsset(env, hash, path, routing.projectId, deploymentId, 2000)
+            : null;
+        },
+      );
+
     // Check if project is suspended
+    if (routing.suspended === 'requests_exceeded') {
+      return limitResponse('requests');
+    }
     if (routing.suspended) {
       return Response.json(
         { error: 'usage limit exceeded', reason: routing.suspended },
@@ -1087,7 +1117,7 @@ export default {
             });
           }
           if (err instanceof Error && err.message.includes('Worker exceeded')) {
-            return meter(Response.json({ error: 'CPU limit exceeded' }, { status: 429 }));
+            return meter(await limitResponse('execution'));
           }
           throw err;
         }
@@ -1894,7 +1924,7 @@ export default {
         });
       }
       if (err instanceof Error && err.message.includes('Worker exceeded')) {
-        return meter(Response.json({ error: 'CPU limit exceeded' }, { status: 429 }));
+        return meter(await limitResponse('execution'));
       }
       throw err;
     }

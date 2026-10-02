@@ -146,3 +146,16 @@ Set [`target`](../reference/config.md#target) in `void.config.ts` to build a sta
 Deploy `dist/ssr` and `dist/client` together. See the target guide for startup commands.
 
 These targets don't provide Cloudflare bindings such as D1, KV, R2, and Workers AI. See the [Node.js, Bun, and Deno guide](../integrations/nodejs-bun-deno.md) for the features available on each target.
+
+## Usage and execution limit pages
+
+Void platforms show a built-in page when an app exhausts its request allowance or an invocation exceeds its CPU limit. API requests and Pages action requests receive a structured HTTP 429 with `code: 'usage_limit'`, `resource`, `reason`, and `message`.
+
+To customize browser error pages, add either optional file to your app's public assets:
+
+- `public/usage-limit.html` for exhausted request allowances.
+- `public/execution-limit.html` for execution limits.
+
+Use standalone HTML with inline CSS and data-URL images. These pages run with scripts, external assets and form submissions disabled, so they remain usable while application requests are blocked. Void serves them directly from the deployed assets; your Worker, loaders and database are not involved. A missing or unreadable custom page uses the built-in page.
+
+Responses are not cached. Once a streaming response has started, it cannot be replaced with an error page; clients should display stream failures and end their pending state. These platform pages apply to Void platform deployments. Direct Cloudflare runtime limits use Cloudflare's own response behavior.
