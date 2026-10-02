@@ -40,6 +40,8 @@ export function prepareKitchenSinkPlatformFixture(
     if (options.email) {
       const source = join(workspaceRoot, 'platform/scripts/fixtures/kitchen-sink-email');
       cpSync(source, fixture.root, { recursive: true });
+    } else {
+      rmSync(join(fixture.root, 'email'), { recursive: true, force: true });
     }
     if (options.runtime) {
       cpSync(join(workspaceRoot, 'platform/scripts/fixtures/kitchen-sink-runtime'), fixture.root, {

@@ -1,8 +1,40 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import spawn from 'cross-spawn';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
+import { analyzeApplicationSync } from '../../../../packages/void/src/application-analysis.ts';
+import { readConfig } from '../../../../packages/void/src/config.ts';
+import { hasEmailHandlers } from '../../../../packages/void/src/router/email.ts';
 import { prepareKitchenSinkPlatformFixture } from '../../../scripts/kitchen-sink-platform-fixture.ts';
+
+// The CLI manifest builder runs in Node; keep its Node types out of the API's Worker context.
+function readDeployManifest(root: string) {
+  const result = spawn.sync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `import { analyzeApplicationSync } from './packages/void/src/application-analysis.ts';
+import { buildVoidManifest } from './packages/void/src/cli/package.ts';
+import { readConfig } from './packages/void/src/config.ts';
+import { hasEmailHandlers } from './packages/void/src/router/email.ts';
+const root = process.argv[1];
+const application = analyzeApplicationSync(root, { config: readConfig(root), environment: 'prod' });
+console.log(JSON.stringify(buildVoidManifest({
+  bindings: application.bindings,
+  hasEmailHandlers: hasEmailHandlers(application.email),
+})));`,
+      root,
+    ],
+    {
+      cwd: resolve(import.meta.dirname, '../../../..'),
+      encoding: 'utf8',
+      timeout: 10_000,
+    },
+  );
+  expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+  return JSON.parse(result.stdout);
+}
 
 describe('hosted kitchen-sink smoke fixture', () => {
   let fixture: ReturnType<typeof prepareKitchenSinkPlatformFixture>;
@@ -12,6 +44,44 @@ describe('hosted kitchen-sink smoke fixture', () => {
   });
 
   afterAll(() => fixture?.cleanup());
+
+  it('omits inbound email from the default hosted manifest while preserving authentication', () => {
+    const config = readConfig(fixture.root);
+    const application = analyzeApplicationSync(fixture.root, { config, environment: 'prod' });
+    expect(application.email).toEqual({ addresses: [], defaultHandler: undefined });
+    expect(hasEmailHandlers(application.email)).toBe(false);
+    expect(config.auth).toEqual({ providers: ['email'] });
+    const manifest = readDeployManifest(fixture.root);
+    expect(manifest.auth).toBe(true);
+    expect(manifest.emailProtocolVersion).toBeUndefined();
+    for (const path of ['email/_default.ts', 'email/support+[ticket].ts']) {
+      expect(existsSync(resolve(fixture.root, path))).toBe(false);
+      expect(
+        existsSync(resolve(import.meta.dirname, '../../../../playground/kitchen-sink', path)),
+      ).toBe(true);
+    }
+  });
+
+  it('preserves outbound email inference without requiring an inbound recipient', () => {
+    const senderFixture = prepareKitchenSinkPlatformFixture();
+    try {
+      writeFileSync(
+        resolve(senderFixture.root, 'routes/api/sender.ts'),
+        `import { sendEmail } from 'void/email';
+export const POST = () => sendEmail({ to: 'test@example.com', subject: 'Test', text: 'Test' });`,
+      );
+      const application = analyzeApplicationSync(senderFixture.root, {
+        config: readConfig(senderFixture.root),
+        environment: 'prod',
+      });
+      expect(application.bindings.needsEmail).toBe(true);
+      const manifest = readDeployManifest(senderFixture.root);
+      expect(manifest.auth).toBe(true);
+      expect(manifest.emailProtocolVersion).toBeUndefined();
+    } finally {
+      senderFixture.cleanup();
+    }
+  });
 
   it('preserves the native Sandbox example while removing its hosted routes and links', () => {
     for (const path of ['routes/api/sandbox.ts', 'pages/sandbox.vue', 'pages/sandbox.server.ts']) {
@@ -66,6 +136,13 @@ describe('hosted kitchen-sink smoke fixture', () => {
         readFileSync(resolve(emailFixture.root, 'routes/api/acceptance/email.ts'), 'utf8'),
       ).toContain("typeof secret !== 'string' || !secret");
       expect(existsSync(resolve(emailFixture.root, '.env'))).toBe(false);
+      const application = analyzeApplicationSync(emailFixture.root, {
+        config: readConfig(emailFixture.root),
+        environment: 'prod',
+      });
+      expect(application.bindings.needsEmail).toBe(true);
+      expect(hasEmailHandlers(application.email)).toBe(true);
+      expect(readDeployManifest(emailFixture.root).emailProtocolVersion).toBe(1);
     } finally {
       emailFixture.cleanup();
     }
