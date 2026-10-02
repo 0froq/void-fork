@@ -3,7 +3,6 @@ import {
   PLAN_LIMITS,
   STATIC_RETENTION_LIMIT,
   getPlanLimits,
-  getBuildInstanceType,
   isWithinLimit,
   getCurrentBillingPeriodStart,
   type PlanId,
@@ -128,23 +127,6 @@ describe('getPlanLimits', () => {
   it('returns free tier limits for unknown plans', () => {
     expect(getPlanLimits('unknown')).toBe(PLAN_LIMITS.free);
     expect(getPlanLimits('')).toBe(PLAN_LIMITS.free);
-  });
-});
-
-describe('getBuildInstanceType', () => {
-  it('returns the free (standard-3) container for the free plan', () => {
-    expect(getBuildInstanceType('free')).toBe('standard-3');
-  });
-
-  it('returns the large (standard-4) container for paid plans', () => {
-    expect(getBuildInstanceType('solo')).toBe('standard-4');
-    expect(getBuildInstanceType('pro')).toBe('standard-4');
-    expect(getBuildInstanceType('sponsored')).toBe('standard-4');
-    expect(getBuildInstanceType('custom')).toBe('standard-4');
-  });
-
-  it('defaults to the free (standard-3) container for unknown plans', () => {
-    expect(getBuildInstanceType('unknown' as PlanId)).toBe('standard-3');
   });
 });
 

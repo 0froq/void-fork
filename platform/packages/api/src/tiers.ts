@@ -18,33 +18,6 @@ export function getPlanLimits(plan: string): PlanLimits {
   return Object.hasOwn(PLAN_LIMITS, plan) ? PLAN_LIMITS[plan] : PLAN_LIMITS.free;
 }
 
-/**
- * Returns the build container instance type for a plan, defaulting to the free
- * (smaller, cheaper) container.
- *
- * This value is BOTH the persisted size-of-record (written to the
- * `builds.instance_type` DB column) AND the routing key that selects which
- * container-enabled DO class — and thus which static container size — the build
- * runs on. `@cloudflare/containers@0.3.3` has no per-start sizing, so each size
- * is a distinct DO class with a fixed `instance_type` in wrangler.jsonc;
- * `buildManagerNamespace` (build-namespace.ts) maps this value to the class:
- * `BUILD_INSTANCE_LARGE` → `BuildManagerLarge` (standard-4), everything else →
- * the base `BuildManager` (standard-3).
- */
-export function getBuildInstanceType(plan: PlanId): BuildInstanceType {
-  switch (plan) {
-    case 'free':
-      return BUILD_INSTANCE_FREE;
-    case 'solo':
-    case 'pro':
-    case 'sponsored':
-    case 'custom':
-      return BUILD_INSTANCE_LARGE;
-    default:
-      return BUILD_INSTANCE_FREE;
-  }
-}
-
 /** Checks if current usage is within the limit. 0 = unlimited. */
 export function isWithinLimit(limit: number, current: number): boolean {
   return limit === 0 || current < limit;
