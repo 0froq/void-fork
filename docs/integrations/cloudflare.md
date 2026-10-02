@@ -55,7 +55,7 @@ This provides binding types and Workers runtime types.
 | `QUEUE_*`        | Queues          | `defineQueue()` or `void/queues`  |
 | Filename-derived | Durable Objects | A module in `durable-objects/`    |
 
-Use [binding configuration](../reference/resource-inference.md#explicit-overrides) when you need to enable, disable, or rename an inferred binding.
+Use [binding configuration](../reference/resource-inference.md#explicit-binding-overrides) when you need to enable, disable, or rename an inferred binding.
 
 ## Cloudflare Configuration
 
@@ -192,7 +192,7 @@ Void deploys native apps, static sites, SPAs, supported SSGs, and Cloudflare bui
 - Native apps support Void routing rules. Framework apps on the direct target must configure redirects, rewrites, fallbacks, and headers through their framework or Worker.
 - `--skip-build` works for existing static output. Worker apps require a fresh build.
 - Named Cloudflare environments aren't supported. Use a separate Void project config for each target.
-- Sandbox requires Workers Paid and Docker. See [Sandbox requirements](../guide/sandboxes.md#cloudflare-requirements) for plan and token permissions.
+- Sandbox requires Workers Paid and Docker. See [Sandbox requirements](../guide/sandboxes.md#deployment) for plan and token permissions.
 - Email to arbitrary recipients requires Workers Paid; verified recipients and inbound mail work on Workers Free. See [Email](../guide/email.md#your-own-cloudflare-account).
 - Node.js, Bun, and Deno use their [own deployment path](./nodejs-bun-deno.md).
 
