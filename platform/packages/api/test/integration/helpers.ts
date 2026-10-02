@@ -1,5 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
-import { eq, sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
 import { drizzle } from 'drizzle-orm/pglite';
 import pg from 'pg';
@@ -33,7 +33,7 @@ import {
   githubWebhookRedeliveries,
 } from '../../src/schema.ts';
 import type { PlanId } from '../../src/tiers.ts';
-import type { Build } from '../../src/types.ts';
+import type { Build, GitHubInstallationMember } from '../../src/types.ts';
 import { loadPGliteTemplateBundle } from './db-template.ts';
 import { setTestDb, clearTestDb } from './setup.ts';
 
@@ -608,6 +608,18 @@ export async function createOperatorToken(
 
 export async function seedOAuthNonce(db: Db, nonce: string): Promise<void> {
   await db.insert(oauthNonces).values({ nonce, expires_at: sql`now() + interval '600 seconds'` });
+}
+
+/** All cached members of an installation, newest verification first. */
+export async function getTestGitHubInstallationMembers(
+  db: Db,
+  installationId: string,
+): Promise<ReadonlyArray<GitHubInstallationMember>> {
+  return db
+    .select()
+    .from(githubInstallationMembers)
+    .where(eq(githubInstallationMembers.installation_id, installationId))
+    .orderBy(desc(githubInstallationMembers.verified_at));
 }
 
 let userCounter = 0;

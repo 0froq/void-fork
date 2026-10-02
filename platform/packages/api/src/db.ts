@@ -5814,18 +5814,6 @@ export async function hasActiveInstallationMembership(
   return rows.length > 0;
 }
 
-/** All cached members of an installation, newest verification first. */
-export async function getGitHubInstallationMembers(
-  db: Db,
-  installationId: string,
-): Promise<ReadonlyArray<GitHubInstallationMember>> {
-  return db
-    .select()
-    .from(githubInstallationMembers)
-    .where(eq(githubInstallationMembers.installation_id, installationId))
-    .orderBy(desc(githubInstallationMembers.verified_at));
-}
-
 /**
  * Bulk-remove a user's cached memberships across several installations (used by
  * revocation). No-op on an empty id list so we never emit a `WHERE ... IN ()`.

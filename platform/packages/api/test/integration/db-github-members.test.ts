@@ -5,7 +5,6 @@ import {
   deleteGitHubInstallationMembers,
   deleteGitHubInstallationMembersByGithubAccount,
   getGitHubAccountIdForUser,
-  getGitHubInstallationMembers,
   getDbNowMs,
   getGitHubInstallationsByAccount,
   getInstallationRevocationAt,
@@ -22,7 +21,14 @@ import {
   githubInstallationRevocations,
   githubInstallations,
 } from '../../src/schema.ts';
-import { clearTables, createTestUser, setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
+import {
+  getTestGitHubInstallationMembers,
+  clearTables,
+  createTestUser,
+  setupEnv,
+  teardownEnv,
+  type TestEnv,
+} from './helpers.ts';
 
 let env: TestEnv;
 
@@ -105,7 +111,7 @@ describe('github_installation_members', () => {
       new Date(first.expires_at).getTime(),
     );
 
-    const all = await getGitHubInstallationMembers(env.db, '100');
+    const all = await getTestGitHubInstallationMembers(env.db, '100');
     expect(all).toHaveLength(1);
   });
 
@@ -151,7 +157,7 @@ describe('github_installation_members', () => {
     expect(await hasActiveInstallationMembership(env.db, '200', user.id)).toBe(false);
   });
 
-  it('getGitHubInstallationMembers scopes to one install', async () => {
+  it('getTestGitHubInstallationMembers scopes to one install', async () => {
     const alice = await createTestUser(env.db, 'alice');
     const bob = await createTestUser(env.db, 'bob', 'google', 'google-bob');
     await seedInstall(env.db, '100');
@@ -176,7 +182,7 @@ describe('github_installation_members', () => {
       ttlSeconds: MEMBERSHIP_TTL_SECONDS,
     });
 
-    const install100 = await getGitHubInstallationMembers(env.db, '100');
+    const install100 = await getTestGitHubInstallationMembers(env.db, '100');
     expect(install100).toHaveLength(2);
     expect(install100.every((r) => r.installation_id === '100')).toBe(true);
     expect(new Set(install100.map((r) => r.user_id))).toEqual(new Set([alice.id, bob.id]));
@@ -299,21 +305,21 @@ describe('github_installation_members', () => {
 
     // Empty id list → no-op (never emits `WHERE ... IN ()`); nothing deleted.
     await deleteGitHubInstallationMembersByGithubAccount(env.db, [], 'X');
-    expect(await getGitHubInstallationMembers(env.db, '100')).toHaveLength(3);
+    expect(await getTestGitHubInstallationMembers(env.db, '100')).toHaveLength(3);
 
     // Scope to [100,200]: deletes ALL X-keyed rows on those installs (alice@100,
     // alice@200, bob@100), keyed by the github id regardless of bearer.
     await deleteGitHubInstallationMembersByGithubAccount(env.db, ['100', '200'], 'X');
 
     // Install 100: only Carol's Z-keyed row survives.
-    const m100 = await getGitHubInstallationMembers(env.db, '100');
+    const m100 = await getTestGitHubInstallationMembers(env.db, '100');
     expect(m100).toHaveLength(1);
     expect(m100[0]!.user_id).toBe(carol.id);
     expect(m100[0]!.github_account_id).toBe('Z');
     // Install 200: alice's X-keyed row is gone.
-    expect(await getGitHubInstallationMembers(env.db, '200')).toHaveLength(0);
+    expect(await getTestGitHubInstallationMembers(env.db, '200')).toHaveLength(0);
     // Install 300: bob's NULL-proof row was out of scope AND not X-keyed → survives.
-    const m300 = await getGitHubInstallationMembers(env.db, '300');
+    const m300 = await getTestGitHubInstallationMembers(env.db, '300');
     expect(m300).toHaveLength(1);
     expect(m300[0]!.user_id).toBe(bob.id);
   });

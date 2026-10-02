@@ -16,7 +16,6 @@ import {
   getBuild,
   getGitHubConnection,
   getGitHubInstallation,
-  getGitHubInstallationMembers,
   getInstallationRevocationAt,
   getProject,
   getProjectBuilds,
@@ -42,6 +41,7 @@ import {
   projectMembers,
 } from '../../src/schema.ts';
 import {
+  getTestGitHubInstallationMembers,
   createTestBuild,
   clearTables,
   createTestDeployment,
@@ -4171,7 +4171,7 @@ describe('POST /webhooks/github — organization member_removed revocation', () 
     // Connection severed (future auto-deploy trigger removed).
     expect(await getGitHubConnection(env.db, project.id)).toBeNull();
     // Membership cache cleared.
-    const members = await getGitHubInstallationMembers(env.db, '8100');
+    const members = await getTestGitHubInstallationMembers(env.db, '8100');
     expect(members.some((m) => m.user_id === user.id)).toBe(false);
     // In-flight build token revoked (build-row terminalized) + DO cancelled.
     const updated = await getBuild(env.db, build.id);
@@ -4328,7 +4328,7 @@ describe('POST /webhooks/github — organization member_removed revocation', () 
     expect(await res.json()).toEqual({ ok: true });
     // V's X-keyed membership cache is DELETED (arm b, keyed by the github id).
     expect(
-      (await getGitHubInstallationMembers(env.db, '8190')).some((m) => m.user_id === v.id),
+      (await getTestGitHubInstallationMembers(env.db, '8190')).some((m) => m.user_id === v.id),
     ).toBe(false);
     // The durable tombstone for (install, X) — keyed by the removed GitHub id — is
     // still written, closing a later pre-removal connect_grant replay even after V
@@ -4402,7 +4402,7 @@ describe('POST /webhooks/github — organization member_removed revocation', () 
     // V's oauth id is not X.
     expect(await getGitHubConnection(env.db, vProj.id)).not.toBeNull();
     // Both X-keyed memberships are voided (U's via arm a, V's via arm b).
-    const members = await getGitHubInstallationMembers(env.db, '8200');
+    const members = await getTestGitHubInstallationMembers(env.db, '8200');
     expect(members.some((m) => m.user_id === u.id)).toBe(false);
     expect(members.some((m) => m.user_id === v.id)).toBe(false);
     // Tombstoned ONCE, keyed by the removed GitHub id X — a single row covers X.
@@ -4477,11 +4477,11 @@ describe('POST /webhooks/github — organization member_removed revocation', () 
     expect(cancelledIds).not.toContain(build.id);
     // V's stale (I1, X) browser-proof membership IS deleted (arm b).
     expect(
-      (await getGitHubInstallationMembers(env.db, '8210')).some((m) => m.user_id === v.id),
+      (await getTestGitHubInstallationMembers(env.db, '8210')).some((m) => m.user_id === v.id),
     ).toBe(false);
     // V's current (I2, Z) membership SURVIVES (not X-keyed).
     expect(
-      (await getGitHubInstallationMembers(env.db, '8211')).some(
+      (await getTestGitHubInstallationMembers(env.db, '8211')).some(
         (m) => m.user_id === v.id && m.github_account_id === Z,
       ),
     ).toBe(true);
@@ -4545,7 +4545,7 @@ describe('POST /webhooks/github — organization member_removed revocation', () 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, ignored: 'organization:member_added' });
     expect(await getGitHubConnection(env.db, project.id)).not.toBeNull();
-    const members = await getGitHubInstallationMembers(env.db, '8130');
+    const members = await getTestGitHubInstallationMembers(env.db, '8130');
     expect(members.some((m) => m.user_id === user.id)).toBe(true);
   });
 
@@ -4634,7 +4634,7 @@ describe('POST /webhooks/github — organization member_removed revocation', () 
     // …but V's connection under the SAME org install stays.
     expect(await getGitHubConnection(env.db, otherProj.id)).not.toBeNull();
     // V's membership stays; only U's is deleted.
-    const members = await getGitHubInstallationMembers(env.db, '8150');
+    const members = await getTestGitHubInstallationMembers(env.db, '8150');
     expect(members.some((m) => m.user_id === removed.id)).toBe(false);
     expect(members.some((m) => m.user_id === other.id)).toBe(true);
   });
@@ -4680,7 +4680,7 @@ describe('POST /webhooks/github — organization member_removed revocation', () 
     expect(await res2.json()).toEqual({ ok: true });
     // Still exactly one net effect: connection gone, membership gone, build terminal.
     expect(await getGitHubConnection(env.db, project.id)).toBeNull();
-    const members = await getGitHubInstallationMembers(env.db, '8170');
+    const members = await getTestGitHubInstallationMembers(env.db, '8170');
     expect(members.some((m) => m.user_id === user.id)).toBe(false);
     expect((await getBuild(env.db, build.id))!.status).toBe('cancelled');
   });

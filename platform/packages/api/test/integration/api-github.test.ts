@@ -20,7 +20,6 @@ import {
   getGitHubConnection,
   getGitHubConnectionsByRepo,
   getGitHubInstallation,
-  getGitHubInstallationMembers,
   getInstallationRevocationAt,
   getProjectBuilds,
   hasGitHubConnectionAuthority,
@@ -46,6 +45,7 @@ import {
   projects,
 } from '../../src/schema.ts';
 import {
+  getTestGitHubInstallationMembers,
   createTestBuild,
   JWT_SECRET,
   clearTables,
@@ -1800,7 +1800,7 @@ describe('POST /projects/:id/github — non-owner member connect grant', () => {
     // F1 wrote the tombstone (keyed by the removed GitHub id X, Task 19) + deleted
     // V's membership.
     expect(
-      (await getGitHubInstallationMembers(env.db, INSTALL)).some((m) => m.user_id === v.id),
+      (await getTestGitHubInstallationMembers(env.db, INSTALL)).some((m) => m.user_id === v.id),
     ).toBe(false);
     const tombstone = await getInstallationRevocationAt(env.db, INSTALL, X);
     expect(tombstone).not.toBeNull();
@@ -1930,7 +1930,7 @@ describe('POST /projects/:id/github — non-owner member connect grant', () => {
     expect(joinRes.status).toBe(200);
     expect(await joinRes.json()).toEqual({ status: 'joined', count: 0 });
     expect(
-      (await getGitHubInstallationMembers(env.db, INSTALL)).some((m) => m.user_id === v.id),
+      (await getTestGitHubInstallationMembers(env.db, INSTALL)).some((m) => m.user_id === v.id),
     ).toBe(false);
 
     // (b) Even if a membership DID exist (force one — e.g. a concurrent re-join),
@@ -2100,7 +2100,9 @@ describe('POST /projects/:id/github — non-owner member connect grant', () => {
       message: 'GitHub App user OAuth is not configured',
     });
     expect(
-      (await getGitHubInstallationMembers(env.db, INSTALL)).some((m) => m.user_id === caller.id),
+      (await getTestGitHubInstallationMembers(env.db, INSTALL)).some(
+        (m) => m.user_id === caller.id,
+      ),
     ).toBe(false);
   });
 
@@ -3622,7 +3624,9 @@ describe('GET /github/callback', () => {
     expect(persisted?.account_id).toBe('9001');
     expect(persisted?.account_type).toBe('Organization');
     expect(
-      (await getGitHubInstallationMembers(env.db, '5000')).some((row) => row.user_id === user.id),
+      (await getTestGitHubInstallationMembers(env.db, '5000')).some(
+        (row) => row.user_id === user.id,
+      ),
     ).toBe(true);
   });
 
@@ -3963,7 +3967,7 @@ describe('GET /github/callback', () => {
     expect(persisted?.account_id).toBe('999');
     expect(persisted?.account_type).toBe('Organization');
     expect(
-      (await getGitHubInstallationMembers(env.db, '5000')).some(
+      (await getTestGitHubInstallationMembers(env.db, '5000')).some(
         (row) => row.user_id === initiator.id,
       ),
     ).toBe(true);
