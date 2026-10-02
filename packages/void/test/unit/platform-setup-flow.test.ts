@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
-import { log, outro } from '@clack/prompts';
+import { log, note, outro } from '@clack/prompts';
 import { createPlatformDeploymentManifest, transitionInstallation } from '@void/platform';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { pc } from '../../src/cli/output.ts';
@@ -280,9 +280,15 @@ describe('platform credential onboarding', () => {
     requireManagementToken();
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));
     expect(outro).toHaveBeenCalledWith('Plan complete. Management API token required.');
-    expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Browser login cannot change DNS. Installation will guide you'),
+    expect(note).toHaveBeenCalledWith(
+      expect.stringContaining('• Cloudflare management API token for DNS changes'),
+      'Required Credentials',
     );
+    expect(vi.mocked(note).mock.calls.map(([, title]) => title)).toEqual([
+      'Read-only installation plan',
+      'Platform runtime',
+      'Required Credentials',
+    ]);
     expect(mocks.password).not.toHaveBeenCalled();
     expect(mocks.open).not.toHaveBeenCalled();
     expect(listInstallationManifests()).toEqual([]);
@@ -988,9 +994,6 @@ describe('platform credential onboarding', () => {
     expect(draft.deployment.resources).toEqual(preview.deployment.resources);
     expect(isPlatformSetupDraft(draft)).toBe(true);
     const callback = `https://${draft.deployment.resources.apiWorker}.void-platform-e2e-test.workers.dev/auth/callback`;
-    expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining('Login callback: ' + callback),
-    );
     expect(info).toHaveBeenCalledWith(expect.stringContaining('Redirect URI: ' + callback));
     mocks.password.mockImplementation(normalPassword);
     mocks.open.mockClear();

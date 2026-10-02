@@ -205,21 +205,13 @@ export function formatPlatformSetupPlan(
   plan: PlatformInstallPlan,
   options: { managementToken?: boolean } = {},
 ): string {
-  const pages = platformSetupPages(plan);
-  // Keep URLs outside wrapping note boxes so terminal links remain intact.
-  return [
-    'Credentials needed during installation:',
-    ...(options.managementToken
-      ? [
-          platformSetupLink(platformManagementSetupPage(plan)),
-          'Browser login cannot change DNS. Installation will guide you to create and paste a management API token.',
-        ]
-      : []),
+  const credentials = [
+    ...(options.managementToken ? ['Cloudflare management API token for DNS changes'] : []),
     'PostgreSQL database URL',
-    platformSetupLink(pages.runtime),
-    platformSetupLink(pages.r2),
+    'Cloudflare runtime token',
+    'R2 upload token',
     ...(plan.deployment.authentication.providers.includes('github')
-      ? [platformSetupLink(pages.github)]
+      ? ['GitHub OAuth App client ID and secret']
       : []),
     ...plan.deployment.authentication.providers
       .filter((provider) => provider !== 'github')
@@ -234,13 +226,12 @@ export function formatPlatformSetupPlan(
     ...(plan.deployment.authentication.accessProtection
       ? ['Cloudflare Access application and installer credentials']
       : []),
-    platformSetupLink({
-      title: 'JWT signing key and project encryption key',
-      url: 'https://void.cloud/guide/platform/installation/credentials#signing-and-encryption-keys',
-    }),
+    'JWT signing key and project encryption key',
+  ];
+  return [
+    'The installation will guide you through setting up the following credentials:',
     '',
-    'Login callback: ' + plan.apiUrl + '/auth/callback',
-    'Installation collects and validates missing credentials after you confirm the plan.',
+    ...credentials.map((credential) => `• ${credential}`),
   ].join('\n');
 }
 

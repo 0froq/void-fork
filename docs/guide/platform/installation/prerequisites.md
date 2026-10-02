@@ -52,7 +52,7 @@ For a domain installation, use these answers. Testing mode skips the application
 
 Choose an unused installation name in your account. For example, `team` creates resources such as `void-team-api` and `void-team-proxy`.
 
-The preview includes your login callback URL and links for creating credentials. Keep it open while following [Credentials](/guide/platform/installation/credentials), then run the install command printed at the end.
+The preview lists the credentials you will need. Review [Credentials](/guide/platform/installation/credentials), then run the install command printed at the end. The guided installation provides setup links and the login callback when needed.
 
 You can select either path directly:
 

@@ -274,22 +274,53 @@ describe('platform credential setup links', () => {
     );
     expect(platformSetupPages(original).runtime.instructions).not.toContain('Email Sending');
   });
-  it('shows the final callback in previews as well as interactive setup', () => {
+  it('lists credentials in previews and shows credential links and callbacks during setup', () => {
     const preview = formatPlatformSetupPlan(plan());
-    expect(preview).toContain('https://github.com/settings/applications/new');
-    expect(preview).toContain(plan().apiUrl + '/auth/callback');
+    expect(preview).toContain(
+      'The installation will guide you through setting up the following credentials:',
+    );
+    expect(preview).not.toContain('https://');
+    expect(preview).not.toContain('/auth/callback');
     expect(platformSetupPages(plan()).github.instructions).toContain(
       plan().apiUrl + '/auth/callback',
     );
-    expect(preview).toContain('Login callback: ' + plan().apiUrl + '/auth/callback');
     expect(preview).toContain('PostgreSQL database URL');
     expect(preview).toContain('JWT signing key and project encryption key');
-    expect(preview).toContain(
-      'Installation collects and validates missing credentials after you confirm the plan.',
-    );
     expect(preview).not.toMatch(/paste|copy|Workers Scripts|Object Read|Register a GitHub/);
     expect(preview).not.toMatch(/[();]/);
     expect(preview.split('\n').length).toBeLessThanOrEqual(10);
+  });
+  it('lists the selected Access credentials and required DNS token concisely', () => {
+    const original = plan('example.com');
+    const preview = formatPlatformSetupPlan(
+      {
+        ...original,
+        deployment: {
+          ...original.deployment,
+          authentication: {
+            providers: ['cloudflare-access'],
+            configurable: true,
+            accessProtection: true,
+          },
+        },
+      },
+      { managementToken: true },
+    );
+    expect(preview).toBe(
+      [
+        'The installation will guide you through setting up the following credentials:',
+        '',
+        '• Cloudflare management API token for DNS changes',
+        '• PostgreSQL database URL',
+        '• Cloudflare runtime token',
+        '• R2 upload token',
+        '• Cloudflare Access OIDC client ID and secret',
+        '• Cloudflare Access application and installer credentials',
+        '• JWT signing key and project encryption key',
+      ].join('\n'),
+    );
+    expect(formatPlatformSetupPlan(plan())).not.toContain('management API token');
+    expect(formatPlatformSetupPlan(plan())).not.toContain('Access application');
   });
   it('includes zone permissions only for an application domain', () => {
     const page = platformSetupPages(plan('example.com')).runtime;

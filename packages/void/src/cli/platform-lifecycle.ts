@@ -668,7 +668,10 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
     note(formatPlatformRuntime(runtime), 'Platform runtime');
     const needsManagementToken = platformOperatorNeedsManagementToken(operatorCredential, plan);
     if (args.plan) {
-      console.log(formatPlatformSetupPlan(plan, { managementToken: needsManagementToken }));
+      note(
+        formatPlatformSetupPlan(plan, { managementToken: needsManagementToken }),
+        'Required Credentials',
+      );
       if (!existing) {
         log.info('Plan saved locally for your next install.');
       }
