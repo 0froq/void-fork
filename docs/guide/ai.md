@@ -133,7 +133,7 @@ const result = await ai.run(
 );
 ```
 
-For provider-native requests on a direct deployment, configure [`ai.gateway`](../reference/config.md#ai).
+For provider-native requests on a direct deployment, configure [`ai.gateway`](../integrations/cloudflare.md#ai-self-host).
 
 ## Provider-Native Requests
 
