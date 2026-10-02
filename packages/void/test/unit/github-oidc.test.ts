@@ -1,3 +1,11 @@
+vi.mock('../../src/cli/keyring.ts', () => ({
+  readKeyringPassword: () => null,
+  writeKeyringPassword: () => true,
+}));
+const accessJwt =
+  'header.' +
+  Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url') +
+  '.signature';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   exchangeGithubOidcForDeployToken,
@@ -15,6 +23,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   if (originalFetch) {
     globalThis.fetch = originalFetch;
   }
@@ -107,6 +116,7 @@ describe('exchangeGithubOidcForDeployToken', () => {
 
   it('forwards CF Access service-token headers on the API POST but not the GitHub GET', async () => {
     const gatedApiUrl = 'https://api.staging.void.cloud';
+    vi.stubEnv('VOID_ACCESS_ORIGIN', gatedApiUrl);
     const prevId = process.env.CF_ACCESS_CLIENT_ID;
     const prevSecret = process.env.CF_ACCESS_CLIENT_SECRET;
     process.env.CF_ACCESS_CLIENT_ID = 'cf-id';
@@ -137,8 +147,9 @@ describe('exchangeGithubOidcForDeployToken', () => {
 
   it('forwards a CF_ACCESS_TOKEN user JWT on the API POST but not the GitHub GET', async () => {
     const gatedApiUrl = 'https://api.staging.void.cloud';
+    vi.stubEnv('VOID_ACCESS_ORIGIN', gatedApiUrl);
     const prevToken = process.env.CF_ACCESS_TOKEN;
-    process.env.CF_ACCESS_TOKEN = 'cf-jwt';
+    process.env.CF_ACCESS_TOKEN = accessJwt;
     try {
       fetchMock
         .mockResolvedValueOnce(jsonResponse({ value: 'oidc-jwt' }))
@@ -150,7 +161,7 @@ describe('exchangeGithubOidcForDeployToken', () => {
       expect((getInit.headers as Record<string, string>)['cf-access-token']).toBeUndefined();
 
       const [, postInit] = fetchMock.mock.calls[1] as [string, RequestInit];
-      expect((postInit.headers as Record<string, string>)['cf-access-token']).toBe('cf-jwt');
+      expect((postInit.headers as Record<string, string>)['cf-access-token']).toBe(accessJwt);
     } finally {
       restoreEnv('CF_ACCESS_TOKEN', prevToken);
     }
@@ -196,7 +207,7 @@ describe('exchangeGithubOidcForDeployToken', () => {
       const postHeaders = postInit.headers as Record<string, string>;
       expect(postHeaders['CF-Access-Client-Id']).toBeUndefined();
       expect(postHeaders['CF-Access-Client-Secret']).toBeUndefined();
-      expect(postHeaders['cf-access-token']).toBeUndefined();
+      expect(postHeaders[accessJwt]).toBeUndefined();
       // The plain Content-Type header is still present.
       expect(postHeaders['Content-Type']).toBe('application/json');
     } finally {

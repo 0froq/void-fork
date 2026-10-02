@@ -2638,7 +2638,19 @@ describe('platform installer', () => {
     },
   );
 
-  it('authenticates lifecycle health probes to Access-gated hosted staging', async () => {
+  it('authenticates lifecycle health probes with explicitly scoped Access proof', async () => {
+    process.env.VOID_ACCESS_CREDENTIALS = JSON.stringify(
+      Object.fromEntries(
+        [
+          'https://api.staging.void.cloud',
+          'https://proxy.staging.void.cloud',
+          'https://void-platform-health.staging.void.app',
+        ].map((origin) => [
+          origin,
+          { CF_ACCESS_CLIENT_ID: 'service-id', CF_ACCESS_CLIENT_SECRET: 'service-secret' },
+        ]),
+      ),
+    );
     process.env.CF_ACCESS_CLIENT_ID = 'service-id';
     process.env.CF_ACCESS_CLIENT_SECRET = 'service-secret';
     const requests: Array<Headers> = [];

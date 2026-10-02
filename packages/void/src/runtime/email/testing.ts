@@ -409,7 +409,7 @@ export function createInboundTestHarness(opts: InboundTestHarnessOptions): Inbou
     } as unknown as ExecutionContext;
 
     // Mirror the production dispatcher's slug-strip: on the platform the
-    // recipient is `<projectSlug>+<tag>@mail.void.cloud` and the dispatcher
+    // recipient is `<projectSlug>+<tag>@mail.example.com` and the dispatcher
     // strips through the first `+` before matching. The test harness must do
     // the same so tests don't pass against routing paths that can't occur in
     // production. With `slug: null` (own-account deploy) nothing is stripped
@@ -423,7 +423,7 @@ export function createInboundTestHarness(opts: InboundTestHarnessOptions): Inbou
     const fullLocal = input.to.split('@')[0] ?? '';
     const plus = fullLocal.indexOf('+');
     const local = opts.slug === null ? fullLocal : plus === -1 ? '' : fullLocal.slice(plus + 1);
-    // Note: on the platform a recipient with no `+` (e.g. `slug@mail.void.cloud`)
+    // Note: on the platform a recipient with no `+` (e.g. `slug@mail.example.com`)
     // has no tag to match — production lands at `_default` if defined, otherwise
     // no-op. We mirror that here.
 

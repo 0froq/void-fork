@@ -26,6 +26,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   if (originalFetch) {
     globalThis.fetch = originalFetch;
   }
@@ -927,6 +928,7 @@ describe('PlatformClient.finalizeDeploy', () => {
 // process.env; this test deletes them itself to assert the capture invariant.)
 describe('PlatformClient CF Access header capture (survives a later env scrub)', () => {
   it('keeps sending CF-Access headers after CF_ACCESS_* are deleted from process.env', async () => {
+    vi.stubEnv('VOID_ACCESS_ORIGIN', 'https://api.staging.void.cloud');
     const savedId = process.env.CF_ACCESS_CLIENT_ID;
     const savedSecret = process.env.CF_ACCESS_CLIENT_SECRET;
     try {
@@ -1005,11 +1007,18 @@ describe('PlatformClient CF Access header capture (survives a later env scrub)',
       delete process.env.CF_ACCESS_CLIENT_ID;
       delete process.env.CF_ACCESS_CLIENT_SECRET;
       delete process.env.VOID_ACCESS_CREDENTIALS;
-      delete process.env.VOID_ACCESS_ORIGIN;
-      process.env.CF_ACCESS_TOKEN = 'initial-user-token';
+      process.env.VOID_ACCESS_ORIGIN = 'https://api.staging.void.cloud';
+      const tokenFor = (label: string) =>
+        'header.' +
+        Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600, label })).toString(
+          'base64url',
+        ) +
+        '.signature';
+      process.env.CF_ACCESS_TOKEN = tokenFor('initial');
       const client = new PlatformClient(token, { apiUrl: 'https://api.staging.void.cloud' });
 
-      process.env.CF_ACCESS_TOKEN = 'renewed-user-token';
+      const renewedToken = tokenFor('renewed');
+      process.env.CF_ACCESS_TOKEN = renewedToken;
       fetchMock.mockResolvedValueOnce(jsonResponse({ urls: {} }));
       await client.requestUploadUrls(projectId, [
         { blake3: 'a'.repeat(32), md5: 'b'.repeat(32), size: 1, contentType: 'text/plain' },
@@ -1017,7 +1026,7 @@ describe('PlatformClient CF Access header capture (survives a later env scrub)',
 
       const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       const headers = init.headers as Record<string, string>;
-      expect(headers['cf-access-token']).toBe('renewed-user-token');
+      expect(headers['cf-access-token']).toBe(renewedToken);
       expect(headers['CF-Access-Client-Id']).toBeUndefined();
     } finally {
       for (const [name, value] of [

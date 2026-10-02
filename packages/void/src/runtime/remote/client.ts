@@ -82,7 +82,7 @@ async function proxyError(response: Response): Promise<Error> {
 }
 
 /**
- * HTTP client for the remote bindings proxy (proxy.void.cloud).
+ * HTTP client for the connected platform's remote bindings proxy.
  *
  * Used by ProxyD1Database, ProxyKVNamespace, and ProxyR2Bucket to forward
  * binding operations to the platform proxy during local development.

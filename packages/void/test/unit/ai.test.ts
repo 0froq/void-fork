@@ -25,6 +25,25 @@ function makeDirectAi(
 }
 
 describe('runtime ai', () => {
+  it.each([undefined, '1'])(
+    'rejects missing proxy metadata without sending credentials (legacy staging=%s)',
+    async (staging) => {
+      vi.resetModules();
+      const { envContext } = await import('../../src/runtime/env-raw.ts');
+      const { ai } = await import('../../src/runtime/ai.ts');
+      const request = vi.fn();
+      vi.stubGlobal('fetch', request);
+      await envContext.run(
+        { __VOID_TOKEN: 'token', __VOID_PROJECT_ID: 'project', __VOID_STAGING: staging },
+        async () => {
+          await expect(
+            ai.run('@cf/meta/llama', {}).match({ ok: (value) => value, limited: (limit) => limit }),
+          ).rejects.toThrow('No connected platform proxy');
+        },
+      );
+      expect(request).not.toHaveBeenCalled();
+    },
+  );
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();

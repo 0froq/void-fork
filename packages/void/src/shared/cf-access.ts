@@ -6,18 +6,6 @@
  *   2. User JWT (`CF_ACCESS_TOKEN`) — dev path, typically populated via `cloudflared access token`
  *   3. No headers — prod, or unprotected hostnames
  */
-export function isVoidAccessGatedUrl(targetUrl: string): boolean {
-  try {
-    const url = new URL(targetUrl);
-    return (
-      url.protocol === 'https:' &&
-      (url.hostname.endsWith('.staging.void.cloud') || url.hostname.endsWith('.staging.void.app'))
-    );
-  } catch {
-    return false;
-  }
-}
-
 function accessHeaders(env: Record<string, unknown>): Record<string, string> {
   const id = env.CF_ACCESS_CLIENT_ID;
   const secret = env.CF_ACCESS_CLIENT_SECRET;
@@ -34,7 +22,7 @@ function accessHeaders(env: Record<string, unknown>): Record<string, string> {
   return {};
 }
 
-/** Attach shared Void Access credentials only to known hosted staging origins. */
+/** Attach Access credentials only to their explicitly scoped origin. */
 export function cfAccessHeaders(
   env: Record<string, unknown>,
   targetUrl: string,
@@ -90,7 +78,7 @@ export function cfAccessHeaders(
       return {};
     }
   }
-  return isVoidAccessGatedUrl(targetUrl) ? accessHeaders(env) : {};
+  return {};
 }
 
 /**

@@ -207,7 +207,6 @@ export default extendConfig(
         },
         referenceLinks,
         integrationLinks,
-        // { text: "Dashboard", link: "https://dash.void.cloud" },
       ],
 
       socialLinks,

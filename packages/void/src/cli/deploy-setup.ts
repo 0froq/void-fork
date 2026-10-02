@@ -1,5 +1,5 @@
 import { cancel, confirm, isCancel, log } from '@voidzero-dev/vite-plus-prompts';
-import { getToken, isStagingMode } from './auth.ts';
+import { getToken } from './auth.ts';
 import { PlatformClient } from './client.ts';
 import { promptAndCreateProject } from './create-project.ts';
 import { promptForLoginToken } from './login.ts';
@@ -18,7 +18,7 @@ async function ensureToken(root: string): Promise<string> {
   }
 
   const token = await promptForLoginToken(root);
-  log.success(isStagingMode(root) ? 'Staging token saved.' : 'Token saved.');
+  log.success('Token saved.');
   return token;
 }
 

@@ -22,6 +22,7 @@ describe('cfAccessHeaders', () => {
           CF_ACCESS_CLIENT_ID: 'id',
           CF_ACCESS_CLIENT_SECRET: 'secret',
           CF_ACCESS_TOKEN: 'jwt',
+          VOID_ACCESS_ORIGIN: 'https://api.staging.void.cloud',
         },
         'https://api.staging.void.cloud',
       ),
@@ -37,6 +38,7 @@ describe('cfAccessHeaders', () => {
         {
           CF_ACCESS_CLIENT_ID: 'id',
           CF_ACCESS_TOKEN: 'jwt',
+          VOID_ACCESS_ORIGIN: 'https://proxy.staging.void.cloud',
         },
         'https://proxy.staging.void.cloud',
       ),
@@ -344,73 +346,21 @@ describe('origin-scoped self-hosted Access login', () => {
 });
 
 describe('ensureCloudflaredToken', () => {
-  beforeEach(() => {
+  it.each([
+    'https://api.void.cloud',
+    'https://api.staging.void.cloud',
+    'https://proxy.staging.void.cloud',
+  ])('does not implicitly authenticate a former hosted origin: %s', async (origin) => {
     vi.resetModules();
     spawnSyncMock.mockReset();
-    delete process.env.CF_ACCESS_CLIENT_ID;
-    delete process.env.CF_ACCESS_CLIENT_SECRET;
-    delete process.env.CF_ACCESS_TOKEN;
-  });
-
-  afterEach(() => {
-    delete process.env.CF_ACCESS_TOKEN;
-  });
-
-  it('does not probe when service token is present', async () => {
-    process.env.CF_ACCESS_CLIENT_ID = 'id';
-    process.env.CF_ACCESS_CLIENT_SECRET = 'secret';
+    keyring.read.mockReset().mockReturnValue(null);
+    vi.stubEnv('CF_ACCESS_TOKEN', 'unscoped-token');
+    vi.stubEnv('VOID_ACCESS_ORIGIN', '');
+    vi.stubEnv('VOID_ACCESS_CREDENTIALS', '');
     const { ensureCloudflaredToken } = await import('../../src/cli/cf-access.ts');
-    ensureCloudflaredToken('https://api.staging.void.cloud');
+    ensureCloudflaredToken(origin);
     expect(spawnSyncMock).not.toHaveBeenCalled();
-  });
-
-  it('does not probe when CF_ACCESS_TOKEN is already set', async () => {
-    process.env.CF_ACCESS_TOKEN = 'jwt';
-    const { ensureCloudflaredToken } = await import('../../src/cli/cf-access.ts');
-    ensureCloudflaredToken('https://api.staging.void.cloud');
-    expect(spawnSyncMock).not.toHaveBeenCalled();
-  });
-
-  it('does not probe non-gated hosts', async () => {
-    const { ensureCloudflaredToken } = await import('../../src/cli/cf-access.ts');
-    ensureCloudflaredToken('https://api.void.cloud');
-    expect(spawnSyncMock).not.toHaveBeenCalled();
-  });
-
-  it('does not poison the cache when a non-gated host is hit first', async () => {
-    spawnSyncMock.mockReturnValue({ status: 0, stdout: 'mocked-jwt' });
-    const { ensureCloudflaredToken } = await import('../../src/cli/cf-access.ts');
-
-    // First: non-gated host. Should be a noop.
-    ensureCloudflaredToken('https://api.void.cloud');
-    expect(spawnSyncMock).not.toHaveBeenCalled();
-
-    // Second: gated host. Should still probe — this is the regression fix.
-    ensureCloudflaredToken('https://api.staging.void.cloud');
-    expect(spawnSyncMock).toHaveBeenCalledTimes(1);
-    expect(process.env.CF_ACCESS_TOKEN).toBe('mocked-jwt');
-  });
-
-  it('caches per gated host so the same host is not probed twice', async () => {
-    spawnSyncMock.mockReturnValue({ status: 0, stdout: 'jwt-a' });
-    const { ensureCloudflaredToken } = await import('../../src/cli/cf-access.ts');
-
-    ensureCloudflaredToken('https://api.staging.void.cloud');
-    ensureCloudflaredToken('https://api.staging.void.cloud/some/path');
-    expect(spawnSyncMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('skips re-probing once CF_ACCESS_TOKEN has been populated by an earlier probe', async () => {
-    spawnSyncMock.mockReturnValue({ status: 0, stdout: 'jwt-a' });
-    const { ensureCloudflaredToken } = await import('../../src/cli/cf-access.ts');
-
-    // First gated host triggers probe and sets the env var.
-    ensureCloudflaredToken('https://api.staging.void.cloud');
-    expect(spawnSyncMock).toHaveBeenCalledTimes(1);
-    expect(process.env.CF_ACCESS_TOKEN).toBe('jwt-a');
-
-    // Second gated host (different) sees CF_ACCESS_TOKEN already set, skips.
-    ensureCloudflaredToken('https://proxy.staging.void.cloud');
-    expect(spawnSyncMock).toHaveBeenCalledTimes(1);
+    expect(cfAccessHeaders(process.env, origin)).toEqual({});
+    vi.unstubAllEnvs();
   });
 });

@@ -26,6 +26,7 @@ afterEach(() => {
   delete process.env.CF_ACCESS_CLIENT_ID;
   delete process.env.CF_ACCESS_CLIENT_SECRET;
   delete process.env.CF_ACCESS_TOKEN;
+  delete process.env.VOID_ACCESS_ORIGIN;
 });
 
 describe('platform discovery', () => {
@@ -81,6 +82,7 @@ describe('platform discovery', () => {
   it('authenticates discovery for Access-gated Void Cloud staging', async () => {
     process.env.CF_ACCESS_CLIENT_ID = 'client-id';
     process.env.CF_ACCESS_CLIENT_SECRET = 'client-secret';
+    process.env.VOID_ACCESS_ORIGIN = 'https://api.staging.void.cloud';
     const stagingDocument = {
       ...document,
       apiUrl: 'https://api.staging.void.cloud',

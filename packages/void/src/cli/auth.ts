@@ -83,11 +83,6 @@ function readOriginScopedToken(apiUrl: string, config: Config): string | null {
   return fileToken;
 }
 
-/** @deprecated Platform destinations are selected through explicit connections. */
-export function isStagingMode(_root: string = process.cwd()): boolean {
-  return false;
-}
-
 function connectedPlatform(apiUrl: string | null | undefined) {
   if (!apiUrl) {
     throw new Error('platform: No Void platform connected. Run `void connect <url>` first.');

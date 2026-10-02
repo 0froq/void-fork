@@ -60,7 +60,7 @@ function tryReadProjectSlug(): string | undefined {
 }
 
 // The platform mail domain for this environment, injected per deployment
-// (production uses `mail.void.cloud`, staging its own zone). Mirrors
+// (production uses `mail.example.com`, staging its own zone). Mirrors
 // `readEmailDomain` in runtime/email.ts — no baked-in default, so a
 // staging reply is never built against the production zone.
 function tryReadEmailDomain(): string | undefined {
@@ -217,7 +217,7 @@ export interface CreateMessageProxyOptions {
 
 /**
  * Remove the platform-injected `<slug>+` prefix from a recipient address.
- * The platform's shared sender (e.g. `mail.void.cloud`) rewrites every recipient to
+ * The platform's shared sender (e.g. `mail.example.com`) rewrites every recipient to
  * `<slug>+<tag>@<domain>`; user handlers expect `<tag>@<domain>`. If the
  * slug is unknown, missing, or doesn't match the local-part prefix, the
  * address is returned unchanged so callers without slug context (e.g. the

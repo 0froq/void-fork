@@ -38,6 +38,7 @@ afterEach(() => {
   delete process.env.VOID_PLATFORM_REGISTRY_DIR;
   delete process.env.CF_ACCESS_CLIENT_ID;
   delete process.env.CF_ACCESS_CLIENT_SECRET;
+  delete process.env.VOID_ACCESS_ORIGIN;
   for (const directory of directories.splice(0)) {
     rmSync(directory, { force: true, recursive: true });
   }
@@ -275,9 +276,10 @@ function ownershipMarker(
 }
 
 describe('platform recovery', () => {
-  it('authenticates endpoint verification to Access-gated hosted staging', async () => {
+  it('authenticates endpoint verification with explicitly scoped Access proof', async () => {
     process.env.CF_ACCESS_CLIENT_ID = 'service-id';
     process.env.CF_ACCESS_CLIENT_SECRET = 'service-secret';
+    process.env.VOID_ACCESS_ORIGIN = 'https://api.staging.void.cloud';
     const manifest = {
       ...remoteManifest(),
       endpoints: {

@@ -159,6 +159,7 @@ describe('void db execute --remote (D1)', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
     if (originalFetch) {
       globalThis.fetch = originalFetch;
@@ -643,7 +644,8 @@ describe('void db execute --remote (D1)', () => {
     expect(mockConfirm).toHaveBeenCalledTimes(1);
   });
 
-  it('includes CF Access service-token headers for the staging proxy', async () => {
+  it('includes explicitly scoped CF Access service-token headers for the selected proxy', async () => {
+    vi.stubEnv('VOID_ACCESS_ORIGIN', 'https://proxy.staging.void.cloud');
     const root = createProjectRoot();
     mockIsStagingMode.mockReturnValue(true);
     const originalId = process.env.CF_ACCESS_CLIENT_ID;

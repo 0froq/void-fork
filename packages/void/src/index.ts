@@ -23,7 +23,7 @@ import {
   resolveAssetRoutingPolicy,
   type AssetRoutingPolicy,
 } from './asset-routing.ts';
-import { getApiUrl, getProxyUrl, getToken, isStagingMode } from './cli/auth.ts';
+import { getApiUrl, getProxyUrl, getToken } from './cli/auth.ts';
 import { ensurePlatformProxyAccess } from './cli/cf-access.ts';
 import { SEND_EMAIL_BINDING } from './cli/email-cloudflare.ts';
 import { mergeRoutingRules } from './cli/headers.ts';
@@ -621,10 +621,9 @@ type CredentialStatus =
       projectId: string;
       proxyUrl: string;
       accessCredentials?: string;
-      staging?: boolean;
     }
   | { status: 'no-token' }
-  | { status: 'no-project'; apiUrl: string; token: string; staging?: boolean };
+  | { status: 'no-project'; apiUrl: string; token: string };
 
 /**
  * Read Void auth credentials for local dev AI proxy access.
@@ -636,12 +635,11 @@ function readVoidDevCredentials(root: string): CredentialStatus {
   if (!token) {
     return { status: 'no-token' };
   }
-  const staging = isStagingMode(root) || undefined;
   const apiUrl = getApiUrl(root);
 
   const project = readProjectConfig(root);
   if (!project) {
-    return { status: 'no-project', apiUrl, token, staging };
+    return { status: 'no-project', apiUrl, token };
   }
 
   const proxyUrl = getProxyUrl(root);
@@ -652,7 +650,6 @@ function readVoidDevCredentials(root: string): CredentialStatus {
     projectId: project.projectId,
     proxyUrl,
     accessCredentials: scopedAccessCredentials(process.env, proxyUrl),
-    staging,
   };
 }
 
@@ -1772,9 +1769,6 @@ export function voidPlugin(options?: {
         vars.__VOID_PROXY_URL = credentials.proxyUrl;
         if (credentials.accessCredentials) {
           vars.__VOID_ACCESS_CREDENTIALS = credentials.accessCredentials;
-        }
-        if (credentials.staging) {
-          vars.__VOID_STAGING = '1';
         }
         result.vars = vars;
       }

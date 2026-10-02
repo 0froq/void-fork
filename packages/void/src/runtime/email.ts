@@ -125,7 +125,7 @@ function readProjectSlug(): string | undefined {
 }
 
 // The platform mail domain for this environment (production uses
-// `mail.void.cloud`, staging its own zone). It is injected per
+// `mail.example.com`, staging its own zone). It is injected per
 // deployment rather than baked in, so a staging send is not rejected by
 // the proxy's sender check. There is deliberately no built-in default:
 // silently falling back to the production zone is the bug this binding

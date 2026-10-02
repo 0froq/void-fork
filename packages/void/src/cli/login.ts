@@ -9,7 +9,6 @@ import {
   runPlatformLogin,
   savePlatformToken,
   saveToken,
-  isStagingMode,
 } from './auth.ts';
 import { isExpiredTokenError, PlatformClient } from './client.ts';
 import { cliTitle, createSpinner, pc } from './output.ts';
@@ -134,10 +133,8 @@ export async function runLoginCommand(root: string = process.cwd()): Promise<voi
 
   await promptForLoginToken(root);
   if (expiredEnvToken) {
-    outro(
-      `${isStagingMode(root) ? 'Staging token saved.' : 'Token saved.'} Unset \`VOID_TOKEN\` to use it.`,
-    );
+    outro('Token saved. Unset `VOID_TOKEN` to use it.');
     return;
   }
-  outro(isStagingMode(root) ? 'Staging token saved.' : 'Token saved.');
+  outro('Token saved.');
 }

@@ -233,7 +233,6 @@ describe('buildPrerenderBindings', () => {
       voidToken: 'human',
       voidProjectId: 'project',
       voidProxyUrl: 'https://proxy.example.com',
-      voidStaging: false,
       remoteMode: true,
       accessEnv: {
         VOID_ACCESS_CREDENTIALS: JSON.stringify({
@@ -253,7 +252,7 @@ describe('buildPrerenderBindings', () => {
       env: {},
       voidToken: null,
       voidProjectId: 'proj',
-      voidStaging: false,
+      voidProxyUrl: 'https://proxy.example.test',
       remoteMode: false,
     });
 
@@ -267,7 +266,6 @@ describe('buildPrerenderBindings', () => {
       env: {},
       voidToken: 'tkn',
       voidProjectId: undefined,
-      voidStaging: false,
       remoteMode: false,
     });
 
@@ -281,7 +279,6 @@ describe('buildPrerenderBindings', () => {
       env: {},
       voidToken: null,
       voidProjectId: undefined,
-      voidStaging: false,
       remoteMode: false,
     });
 
@@ -289,35 +286,33 @@ describe('buildPrerenderBindings', () => {
     expect(Object.keys(result).some((key) => key.startsWith('__VOID_'))).toBe(false);
   });
 
-  it('sets credentials and production proxy URL when token+projectId are present', () => {
+  it('sets credentials and the selected proxy URL when token+projectId are present', () => {
     const result = buildPrerenderBindings({
       wranglerVars: {},
       env: {},
       voidToken: 'tkn',
       voidProjectId: 'proj',
-      voidStaging: false,
+      voidProxyUrl: 'https://proxy.example.test',
       remoteMode: false,
     });
 
     expect(result.__VOID_TOKEN).toBe('tkn');
     expect(result.__VOID_PROJECT_ID).toBe('proj');
-    expect(result.__VOID_PROXY_URL).toBe('https://proxy.void.cloud');
+    expect(result.__VOID_PROXY_URL).toBe('https://proxy.example.test');
     expect(result).not.toHaveProperty('__VOID_STAGING');
     expect(result).not.toHaveProperty('__VOID_REMOTE');
   });
 
-  it('flips the proxy URL and sets __VOID_STAGING in staging mode', () => {
-    const result = buildPrerenderBindings({
-      wranglerVars: {},
-      env: {},
-      voidToken: 'tkn',
-      voidProjectId: 'proj',
-      voidStaging: true,
-      remoteMode: false,
-    });
-
-    expect(result.__VOID_STAGING).toBe('1');
-    expect(result.__VOID_PROXY_URL).toBe('https://proxy.staging.void.cloud');
+  it('requires a selected proxy before binding credentials', () => {
+    expect(() =>
+      buildPrerenderBindings({
+        wranglerVars: {},
+        env: {},
+        voidToken: 'token',
+        voidProjectId: 'project',
+        remoteMode: true,
+      }),
+    ).toThrow('No connected platform proxy');
   });
 
   it('pins custom platform credentials to its discovered proxy', () => {
@@ -327,7 +322,6 @@ describe('buildPrerenderBindings', () => {
       voidToken: 'custom-token',
       voidProjectId: 'custom-project',
       voidProxyUrl: 'https://void-company-proxy.example.workers.dev',
-      voidStaging: false,
       remoteMode: true,
     });
 
@@ -341,7 +335,7 @@ describe('buildPrerenderBindings', () => {
       env: {},
       voidToken: 'tkn',
       voidProjectId: 'proj',
-      voidStaging: false,
+      voidProxyUrl: 'https://proxy.example.test',
       remoteMode: true,
     });
 
@@ -354,7 +348,6 @@ describe('buildPrerenderBindings', () => {
       env: {},
       voidToken: null,
       voidProjectId: undefined,
-      voidStaging: false,
       remoteMode: true,
     });
 
@@ -368,7 +361,6 @@ describe('buildPrerenderBindings', () => {
       env: {},
       voidToken: null,
       voidProjectId: undefined,
-      voidStaging: false,
       remoteMode: false,
     });
 
@@ -381,7 +373,6 @@ describe('buildPrerenderBindings', () => {
       env: { FOO: 'bar' },
       voidToken: null,
       voidProjectId: undefined,
-      voidStaging: false,
       remoteMode: false,
     });
 
@@ -394,7 +385,7 @@ describe('buildPrerenderBindings', () => {
       env: {},
       voidToken: 'real',
       voidProjectId: 'proj',
-      voidStaging: false,
+      voidProxyUrl: 'https://proxy.example.test',
       remoteMode: false,
     });
 
@@ -407,7 +398,6 @@ describe('buildPrerenderBindings', () => {
       env: {},
       voidToken: null,
       voidProjectId: undefined,
-      voidStaging: false,
       remoteMode: false,
     });
 
@@ -421,7 +411,6 @@ describe('buildPrerenderBindings', () => {
       env: { __VOID_REMOTE: '1', FOO: 'bar' },
       voidToken: null,
       voidProjectId: undefined,
-      voidStaging: false,
       remoteMode: false,
     });
 
@@ -435,7 +424,6 @@ describe('buildPrerenderBindings', () => {
       env: {},
       voidToken: null,
       voidProjectId: undefined,
-      voidStaging: false,
       remoteMode: false,
     });
 
@@ -448,7 +436,6 @@ describe('buildPrerenderBindings', () => {
       env: { __VOID_REMOTE: '1', __VOID_STAGING: '1', FOO: 'bar' },
       voidToken: null,
       voidProjectId: undefined,
-      voidStaging: false,
       remoteMode: false,
     });
 
@@ -465,13 +452,13 @@ describe('buildPrerenderBindings', () => {
       env: { __VOID_PROXY_URL: 'https://evil.example.com' },
       voidToken: 'real',
       voidProjectId: 'proj',
-      voidStaging: false,
+      voidProxyUrl: 'https://proxy.example.test',
       remoteMode: false,
     });
 
     expect(result.__VOID_TOKEN).toBe('real');
     expect(result.__VOID_PROJECT_ID).toBe('proj');
-    expect(result.__VOID_PROXY_URL).toBe('https://proxy.void.cloud');
+    expect(result.__VOID_PROXY_URL).toBe('https://proxy.example.test');
     expect(result).not.toHaveProperty('__VOID_PROXY_TOKEN');
   });
 });

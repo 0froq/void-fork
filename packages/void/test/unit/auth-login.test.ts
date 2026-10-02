@@ -1,3 +1,11 @@
+vi.mock('../../src/cli/keyring.ts', () => ({
+  readKeyringPassword: () => null,
+  writeKeyringPassword: () => true,
+}));
+const accessJwt =
+  'header.' +
+  Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url') +
+  '.signature';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -77,6 +85,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.VOID_API_URL;
   delete process.env.CF_ACCESS_TOKEN;
+  delete process.env.VOID_ACCESS_ORIGIN;
 });
 
 describe('runLogin', () => {
@@ -221,7 +230,8 @@ describe('runLogin', () => {
 
   it('sends Cloudflare Access headers when exchanging a staging login code', async () => {
     process.env.VOID_API_URL = 'https://api.staging.void.cloud';
-    process.env.CF_ACCESS_TOKEN = 'cf-access-token';
+    process.env.CF_ACCESS_TOKEN = accessJwt;
+    process.env.VOID_ACCESS_ORIGIN = process.env.VOID_API_URL;
 
     let resolveLoginUrl!: (url: string) => void;
     const loginUrlPromise = new Promise<string>((resolve) => {
@@ -241,7 +251,7 @@ describe('runLogin', () => {
     await expect(loginPromise).resolves.toBe('real-token');
 
     expect(exchangeRequests[0]?.headers).toMatchObject({
-      'cf-access-token': 'cf-access-token',
+      'cf-access-token': accessJwt,
       'content-type': 'application/json',
     });
   });

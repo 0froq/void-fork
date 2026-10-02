@@ -16,6 +16,7 @@ import {
   type IsolatedPlayground,
 } from '../../../../test/integration-helpers.ts';
 import type { ProjectRole } from '../../src/cli/client.ts';
+import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
 import type { DetectedFramework } from '../../src/plugin-inference.ts';
 
 // @voidzero-dev/vite-plus-prompts + the output-spinner wrapper are TTY-bound; noop them (same as
@@ -211,7 +212,11 @@ describe('runFullDeploy emits manifest.pages (Void pages app, end-to-end)', () =
     mkdirSync(join(fixture, '.void'), { recursive: true });
     writeFileSync(
       projectJson,
-      JSON.stringify({ projectId: 'proj_named_layouts_test', slug: 'named-layouts-test' }),
+      JSON.stringify({
+        projectId: 'proj_named_layouts_test',
+        slug: 'named-layouts-test',
+        platformUrl: 'https://platform.example.test',
+      }),
     );
   }, 180_000);
 
@@ -242,11 +247,23 @@ describe('runFullDeploy emits manifest.pages (Void pages app, end-to-end)', () =
     savedProject = process.env.VOID_PROJECT;
     // Explicit token bypasses getToken() + the GitHub-Actions OIDC branch.
     process.env.VOID_TOKEN = 'test-token-do-not-use';
+    vi.stubEnv('VOID_API_URL', 'https://platform.example.test');
+    vi.stubEnv('VOID_PLATFORM_REGISTRY_DIR', join(fixture, 'registry'));
+    savePlatformConnection({
+      accountId: null,
+      apiUrl: 'https://platform.example.test',
+      applicationDomain: 'apps.example.test',
+      displayName: 'Test platform',
+      installationId: null,
+      kind: 'connected',
+      proxyUrl: 'https://proxy.example.test',
+    });
     // Select the saved project; runDeploy verifies its current role through the API.
     delete process.env.VOID_PROJECT;
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     if (originalFetch) {
       globalThis.fetch = originalFetch;
     }

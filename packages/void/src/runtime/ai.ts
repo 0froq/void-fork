@@ -14,8 +14,6 @@ import {
   type LimitOperation,
 } from './limits.ts';
 
-const PROXY_URL = 'https://proxy.void.cloud/ai';
-const STAGING_PROXY_URL = 'https://proxy.staging.void.cloud/ai';
 const VOID_FILE_MARKER = '__voidFile';
 
 // Per-provider auth header/prefix for the self-host direct gateway path. The
@@ -337,9 +335,9 @@ function resolveProviderKey(
 function getProxyUrl(runtimeEnv: RuntimeEnv): string {
   const custom = runtimeEnv.__VOID_PROXY_URL;
   if (typeof custom === 'string' && custom.length > 0) {
-    return custom + '/ai';
+    return custom.replace(/\/+$/, '') + '/ai';
   }
-  return runtimeEnv.__VOID_STAGING ? STAGING_PROXY_URL : PROXY_URL;
+  throw new Error('ai: No connected platform proxy is available. Run `void connect <url>` first.');
 }
 
 function providerAuthDefaults(provider: string): { header: string; prefix: string } {

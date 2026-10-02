@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import { dirname, join, relative } from 'pathslash';
 import pc from 'picocolors';
-import { getApiUrl, getProxyUrl, getToken, isStagingMode } from './cli/auth.ts';
+import { getApiUrl, getProxyUrl, getToken } from './cli/auth.ts';
 import { ensurePlatformProxyAccess } from './cli/cf-access.ts';
 import { ensureWranglerCompat } from './cli/wrangler.ts';
 import { readConfig } from './config.ts';
@@ -18,7 +18,6 @@ import { renderPrerenderPaths, type PrerenderResult } from './prerender-render.t
 export type { PrerenderResult } from './prerender-render.ts';
 import { scopedAccessCredentials } from './shared/cf-access.ts';
 import { stripInternalEnvKeys } from './shared/env.ts';
-import { DEFAULT_PROXY_URL, STAGING_PROXY_URL } from './shared/proxy.ts';
 import { buildEnv } from './shared/untrusted-env.ts';
 
 const PRERENDER_PATHS_ENDPOINT = '/__void/prerender-paths';
@@ -153,7 +152,6 @@ export type PrerenderBindingsInput = {
   voidProjectId: string | undefined;
   voidProxyUrl?: string;
   accessEnv?: Record<string, unknown>;
-  voidStaging: boolean;
   remoteMode: boolean | undefined;
 };
 
@@ -173,11 +171,12 @@ export function buildPrerenderBindings(input: PrerenderBindingsInput): Record<st
   if (input.voidToken && input.voidProjectId) {
     voidBindings.__VOID_TOKEN = input.voidToken;
     voidBindings.__VOID_PROJECT_ID = input.voidProjectId;
-    if (input.voidStaging) {
-      voidBindings.__VOID_STAGING = '1';
+    if (!input.voidProxyUrl) {
+      throw new Error(
+        'prerender: No connected platform proxy is available. Run `void connect <url>` first.',
+      );
     }
-    voidBindings.__VOID_PROXY_URL =
-      input.voidProxyUrl ?? (input.voidStaging ? STAGING_PROXY_URL : DEFAULT_PROXY_URL);
+    voidBindings.__VOID_PROXY_URL = input.voidProxyUrl;
     const access = scopedAccessCredentials(input.accessEnv ?? {}, voidBindings.__VOID_PROXY_URL!);
     if (access) {
       voidBindings.__VOID_ACCESS_CREDENTIALS = access;
@@ -239,7 +238,6 @@ async function createCloudflarePrerenderRunner(options: {
   // Self-hosted `vite build` keeps the existing linked-project credential
   // fallback because it has no parent deploy orchestrator to mint one.
   const voidToken = voidProjectId ? (options.voidToken ?? getToken(root)) : null;
-  const voidStaging = isStagingMode(root);
   const voidProxyUrl = voidToken && voidProjectId ? getProxyUrl(root) : undefined;
 
   if (voidProxyUrl) {
@@ -252,7 +250,6 @@ async function createCloudflarePrerenderRunner(options: {
     voidToken,
     voidProjectId,
     voidProxyUrl,
-    voidStaging,
     remoteMode,
   });
 

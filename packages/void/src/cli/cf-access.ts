@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { cfAccessHeaders, isVoidAccessGatedUrl } from '../shared/cf-access.ts';
+import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { readKeyringPassword, writeKeyringPassword } from './keyring.ts';
 import { normalizePlatformApiUrl, platformCredentialAccount } from './platform-registry.ts';
 
@@ -135,59 +135,9 @@ export function ensurePlatformAccessToken(
   writeKeyringPassword(ACCESS_KEYRING_SERVICE, account, token);
 }
 
-const probedHosts = new Set<string>();
-
-/**
- * If the CLI is about to talk to a Cloudflare-Access-gated staging host,
- * probe the locally-installed `cloudflared` binary for a cached user JWT
- * and export it as `CF_ACCESS_TOKEN`. On interactive shells with no cached
- * token, open a browser login flow to populate the cache, then re-read it.
- *
- * Cached per-host so that an early non-gated call (e.g. prod) does not
- * permanently disable the probe for a later gated call (e.g. staging) in
- * the same process. Noop when:
- *   - a service-token pair is already set (CI path)
- *   - `CF_ACCESS_TOKEN` is already set (manual override or prior probe)
- *   - the target host is not gated
- *   - `cloudflared` is not installed
- */
+/** Restore only credentials scoped to this explicitly selected platform origin. */
 export function ensureCloudflaredToken(apiUrl: string): void {
-  if (
-    !isVoidAccessGatedUrl(apiUrl) ||
-    process.env.VOID_ACCESS_ORIGIN ||
-    process.env.VOID_ACCESS_CREDENTIALS
-  ) {
-    ensurePlatformAccessToken(apiUrl);
-    return;
-  }
-  if (process.env.CF_ACCESS_CLIENT_ID && process.env.CF_ACCESS_CLIENT_SECRET) {
-    return;
-  }
-  if (process.env.CF_ACCESS_TOKEN) {
-    return;
-  }
-  if (!isVoidAccessGatedUrl(apiUrl)) {
-    return;
-  }
-  const host = new URL(apiUrl).hostname;
-  if (probedHosts.has(host)) {
-    return;
-  }
-  probedHosts.add(host);
-
-  let token = runCloudflared(['access', 'token', `-app=${apiUrl}`]);
-
-  if (!token && process.stdin.isTTY && process.stdout.isTTY) {
-    // No cached token and we can show a browser prompt — kick off login.
-    // `cloudflared access login` opens the browser and blocks until the
-    // user completes the Access flow (or times out).
-    runCloudflared(['access', 'login', apiUrl], { inherit: true, timeoutMs: 120_000 });
-    token = runCloudflared(['access', 'token', `-app=${apiUrl}`]);
-  }
-
-  if (token) {
-    process.env.CF_ACCESS_TOKEN = token;
-  }
+  ensurePlatformAccessToken(apiUrl);
 }
 
 function runCloudflared(
