@@ -4,6 +4,8 @@ outline: deep
 
 # Install and Configure Login
 
+Press Enter to accept a suggested zone or display name, or type to replace it. Enter your own installation name and application domain; examples such as `company` and `example.com` are placeholders.
+
 For workers.dev testing, start the interactive install and choose your login method below:
 
 ```sh

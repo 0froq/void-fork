@@ -107,13 +107,16 @@ describe('promptDeployProjectConfig', () => {
     const promptConfig = mockText.mock.calls[0]?.[0] as {
       validate: (value: string) => string | undefined;
     };
+    expect(promptConfig).toMatchObject({ placeholder: 'demo-app', defaultValue: 'demo-app' });
+    expect(promptConfig).not.toHaveProperty('initialValue');
     // Short slugs no longer rejected client-side — plan is checked server-side.
     expect(promptConfig.validate('abc')).toBeUndefined();
     expect(promptConfig.validate('abcde')).toBeUndefined();
     expect(promptConfig.validate('abcdef')).toBeUndefined();
     // Format check still runs locally.
     expect(promptConfig.validate('ABC')).toBe('Slug must be lowercase alphanumeric with dashes.');
-    expect(promptConfig.validate('')).toBe('Project slug is required.');
+    expect(promptConfig.validate('')).toBeUndefined();
+    expect(promptConfig.validate(' ')).toBe('Project slug is required.');
   });
 
   it('re-prompts when the server rejects a short slug for a free-plan user', async () => {

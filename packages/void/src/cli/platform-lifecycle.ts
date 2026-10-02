@@ -1166,11 +1166,14 @@ async function promptText(
     }
     throw new Error(`platform: ${message.replace(/:$/, '')} is required in non-interactive mode.`);
   }
+  const defaultValue = typeof value === 'string' ? value : undefined;
   const input = await text({
     message,
-    ...(typeof value === 'string' ? { initialValue: value } : value),
-    validate: (input) =>
-      input ? validate?.(input) : optional ? undefined : 'A value is required.',
+    ...(typeof value === 'string' ? { placeholder: value, defaultValue } : value),
+    validate: (input) => {
+      const candidate = input || defaultValue;
+      return candidate ? validate?.(candidate) : optional ? undefined : 'A value is required.';
+    },
   });
   if (isCancel(input) || typeof input === 'symbol') {
     throw new Error('platform: Cancelled.');

@@ -67,7 +67,7 @@ beforeEach(() => {
     { id: 'account', name: 'Account' },
   ]);
   vi.spyOn(PlatformCloudflareClient.prototype, 'listHyperdriveConfigs').mockResolvedValue([]);
-  mocks.text.mockResolvedValue('');
+  mocks.text.mockImplementation(async ({ defaultValue }) => defaultValue ?? '');
   mocks.select.mockImplementation(async ({ message, options }) =>
     message === 'How should Void set up Hyperdrive?' ||
     message === 'Which Hyperdrive should Void use?'
@@ -326,8 +326,37 @@ describe('interactive platform installation prompts', () => {
     expect(mocks.text).toHaveBeenCalledWith(
       expect.objectContaining({
         message: 'Platform display name:',
-        initialValue: 'My Team Void',
+        placeholder: 'My Team Void',
+        defaultValue: 'My Team Void',
       }),
+    );
+  });
+
+  it('accepts suggested zones and display names while requiring an application domain', async () => {
+    mocks.select.mockResolvedValue('domain');
+    mocks.text.mockResolvedValueOnce('apps.example.com');
+    await runPlatformLifecycleCommand(
+      parsePlatformArgs(['install', '--plan', '--name', 'team', '--account', 'account']),
+    );
+    const domainPrompt = mocks.text.mock.calls.find(
+      ([input]) => input.message === 'Application base domain:',
+    )![0];
+    expect(domainPrompt.validate('')).toBe('A value is required.');
+    expect(domainPrompt).not.toHaveProperty('defaultValue');
+    for (const [message, suggestion] of [
+      ['Cloudflare zone:', 'apps.example.com'],
+      ['Platform display name:', 'team Void'],
+    ]) {
+      const prompt = mocks.text.mock.calls.find(([input]) => input.message === message)![0];
+      expect(prompt).toMatchObject({ placeholder: suggestion, defaultValue: suggestion });
+      expect(prompt).not.toHaveProperty('initialValue');
+      expect(prompt.validate('')).toBeUndefined();
+    }
+    expect(mocks.plan).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ zoneName: 'apps.example.com', displayName: 'team Void' }),
+      null,
+      expect.anything(),
     );
   });
 

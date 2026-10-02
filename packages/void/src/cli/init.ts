@@ -604,11 +604,12 @@ async function resolveInitRoot(root: string): Promise<string> {
     return root;
   }
 
+  const defaultFolder = 'my-void-app';
   const folder = await text({
     message: 'New project folder name:',
-    placeholder: 'my-void-app',
-    initialValue: 'my-void-app',
-    validate: (value) => validateSubfolderName(root, value),
+    placeholder: defaultFolder,
+    defaultValue: defaultFolder,
+    validate: (value) => validateSubfolderName(root, value || defaultFolder),
   });
 
   if (isCancel(folder) || typeof folder === 'symbol') {

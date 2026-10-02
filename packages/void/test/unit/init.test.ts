@@ -1729,9 +1729,17 @@ describe('isScaffoldableEmptyProject', () => {
       expect(mockText).toHaveBeenCalledWith(
         expect.objectContaining({
           message: 'New project folder name:',
-          initialValue: 'my-void-app',
+          placeholder: 'my-void-app',
+          defaultValue: 'my-void-app',
         }),
       );
+      const folderPrompt = mockText.mock.calls[0]![0];
+      expect(folderPrompt).not.toHaveProperty('initialValue');
+      expect(folderPrompt.validate('')).toBeUndefined();
+      expect(folderPrompt.validate(' ')).toBe('Enter a folder name.');
+      mkdirSync(join(root, 'my-void-app'));
+      expect(folderPrompt.validate('')).toBe('That folder already exists.');
+      expect(folderPrompt.validate('another-app')).toBeUndefined();
       expect(mockSpawnSync).toHaveBeenCalledWith(
         'pnpm',
         ['install', '--no-frozen-lockfile'],

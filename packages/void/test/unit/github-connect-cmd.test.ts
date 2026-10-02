@@ -8,6 +8,7 @@ import {
   type PlatformClient,
   type ProjectResponse,
 } from '../../src/cli/client.ts';
+import * as gitMetadata from '../../src/cli/git-metadata.ts';
 import type { GithubArgs } from '../../src/cli/github-args.ts';
 import { runConnect } from '../../src/cli/github-cmd.ts';
 
@@ -594,6 +595,56 @@ describe('runConnect — member repo prompt (redacted repository list)', () => {
     // client.connectGithub(projectId, body) — body.repoFullName carries the typed repo
     const body = connectGithub.mock.calls[0]![1] as { repoFullName: string };
     expect(body.repoFullName).toBe(repoFullName);
+  });
+
+  it('accepts inferred repository, branch, and workflow suggestions with Enter', async () => {
+    (process.stdin as { isTTY?: boolean }).isTTY = true;
+    const metadata = vi.spyOn(gitMetadata, 'collectGitDeployMetadata').mockReturnValue({
+      commit: null,
+      commitUrl: null,
+      gitRef: 'release',
+      repositoryUrl: `https://github.com/${repoFullName}`,
+    });
+    mockText.mockImplementation(async ({ defaultValue }) => defaultValue);
+    const connectGithub = vi
+      .fn()
+      .mockResolvedValueOnce(
+        makeConnection({ branch: 'release', build_executor: 'github_actions' }),
+      );
+    try {
+      const { promise } = driveConnect({
+        connectGithub,
+        listGithubInstallations: vi.fn(async () => [memberInstallation()]),
+        args: { executor: 'github_actions', repo: undefined, branch: undefined },
+      });
+      await promise;
+
+      const repoPrompt = mockText.mock.calls[0]![0];
+      expect(repoPrompt.validate('')).toBeUndefined();
+      expect(repoPrompt.validate(' ')).toBe('Enter the repository as owner/repo.');
+      expect(repoPrompt.validate('another/project')).toBeUndefined();
+      for (const [index, suggestion] of [
+        [0, repoFullName],
+        [1, 'release'],
+        [2, '.github/workflows/void-deploy.yml'],
+      ] as const) {
+        expect(mockText.mock.calls[index]![0]).toMatchObject({
+          placeholder: suggestion,
+          defaultValue: suggestion,
+        });
+        expect(mockText.mock.calls[index]![0]).not.toHaveProperty('initialValue');
+      }
+      expect(connectGithub).toHaveBeenCalledWith(
+        projectId,
+        expect.objectContaining({
+          repoFullName,
+          branch: 'release',
+          buildExecutor: 'github_actions',
+        }),
+      );
+    } finally {
+      metadata.mockRestore();
+    }
   });
 
   it('fails closed without a TTY, naming --repo', async () => {

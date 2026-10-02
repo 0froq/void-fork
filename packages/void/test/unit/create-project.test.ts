@@ -171,10 +171,14 @@ describe('promptAndCreateProject', () => {
     expect(client.createProject).toHaveBeenNthCalledWith(1, tooLong);
     expect(client.createProject).toHaveBeenNthCalledWith(2, 'shorter-app');
     expect(mockText).toHaveBeenCalledTimes(2);
-    // The rejected slug becomes the next prompt's initial value so the user
-    // edits it rather than retyping it.
-    const secondPrompt = mockText.mock.calls[1]?.[0] as { initialValue: string } | undefined;
-    expect(secondPrompt?.initialValue).toBe(tooLong);
+    // Enter must still validate a suggested slug rejected on the previous attempt.
+    const secondPrompt = mockText.mock.calls[1]?.[0] as {
+      defaultValue: string;
+      validate: (value: string) => string | undefined;
+    };
+    expect(secondPrompt.defaultValue).toBe(tooLong);
+    expect(secondPrompt.validate('')).toContain('Slug must be at most 56 characters');
+    expect(secondPrompt.validate('shorter-app')).toBeUndefined();
     expect(mockError).toHaveBeenCalledWith(
       expect.stringContaining('slug must be at most 56 characters'),
     );

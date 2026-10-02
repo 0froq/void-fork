@@ -88,9 +88,9 @@ export async function promptProjectSelection(
 export async function promptProjectSlug(defaultSlug: string): Promise<string> {
   const result = await text({
     message: 'Choose a slug for your new Void project:',
-    placeholder: 'my-app',
-    initialValue: defaultSlug,
-    validate: validateProjectSlug,
+    placeholder: defaultSlug,
+    defaultValue: defaultSlug,
+    validate: (value) => validateProjectSlug(value || defaultSlug),
   });
 
   if (isCancel(result) || typeof result === 'symbol') {

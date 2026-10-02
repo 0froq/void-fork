@@ -476,9 +476,9 @@ async function promptRepoFullName(root: string): Promise<string> {
   const input = await text({
     message: 'Repository (owner/repo):',
     placeholder: gitDefault ?? 'owner/repo',
-    initialValue: gitDefault ?? '',
+    defaultValue: gitDefault ?? undefined,
     validate: (value) =>
-      /^[^/\s]+\/[^/\s]+$/.test((value ?? '').trim())
+      /^[^/\s]+\/[^/\s]+$/.test((value || gitDefault || '').trim())
         ? undefined
         : 'Enter the repository as owner/repo.',
   });
@@ -691,7 +691,7 @@ export async function runConnect(
     const input = await text({
       message: 'Branch to deploy from:',
       placeholder: branchDefault,
-      initialValue: branchDefault,
+      defaultValue: branchDefault,
     });
     if (isCancel(input)) {
       cancel('Cancelled.');
@@ -741,7 +741,7 @@ export async function runConnect(
     const input = await text({
       message: 'Deploy workflow file:',
       placeholder: DEFAULT_WORKFLOW_PATH,
-      initialValue: DEFAULT_WORKFLOW_PATH,
+      defaultValue: DEFAULT_WORKFLOW_PATH,
       validate(value) {
         const v = (value ?? '').trim();
         if (v.length === 0 || isValidWorkflowPath(v)) {
