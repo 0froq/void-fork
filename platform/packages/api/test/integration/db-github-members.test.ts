@@ -2,12 +2,10 @@ import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vite-plus/test';
 import { MEMBERSHIP_TTL_SECONDS } from '../../src/constants.ts';
 import {
-  deleteGitHubInstallationMember,
   deleteGitHubInstallationMembers,
   deleteGitHubInstallationMembersByGithubAccount,
   getGitHubAccountIdForUser,
   getGitHubInstallationMembers,
-  getGitHubInstallationMembersByUser,
   getDbNowMs,
   getGitHubInstallationsByAccount,
   getInstallationRevocationAt,
@@ -153,41 +151,6 @@ describe('github_installation_members', () => {
     expect(await hasActiveInstallationMembership(env.db, '200', user.id)).toBe(false);
   });
 
-  it('getGitHubInstallationMembersByUser scopes to the user across two installs', async () => {
-    const alice = await createTestUser(env.db, 'alice');
-    const bob = await createTestUser(env.db, 'bob', 'google', 'google-bob');
-    await seedInstall(env.db, '100');
-    await seedInstall(env.db, '200');
-
-    await upsertGitHubInstallationMember(env.db, {
-      installationId: '100',
-      userId: alice.id,
-      githubAccountId: null,
-      ttlSeconds: MEMBERSHIP_TTL_SECONDS,
-    });
-    await upsertGitHubInstallationMember(env.db, {
-      installationId: '200',
-      userId: alice.id,
-      githubAccountId: null,
-      ttlSeconds: MEMBERSHIP_TTL_SECONDS,
-    });
-    await upsertGitHubInstallationMember(env.db, {
-      installationId: '100',
-      userId: bob.id,
-      githubAccountId: null,
-      ttlSeconds: MEMBERSHIP_TTL_SECONDS,
-    });
-
-    const aliceRows = await getGitHubInstallationMembersByUser(env.db, alice.id);
-    expect(aliceRows).toHaveLength(2);
-    expect(aliceRows.every((r) => r.user_id === alice.id)).toBe(true);
-    expect(new Set(aliceRows.map((r) => r.installation_id))).toEqual(new Set(['100', '200']));
-
-    const bobRows = await getGitHubInstallationMembersByUser(env.db, bob.id);
-    expect(bobRows).toHaveLength(1);
-    expect(bobRows[0]!.installation_id).toBe('100');
-  });
-
   it('getGitHubInstallationMembers scopes to one install', async () => {
     const alice = await createTestUser(env.db, 'alice');
     const bob = await createTestUser(env.db, 'bob', 'google', 'google-bob');
@@ -219,27 +182,6 @@ describe('github_installation_members', () => {
     expect(new Set(install100.map((r) => r.user_id))).toEqual(new Set([alice.id, bob.id]));
   });
 
-  it('deleteGitHubInstallationMember removes one and is a silent no-op when absent', async () => {
-    const user = await createTestUser(env.db);
-    await seedInstall(env.db, '100');
-
-    await upsertGitHubInstallationMember(env.db, {
-      installationId: '100',
-      userId: user.id,
-      githubAccountId: null,
-      ttlSeconds: MEMBERSHIP_TTL_SECONDS,
-    });
-    expect(await hasActiveInstallationMembership(env.db, '100', user.id)).toBe(true);
-
-    await deleteGitHubInstallationMember(env.db, '100', user.id);
-    expect(await hasActiveInstallationMembership(env.db, '100', user.id)).toBe(false);
-
-    // No-op on an absent row (must not throw).
-    await deleteGitHubInstallationMember(env.db, '100', user.id);
-    await deleteGitHubInstallationMember(env.db, '999', user.id);
-    expect(await getGitHubInstallationMembers(env.db, '100')).toHaveLength(0);
-  });
-
   it('deleteGitHubInstallationMembers bulk-deletes for (installIds, user) and no-ops on empty ids', async () => {
     const alice = await createTestUser(env.db, 'alice');
     const bob = await createTestUser(env.db, 'bob', 'google', 'google-bob');
@@ -265,11 +207,19 @@ describe('github_installation_members', () => {
 
     // Empty ids: no-op (alice's rows all intact).
     await deleteGitHubInstallationMembers(env.db, [], alice.id);
-    expect(await getGitHubInstallationMembersByUser(env.db, alice.id)).toHaveLength(3);
+    expect(
+      await env.db
+        .select()
+        .from(githubInstallationMembers)
+        .where(eq(githubInstallationMembers.user_id, alice.id)),
+    ).toHaveLength(3);
 
     // Delete two of alice's three installs.
     await deleteGitHubInstallationMembers(env.db, ['100', '200'], alice.id);
-    const aliceLeft = await getGitHubInstallationMembersByUser(env.db, alice.id);
+    const aliceLeft = await env.db
+      .select()
+      .from(githubInstallationMembers)
+      .where(eq(githubInstallationMembers.user_id, alice.id));
     expect(aliceLeft).toHaveLength(1);
     expect(aliceLeft[0]!.installation_id).toBe('300');
 

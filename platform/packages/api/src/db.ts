@@ -5849,18 +5849,6 @@ export async function hasActiveInstallationMembership(
   return rows.length > 0;
 }
 
-/** All cached memberships for a user, newest verification first. */
-export async function getGitHubInstallationMembersByUser(
-  db: Db,
-  userId: string,
-): Promise<ReadonlyArray<GitHubInstallationMember>> {
-  return db
-    .select()
-    .from(githubInstallationMembers)
-    .where(eq(githubInstallationMembers.user_id, userId))
-    .orderBy(desc(githubInstallationMembers.verified_at));
-}
-
 /** All cached members of an installation, newest verification first. */
 export async function getGitHubInstallationMembers(
   db: Db,
@@ -5871,22 +5859,6 @@ export async function getGitHubInstallationMembers(
     .from(githubInstallationMembers)
     .where(eq(githubInstallationMembers.installation_id, installationId))
     .orderBy(desc(githubInstallationMembers.verified_at));
-}
-
-/** Remove one cached membership. Silent no-op when the row is absent. */
-export async function deleteGitHubInstallationMember(
-  db: Db,
-  installationId: string,
-  userId: string,
-): Promise<void> {
-  await db
-    .delete(githubInstallationMembers)
-    .where(
-      and(
-        eq(githubInstallationMembers.installation_id, installationId),
-        eq(githubInstallationMembers.user_id, userId),
-      ),
-    );
 }
 
 /**
