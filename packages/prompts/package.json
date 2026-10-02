@@ -1,0 +1,16 @@
+{
+  "name": "@void/prompts",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "types": "./index.d.mts",
+    "default": "./index.mjs"
+  },
+  "dependencies": {
+    "@clack/core": "1.5.1",
+    "picocolors": "^1.1.1",
+    "sisteransi": "^1.0.5"
+  }
+}

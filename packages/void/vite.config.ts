@@ -186,6 +186,7 @@ export default defineConfig({
         'es-module-lexer',
         'magic-string',
         '@jridgewell/sourcemap-codec',
+        '@void/prompts',
         '@clack/prompts',
         '@clack/core',
         'fast-string-truncated-width',

@@ -89,6 +89,8 @@ export default defineConfig({
       sortScripts: true,
     },
     ignorePatterns: [
+      'packages/prompts/index.mjs',
+      'packages/prompts/index.d.mts',
       '.svelte-kit/**',
       'packages/void/docs/**',
       'packages/void/skills/void/docs/**',
@@ -124,6 +126,8 @@ export default defineConfig({
     ],
     plugins: ['typescript', 'import', 'react', 'unicorn', 'vitest', 'node', 'jsdoc'],
     ignorePatterns: [
+      'packages/prompts/index.mjs',
+      'packages/prompts/index.d.mts',
       '**/node_modules/**',
       '**/dist/**',
       '**/.void/**',
