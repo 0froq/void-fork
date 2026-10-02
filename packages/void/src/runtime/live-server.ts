@@ -457,7 +457,11 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
           }
           const response = outcome.value;
           const items = batch[index]![1];
-          if (!response || response.status === 410 || response.status === 404) {
+          // A missed delivery does not prove the still-open SSE connection is gone.
+          if (!response) {
+            continue;
+          }
+          if (response.status === 410 || response.status === 404) {
             await this.state.storage.delete(items.map((item) => item.key));
             continue;
           }
@@ -527,7 +531,10 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
           }
           const response = outcome.value;
           const items = batch[index]![1];
-          if (!response || response.status === 410 || response.status === 404) {
+          if (!response) {
+            continue;
+          }
+          if (response.status === 410 || response.status === 404) {
             staleKeys.push(...items.map((item) => item.key));
             continue;
           }

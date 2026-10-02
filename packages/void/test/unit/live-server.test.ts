@@ -163,6 +163,69 @@ describe('live Durable Object runtime', () => {
     expect(Date.now() - startedAt).toBeLessThan(1_000);
   });
 
+  it.each([
+    ['/deliver', 'timeout'],
+    ['/deliver', 'error'],
+    ['/deliver', '503'],
+    ['/check', 'timeout'],
+    ['/check', 'error'],
+    ['/check', '503'],
+  ])('keeps subscriptions after a transient %s %s', async (path, failure) => {
+    let failing = false;
+    const harness = createHarness({
+      fetch(_name, request) {
+        if (failing && new URL(request.url).pathname === path) {
+          if (failure === 'timeout') {
+            return new Promise<Response>(() => {});
+          }
+          if (failure === 'error') {
+            return Promise.reject(new Error('temporarily unavailable'));
+          }
+          return Promise.resolve(new Response('unavailable', { status: 503 }));
+        }
+      },
+    });
+    const connectionId = 'connection-transient-0001';
+    const connection = harness.stub(`live:app:connection:${connectionId}`);
+    const message = { streamId: 'app', connectionId, owner: 'user:1', limits: LIMITS };
+    const response = await connection.fetch(jsonRequest('/connect', message));
+    const reader = response.body!.getReader();
+    await readFrame(reader);
+    try {
+      await connection.fetch(
+        jsonRequest('/control', {
+          ...message,
+          operations: [{ kind: 'subscribe', id: 'card', topic: 'post:12' }],
+        }),
+      );
+      const topicName = `live:app:topic:${await topicDigest('app', 'post:12')}`;
+      failing = true;
+      vi.useFakeTimers();
+      const operation =
+        path === '/check'
+          ? harness.alarm(topicName)
+          : harness.stub(topicName).fetch(
+              jsonRequest('/publish', {
+                streamId: 'app',
+                topic: 'post:12',
+                topicKey: await topicDigest('app', 'post:12'),
+                data: 'missed',
+                limits: LIMITS,
+              }),
+            );
+      await vi.advanceTimersByTimeAsync(1_501);
+      await operation;
+      vi.useRealTimers();
+      expect(await harness.subscriberCount(topicName)).toBe(1);
+      failing = false;
+      await harness.publish('app', 'post:12', { title: 'Recovered' });
+      expect(parseData(await readFrame(reader))).toMatchObject({ data: { title: 'Recovered' } });
+    } finally {
+      vi.useRealTimers();
+      await reader.cancel();
+    }
+  });
+
   it('fans out publish deliveries six at a time and prunes missing connections', async () => {
     const pending: Array<(response: Response) => void> = [];
     let calls = 0;
