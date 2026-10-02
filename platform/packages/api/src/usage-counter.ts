@@ -444,13 +444,20 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
       plan: string;
       userId: string;
     };
+    const incomingPeriodStart = Date.parse(body.billingPeriodStart);
+    if (!Number.isFinite(incomingPeriodStart)) {
+      return Response.json({ error: 'invalid billing period' }, { status: 400 });
+    }
     const state = await this.getState();
     if (body.userId) {
       state.ownerUserId = body.userId;
     }
 
-    // Only act if billingPeriodStart differs
-    if (state.billingPeriodStart === body.billingPeriodStart) {
+    // A delayed scheduler snapshot must not rewind an already advanced ledger.
+    if (
+      state.billingPeriodInitialized &&
+      incomingPeriodStart <= Date.parse(state.billingPeriodStart)
+    ) {
       return Response.json({
         rolled: false,
         unsuspendRequests: false,
@@ -487,6 +494,10 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
       projectOwnershipStarts?: Record<string, string>;
       userId?: string;
     };
+    const incomingPeriodStart = Date.parse(body.billingPeriodStart);
+    if (!Number.isFinite(incomingPeriodStart)) {
+      return Response.json({ error: 'invalid billing period' }, { status: 400 });
+    }
     const state = await this.getState();
     if (body.userId) {
       state.ownerUserId = body.userId;
@@ -500,6 +511,23 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
       (projectId) => !(projectId in body.projectSlugs),
     );
     const db = createDb(this.env.HYPERDRIVE.connectionString);
+    const currentPeriodStart = Date.parse(state.billingPeriodStart);
+    if (!state.billingPeriodInitialized) {
+      state.billingPeriodStart = body.billingPeriodStart;
+      state.billingPeriodInitialized = true;
+    } else if (!Number.isFinite(currentPeriodStart) || incomingPeriodStart > currentPeriodStart) {
+      // Plan reconciliation can precede the hourly rollover. Advance the
+      // ledger before stamping the period; never label old totals as new usage.
+      await this.advanceBillingPeriod(
+        state,
+        {
+          billingPeriodStart: body.billingPeriodStart,
+          plan: body.plan,
+          userId: state.ownerUserId ?? '',
+        },
+        true,
+      );
+    }
     await this.retainTransferredProjectWindows(db, state, removedProjectIds);
     state.projectSlugs = { ...body.projectSlugs };
     state.projectOwnershipStarts = Object.fromEntries(
@@ -510,8 +538,6 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
       }),
     );
     state.plan = body.plan;
-    state.billingPeriodStart = body.billingPeriodStart;
-    state.billingPeriodInitialized = true;
 
     // Re-suspend any newly added project slugs if user is currently suspended
     if (state.requestsSuspended) {

@@ -5,6 +5,7 @@ import type { ApiEnv } from '../../src/env.ts';
 import { app } from '../../src/index.ts';
 import { readPlanCatalog } from '../../src/plans.ts';
 import { domains, users } from '../../src/schema.ts';
+import { getCurrentBillingPeriodStart } from '../../src/tiers.ts';
 import type { CounterState } from '../../src/usage-counter.ts';
 import {
   clearTables,
@@ -46,6 +47,93 @@ async function change(path: string, body: Record<string, unknown>) {
 }
 
 describe('live plan transitions using the production quota counter', () => {
+  test.each(['requests_exceeded', 'operator_review'])(
+    'advances a prior billing period during plan reconciliation while preserving %s policy',
+    async (reason) => {
+      const owner = await createTestUser(env.db, 'rollover-owner');
+      const project = await createTestProject(env.db, owner.id, 'rollover-project');
+      const original = (await getUser(env.db, owner.id))!;
+      const currentPeriod = getCurrentBillingPeriodStart(
+        original.billing_cycle_start,
+      ).toISOString();
+      const priorPeriod = new Date(
+        Date.parse(currentPeriod) - 40 * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      await env.db.update(users).set({ suspended_reason: reason }).where(eq(users.id, owner.id));
+      await env.ROUTING.put(
+        project.slug,
+        JSON.stringify({
+          projectId: project.id,
+          userId: owner.id,
+          workerName: 'existing-worker',
+          suspended: reason,
+        }),
+      );
+      await env.ROUTING.put('ai-block:' + project.id, '1');
+      await env.ROUTING.put('sandbox-block:' + owner.id, '1');
+      counters = createUsageCounterFixture(env as unknown as ApiEnv['Bindings'], {
+        [owner.id]: {
+          ownerUserId: owner.id,
+          plan: 'free',
+          billingPeriodStart: priorPeriod,
+          billingPeriodInitialized: true,
+          totalRequests: 9000,
+          totalNeurons: 120000,
+          totalSandboxSeconds: 100,
+          requestsSuspended: true,
+          aiSuspended: true,
+          sandboxRuntimeSuspended: true,
+          projectSlugs: { [project.id]: project.slug },
+        },
+      });
+      await change('/free/set', { limits: { requestsPerMonth: 10 } });
+      const counter = counters.get(counters.idFromName(owner.id));
+      const state = await (await counter.fetch(new Request('https://do/state'))).json();
+      expect(state).toMatchObject({
+        billingPeriodStart: currentPeriod,
+        totalRequests: 0,
+        totalNeurons: 0,
+        totalSandboxSeconds: 0,
+        requestsSuspended: false,
+        aiSuspended: false,
+        sandboxRuntimeSuspended: false,
+      });
+      expect(await getUser(env.db, owner.id)).toMatchObject({
+        billing_cycle_start: original.billing_cycle_start,
+        suspended_reason: reason === 'operator_review' ? reason : null,
+      });
+      expect(JSON.parse((await env.ROUTING.get(project.slug))!)).toMatchObject({
+        workerName: 'existing-worker',
+        ...(reason === 'operator_review' ? { suspended: reason } : {}),
+      });
+      expect(await env.ROUTING.get('ai-block:' + project.id)).toBeNull();
+      expect(await env.ROUTING.get('sandbox-block:' + owner.id)).toBeNull();
+      await counter.fetch(
+        new Request('https://do/record', {
+          method: 'POST',
+          body: JSON.stringify({
+            userId: owner.id,
+            events: [
+              {
+                projectId: project.id,
+                userId: owner.id,
+                slug: project.slug,
+                requests: 3,
+                responseBytes: 0,
+              },
+            ],
+          }),
+        }),
+      );
+      await change('/free/set', { limits: { requestsPerMonth: 5 } });
+      expect(await (await counter.fetch(new Request('https://do/state'))).json()).toMatchObject({
+        totalRequests: 3,
+        billingPeriodStart: currentPeriod,
+        requestsSuspended: false,
+      });
+    },
+  );
+
   test('retains capped and unlimited usage, updates both routes, and preserves manual suspension', async () => {
     const owner = await createTestUser(env.db, 'transition-owner');
     const project = await createTestProject(env.db, owner.id, 'transition-project');

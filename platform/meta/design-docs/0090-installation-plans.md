@@ -45,6 +45,12 @@ retention does not itself delete deployments. CPU policy preserves a project's
 requested value when within the current ceiling. Settings updates require no
 platform or tenant redeploy after the feature's initial installation upgrade.
 
+When reconciliation precedes scheduled monthly rollover, counter initialization
+performs the normal rollover cleanup before advancing its billing period. It never
+relabels prior-period usage as current. Delayed initialization and scheduler
+snapshots cannot rewind the ledger or clear current-period totals. Administrator
+suspensions remain intact.
+
 ## Accounting upgrade
 
 The previous consumer skipped UsageCounter records for unlimited request plans;

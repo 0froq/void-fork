@@ -2376,6 +2376,37 @@ describe('UsageCounter durable sandbox receipts', () => {
 });
 
 describe('UsageCounter dynamic plan reconciliation', () => {
+  it('keeps current-period totals when stale initialization and rollover snapshots arrive', async () => {
+    const period = '2026-02-01T00:00:00.000Z';
+    const { counter, storage } = makeCounter({
+      billingPeriodStart: period,
+      billingPeriodInitialized: true,
+      totalRequests: 9,
+      totalSandboxSeconds: 7,
+    });
+    await counter.fetch(
+      new Request('https://do/init', {
+        method: 'POST',
+        body: JSON.stringify({
+          userId: 'u1',
+          plan: 'pro',
+          billingPeriodStart: '2026-01-01T00:00:00Z',
+          projectSlugs: {},
+        }),
+      }),
+    );
+    for (const timestamp of ['2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z']) {
+      expect(
+        await (await counter.fetch(rolloverRequest(timestamp, 'pro', 'u1'))).json(),
+      ).toMatchObject({ rolled: false });
+    }
+    expect(storage.data.get('state')).toMatchObject({
+      billingPeriodStart: period,
+      totalRequests: 9,
+      totalSandboxSeconds: 7,
+    });
+  });
+
   function reevaluate(userId = 'u1') {
     return new Request('https://do/reevaluate-limits', {
       method: 'POST',
