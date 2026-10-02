@@ -16,6 +16,38 @@ function createMockKVNamespace() {
 }
 
 describe('createKV', () => {
+  it.each([
+    '123',
+    'null',
+    'true',
+    'false',
+    '9007199254740993',
+    '{"value":1}',
+    '[1,2]',
+    '"quoted"',
+    '',
+    'plain text',
+  ])('round-trips string %j through clients, maps, and metadata reads', async (value) => {
+    const store = new Map<string, { value: string; metadata: unknown }>();
+    const namespace = {
+      async get(key: string) {
+        return store.get(key)?.value ?? null;
+      },
+      async getWithMetadata(key: string) {
+        return store.get(key) ?? { value: null, metadata: null };
+      },
+      async put(key: string, stored: string, options?: KVNamespacePutOptions) {
+        store.set(key, { value: stored, metadata: options?.metadata ?? null });
+      },
+    } as unknown as KVNamespace;
+    const client = createKV(namespace);
+    for (const kv of [client, client.map<string>('strings')]) {
+      await kv.put('key', value, { metadata: { source: 'test' } });
+      expect(await kv.get('key')).toBe(value);
+      expect(await kv.getWithMetadata('key')).toEqual({ value, metadata: { source: 'test' } });
+    }
+  });
+
   let mockNS: ReturnType<typeof createMockKVNamespace>;
   let kv: KVClient;
 
@@ -51,24 +83,24 @@ describe('createKV', () => {
       expect(mockNS.put).toHaveBeenCalledWith('user:1', '{"name":"Alice"}', {});
     });
 
-    it('stores strings as-is', async () => {
+    it('stores strings as JSON so their type survives reads', async () => {
       await kv.put('key', 'hello');
-      expect(mockNS.put).toHaveBeenCalledWith('key', 'hello', {});
+      expect(mockNS.put).toHaveBeenCalledWith('key', '"hello"', {});
     });
 
     it('passes ttl option as expirationTtl', async () => {
       await kv.put('key', 'val', { ttl: 3600 });
-      expect(mockNS.put).toHaveBeenCalledWith('key', 'val', { expirationTtl: 3600 });
+      expect(mockNS.put).toHaveBeenCalledWith('key', '"val"', { expirationTtl: 3600 });
     });
 
     it('passes expiration option', async () => {
       await kv.put('key', 'val', { expiration: 1700000000 });
-      expect(mockNS.put).toHaveBeenCalledWith('key', 'val', { expiration: 1700000000 });
+      expect(mockNS.put).toHaveBeenCalledWith('key', '"val"', { expiration: 1700000000 });
     });
 
     it('passes metadata option', async () => {
       await kv.put('key', 'val', { metadata: { role: 'admin' } });
-      expect(mockNS.put).toHaveBeenCalledWith('key', 'val', { metadata: { role: 'admin' } });
+      expect(mockNS.put).toHaveBeenCalledWith('key', '"val"', { metadata: { role: 'admin' } });
     });
   });
 

@@ -53,9 +53,6 @@ function parseValue<T>(raw: string | null): T | null {
 }
 
 function serializeValue(value: unknown): string {
-  if (typeof value === 'string') {
-    return value;
-  }
   return JSON.stringify(value);
 }
 
