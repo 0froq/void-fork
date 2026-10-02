@@ -7517,6 +7517,9 @@ export function applyDeployEvent(event: DeployEvent, s: SpinnerResult): ApplyDep
       s.message('Deploying...');
       return { kind: 'start', deploymentId: event.deploymentId };
     case 'heartbeat':
+      if (event.status === 'recovering') {
+        s.message('Recovering interrupted deployment...');
+      }
       return { kind: 'continue' };
     case 'asset_upload':
       if (event.new > 0) {
@@ -7589,6 +7592,8 @@ export async function streamDeployEvents(
 ): Promise<StreamDeployResult> {
   const startedAt = Date.now();
   let deploymentId: string | null = null;
+  let lastProgressAt = startedAt;
+  let waitNotice: string | undefined;
   let interrupted = false;
   cliLog?.info('stream_start', { projectId });
   const onSigint = () => {
@@ -7612,6 +7617,34 @@ export async function streamDeployEvents(
 
   try {
     for await (const event of events) {
+      if (event.event === 'heartbeat') {
+        const fields = {
+          deploymentId,
+          step: event.step,
+          status: event.status,
+          recoveryAt: event.recoveryAt,
+        };
+        if (event.status === 'recovering' && waitNotice !== 'recovering') {
+          log.info(
+            `Deployment ${deploymentId ?? event.deploymentId ?? ''} is recovering; waiting for its result.`,
+          );
+          cliLog?.info('deploy_recovering', fields);
+          waitNotice = 'recovering';
+        } else if (Date.now() - lastProgressAt >= 90_000 && waitNotice === undefined) {
+          log.warn(
+            `Deployment ${deploymentId ?? event.deploymentId ?? ''} has not reported new progress for 90 seconds (last reported progress: ${event.step.replaceAll('_', ' ')}).` +
+              (event.recoveryAt
+                ? ` Automatic recovery can start after ${event.recoveryAt} if execution was interrupted.`
+                : '') +
+              ' Inspect with `void project status`.',
+          );
+          cliLog?.warn('deploy_progress_stalled', fields);
+          waitNotice = 'stalled';
+        }
+      } else {
+        lastProgressAt = Date.now();
+        waitNotice = undefined;
+      }
       const result = applyDeployEvent(event, s);
       if (result.kind === 'start') {
         deploymentId = result.deploymentId;

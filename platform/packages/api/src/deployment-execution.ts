@@ -1,4 +1,4 @@
-import { and, eq, lte, ne, or, sql } from 'drizzle-orm';
+import { and, eq, getTableColumns, lte, ne, or, sql } from 'drizzle-orm';
 import { paginatedR2Delete } from './assets.ts';
 import { createDb, type Db, type DbOrTx } from './db.ts';
 import type { DeploymentInput, DeploymentOperation } from './deployment-operation-types.ts';
@@ -56,7 +56,14 @@ export async function deploymentExecutionStatus(db: Db, installationId?: string)
 
 export async function getDeploymentOperation(db: DbOrTx, id: string) {
   const [operation] = await db
-    .select()
+    .select({
+      ...getTableColumns(deploymentOperations),
+      // The stored lease is a timestamp without time zone. Resolve it in the
+      // SQL session's zone so observers receive an unambiguous UTC instant.
+      lease_expires_at: sql<string | null>`to_char(
+        ${deploymentOperations.lease_expires_at} AT TIME ZONE current_setting('TimeZone') AT TIME ZONE 'UTC',
+        'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
+    })
     .from(deploymentOperations)
     .where(eq(deploymentOperations.id, id));
   return operation ?? null;
@@ -187,6 +194,20 @@ export function deploymentEventPage(operation: DeploymentOperation, since: numbe
     events,
     lastSeq,
     terminal: operation.status === 'terminal' && lastSeq >= operation.last_seq,
+    ...(operation.status !== 'terminal' && {
+      heartbeat: {
+        event: 'heartbeat' as const,
+        deploymentId: operation.id,
+        step:
+          operation.status === 'recovering'
+            ? 'recovery'
+            : (operation.events.at(-1)?.event.event ?? 'queued'),
+        status: operation.status,
+        ...(operation.lease_expires_at && {
+          recoveryAt: new Date(operation.lease_expires_at).toISOString(),
+        }),
+      },
+    }),
   };
 }
 
@@ -222,7 +243,7 @@ export function deploymentReceiptResponse(db: Db, id: string): Response {
             return;
           }
           if (!page.events.length) {
-            controller.enqueue(encoder.encode('{"event":"heartbeat","step":"queued"}\n'));
+            controller.enqueue(encoder.encode(`${JSON.stringify(page.heartbeat)}\n`));
           }
           timer = setTimeout(() => {
             void poll();

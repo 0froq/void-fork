@@ -277,7 +277,13 @@ export type DeployManifest = {
 
 export type DeployEvent =
   | { event: 'start'; deploymentId: string }
-  | { event: 'heartbeat'; deploymentId?: string; step: string }
+  | {
+      event: 'heartbeat';
+      deploymentId?: string;
+      step: string;
+      status?: 'queued' | 'running' | 'recovering';
+      recoveryAt?: string;
+    }
   | { event: 'asset_upload'; total: number; new: number; cached: number }
   | { event: 'asset_upload_done' }
   | { event: 'provisioning'; bindings: Array<string> }

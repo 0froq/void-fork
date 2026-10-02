@@ -35,7 +35,8 @@ jobs:
     concurrency:
       group: staging-kitchen-sink-smoke
       cancel-in-progress: false
-    timeout-minutes: 15
+    # Include the deployment observer's 30-minute deadline, builds, and HTTP tests.
+    timeout-minutes: 40
     permissions:
       contents: read
     steps:
@@ -70,6 +71,7 @@ jobs:
         id: fixture
         run: node platform/scripts/kitchen-sink-platform-fixture.ts
       - name: Deploy kitchen-sink
+        timeout-minutes: 32
         working-directory: ${{ steps.fixture.outputs.path }}
         run: node "$GITHUB_WORKSPACE/packages/void/dist/cli/cli.mjs" deploy --project kitchen-sink
         env:
@@ -78,6 +80,15 @@ jobs:
           STAGING: '1'
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_STAGING }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_STAGING }}
+      - name: Retain deployment diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: staging-deployment-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ~/.void/logs/deploy-*.jsonl
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
       - run: vp exec playwright install chromium
       - name: Reset app state
         run: |

@@ -26,6 +26,13 @@ is sequenced, bounded and authorized against current project access. A page is
 terminal only after it contains the persisted terminal result. Observation does
 not own execution; stopping observation does not cancel deployment.
 
+The stream and resumed polling share one thirty-minute observation deadline.
+Idle receipts report execution state, the last recorded progress, and the lease
+expiry as an absolute UTC instant. Heartbeats do not imply forward progress.
+The CLI reports a ninety-second progress stall once and announces recovery.
+Staging smoke tests allow time for recovery and retain deployment JSONL logs
+after success or failure.
+
 Intermediate progress writes retry once and are best effort after that. A failed
 progress write is logged without suppressing subsequent events or authoritative
 terminal settlement. An acknowledgement lost after an intermediate write may

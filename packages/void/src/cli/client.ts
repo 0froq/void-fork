@@ -525,6 +525,11 @@ const DEPLOY_EVENT_MAX_BYTES = 1024 * 1024;
 
 type SequencedDeployEvent = DeployEvent & { seq?: number };
 class DeploymentProtocolError extends Error {}
+class DeploymentObservationTimeoutError extends Error {
+  constructor(deploymentId: string) {
+    super(`Timed out observing deployment ${deploymentId}. Inspect with \`void project status\`.`);
+  }
+}
 
 function parseDeployEvent(value: unknown): SequencedDeployEvent {
   if (
@@ -541,6 +546,13 @@ function parseDeployEvent(value: unknown): SequencedDeployEvent {
   }
   if (
     (event.event === 'start' && typeof event.deploymentId !== 'string') ||
+    (event.event === 'heartbeat' &&
+      (typeof event.step !== 'string' ||
+        (event.status !== undefined &&
+          !['queued', 'running', 'recovering'].includes(event.status)) ||
+        (event.recoveryAt !== undefined &&
+          (typeof event.recoveryAt !== 'string' ||
+            !Number.isFinite(Date.parse(event.recoveryAt)))))) ||
     (event.event === 'done' &&
       (typeof event.deployment !== 'string' ||
         typeof event.url !== 'string' ||
@@ -1216,6 +1228,7 @@ export class PlatformClient {
     }
 
     const receipt = res.headers.get('x-void-deployment-id');
+    const observationDeadline = Date.now() + DEPLOY_OBSERVATION_DEADLINE_MS;
     if (receipt !== null && !/^[A-Za-z0-9_-]{1,128}$/.test(receipt)) {
       void res.body?.cancel().catch(() => {});
       throw new Error('Invalid deployment receipt from platform.');
@@ -1228,7 +1241,7 @@ export class PlatformClient {
     if (!res.body) {
       if (receipt) {
         yield { event: 'start', deploymentId: receipt };
-        yield* this.followDeploymentEvents(projectId, receipt, cursor);
+        yield* this.followDeploymentEvents(projectId, receipt, cursor, observationDeadline);
         return;
       }
       throw new Error('Platform returned no deployment event stream.');
@@ -1247,13 +1260,22 @@ export class PlatformClient {
       if (!receipt) {
         return reader.read();
       }
+      const remaining = observationDeadline - Date.now();
+      if (remaining <= 0) {
+        throw new DeploymentObservationTimeoutError(receipt);
+      }
       try {
         return await Promise.race([
           reader.read(),
           new Promise<never>((_, reject) => {
             readTimer = setTimeout(
-              () => reject(new TypeError('Deployment event stream timed out.')),
-              DEPLOY_OBSERVATION_TIMEOUT_MS,
+              () =>
+                reject(
+                  Date.now() >= observationDeadline
+                    ? new DeploymentObservationTimeoutError(receipt)
+                    : new TypeError('Deployment event stream timed out.'),
+                ),
+              Math.min(DEPLOY_OBSERVATION_TIMEOUT_MS, remaining),
             );
           }),
         ]);
@@ -1292,6 +1314,9 @@ export class PlatformClient {
       }
       while (true) {
         const { done, value } = await read();
+        if (receipt && Date.now() >= observationDeadline) {
+          throw new DeploymentObservationTimeoutError(receipt);
+        }
         if (done) {
           streamFinished = true;
           buffer += decoder.decode();
@@ -1341,6 +1366,7 @@ export class PlatformClient {
       // them behind polling, and never replay a POST that yielded a receipt.
       if (
         !receipt ||
+        err instanceof DeploymentObservationTimeoutError ||
         err instanceof DeploymentProtocolError ||
         err instanceof SyntaxError ||
         (err instanceof DOMException && err.name === 'AbortError')
@@ -1357,7 +1383,7 @@ export class PlatformClient {
       reader.releaseLock();
     }
     if (receipt && !terminal) {
-      yield* this.followDeploymentEvents(projectId, receipt, cursor);
+      yield* this.followDeploymentEvents(projectId, receipt, cursor, observationDeadline);
     }
   }
 
@@ -1365,10 +1391,10 @@ export class PlatformClient {
     projectId: string,
     deploymentId: string,
     since: number,
+    deadline: number,
   ): AsyncGenerator<DeployEvent> {
     let cursor = since;
     let failures = 0;
-    const deadline = Date.now() + DEPLOY_OBSERVATION_DEADLINE_MS;
     while (Date.now() < deadline) {
       const url = `${this.baseUrl}/projects/${encodeURIComponent(projectId)}/deployments/${encodeURIComponent(deploymentId)}/events?since=${cursor}`;
       let page: {
@@ -1376,16 +1402,22 @@ export class PlatformClient {
         events: Array<{ seq: number; event: unknown }>;
         lastSeq: number;
         terminal: boolean;
+        heartbeat?: unknown;
       };
       try {
         const response = await this.request(url, {
           headers: { ...this.authHeaders },
-          signal: AbortSignal.timeout(DEPLOY_OBSERVATION_TIMEOUT_MS),
+          signal: AbortSignal.timeout(
+            Math.max(1, Math.min(DEPLOY_OBSERVATION_TIMEOUT_MS, deadline - Date.now())),
+          ),
         });
         if (!response.ok) {
           await throwPlatformApiError('Failed to observe deployment', response, 'read');
         }
         page = (await response.json()) as typeof page;
+        if (Date.now() >= deadline) {
+          throw new DeploymentObservationTimeoutError(deploymentId);
+        }
       } catch (err) {
         const transient =
           err instanceof TypeError ||
@@ -1396,7 +1428,7 @@ export class PlatformClient {
         }
         const delayMs = DEPLOY_OBSERVATION_BACKOFF_MS[failures++];
         this.cliLog?.warn('deploy_observation_retry', { deploymentId, cursor, delayMs });
-        await sleep(delayMs);
+        await sleep(Math.min(delayMs, Math.max(0, deadline - Date.now())));
         continue;
       }
       failures = 0;
@@ -1439,11 +1471,19 @@ export class PlatformClient {
       if (page.terminal) {
         throw new Error('Platform finished deployment without a terminal result.');
       }
-      await sleep(1000);
+      if (page.heartbeat !== undefined) {
+        const heartbeat = parseDeployEvent(page.heartbeat);
+        if (
+          heartbeat.event !== 'heartbeat' ||
+          (heartbeat.deploymentId !== undefined && heartbeat.deploymentId !== deploymentId)
+        ) {
+          throw new DeploymentProtocolError('Invalid deployment observation heartbeat.');
+        }
+        yield heartbeat;
+      }
+      await sleep(Math.min(1000, Math.max(0, deadline - Date.now())));
     }
-    throw new Error(
-      `Timed out observing deployment ${deploymentId}. Inspect with \`void project status\`.`,
-    );
+    throw new DeploymentObservationTimeoutError(deploymentId);
   }
 
   async listSecrets(projectId: string): Promise<Array<{ name: string }>> {

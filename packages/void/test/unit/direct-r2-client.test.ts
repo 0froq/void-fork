@@ -701,6 +701,130 @@ describe('PlatformClient.finalizeDeploy', () => {
     }
   });
 
+  it('bounds an open deployment stream even while heartbeats continue', async () => {
+    vi.useFakeTimers();
+    const cancel = vi.fn();
+    let reads = 0;
+    const startedAt = Date.now();
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          vi.setSystemTime(startedAt + reads++ * 15 * 60_000);
+          controller.enqueue(
+            new TextEncoder().encode('{"event":"heartbeat","step":"queue_setup"}\n'),
+          );
+          // Close this finite fixture so a missing deadline produces a failed
+          // assertion instead of hanging the regression test indefinitely.
+          if (reads === 4) {
+            controller.close();
+          }
+        },
+        cancel,
+      },
+      { highWaterMark: 0 },
+    );
+    fetchMock.mockResolvedValueOnce(
+      new Response(stream, { headers: { 'x-void-deployment-id': 'dpl_durable' } }),
+    );
+    fetchMock.mockResolvedValueOnce(eventPage([{ seq: 1, event: durableDone }]));
+    try {
+      await expect(collectDeploy()).rejects.toThrow('Timed out observing deployment dpl_durable');
+      expect(deployPostCalls()).toHaveLength(1);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the original observation deadline when reconnecting after a long stream', async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const response = new Response(
+      new ReadableStream(
+        {
+          pull(controller) {
+            vi.setSystemTime(startedAt + 29 * 60_000);
+            controller.close();
+          },
+        },
+        { highWaterMark: 0 },
+      ),
+      { headers: { 'x-void-deployment-id': 'dpl_durable' } },
+    );
+    let polls = 0;
+    fetchMock.mockResolvedValueOnce(response).mockImplementation(async () => {
+      vi.setSystemTime(startedAt + 30 * 60_000);
+      return polls++ === 0 ? eventPage([], false) : eventPage([{ seq: 1, event: durableDone }]);
+    });
+    try {
+      const assertion = expect(collectDeploy()).rejects.toThrow(
+        'Timed out observing deployment dpl_durable',
+      );
+      await vi.runAllTimersAsync();
+      await assertion;
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(deployPostCalls()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports recovery heartbeats after reconnecting to a deployment receipt', async () => {
+    vi.useFakeTimers();
+    const heartbeat = {
+      event: 'heartbeat',
+      deploymentId: 'dpl_durable',
+      status: 'recovering',
+      step: 'recovery',
+      recoveryAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    fetchMock
+      .mockResolvedValueOnce(durableResponse([]))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          deploymentId: 'dpl_durable',
+          events: [],
+          lastSeq: 0,
+          terminal: false,
+          heartbeat,
+        }),
+      )
+      .mockResolvedValueOnce(eventPage([{ seq: 1, event: durableDone }]));
+    try {
+      const result = collectDeploy();
+      await vi.runAllTimersAsync();
+      expect(await result).toEqual([
+        { event: 'start', deploymentId: 'dpl_durable' },
+        heartbeat,
+        durableDone,
+      ]);
+      expect(deployPostCalls()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    { event: 'done' },
+    { event: 'heartbeat', step: 'recovery', deploymentId: 'dpl_other' },
+    { event: 'heartbeat', step: 'recovery', status: 'invalid' },
+    { event: 'heartbeat', step: 'recovery', recoveryAt: 'invalid' },
+  ])('rejects invalid recovery metadata without resubmitting deployment: %j', async (heartbeat) => {
+    fetchMock.mockResolvedValueOnce(durableResponse([])).mockResolvedValueOnce(
+      jsonResponse({
+        deploymentId: 'dpl_durable',
+        events: [],
+        lastSeq: 0,
+        terminal: false,
+        heartbeat,
+      }),
+    );
+    await expect(collectDeploy()).rejects.toThrow(/Invalid deployment/);
+    expect(deployPostCalls()).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('cancels and releases an open response after terminal delivery', async () => {
     const cancel = vi.fn();
     const stream = new ReadableStream<Uint8Array>({

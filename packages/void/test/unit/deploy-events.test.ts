@@ -75,6 +75,11 @@ function createMockSpinner() {
 }
 
 describe('applyDeployEvent', () => {
+  it('shows interrupted deployment recovery from a heartbeat', () => {
+    const { spinner, calls } = createMockSpinner();
+    applyDeployEvent({ event: 'heartbeat', step: 'recovery', status: 'recovering' }, spinner);
+    expect(calls.message).toEqual(['Recovering interrupted deployment...']);
+  });
   it('shows queue_setup progress message so the user sees it mid-deploy', async () => {
     const { spinner, calls } = createMockSpinner();
     const result = applyDeployEvent(
@@ -187,6 +192,56 @@ describe('applyDeployEvent', () => {
     expect(result).toEqual({ kind: 'error', message: 'bad things' });
     expect(calls.stop[0]).toBe('Deploy failed');
   });
+});
+
+it('explains stalled deployment progress once and reports recovery without claiming completion', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const { log } = await import('@clack/prompts');
+  const warn = log.warn as ReturnType<typeof vi.fn>;
+  const info = log.info as ReturnType<typeof vi.fn>;
+  warn.mockClear();
+  info.mockClear();
+  const { spinner } = createMockSpinner();
+  const { logger, calls } = createMockCliLog();
+  const recoveryAt = new Date(Date.now() + 18 * 60_000).toISOString();
+  async function* events(): AsyncGenerator<DeployEvent> {
+    yield { event: 'start', deploymentId: 'dpl_stalled' };
+    yield { event: 'queue_setup', queues: ['demo-queue'] };
+    vi.setSystemTime(Date.now() + 90_000);
+    yield { event: 'heartbeat', step: 'queue_setup', status: 'running', recoveryAt };
+    yield { event: 'heartbeat', step: 'queue_setup', status: 'running', recoveryAt };
+    yield { event: 'heartbeat', step: 'recovery', status: 'recovering', recoveryAt };
+    yield { event: 'heartbeat', step: 'recovery', status: 'recovering', recoveryAt };
+    yield {
+      event: 'done',
+      deployment: 'dpl_stalled',
+      url: 'https://app.test',
+      urls: [],
+      assets: 0,
+      workers: 1,
+    };
+  }
+  try {
+    expect(await streamDeployEvents('proj_test', events(), spinner, logger)).toMatchObject({
+      deployment: 'dpl_stalled',
+    });
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0][0]).toContain('dpl_stalled');
+    expect(warn.mock.calls[0][0]).toContain(recoveryAt);
+    expect(info).toHaveBeenCalledOnce();
+    expect(info.mock.calls[0][0]).toContain('recovering');
+    expect(calls.warn).toContainEqual({
+      msg: 'deploy_progress_stalled',
+      fields: expect.objectContaining({
+        deploymentId: 'dpl_stalled',
+        step: 'queue_setup',
+        status: 'running',
+        recoveryAt,
+      }),
+    });
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 describe('streamDeployEvents', () => {

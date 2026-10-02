@@ -511,6 +511,58 @@ describe('durable deployment admission and observation', () => {
     });
   });
 
+  it.each(['queued', 'running', 'recovering'] as const)(
+    'reports %s execution and recovery timing to deployment observers',
+    async (status) => {
+      const id = await admit();
+      const recoveryAt = new Date(Date.now() + 18 * 60_000).toISOString();
+      const started = status !== 'queued';
+      await env.db
+        .update(deploymentOperations)
+        .set({
+          status,
+          lease_expires_at: started
+            ? sql`${recoveryAt}::timestamptz AT TIME ZONE current_setting('TimeZone')`
+            : null,
+          events: started
+            ? [{ seq: 1, event: { event: 'queue_setup', queues: ['demo-queue'] } }]
+            : [],
+          last_seq: started ? 1 : 0,
+        })
+        .where(eq(deploymentOperations.id, id));
+      const page = await (await getEvents(id, started ? 1 : 0)).json();
+      expect(page).toMatchObject({
+        events: [],
+        terminal: false,
+        heartbeat: {
+          event: 'heartbeat',
+          deploymentId: id,
+          status,
+          step: status === 'recovering' ? 'recovery' : started ? 'queue_setup' : 'queued',
+          ...(started && { recoveryAt }),
+        },
+      });
+    },
+  );
+
+  it('reports execution state in a streamed receipt heartbeat', async () => {
+    const id = await admit();
+    const response = execution.deploymentReceiptResponse(env.db, id);
+    const reader = response.body!.getReader();
+    try {
+      const first = await reader.read();
+      expect(JSON.parse(new TextDecoder().decode(first.value))).toEqual({
+        event: 'heartbeat',
+        deploymentId: id,
+        step: 'queued',
+        status: 'queued',
+      });
+    } finally {
+      await reader.cancel();
+      reader.releaseLock();
+    }
+  });
+
   it('protects observation with project authorization and rejects a receipt under another owned project', async () => {
     const id = await admit();
     const other = await createTestUser(env.db, 'other-observer');
