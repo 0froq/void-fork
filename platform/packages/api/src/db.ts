@@ -2930,10 +2930,6 @@ export async function promoteEmailDestinationWithOwnerAudit(
 
 // --- Deletion ---
 
-export async function deleteProject(db: Db, id: string): Promise<void> {
-  await db.delete(projects).where(eq(projects.id, id));
-}
-
 export type ProjectCleanupJobInput = typeof projectCleanupJobs.$inferInsert;
 
 export function cleanupJobsForResource(
@@ -3237,17 +3233,6 @@ export async function suspendUser(db: Db, id: string, reason: string): Promise<v
 
 export async function unsuspendUser(db: Db, id: string): Promise<void> {
   await db.update(users).set({ suspended_reason: null }).where(eq(users.id, id));
-}
-
-export async function updateUserRole(db: Db, id: string, role: 'user' | 'admin'): Promise<void> {
-  const update = async (target: Db) => {
-    await target.update(users).set({ role }).where(eq(users.id, id));
-  };
-  if (role === 'user') {
-    await withAdminRemovalGuard(db, id, update);
-  } else {
-    await update(db);
-  }
 }
 
 export async function deleteUser(db: Db, id: string): Promise<ReadonlyArray<TerminatedBuild>> {

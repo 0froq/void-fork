@@ -16,7 +16,6 @@ import {
   LastAdminError,
   prepareUserRemoval,
   suspendUser,
-  updateUserRole,
 } from '../../src/db.ts';
 import { app } from '../../src/index.ts';
 import { resources, users } from '../../src/schema.ts';
@@ -124,7 +123,9 @@ describe('last active administrator protection', () => {
 
   test('guards low-level deletion, demotion, and manual suspension but permits usage enforcement', async () => {
     await expect(deleteUser(env.db, admin.id)).rejects.toBeInstanceOf(LastAdminError);
-    await expect(updateUserRole(env.db, admin.id, 'user')).rejects.toBeInstanceOf(LastAdminError);
+    await expect(prepareUserRemoval(env.db, admin.id, { kind: 'delete' })).rejects.toBeInstanceOf(
+      LastAdminError,
+    );
     await expect(suspendUser(env.db, admin.id, 'admin_suspended')).rejects.toBeInstanceOf(
       LastAdminError,
     );
