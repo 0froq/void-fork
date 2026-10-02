@@ -117,68 +117,17 @@ If your platform supports managed GitHub builds, the Void GitHub App can build a
 
 You don't need a deployment workflow file or a repository `VOID_TOKEN` for this path.
 
-1. Initialize your Void project
+With a linked project, connect the repository:
 
-```bash
-void init
-# Or, for existing Void project:
-void project link
-```
-
-2. Install the Void GitHub app
-
-```bash
+```sh
 void github install
-```
-
-Void opens GitHub so you can install and authorize the `Void Deploy` app.
-
-In the browser, select the GitHub account/organization and grant access to the repository.
-
-:::details If someone already installed the App for your organization
-Join that installation instead:
-
-```bash
-void github join
-```
-
-:::
-
-3. Link your repository to your project
-
-```bash
 void github connect --executor container
-```
-
-Organization installations always require a browser proof for the specific repository, including for the person who installed the App. Void does not reveal the installation's full private repository list.
-
-4. Verify the connection
-
-```bash
 void github status
 ```
 
-The output shows the repository, branch, and build executor:
+If your organization already installed the App, Void can join that installation during setup. Organization repositories require browser authorization.
 
-```bash
-Repository      <owner/repository>
-Branch          main
-Build executor  container
-Deploy workflow .github/workflows/void-deploy.yml (unused for container builds)
-
-```
-
-5. Push to the configured branch to trigger a new deploy
-
-```bash
-git push origin main
-```
-
-6. Follow the build
-
-```bash
-void build logs --follow
-```
+Push to the configured branch to deploy, then follow progress with `void build logs --follow`. See [GitHub commands](../reference/cli.md#github) for installation sharing and connection options.
 
 ### GitHub Actions
 
@@ -192,8 +141,7 @@ on:
   push:
     branches: [main]
 
-# Latest push wins: a newer commit cancels an in-flight deploy for the same
-# repo + branch, so an older commit can never overtake a newer one.
+# Cancel an older deploy when a new push arrives.
 concurrency:
   group: void-deploy-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: true
@@ -242,6 +190,6 @@ See the [Cloudflare guide](../integrations/cloudflare.md#deploy-to-your-own-clou
 
 Set [`target`](../reference/config.md#target) in `void.config.ts` to build a standalone server for Node.js, Bun, or Deno. You can run the result on your own server or in a container.
 
-Deploy `dist/ssr` and `dist/client` together. The server loads the Pages client manifest and assets relative to its emitted module; start it from the app root with `node dist/ssr/index.js`, `bun dist/ssr/index.js`, or `deno run -A dist/ssr/index.js`.
+Deploy `dist/ssr` and `dist/client` together. See the target guide for startup commands.
 
 These targets don't provide Cloudflare bindings such as D1, KV, R2, and Workers AI. See the [Node.js, Bun, and Deno guide](../integrations/nodejs-bun-deno.md) for the features available on each target.
