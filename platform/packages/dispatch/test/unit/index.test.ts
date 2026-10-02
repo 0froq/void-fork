@@ -3209,7 +3209,17 @@ describe('ISR JSON edge cache (pages protocol)', () => {
       'https://my-app.void.app/dashboard?__void=json&__void_isr=legacy',
     );
     expect(jsonCached).toBeDefined();
-    expect(await jsonCached!.text()).toBe(pageData);
+    expect(jsonCached!.headers.get('X-VoidPages')).toBe('true');
+    expect(jsonCached!.headers.get('Vary')).toBe('X-VoidPages');
+    const navigation = await app.fetch(
+      new Request('https://my-app.void.app/dashboard', { headers: { 'X-VoidPages': 'true' } }),
+      env,
+      createCtx(),
+    );
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(navigation.headers.get('X-VoidPages')).toBe('true');
+    expect(navigation.headers.get('Vary')).toBe('X-VoidPages');
+    expect(await navigation.json()).toEqual(JSON.parse(pageData));
   });
 
   it('background revalidation populates JSON edge cache', async () => {
@@ -3243,6 +3253,8 @@ describe('ISR JSON edge cache (pages protocol)', () => {
       'https://my-app.void.app/dashboard?__void=json&__void_isr=legacy',
     );
     expect(jsonCached).toBeDefined();
+    expect(jsonCached!.headers.get('X-VoidPages')).toBe('true');
+    expect(jsonCached!.headers.get('Vary')).toBe('X-VoidPages');
     expect(await jsonCached!.text()).toBe(pageData);
     expect(jsonCached!.headers.get('x-isr-cache')).toBe('HIT');
   });

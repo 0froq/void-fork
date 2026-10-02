@@ -192,6 +192,8 @@ function jsonCacheResponse(pageData: string, ttl: number, state: 'HIT' | 'MISS')
   const response = new Response(pageData, {
     headers: {
       'content-type': 'application/json',
+      'X-VoidPages': 'true',
+      Vary: 'X-VoidPages',
       'Cache-Control': `public, s-maxage=${ttl}, max-age=0, must-revalidate`,
       'x-isr-cache': state,
     },
