@@ -495,10 +495,12 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
             `platform: Could not verify the database user for existing Hyperdrive ${selected.name}.`,
           );
         }
-        note(
-          `Database: ${live.origin.database}\nHost: ${live.origin.host}\nPort: ${live.origin.port ?? 'configured by Cloudflare Tunnel'}\nUser: ${live.origin.user}\nSQL result caching: ${live.cachingDisabled ? 'disabled' : 'enabled'}`,
-          `Existing Hyperdrive ${live.name}`,
-        );
+        if (!args.hyperdrive) {
+          note(
+            `Database: ${live.origin.database}\nHost: ${live.origin.host}\nPort: ${live.origin.port ?? 'configured by Cloudflare Tunnel'}\nUser: ${live.origin.user}\nSQL result caching: ${live.cachingDisabled ? 'disabled' : 'enabled'}`,
+            `Existing Hyperdrive ${live.name}`,
+          );
+        }
         if (!live.cachingDisabled) {
           throw new Error(
             `platform: Disable SQL result caching on existing Hyperdrive ${live.name} before installing.`,

@@ -184,6 +184,10 @@ describe('interactive platform installation prompts', () => {
     expect(mocks.select).not.toHaveBeenCalled();
     expect(mocks.multiselect).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(mocks.note).not.toHaveBeenCalledWith(
+      expect.any(String),
+      'Existing Hyperdrive company-managed-postgres',
+    );
     expect(PlatformCloudflareClient.prototype.getHyperdriveConfig).toHaveBeenCalledWith(
       'account',
       'terraform-id',
