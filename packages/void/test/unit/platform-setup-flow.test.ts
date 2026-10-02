@@ -818,7 +818,8 @@ describe('platform credential onboarding', () => {
     );
     expect(mocks.text).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: 'Custom API hostname. Leave empty for workers.dev:',
+        message:
+          'Where do you want to host the Void Platform API? Leave empty for a workers.dev fallback.',
       }),
     );
     const draft = listInstallationManifests()[0]!;
@@ -898,7 +899,9 @@ describe('platform credential onboarding', () => {
     expect(mocks.multiselect).not.toHaveBeenCalled();
     expect(mocks.select).not.toHaveBeenCalled();
     expect(
-      mocks.text.mock.calls.some(([input]) => input.message.startsWith('Custom API hostname')),
+      mocks.text.mock.calls.some(([input]) =>
+        input.message.startsWith('Where do you want to host the Void Platform API?'),
+      ),
     ).toBe(false);
     expect(mocks.password).toHaveBeenCalled();
     expect(mocks.install).toHaveBeenCalledOnce();

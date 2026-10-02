@@ -348,9 +348,24 @@ describe('interactive platform installation prompts', () => {
       expect(prompt).not.toHaveProperty('initialValue');
       expect(prompt.validate('')).toBeUndefined();
     }
+    const apiPrompt = mocks.text.mock.calls.find(([input]) =>
+      input.message.startsWith('Where do you want to host the Void Platform API?'),
+    )![0];
+    expect(apiPrompt).toMatchObject({
+      message:
+        'Where do you want to host the Void Platform API? Leave empty for a workers.dev fallback.',
+      placeholder: 'api.apps.example.com',
+    });
+    expect(apiPrompt).not.toHaveProperty('initialValue');
+    expect(apiPrompt).not.toHaveProperty('defaultValue');
+    expect(apiPrompt.validate('')).toBeUndefined();
     expect(mocks.plan).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ zoneName: 'apps.example.com', displayName: 'team Void' }),
+      expect.objectContaining({
+        zoneName: 'apps.example.com',
+        displayName: 'team Void',
+        controlPlaneDomain: '',
+      }),
       null,
       expect.anything(),
     );
@@ -362,6 +377,13 @@ describe('interactive platform installation prompts', () => {
   ])('skips the dedicated-zone question for testing mode: $name', async ({ flags }) => {
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, ...flags]));
     expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(mocks.text).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          'Where do you want to host the Void Platform API? Leave empty for a workers.dev fallback.',
+        placeholder: 'api.example.com',
+      }),
+    );
     expect(mocks.plan).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ workersDev: true, zoneName: '', dedicatedZone: false }),

@@ -347,7 +347,11 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     ? (recorded.controlPlane.apiHostname ?? '')
     : args.controlPlaneDomain ||
       (process.stdin.isTTY && !args.noControlPlaneDomain
-        ? await promptText('Custom API hostname. Leave empty for workers.dev:', '', true)
+        ? await promptText(
+            'Where do you want to host the Void Platform API? Leave empty for a workers.dev fallback.',
+            { placeholder: applicationDomain ? `api.${applicationDomain}` : 'api.example.com' },
+            true,
+          )
         : '');
   let dedicatedZone = recorded?.application.dedicatedZone ?? args.dedicatedZone;
   if (
