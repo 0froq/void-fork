@@ -461,6 +461,67 @@ describe('handlePageGet', () => {
 });
 
 describe('handlePageMutation', () => {
+  it.each<Record<string, string>>([
+    { origin: 'https://attacker.test' },
+    { origin: 'http://sibling.localhost', 'sec-fetch-site': 'same-site' },
+    { origin: 'null' },
+    { origin: 'http://localhost:3000' },
+    { origin: 'https://localhost' },
+    { 'sec-fetch-site': 'cross-site' },
+    { 'sec-fetch-site': 'same-site' },
+    { referer: 'https://attacker.test/form' },
+  ])('rejects cross-origin page actions before invoking application code: %j', async (headers) => {
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      const c = await createTestContext(method, '/settings', {
+        headers: { ...headers, cookie: 'session=victim' },
+      });
+      const action = vi.fn(() => new Response(null, { status: 204 }));
+      const loader = vi.fn(() => ({}));
+      const render = vi.fn(async () => '');
+      const assets = vi.fn(async () => ({ css: '', preloads: '', body: '' }));
+      const response = await handlePageMutation(
+        action,
+        loader,
+        undefined,
+        c,
+        'settings',
+        render,
+        assets,
+      );
+      expect(response.status).toBe(403);
+      expect(action).not.toHaveBeenCalled();
+      expect(loader).not.toHaveBeenCalled();
+      expect(render).not.toHaveBeenCalled();
+      expect(assets).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each<Record<string, string>>([
+    { origin: 'http://localhost', 'sec-fetch-site': 'same-origin' },
+    { 'sec-fetch-site': 'same-origin' },
+    { referer: 'http://localhost/form' },
+    {},
+  ])(
+    'allows same-origin browser actions and requests without browser metadata: %j',
+    async (headers) => {
+      const c = await createTestContext('POST', '/settings', {
+        headers: headers,
+      });
+      const action = vi.fn(() => Response.redirect('http://localhost/settings', 303));
+      const response = await handlePageMutation(
+        action,
+        undefined,
+        undefined,
+        c,
+        'settings',
+        mockRenderFn,
+        mockGetAssetTags,
+      );
+      expect(response.status).toBe(303);
+      expect(action).toHaveBeenCalledOnce();
+    },
+  );
+
   it('void return — re-runs GET, returns fresh props', async () => {
     const c = await createTestContext('POST', '/users', {
       headers: { 'x-voidpages': 'true' },

@@ -509,7 +509,29 @@ export async function handlePageGet(
   );
 }
 
-/** Handle POST/PUT/DELETE page request — run mutation, then re-run GET or redirect */
+function isSameOriginAction(request: Request): boolean {
+  const origin = new URL(request.url).origin;
+  const suppliedOrigin = request.headers.get('Origin');
+  if (suppliedOrigin !== null) {
+    return suppliedOrigin === origin;
+  }
+  const site = request.headers.get('Sec-Fetch-Site');
+  if (site && site !== 'same-origin' && site !== 'none') {
+    return false;
+  }
+  const referer = request.headers.get('Referer');
+  if (referer !== null) {
+    try {
+      return new URL(referer).origin === origin;
+    } catch {
+      return false;
+    }
+  }
+  // Non-browser clients may omit browser-controlled origin metadata entirely.
+  return true;
+}
+
+/** Handle POST/PUT/PATCH/DELETE page request — run mutation, then re-run GET or redirect */
 export async function handlePageMutation(
   mutationHandler: PageHandler,
   getHandler: PageHandler,
@@ -521,6 +543,9 @@ export async function handlePageMutation(
   configHead?: HeadConfig,
   options?: PageRenderOptions,
 ): Promise<Response> {
+  if (!isSameOriginAction(c.req.raw)) {
+    return new Response('Cross-origin page actions are not allowed.', { status: 403 });
+  }
   const renderMode = options?.renderMode ?? 'server';
   const shared = (c.get('shared') as Record<string, unknown> | undefined) ?? {};
   const middlewareHead = c.get('headDefaults') as HeadDescriptor | undefined;
