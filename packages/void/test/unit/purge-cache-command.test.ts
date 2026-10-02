@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
 
 const tempHomes: Array<string> = [];
 const tempRoots: Array<string> = [];
@@ -17,6 +18,16 @@ function setIsolatedHome(): void {
   tempHomes.push(dir);
   process.env.HOME = dir;
   process.env.USERPROFILE = dir;
+  process.env.VOID_PLATFORM_REGISTRY_DIR = join(dir, 'registry');
+  savePlatformConnection({
+    accountId: null,
+    apiUrl: 'https://api.example.test',
+    applicationDomain: 'apps.example.test',
+    displayName: 'Test platform',
+    installationId: null,
+    kind: 'connected',
+    proxyUrl: 'https://proxy.example.test',
+  });
 }
 
 function createLinkedProject(root: string): void {
@@ -24,7 +35,11 @@ function createLinkedProject(root: string): void {
   mkdirSync(voidDir, { recursive: true });
   writeFileSync(
     join(voidDir, 'project.json'),
-    JSON.stringify({ projectId: 'proj_123', slug: 'my-app' }),
+    JSON.stringify({
+      projectId: 'proj_123',
+      slug: 'my-app',
+      platformUrl: 'https://api.example.test',
+    }),
   );
 }
 
@@ -65,6 +80,7 @@ describe('runPurgeCacheCommand', () => {
   });
 
   afterEach(() => {
+    delete process.env.VOID_PLATFORM_REGISTRY_DIR;
     delete process.env.VOID_TOKEN;
     delete process.env.VOID_API_URL;
 

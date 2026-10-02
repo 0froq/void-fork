@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
 import { runProjectCommand } from '../../src/cli/project-cmd.ts';
 
 const roots: Array<string> = [];
@@ -9,6 +10,16 @@ const roots: Array<string> = [];
 function linkedProject(): string {
   const root = mkdtempSync(join(tmpdir(), 'void-project-zero-trust-'));
   roots.push(root);
+  process.env.VOID_PLATFORM_REGISTRY_DIR = join(root, 'registry');
+  savePlatformConnection({
+    accountId: null,
+    apiUrl: 'https://api.example.test',
+    applicationDomain: 'apps.example.test',
+    displayName: 'Test platform',
+    installationId: null,
+    kind: 'connected',
+    proxyUrl: 'https://proxy.example.test',
+  });
   mkdirSync(join(root, '.void'));
   writeFileSync(
     join(root, '.void', 'project.json'),
@@ -23,6 +34,7 @@ function linkedProject(): string {
 }
 
 afterEach(() => {
+  delete process.env.VOID_PLATFORM_REGISTRY_DIR;
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();

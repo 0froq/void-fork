@@ -6470,7 +6470,7 @@ describe('build-agent parent-process secret scrub', () => {
 
       // The trusted deploy child STILL receives the token (captured into a local
       // before the parent-env delete and re-injected via the extra overrides).
-      const deploy = seen.find((s) => s.cmd === 'npx');
+      const deploy = [...seen].reverse().find((s) => s.cmd === 'npx');
       expect(deploy?.env?.VOID_TOKEN).toBe('deploy-jwt');
     } finally {
       for (const [key, value] of Object.entries(saved)) {
@@ -6541,7 +6541,7 @@ describe('build-agent nonInteractiveEnv (CI-safe child output)', () => {
         hasLocalVoid: () => true,
       });
       expect(code).toBe(0);
-      expect(seen.map((s) => s.cmd)).toEqual(['npm', 'npx']);
+      expect(seen.map((s) => s.cmd)).toEqual(['npm', 'npx', 'npx']);
       for (const child of seen) {
         expect(child.env?.CI).toBe('true');
       }
@@ -6625,7 +6625,7 @@ describe('build-agent non-root child isolation', () => {
       expect(install?.env?.COREPACK_HOME).toBe('/home/builder/.cache/node/corepack');
       expect(install?.env?.BUN_INSTALL).toBe('/home/builder/.bun');
 
-      const deploy = seen.find((s) => s.cmd === 'npx');
+      const deploy = [...seen].reverse().find((s) => s.cmd === 'npx');
       expect(deploy?.env?.HOME).toBe('/home/builder');
       // The builder cache env must NOT clobber the re-injected deploy token.
       expect(deploy?.env?.VOID_TOKEN).toBe('deploy-jwt');
@@ -6844,6 +6844,35 @@ describe('build-agent lifecycle (container must always exit)', () => {
     expect(runChild).toHaveBeenCalledTimes(1);
   });
 
+  it.each([0, 19])(
+    'connects before deploy and stops if connection fails (exit %s)',
+    async (connectExit) => {
+      const runChild = vi.fn(
+        async (_cmd: string, args: ReadonlyArray<string>, _opts?: { env?: NodeJS.ProcessEnv }) =>
+          args.includes('connect') ? connectExit : 0,
+      );
+      const code = await runBuild({
+        downloadSource: vi.fn(async () => {}),
+        resolveInstall: () => ({ manager: 'npm', cmd: 'npm', args: ['ci'] }),
+        runChild,
+        reportStatus: vi.fn(async () => {}),
+        hasLocalVoid: () => true,
+      });
+      expect(code).toBe(connectExit);
+      const calls = runChild.mock.calls;
+      expect(calls[1]?.[1]).toEqual([
+        '--yes',
+        'void',
+        'connect',
+        'https://api.void.cloud',
+        '--no-login',
+      ]);
+      expect(calls[1]?.[2]?.env?.VOID_TOKEN).toBeUndefined();
+      expect(calls[1]?.[2]?.env?.VOID_ACCESS_ORIGIN).toBe('https://api.void.cloud');
+      expect(calls.some(([, args]) => args.includes('deploy'))).toBe(connectExit === 0);
+    },
+  );
+
   it('passes VOID_TOKEN to the DEPLOY child but NOT the INSTALL child', async () => {
     // Capture the env each spawned child receives. runChild is called first for
     // the install (cmd !== 'npx'), then for the deploy (cmd === 'npx').
@@ -6865,7 +6894,7 @@ describe('build-agent lifecycle (container must always exit)', () => {
     expect(code).toBe(0);
 
     const install = seen.find((s) => s.cmd === 'npm');
-    const deploy = seen.find((s) => s.cmd === 'npx');
+    const deploy = [...seen].reverse().find((s) => s.cmd === 'npx');
     expect(install).toBeDefined();
     expect(deploy).toBeDefined();
     // The untrusted install (postinstall scripts) must NOT see the deploy token.
@@ -6896,7 +6925,7 @@ describe('build-agent lifecycle (container must always exit)', () => {
       });
       expect(code).toBe(0);
 
-      const deploy = seen.find((s) => s.cmd === 'npx');
+      const deploy = [...seen].reverse().find((s) => s.cmd === 'npx');
       expect(deploy).toBeDefined();
       expect(deploy?.args).toContain('void@0.9.1');
       expect(deploy?.args.some((a) => a === 'void@latest')).toBe(false);

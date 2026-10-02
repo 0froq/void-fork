@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
 
 const tempHomes: Array<string> = [];
 const mockGetToken = vi.fn<() => string | null>();
@@ -16,6 +17,16 @@ function setIsolatedHome(): void {
   tempHomes.push(dir);
   process.env.HOME = dir;
   process.env.USERPROFILE = dir;
+  process.env.VOID_PLATFORM_REGISTRY_DIR = join(dir, 'registry');
+  savePlatformConnection({
+    accountId: null,
+    apiUrl: 'https://api.example.test',
+    applicationDomain: 'apps.example.test',
+    displayName: 'Test platform',
+    installationId: null,
+    kind: 'connected',
+    proxyUrl: 'https://proxy.example.test',
+  });
 }
 
 function createProjectRoot(opts?: { staging?: boolean }): string {
@@ -66,6 +77,7 @@ describe('runProjectsCommand', () => {
   });
 
   afterEach(() => {
+    delete process.env.VOID_PLATFORM_REGISTRY_DIR;
     delete process.env.VOID_TOKEN;
     delete process.env.VOID_API_URL;
 
@@ -119,10 +131,10 @@ describe('runProjectsCommand', () => {
     });
     expect(out).toContain('star-tracker');
     expect(out).toContain('owner');
-    expect(out).toContain('https://star-tracker.staging.void.app');
+    expect(out).toContain('https://star-tracker.apps.example.test');
     expect(out).toContain('todo-app');
     expect(out).toContain('collaborator');
-    expect(out).toContain('https://todo-app.staging.void.app');
+    expect(out).toContain('https://todo-app.apps.example.test');
   });
 
   it('prints a friendly message when there are no projects', async () => {

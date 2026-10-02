@@ -84,6 +84,11 @@ If none is set, Void asks you to choose a project. Direct Cloudflare deploys use
 
 ### CI preparation
 
+For a Void platform, run `void connect "$VOID_API_URL" --no-login` in each fresh
+CI environment before deployment. Set `VOID_API_URL` to the platform you selected;
+there is no default hosted platform. The generated GitHub Actions workflow
+includes this connection step.
+
 If your CI pipeline runs typechecking or other static analysis before deploy, run `void prepare` after install to generate the `.void/` artifacts without booting Vite.
 
 ### Environment variables

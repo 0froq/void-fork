@@ -10,7 +10,6 @@ const mockConfirm = vi.fn();
 const mockGetToken = vi.fn();
 const mockListProjects = vi.fn();
 const mockOutro = vi.fn();
-const mockReadLegacyHostedPlatformSelection = vi.fn();
 const mockSelect = vi.fn();
 
 const existingProject = {
@@ -45,11 +44,6 @@ vi.mock('../../src/cli/client', () => ({
       return mockListProjects(...args);
     }
   },
-}));
-
-vi.mock('../../src/cli/hosted-platform', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../src/cli/hosted-platform.ts')>()),
-  readLegacyHostedPlatformSelection: () => mockReadLegacyHostedPlatformSelection(),
 }));
 
 // Disable colors so assertions can match plain strings without ANSI escape codes.
@@ -91,8 +85,6 @@ describe('runLink', () => {
     mockGetToken.mockReset();
     mockListProjects.mockReset();
     mockOutro.mockReset();
-    mockReadLegacyHostedPlatformSelection.mockReset();
-    mockReadLegacyHostedPlatformSelection.mockReturnValue(null);
     mockSelect.mockReset();
   });
 
@@ -126,31 +118,6 @@ describe('runLink', () => {
     expect(stripVTControlCharacters(String(mockOutro.mock.calls[0]?.[0]))).toBe(
       'Linked to existing-app.void.app',
     );
-  });
-
-  it('links through a legacy Void Cloud selection without reconnecting', async () => {
-    const { runLink } = await import('../../src/cli/link.ts');
-    rmSync(join(root, 'registry'), { force: true, recursive: true });
-    mockReadLegacyHostedPlatformSelection.mockReturnValue({
-      apiUrl: 'https://api.void.cloud',
-      applicationDomain: 'void.app',
-      displayName: 'Void Cloud',
-      proxyUrl: 'https://proxy.void.cloud',
-      source: 'legacy-credential',
-    });
-    mockGetToken.mockReturnValue('legacy-token');
-    mockListProjects.mockResolvedValueOnce([existingProject]);
-
-    await runLink(root, 'existing-app');
-
-    expect(JSON.parse(readFileSync(join(root, '.void', 'project.json'), 'utf-8'))).toEqual({
-      applicationDomain: 'void.app',
-      platform: 'void',
-      platformUrl: 'https://api.void.cloud',
-      proxyUrl: 'https://proxy.void.cloud',
-      projectId: 'proj_1',
-      slug: 'existing-app',
-    });
   });
 
   it('does not write project config when the existing-project guard is declined', async () => {

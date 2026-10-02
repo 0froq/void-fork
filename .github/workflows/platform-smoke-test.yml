@@ -73,11 +73,14 @@ jobs:
       - name: Deploy kitchen-sink
         timeout-minutes: 32
         working-directory: ${{ steps.fixture.outputs.path }}
-        run: node "$GITHUB_WORKSPACE/packages/void/dist/cli/cli.mjs" deploy --project kitchen-sink
+        run: |
+          node "$GITHUB_WORKSPACE/packages/void/dist/cli/cli.mjs" connect "$VOID_API_URL" --no-login
+          node "$GITHUB_WORKSPACE/packages/void/dist/cli/cli.mjs" deploy --project kitchen-sink
         env:
           VOID_TOKEN: ${{ secrets.VOID_TOKEN_STAGING }}
           VOID_API_URL: https://api.staging.void.cloud
           STAGING: '1'
+          VOID_ACCESS_ORIGIN: https://api.staging.void.cloud
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_STAGING }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_STAGING }}
       - name: Retain deployment diagnostics

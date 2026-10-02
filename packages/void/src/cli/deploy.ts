@@ -7054,6 +7054,8 @@ async function runManagedDeploy(
   options: RunDeployOptions,
   cliLog: CliLogger,
 ): Promise<void> {
+  // Resolve the connected recipient before credentials, OIDC, builds, or platform requests.
+  getApiUrl(root);
   let reauthenticated = false;
   while (true) {
     try {

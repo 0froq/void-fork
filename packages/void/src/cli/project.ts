@@ -1,11 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { normalizeApplicationDomain } from '@void/platform';
 import { join, dirname } from 'pathslash';
-import {
-  hostedPlatformForApiUrl,
-  VOID_CLOUD_PLATFORM,
-  VOID_CLOUD_STAGING_PLATFORM,
-} from './hosted-platform.ts';
 import { listPlatformConnections, normalizePlatformApiUrl } from './platform-registry.ts';
 import type { DeployTarget } from './types.ts';
 
@@ -15,7 +10,6 @@ export type ProjectConfig = {
   proxyUrl?: string;
   projectId: string;
   slug: string;
-  voidInternalStaging?: boolean;
 };
 
 export type DeploymentPlatform = DeployTarget | 'none';
@@ -69,9 +63,6 @@ export function readProjectConfig(root: string): ProjectConfig | null {
   if (typeof config.proxyUrl === 'string') {
     result.proxyUrl = normalizePlatformApiUrl(config.proxyUrl);
   }
-  if (config.voidInternalStaging === true) {
-    result.voidInternalStaging = true;
-  }
   return result;
 }
 
@@ -122,9 +113,6 @@ export function writeDeploymentPlatform(root: string, platform: DeploymentPlatfo
   if (typeof existing?.slug === 'string') {
     next.slug = existing.slug;
   }
-  if (existing?.voidInternalStaging === true) {
-    next.voidInternalStaging = true;
-  }
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, JSON.stringify(next, null, 2) + '\n');
 }
@@ -136,13 +124,16 @@ export function writePlatformSelection(
 ): boolean {
   const existing = readProjectConfigFile(root);
   const linked = readProjectConfig(root);
-  const pinnedUrl = isVoidInternalStaging(root)
-    ? VOID_CLOUD_STAGING_PLATFORM.apiUrl
-    : linked
-      ? (linked.platformUrl ?? VOID_CLOUD_PLATFORM.apiUrl)
-      : null;
+  const pinnedUrl = linked?.platformUrl;
   if (pinnedUrl && pinnedUrl !== connection.apiUrl) {
     return false;
+  }
+  // An unscoped legacy project ID cannot be carried to a newly selected platform.
+  const metadata = { ...existing };
+  delete metadata.voidInternalStaging;
+  if (linked && !pinnedUrl) {
+    delete metadata.projectId;
+    delete metadata.slug;
   }
   const filePath = join(root, PROJECT_FILE);
   mkdirSync(dirname(filePath), { recursive: true });
@@ -150,7 +141,7 @@ export function writePlatformSelection(
     filePath,
     JSON.stringify(
       {
-        ...existing,
+        ...metadata,
         platform: 'void',
         platformUrl: normalizePlatformApiUrl(connection.apiUrl),
         applicationDomain: normalizeApplicationDomain(connection.applicationDomain),
@@ -161,14 +152,6 @@ export function writePlatformSelection(
     ) + '\n',
   );
   return true;
-}
-
-/**
- * Internal-only platform developers' staging switch.
- * This intentionally lives with the project link state, not public void.json.
- */
-export function isVoidInternalStaging(root: string): boolean {
-  return readProjectConfigFile(root)?.voidInternalStaging === true;
 }
 
 export function readProjectPlatformUrl(root: string): string | null {
@@ -188,18 +171,6 @@ export function attachSelectedPlatform(
   platformApiUrl: string,
 ): ProjectConfig {
   const apiUrl = normalizePlatformApiUrl(platformApiUrl);
-  const hosted = hostedPlatformForApiUrl(apiUrl);
-  if (hosted) {
-    return {
-      ...config,
-      applicationDomain: hosted.applicationDomain,
-      platformUrl: hosted.apiUrl,
-      proxyUrl: hosted.proxyUrl,
-      ...(isVoidInternalStaging(root) && hosted.apiUrl === VOID_CLOUD_STAGING_PLATFORM.apiUrl
-        ? { voidInternalStaging: true }
-        : {}),
-    };
-  }
   const connection = listPlatformConnections().find((entry) => entry.apiUrl === apiUrl);
   if (connection?.applicationDomain && connection.proxyUrl) {
     return {
@@ -211,15 +182,6 @@ export function attachSelectedPlatform(
   }
   throw new Error(
     `platform: No verified metadata is registered for ${apiUrl}. Run \`void connect ${apiUrl}\` before linking a project.`,
-  );
-}
-
-export function isLegacyVoidCloudProject(root: string): boolean {
-  const config = readProjectConfigFile(root);
-  return (
-    typeof config?.projectId === 'string' &&
-    typeof config.slug === 'string' &&
-    typeof config.platformUrl !== 'string'
   );
 }
 
@@ -248,9 +210,6 @@ export function writeProjectConfig(root: string, config: ProjectConfig): void {
     next.proxyUrl = normalizePlatformApiUrl(config.proxyUrl);
   } else if (typeof existing?.proxyUrl === 'string') {
     next.proxyUrl = existing.proxyUrl;
-  }
-  if (config.voidInternalStaging === true || existing?.voidInternalStaging === true) {
-    next.voidInternalStaging = true;
   }
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, JSON.stringify(next, null, 2) + '\n');

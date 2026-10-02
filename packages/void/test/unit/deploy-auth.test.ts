@@ -118,6 +118,18 @@ beforeEach(() => {
 });
 
 describe('runDeploy auth failures', () => {
+  it('rejects an unconnected platform before reading credentials or exchanging OIDC tokens', async () => {
+    mockGetApiUrl.mockImplementation(() => {
+      throw new Error('platform: Run `void connect <url>` first.');
+    });
+    mockIsOidcAvailable.mockReturnValue(true);
+    await expect(
+      runDeploy(process.cwd(), { platform: 'void', projectSlug: 'my-app' }),
+    ).rejects.toThrow('void connect');
+    expect(mockGetToken).not.toHaveBeenCalled();
+    expect(mockExchangeOidc).not.toHaveBeenCalled();
+    expect(mockClientCtor).not.toHaveBeenCalled();
+  });
   it('shows a re-login instruction for expired local auth tokens in non-interactive mode', async () => {
     await expect(runDeploy(process.cwd(), { projectSlug: 'my-app' })).rejects.toThrow(
       'Auth token expired. Run `void account login` and try again.',
@@ -376,7 +388,7 @@ describe('runDeploy GitHub Actions OIDC exchange', () => {
       mockGetToken.mockImplementation((tokenRoot: string) => realGetToken(tokenRoot));
 
       await expect(runDeploy(root, { platform: 'void', projectSlug: 'my-app' })).rejects.toThrow(
-        'VOID_TOKEN is not bound to https://platform.example.test',
+        'Set VOID_API_URL alongside VOID_TOKEN',
       );
 
       expect(mockGetToken).toHaveBeenCalledWith(root);

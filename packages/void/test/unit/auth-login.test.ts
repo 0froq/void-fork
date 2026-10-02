@@ -1,3 +1,8 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
+let registry: string;
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { runLogin, runPlatformLogin } from '../../src/cli/auth.ts';
@@ -27,6 +32,26 @@ beforeEach(() => {
   mockExecFile.mockReset();
   exchangeRequests.length = 0;
   process.env.VOID_API_URL = 'https://api.test';
+  registry = mkdtempSync(join(tmpdir(), 'void-login-connections-'));
+  process.env.VOID_PLATFORM_REGISTRY_DIR = registry;
+  savePlatformConnection({
+    accountId: null,
+    apiUrl: 'https://api.test',
+    applicationDomain: 'apps.example.test',
+    displayName: 'Test',
+    installationId: null,
+    kind: 'connected',
+    proxyUrl: 'https://proxy.example.test',
+  });
+  savePlatformConnection({
+    accountId: null,
+    apiUrl: 'https://api.staging.void.cloud',
+    applicationDomain: 'apps.example.test',
+    displayName: 'Test',
+    installationId: null,
+    kind: 'connected',
+    proxyUrl: 'https://proxy.example.test',
+  });
 
   vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
     const url =
@@ -47,6 +72,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  rmSync(registry, { recursive: true, force: true });
+  delete process.env.VOID_PLATFORM_REGISTRY_DIR;
   vi.unstubAllGlobals();
   delete process.env.VOID_API_URL;
   delete process.env.CF_ACCESS_TOKEN;

@@ -1,8 +1,16 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
+const registries: Array<string> = [];
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { followBuildLogs, isFatalFollowError, runBuildCommand } from '../../src/cli/build-cmd.ts';
 import { PlatformApiError, PlatformClient, type BuildLogsResponse } from '../../src/cli/client.ts';
 
 afterEach(() => {
+  for (const registry of registries.splice(0)) {
+    rmSync(registry, { recursive: true, force: true });
+  }
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.useRealTimers();
@@ -256,6 +264,18 @@ describe('followBuildLogs', () => {
     // Bind this fixture token explicitly so a saved platform cannot select the destination.
     vi.stubEnv('VOID_TOKEN', 'test-build-logs-token');
     vi.stubEnv('VOID_API_URL', 'https://api.example.test');
+    const registry = mkdtempSync(join(tmpdir(), 'void-build-connections-'));
+    registries.push(registry);
+    vi.stubEnv('VOID_PLATFORM_REGISTRY_DIR', registry);
+    savePlatformConnection({
+      accountId: null,
+      apiUrl: 'https://api.example.test',
+      applicationDomain: 'apps.example.test',
+      displayName: 'Test',
+      installationId: null,
+      kind: 'connected',
+      proxyUrl: 'https://proxy.example.test',
+    });
     vi.stubEnv('VOID_PROJECT', '');
     vi.spyOn(PlatformClient.prototype, 'listProjects').mockResolvedValue([
       { id: 'project', slug: 'project' } as Awaited<

@@ -108,13 +108,7 @@ function parseConnection(value: unknown): PlatformConnection {
   }
   const optionalString = (input: unknown): string | null =>
     typeof input === 'string' && input !== '' ? input : null;
-  const proxyUrl =
-    optionalString(entry.proxyUrl) ??
-    (apiUrl === 'https://api.void.cloud'
-      ? 'https://proxy.void.cloud'
-      : apiUrl === 'https://api.staging.void.cloud'
-        ? 'https://proxy.staging.void.cloud'
-        : null);
+  const proxyUrl = optionalString(entry.proxyUrl);
   return {
     accountId: optionalString(entry.accountId),
     apiUrl,

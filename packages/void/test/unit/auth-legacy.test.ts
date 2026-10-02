@@ -63,20 +63,47 @@ afterEach(() => {
   }
 });
 
+async function connect(apiUrl: string) {
+  const { savePlatformConnection } = await import('../../src/cli/platform-registry.ts');
+  savePlatformConnection({
+    accountId: null,
+    apiUrl,
+    applicationDomain: 'apps.example.test',
+    displayName: 'Example',
+    installationId: null,
+    kind: 'connected',
+    proxyUrl: 'https://proxy.example.test',
+  });
+}
+
 describe('retired unscoped credentials', () => {
+  it('rejects an environment URL and token before a connection, without contacting the platform', async () => {
+    process.env.VOID_API_URL = 'https://platform.example.test';
+    process.env.VOID_TOKEN = 'ci-token';
+    const fetcher = vi.spyOn(globalThis, 'fetch');
+    const { getApiUrl, getToken, getAccountCredential } = await import('../../src/cli/auth.ts');
+    expect(() => getApiUrl(state.home)).toThrow('void connect https://platform.example.test');
+    expect(() => getToken(state.home)).toThrow('void connect');
+    expect(() => getAccountCredential()).toThrow('void connect');
+    expect(fetcher).not.toHaveBeenCalled();
+    fetcher.mockRestore();
+    await connect(process.env.VOID_API_URL);
+    expect(getApiUrl(state.home)).toBe('https://platform.example.test');
+    expect(getToken(state.home)).toBe('ci-token');
+  });
   it.each([
     { account: 'token', apiUrl: 'https://api.void.cloud' },
     { account: 'stagingToken', apiUrl: 'https://api.staging.void.cloud' },
   ])(
-    'keeps the $account keychain destination but requires login again',
+    'ignores the $account keychain destination until explicitly connected',
     async ({ account, apiUrl }) => {
       const root = mkdtempSync(join(tmpdir(), 'void-auth-retired-project-'));
       directories.push(root);
       state.passwords.set(`dev.void.cli:${account}`, 'retired-token');
       const { getAccountCredential, getApiUrl, getToken } = await import('../../src/cli/auth.ts');
 
-      expect(getAccountCredential()).toEqual({ apiUrl, token: null });
-      expect(getApiUrl(root)).toBe(apiUrl);
+      expect(() => getAccountCredential()).toThrow('void connect');
+      expect(() => getApiUrl(root)).toThrow('void connect');
       expect(getToken(root)).toBeNull();
       expect(state.passwords).toEqual(new Map([[`dev.void.cli:${account}`, 'retired-token']]));
     },
@@ -86,51 +113,46 @@ describe('retired unscoped credentials', () => {
     { account: 'token', apiUrl: 'https://api.void.cloud' },
     { account: 'stagingToken', apiUrl: 'https://api.staging.void.cloud' },
     { account: 'token', apiUrl: 'https://legacy-platform.example.test' },
-  ])(
-    'ignores the old file credential and preserves its $apiUrl selection',
-    async ({ account, apiUrl }) => {
-      const root = mkdtempSync(join(tmpdir(), 'void-auth-retired-project-'));
-      directories.push(root);
-      const configDirectory = join(state.home, '.void');
-      mkdirSync(configDirectory, { recursive: true });
-      const configPath = join(configDirectory, 'config.json');
-      const config = { api: apiUrl, [account]: 'retired-token' };
-      writeFileSync(configPath, JSON.stringify(config));
-      const { getAccountCredential, getApiUrl, getToken } = await import('../../src/cli/auth.ts');
+  ])('ignores the old file credential and $apiUrl selection', async ({ account, apiUrl }) => {
+    const root = mkdtempSync(join(tmpdir(), 'void-auth-retired-project-'));
+    directories.push(root);
+    const configDirectory = join(state.home, '.void');
+    mkdirSync(configDirectory, { recursive: true });
+    const configPath = join(configDirectory, 'config.json');
+    const config = { api: apiUrl, [account]: 'retired-token' };
+    writeFileSync(configPath, JSON.stringify(config));
+    const { getAccountCredential, getApiUrl, getToken } = await import('../../src/cli/auth.ts');
 
-      expect(getAccountCredential()).toEqual({ apiUrl, token: null });
-      expect(getApiUrl(root)).toBe(apiUrl);
-      expect(getToken(root)).toBeNull();
-      expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual(config);
-      expect(state.passwords.size).toBe(0);
-    },
-  );
+    expect(() => getAccountCredential()).toThrow('void connect');
+    expect(() => getApiUrl(root)).toThrow('void connect');
+    expect(getToken(root)).toBeNull();
+    expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual(config);
+    expect(state.passwords.size).toBe(0);
+  });
 
   it.each([
     { account: 'token', apiUrl: 'https://api.void.cloud' },
     { account: 'stagingToken', apiUrl: 'https://api.staging.void.cloud' },
-  ])(
-    'preserves token-only file destination $apiUrl without accepting the credential',
-    async ({ account, apiUrl }) => {
-      const root = mkdtempSync(join(tmpdir(), 'void-auth-retired-project-'));
-      directories.push(root);
-      mkdirSync(join(state.home, '.void'));
-      writeFileSync(
-        join(state.home, '.void', 'config.json'),
-        JSON.stringify({ [account]: 'retired-token' }),
-      );
-      const { getAccountCredential, getApiUrl, getToken } = await import('../../src/cli/auth.ts');
-      expect(getAccountCredential()).toEqual({ apiUrl, token: null });
-      expect(getApiUrl(root)).toBe(apiUrl);
-      expect(getToken(root)).toBeNull();
-    },
-  );
+  ])('ignores token-only file destination $apiUrl', async ({ account, apiUrl }) => {
+    const root = mkdtempSync(join(tmpdir(), 'void-auth-retired-project-'));
+    directories.push(root);
+    mkdirSync(join(state.home, '.void'));
+    writeFileSync(
+      join(state.home, '.void', 'config.json'),
+      JSON.stringify({ [account]: 'retired-token' }),
+    );
+    const { getAccountCredential, getApiUrl, getToken } = await import('../../src/cli/auth.ts');
+    expect(() => getAccountCredential()).toThrow('void connect');
+    expect(() => getApiUrl(root)).toThrow('void connect');
+    expect(getToken(root)).toBeNull();
+  });
 
   it('uses and removes only the modern credential for the selected origin', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-auth-retired-project-'));
     directories.push(root);
     const apiUrl = 'https://api.staging.void.cloud';
     process.env.VOID_API_URL = apiUrl;
+    await connect(apiUrl);
     const { platformCredentialAccount } = await import('../../src/cli/platform-registry.ts');
     const account = `dev.void.cli:${platformCredentialAccount(apiUrl)}`;
     const productionAccount = `dev.void.cli:${platformCredentialAccount('https://api.void.cloud')}`;
@@ -145,22 +167,23 @@ describe('retired unscoped credentials', () => {
     expect(state.passwords.get('dev.void.cli:stagingToken')).toBe('retired-token');
   });
 
-  it('preserves token-only Void Cloud CI on clean runners', async () => {
+  it('rejects token-only CI on clean runners', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-auth-legacy-ci-'));
     directories.push(root);
     process.env.VOID_TOKEN = 'ci-token';
     const { getApiUrl, getProxyUrl, getSiteDomain, getToken } =
       await import('../../src/cli/auth.ts');
 
-    expect(getApiUrl(root)).toBe('https://api.void.cloud');
-    expect(getProxyUrl(root)).toBe('https://proxy.void.cloud');
-    expect(getSiteDomain(root)).toBe('void.app');
-    expect(getToken(root)).toBe('ci-token');
+    expect(() => getApiUrl(root)).toThrow('void connect');
+    expect(() => getProxyUrl(root)).toThrow('void connect');
+    expect(() => getSiteDomain(root)).toThrow('void connect');
+    expect(() => getToken(root)).toThrow('void connect');
   });
 
   it('keeps origin-scoped file fallback when the keychain is unavailable', async () => {
     const apiUrl = 'https://platform.example.test';
     process.env.VOID_API_URL = apiUrl;
+    await connect(apiUrl);
     mkdirSync(join(state.home, '.void'));
     const configPath = join(state.home, '.void', 'config.json');
     const config = {
@@ -283,9 +306,9 @@ describe('environment token destinations', () => {
       const fetcher = vi.spyOn(globalThis, 'fetch');
       try {
         expect(getApiUrl(root)).toBe(origin);
-        expect(() => getToken(root)).toThrow('VOID_TOKEN is not bound');
+        expect(() => getToken(root)).toThrow('Set VOID_API_URL alongside VOID_TOKEN');
         await expect(runAccountCommand(root, { subcommand: 'whoami' })).rejects.toThrow(
-          'VOID_TOKEN is not bound',
+          'Set VOID_API_URL alongside VOID_TOKEN',
         );
         expect(fetcher).not.toHaveBeenCalled();
         delete process.env.VOID_TOKEN;
@@ -329,8 +352,10 @@ describe('environment token destinations', () => {
     );
     process.env.VOID_TOKEN = 'production-token';
     const { getToken } = await import('../../src/cli/auth.ts');
-    expect(() => getToken(root)).toThrow('VOID_TOKEN is not bound');
+    expect(() => getToken(root)).toThrow('void connect');
     process.env.VOID_API_URL = 'https://api.staging.void.cloud';
+    expect(() => getToken(root)).toThrow('void connect');
+    await connect(process.env.VOID_API_URL);
     expect(getToken(root)).toBe('production-token');
   });
 });

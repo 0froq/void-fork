@@ -39,7 +39,7 @@ describe('platform discovery', () => {
     ).resolves.toMatchObject({ displayName: 'Example' });
   });
 
-  it('fills the hosted proxy for older Void Cloud discovery documents', async () => {
+  it('requires a proxy origin even for former hosted discovery documents', async () => {
     const legacyHosted = { ...document, apiUrl: 'https://api.void.cloud' } as Record<
       string,
       unknown
@@ -50,9 +50,9 @@ describe('platform discovery', () => {
       value: 'https://api.void.cloud/.well-known/void-platform',
     });
 
-    await expect(
-      discoverPlatform('https://api.void.cloud', async () => response),
-    ).resolves.toMatchObject({ proxyUrl: 'https://proxy.void.cloud' });
+    await expect(discoverPlatform('https://api.void.cloud', async () => response)).rejects.toThrow(
+      'proxyUrl',
+    );
   });
 
   it('rejects custom discovery documents without a proxy origin', async () => {

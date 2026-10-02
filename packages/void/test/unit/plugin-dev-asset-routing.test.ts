@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Plugin } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
 
 type MockCloudflarePluginConfig = {
   config: (resolved: Record<string, unknown>) => Record<string, unknown>;
@@ -558,13 +559,34 @@ describe('voidPlugin dev asset routing', () => {
 
   it('keeps managed Workers AI development on the Void proxy', async () => {
     vi.stubEnv('VOID_TOKEN', 'managed-token');
-    const config = await resolveCloudflareConfig(createAiProjectRoot('void'));
+    const root = createAiProjectRoot('void');
+    vi.stubEnv('VOID_API_URL', 'https://platform.example.test');
+    vi.stubEnv('VOID_PLATFORM_REGISTRY_DIR', join(root, 'registry'));
+    savePlatformConnection({
+      accountId: null,
+      apiUrl: 'https://platform.example.test',
+      applicationDomain: 'apps.example.test',
+      displayName: 'Test',
+      installationId: null,
+      kind: 'connected',
+      proxyUrl: 'https://proxy.example.test',
+    });
+    writeFileSync(
+      join(root, '.void/project.json'),
+      JSON.stringify({
+        platform: 'void',
+        projectId: 'managed-project',
+        slug: 'managed-app',
+        platformUrl: 'https://platform.example.test',
+      }),
+    );
+    const config = await resolveCloudflareConfig(root);
 
     expect(config.ai).toBeUndefined();
     expect(config.vars).toMatchObject({
       __VOID_TOKEN: 'managed-token',
       __VOID_PROJECT_ID: 'managed-project',
-      __VOID_PROXY_URL: 'https://proxy.void.cloud',
+      __VOID_PROXY_URL: 'https://proxy.example.test',
     });
   });
 

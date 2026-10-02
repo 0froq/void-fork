@@ -2,11 +2,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
 import { runProjectTokenCommand } from '../../src/cli/project-token.ts';
 
 const roots: Array<string> = [];
 
 afterEach(() => {
+  delete process.env.VOID_PLATFORM_REGISTRY_DIR;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   delete process.env.VOID_TOKEN;
@@ -22,6 +24,16 @@ afterEach(() => {
 function projectRoot() {
   const root = mkdtempSync(join(tmpdir(), 'void-project-token-'));
   roots.push(root);
+  process.env.VOID_PLATFORM_REGISTRY_DIR = join(root, 'registry');
+  savePlatformConnection({
+    accountId: null,
+    apiUrl: 'https://api.example.test',
+    applicationDomain: 'apps.example.test',
+    displayName: 'Test platform',
+    installationId: null,
+    kind: 'connected',
+    proxyUrl: 'https://proxy.example.test',
+  });
   mkdirSync(join(root, '.void'));
   writeFileSync(
     join(root, '.void/project.json'),

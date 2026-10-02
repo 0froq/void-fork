@@ -3,13 +3,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'pathslash';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
-import { DEFAULT_PROXY_URL, STAGING_PROXY_URL } from '../shared/proxy.ts';
 import { ensureCloudflaredToken } from './cf-access.ts';
-import {
-  readLegacyHostedPlatformSelection,
-  VOID_CLOUD_PLATFORM,
-  VOID_CLOUD_STAGING_PLATFORM,
-} from './hosted-platform.ts';
 import { deleteKeyringPassword, readKeyringPassword, writeKeyringPassword } from './keyring.ts';
 import {
   getActivePlatformConnection,
@@ -17,12 +11,7 @@ import {
   normalizePlatformApiUrl,
   platformCredentialAccount,
 } from './platform-registry.ts';
-import {
-  isLegacyVoidCloudProject,
-  isVoidInternalStaging,
-  readProjectApplicationDomain,
-  readProjectPlatformUrl,
-} from './project.ts';
+import { readProjectConfig, readProjectPlatformUrl } from './project.ts';
 
 const CONFIG_DIR = join(homedir(), '.void');
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
@@ -94,33 +83,37 @@ function readOriginScopedToken(apiUrl: string, config: Config): string | null {
   return fileToken;
 }
 
-export function isStagingMode(root: string = process.cwd()): boolean {
-  return isVoidInternalStaging(root);
+/** @deprecated Platform destinations are selected through explicit connections. */
+export function isStagingMode(_root: string = process.cwd()): boolean {
+  return false;
+}
+
+function connectedPlatform(apiUrl: string | null | undefined) {
+  if (!apiUrl) {
+    throw new Error('platform: No Void platform connected. Run `void connect <url>` first.');
+  }
+  const origin = normalizePlatformApiUrl(apiUrl);
+  const connection = listPlatformConnections().find((entry) => entry.apiUrl === origin);
+  if (!connection) {
+    throw new Error(`platform: No connection to ${origin}. Run \`void connect ${origin}\` first.`);
+  }
+  return connection;
 }
 
 export function getSiteDomain(root: string = process.cwd()): string {
-  const legacySelection = readLegacyHostedPlatformSelection();
-  const domain =
-    readProjectApplicationDomain(root) ??
-    (isStagingMode(root) ? VOID_CLOUD_STAGING_PLATFORM.applicationDomain : undefined) ??
-    (isLegacyVoidCloudProject(root) ||
-    (process.env.VOID_TOKEN && process.env.VOID_API_URL === undefined)
-      ? VOID_CLOUD_PLATFORM.applicationDomain
-      : undefined) ??
-    getActivePlatformConnection()?.applicationDomain ??
-    legacySelection?.applicationDomain;
-  if (!domain) {
+  const connection = connectedPlatform(getApiUrl(root));
+  if (!connection.applicationDomain) {
     throw new Error(
-      'platform: No Void platform selected. Run `void connect <url>` or `void platform install` first.',
+      `platform: Missing application domain. Run \`void connect ${connection.apiUrl}\` to refresh the connection.`,
     );
   }
-  return domain;
+  return connection.applicationDomain;
 }
 
 /**
  * Read the deploy token.
  * Priority: origin-bound VOID_TOKEN > system keychain > migrated config.
- * An unscoped environment token retains its historical Void Cloud destination.
+ * Environment tokens must name their recipient with VOID_API_URL.
  */
 export function getToken(root: string = process.cwd()): string | null {
   const envToken = process.env.VOID_TOKEN;
@@ -140,20 +133,9 @@ export function getToken(root: string = process.cwd()): string | null {
 /** Account actions follow the selected connection, independently of application metadata. */
 export function getAccountCredential(): { apiUrl: string; token: string | null } {
   const config = readConfig();
-  const apiUrl = normalizePlatformApiUrl(
-    process.env.VOID_API_URL ||
-      (process.env.VOID_TOKEN
-        ? DEFAULT_API_URL
-        : (getActivePlatformConnection()?.apiUrl ??
-          config.api ??
-          readLegacyHostedPlatformSelection()?.apiUrl ??
-          // Old entries select their original destination but require a new login.
-          (keyringGet('token')
-            ? DEFAULT_API_URL
-            : keyringGet('stagingToken')
-              ? STAGING_API_URL
-              : DEFAULT_API_URL))),
-  );
+  const apiUrl = connectedPlatform(
+    process.env.VOID_API_URL || getActivePlatformConnection()?.apiUrl,
+  ).apiUrl;
   return {
     apiUrl,
     token: readTokenForOrigin(apiUrl, config),
@@ -163,9 +145,12 @@ export function getAccountCredential(): { apiUrl: string; token: string | null }
 function readTokenForOrigin(apiUrl: string, config: Config): string | null {
   const envToken = process.env.VOID_TOKEN;
   if (envToken) {
-    const tokenOrigin = process.env.VOID_API_URL
-      ? normalizePlatformApiUrl(process.env.VOID_API_URL)
-      : DEFAULT_API_URL;
+    if (!process.env.VOID_API_URL) {
+      throw new Error(
+        'auth: Set VOID_API_URL alongside VOID_TOKEN to identify the connected platform that issued it.',
+      );
+    }
+    const tokenOrigin = normalizePlatformApiUrl(process.env.VOID_API_URL);
     if (apiUrl !== tokenOrigin) {
       throw new Error(
         `auth: VOID_TOKEN is not bound to ${apiUrl}. Set VOID_API_URL to this platform's URL with its matching token, or unset VOID_TOKEN to use the saved login.`,
@@ -238,9 +223,6 @@ export function removeToken(root: string = process.cwd()): boolean {
   return removed;
 }
 
-const DEFAULT_API_URL = VOID_CLOUD_PLATFORM.apiUrl;
-const STAGING_API_URL = VOID_CLOUD_STAGING_PLATFORM.apiUrl;
-
 function base64Url(buffer: Buffer): string {
   return buffer.toString('base64').replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 }
@@ -296,66 +278,17 @@ async function exchangeLoginCode(
   return body.token;
 }
 
-/**
- * Read the API URL from environment or config file.
- * Priority: VOID_API_URL env var > ~/.void/config.json > default
- */
+/** Environment and project selections must refer to a verified local connection. */
 export function getApiUrl(root: string = process.cwd()): string {
-  if (process.env.VOID_API_URL) {
-    return normalizePlatformApiUrl(process.env.VOID_API_URL);
-  }
-  if (isStagingMode(root)) {
-    return STAGING_API_URL;
-  }
-
   const projectApiUrl = readProjectPlatformUrl(root);
-  if (projectApiUrl) {
-    if (projectApiUrl === DEFAULT_API_URL || projectApiUrl === STAGING_API_URL) {
-      return projectApiUrl;
-    }
-    if (listPlatformConnections().some((connection) => connection.apiUrl === projectApiUrl)) {
-      return projectApiUrl;
-    }
+  if (readProjectConfig(root) && !projectApiUrl) {
     throw new Error(
-      `platform: Project metadata selected unverified platform ${projectApiUrl}. Connect to it explicitly with \`void connect ${projectApiUrl}\` before forwarding credentials.`,
+      'platform: This project link has no platform URL. Run `void connect <url>`, then `void project link` to choose its destination.',
     );
   }
-
-  const config = readConfig();
-  const legacySelection = readLegacyHostedPlatformSelection();
-  let apiUrl =
-    (isLegacyVoidCloudProject(root) ? DEFAULT_API_URL : undefined) ??
-    getActivePlatformConnection()?.apiUrl ??
-    config.api ??
-    legacySelection?.apiUrl;
-  // VOID_TOKEN predates explicit platform selection and has always meant Void
-  // Cloud when VOID_API_URL is absent. Preserve that contract for clean CI
-  // runners while still requiring new interactive users to select a platform.
-  apiUrl ??= process.env.VOID_TOKEN ? DEFAULT_API_URL : undefined;
-  if (!apiUrl) {
-    // Preserve the old destination without adopting its unscoped credential.
-    apiUrl = keyringGet('token')
-      ? DEFAULT_API_URL
-      : keyringGet('stagingToken')
-        ? STAGING_API_URL
-        : undefined;
-    if (apiUrl) {
-      // Historical keychain entries had no corresponding API selection. Record
-      // the non-sensitive hosted origin so project linking can complete the
-      // migration without importing auth/keyring code into project state.
-      try {
-        writeConfig({ ...config, api: apiUrl });
-      } catch {
-        // Selection still works for this invocation; migration is best-effort.
-      }
-    }
-  }
-  if (!apiUrl) {
-    throw new Error(
-      'platform: No Void platform selected. Run `void connect <url>` or `void platform install` first.',
-    );
-  }
-  return normalizePlatformApiUrl(apiUrl);
+  return connectedPlatform(
+    process.env.VOID_API_URL || projectApiUrl || getActivePlatformConnection()?.apiUrl,
+  ).apiUrl;
 }
 
 export function getProxyUrl(root: string = process.cwd()): string {
@@ -363,16 +296,9 @@ export function getProxyUrl(root: string = process.cwd()): string {
   // to choose the origin that receives a user's platform credential. Resolve
   // the proxy from the selected API's trusted local registry entry instead.
   // VOID_PROXY_URL remains an explicit operator override for CI and recovery.
+  const apiUrl = getApiUrl(root);
   if (process.env.VOID_PROXY_URL) {
     return normalizePlatformApiUrl(process.env.VOID_PROXY_URL);
-  }
-
-  const apiUrl = normalizePlatformApiUrl(getApiUrl(root));
-  if (apiUrl === STAGING_API_URL) {
-    return STAGING_PROXY_URL;
-  }
-  if (apiUrl === DEFAULT_API_URL) {
-    return DEFAULT_PROXY_URL;
   }
 
   const proxyUrl = listPlatformConnections().find(

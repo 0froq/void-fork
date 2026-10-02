@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vite-plus/test';
-import { savePlatformToken, saveToken } from '../../src/cli/auth.ts';
+import { savePlatformToken } from '../../src/cli/auth.ts';
 import { platformCredentialAccount } from '../../src/cli/platform-registry.ts';
 
 afterEach(() => {
@@ -22,7 +22,7 @@ describe('auth token storage', () => {
     process.env.VOID_API_URL = 'https://platform.example.com';
 
     expect(() =>
-      saveToken('secret-token', process.cwd(), {
+      savePlatformToken('secret-token', 'https://platform.example.com', {
         keyringSet: () => false,
       }),
     ).toThrow('Refusing to store your platform token in plaintext');

@@ -113,8 +113,7 @@ export async function runConnectCommand(
   saveDiscoveredPlatform(discovery);
   const envUrl = process.env.VOID_API_URL;
   const environmentOverrides = Boolean(
-    (envUrl && normalizePlatformApiUrl(envUrl) !== discovery.apiUrl) ||
-    (process.env.VOID_TOKEN && !envUrl),
+    envUrl && normalizePlatformApiUrl(envUrl) !== discovery.apiUrl,
   );
   const selected = environmentOverrides ? false : writePlatformSelection(root, discovery);
   log.success(`Connected to ${discovery.displayName} at ${discovery.apiUrl}.`);

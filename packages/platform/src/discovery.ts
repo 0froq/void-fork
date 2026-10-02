@@ -207,14 +207,7 @@ export function parsePlatformDiscoveryDocument(value: unknown): PlatformDiscover
     return entry;
   };
   const apiUrl = string('apiUrl');
-  const proxyUrl =
-    typeof document.proxyUrl === 'string' && document.proxyUrl.trim()
-      ? document.proxyUrl
-      : apiUrl === 'https://api.void.cloud'
-        ? 'https://proxy.void.cloud'
-        : apiUrl === 'https://api.staging.void.cloud'
-          ? 'https://proxy.staging.void.cloud'
-          : string('proxyUrl');
+  const proxyUrl = string('proxyUrl');
   return createPlatformDiscoveryDocument({
     apiUrl,
     applicationDomain: string('applicationDomain'),

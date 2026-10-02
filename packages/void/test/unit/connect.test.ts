@@ -122,10 +122,13 @@ describe('connect workflow', () => {
     expect(mocks.login).toHaveBeenCalledWith(root, discovery);
     expect(getActivePlatformConnection()?.apiUrl).toBe(discovery.apiUrl);
   });
-  it('preserves a legacy project link when connecting elsewhere', async () => {
-    const original = seedProject({ projectId: 'old-project', slug: 'old' });
+  it('requires relinking an unscoped legacy project after connecting', async () => {
+    seedProject({ projectId: 'old-project', slug: 'old' });
     await runConnectCommand(root, parseConnectArgs([discovery.apiUrl]), true);
-    expect(readFileSync(projectFile(), 'utf8')).toBe(original);
+    const saved = JSON.parse(readFileSync(projectFile(), 'utf8'));
+    expect(saved.platformUrl).toBe(discovery.apiUrl);
+    expect(saved.projectId).toBeUndefined();
+    expect(saved.slug).toBeUndefined();
   });
   it('preserves a project id on the same platform', async () => {
     seedProject({ projectId: 'project', slug: 'app', platformUrl: discovery.apiUrl });

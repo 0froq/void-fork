@@ -83,7 +83,7 @@ generated entries must preserve the module-boundary rules below.
 
 - **Remote R2 preconditions**: Conditional uploads use `/r2/put-conditional` through both the proxy and deployed binding handler. Keep this distinct from legacy `/r2/put` so older deployments cannot silently ignore conditions. Restore date/Headers options before calling the native binding, preserve a `null` precondition result, and never fall back to an unconditional REST upload.
 
-- **Deployment connection**: `void connect [url] [--platform cloudflare|void]` is the developer entry point. A URL chooses Void; without arguments the CLI offers both targets. Interactive connection reuses or obtains credentials for the selected origin/account. `--no-login` saves only verified Void connection metadata; headless authenticated connection requires an origin-scoped keychain session or `VOID_TOKEN` with matching `VOID_API_URL`. Existing project links are preserved when connecting elsewhere. Platform installation and administration remain under `void platform`; it has no `connect` subcommand.
+- **Deployment connection**: `void connect [url] [--platform cloudflare|void]` is the developer entry point. A URL chooses Void; without arguments the CLI offers both targets. Interactive connection reuses or obtains credentials for the selected origin/account. `--no-login` saves only verified Void connection metadata; headless authenticated connection requires an origin-scoped keychain session or `VOID_TOKEN` with matching `VOID_API_URL`. Deployment requires a registered connection before reading credentials or exchanging OIDC tokens; environment URLs, legacy config, and unscoped project links never establish one. Fresh CI and managed builds run `void connect <url> --no-login` first. Existing project links are preserved when connecting elsewhere. Platform installation and administration remain under `void platform`; it has no `connect` subcommand.
 
 - **Import redirection**: The routing plugin's `resolveId` hook redirects bare `"void"` imports to `void/handler` (the lightweight subpath). Without this, route files pull the entire plugin (vite, @cloudflare/vite-plugin, lightningcss) into the Worker bundle. Uses `import.meta.resolve()` to compute absolute paths at plugin init.
 
@@ -124,27 +124,6 @@ the CLI binary at `dist/cli/cli.mjs`. The
 [API reference](../../docs/reference/api.md#user-facing-imports) documents
 supported imports. Keep Worker-safe runtime subpaths separate from the
 Vite/CLI dependency graph.
-
-### Legacy Void Cloud Staging Selection
-
-Existing Void Cloud projects may select its staging environment with the legacy `.void/project.json` flag below. New installations and forks use `void connect <api-url>` and origin-scoped credentials instead:
-
-```json
-{
-  "projectId": "proj_...",
-  "slug": "my-app",
-  "voidInternalStaging": true
-}
-```
-
-A pre-link file containing only `{ "voidInternalStaging": true }` is valid for Void platform developers who need `void auth login` or `void project link` to target staging before a project is linked.
-
-When `voidInternalStaging` is true:
-
-- **Token**: uses the origin-scoped system-keychain credential for `https://api.staging.void.cloud`. Historical `token`/`stagingToken` credentials select their original destination only and require a new login; never adopt them or infer production from a retired staging login. Keep existing origin-scoped file fallback and environment token binding.
-- **API URL**: the staging flag selects `https://api.staging.void.cloud` unless explicitly overridden by `VOID_API_URL`.
-- **Site domain**: uses `staging.void.app` for generated project URLs
-- **Proxy**: injects staging proxy bindings for local dev AI and prerendering
 
 Build output uses `.mjs` / `.d.mts` extensions (`vp pack` / tsdown default).
 
