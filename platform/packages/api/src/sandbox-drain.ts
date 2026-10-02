@@ -18,36 +18,6 @@ export type SandboxDrainState = Readonly<{
   completedAt?: string;
 }>;
 
-export async function readSandboxDrainState(
-  routing: Pick<KVNamespace, 'get'>,
-): Promise<SandboxDrainState | null> {
-  const raw = await routing.get(SANDBOX_DRAIN_STATE_KEY);
-  if (!raw) {
-    return null;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error(`${SANDBOX_DRAIN_STATE_KEY} contains invalid JSON.`);
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${SANDBOX_DRAIN_STATE_KEY} contains an invalid state document.`);
-  }
-  const state = parsed as Record<string, unknown>;
-  if (
-    state.version !== 1 ||
-    typeof state.generation !== 'string' ||
-    (state.state !== 'draining' && state.state !== 'complete') ||
-    typeof state.startedAt !== 'string' ||
-    typeof state.updatedAt !== 'string' ||
-    (state.completedAt !== undefined && typeof state.completedAt !== 'string')
-  ) {
-    throw new Error(`${SANDBOX_DRAIN_STATE_KEY} contains an invalid state document.`);
-  }
-  return state as SandboxDrainState;
-}
-
 export async function writeSandboxDrainMirror(
   routing: Pick<KVNamespace, 'put'>,
   checkpoint: SandboxDrainCheckpoint,
