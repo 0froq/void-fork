@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { log } from '@clack/prompts';
 import type { PlatformDeploymentManifest } from '@void/platform';
 import { openBrowser } from './auth.ts';
+import { pc } from './output.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
 
 export type PlatformSetupPage = Readonly<{ title: string; url: string; instructions: string }>;
@@ -36,13 +37,13 @@ export function platformSetupFieldHelp(
     case 'jwtSecret':
       return {
         description:
-          'Create a JWT signing key for platform login tokens. Run openssl rand -base64 32. Save the key in your password manager. ' +
+          `Create a JWT signing key for platform login tokens. Run ${pc.blue('openssl rand -base64 32')}. Save the key in your password manager. ` +
           docs('credentials', 'signing-and-encryption-keys', 'Key setup'),
       };
     case 'projectSecretKey':
       return {
         description:
-          'Generate a project encryption key for app secrets. Run openssl rand -base64 32 separately. Save this key for recovery. ' +
+          `Generate a project encryption key for app secrets. Run ${pc.blue('openssl rand -base64 32')} separately. Save this key for recovery. ` +
           docs('credentials', 'signing-and-encryption-keys', 'Key setup'),
       };
     default:
