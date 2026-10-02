@@ -142,19 +142,31 @@ export function FormNumberInput({
   label,
   name,
   width,
+  initialValue = null,
+  min = 1,
+  max,
+  required = false,
 }: {
   label: string;
   name: string;
   width?: number;
+  initialValue?: number | null;
+  min?: number;
+  max?: number;
+  required?: boolean;
 }) {
-  const [value, setValue] = useState<number | null>(null);
+  const [value, setValue] = useState<number | null>(initialValue);
+  useEffect(() => setValue(initialValue), [initialValue]);
   return (
     <NumberInput
       label={label}
       htmlName={name}
       value={value}
       onChange={setValue}
-      min={1}
+      min={min}
+      max={max}
+      isRequired={required}
+      required={required}
       isIntegerOnly
       hasClear
       width={width}

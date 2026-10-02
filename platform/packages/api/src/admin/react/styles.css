@@ -675,3 +675,25 @@ body {
     background: var(--color-warning-muted);
   }
 }
+
+.void-admin-plan-heading,
+.void-admin-plan-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+  flex-wrap: wrap;
+}
+.void-admin-plan-actions {
+  justify-content: flex-start;
+}
+.void-admin-plan-form {
+  display: grid;
+  gap: var(--spacing-4);
+  max-width: 800px;
+}
+.void-admin-plan-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: var(--spacing-4);
+}

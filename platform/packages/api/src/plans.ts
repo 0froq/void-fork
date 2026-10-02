@@ -6,10 +6,22 @@ import {
   type PlatformPlanCatalog,
   type PlatformPlanDefinition,
 } from '@void/platform/plans';
-import { sql } from 'drizzle-orm';
+import { count, sql } from 'drizzle-orm';
 import type { DbOrTx } from './db.ts';
 import { OperatorError } from './operator/common.ts';
 import { getPlatformSetting, setPlatformSetting } from './platform-settings.ts';
+import { users } from './schema.ts';
+
+export async function readPlanCatalogWithAccounts(
+  db: DbOrTx,
+  initialDefaultPlanId: BuiltinPlanId = 'free',
+) {
+  const [catalog, accounts] = await Promise.all([
+    readPlanCatalog(db, initialDefaultPlanId),
+    db.select({ planId: users.plan, count: count() }).from(users).groupBy(users.plan),
+  ]);
+  return { catalog, accounts };
+}
 
 export const PLAN_CATALOG_SETTING = 'plans:catalog';
 

@@ -206,6 +206,7 @@ recovery or promotion bypass.
 - `/admin/deployments`
 - `/admin/email/:projectId` — per-project email usage, caps, inbound/outbound suspension, and destination list
 - `/admin/signup-control`
+- `/admin/config/plans` — installation plan catalog, reviewed edits and management actions, and resumable account updates
 
 ## Auth Flow
 

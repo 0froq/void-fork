@@ -9,7 +9,7 @@ created: 2026-10-02
 ## Contract
 
 Installation administrators manage plan definitions and effective limits through
-`void platform config plans`. Existing built-in plan IDs, names, numeric defaults
+`void platform config plans` or the administration dashboard's Plans page. Existing built-in plan IDs, names, numeric defaults
 and build container selection remain unchanged. Before an explicit default is
 saved, hosted signup uses `free` and self-hosted signup uses `custom` as today.
 Tenant application configuration cannot change installation policy.
@@ -78,6 +78,13 @@ revision, and continues bounded account updates until completion or a retryable
 failure. Build size and timeout are captured when a build is admitted; token
 refresh respects that admitted deadline.
 
+The administrator dashboard uses the same catalog mutations, revision checks,
+rollout guard, and audit records. Native forms review a change before applying
+its exact revision. A result page advances the saved cursor in bounded batches,
+stops on errors or lack of progress, and exposes a resumable action in Plans.
+Fate reads the catalog and account counts through the lightweight shared reader;
+its browser generation does not import deployment or Sandbox mutation code.
+
 Deploy cutover and compensation resolve current owner policy behind project
 fences. A policy update cannot publish stale limits after reconciliation or make
 a failed candidate look like a newer deployment and prevent routing restoration.
@@ -94,3 +101,18 @@ ledger, and a built CLI subprocess exercises the operator API end to end.
 Focused regressions, affected selection, workspace typechecking, formatting,
 lint, and documentation rendering passed. The final full suite passed 660 files:
 12,321 tests passed and 25 skipped.
+
+Dashboard coverage verifies administrator access, same-origin forms, private
+headers, read-only previews, stale revisions, invalid limits, catalog management,
+replacement assignments, retryable propagation, Fate path validation, and the
+built browser's navigation and automatic continuation across account batches.
+The native form fixture reads the action attribute because a named `action`
+input shadows the DOM property, and reports validation failures directly.
+
+Dashboard verification passed 17 focused tests, 193 affected files (3,842 tests),
+workspace typechecking, lint, formatting, runtime builds and documentation builds.
+The final full run passed 661 files and 12,329 tests with 25 skipped, but exited
+with an unhandled Node `setTypeOfService EINVAL` socket error during the Solid
+playground suite. Its isolated rerun passed all 26 tests without that error.
+The upgraded e2e installation passed browser catalog, edit, preview and cancel
+checks without browser errors or changes to its catalog and application pointers.

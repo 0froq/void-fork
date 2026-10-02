@@ -7,6 +7,10 @@ export const adminComponents = {
   loginError: async () => ({
     default: (await import('./views/LoginErrorPage.tsx')).LoginErrorPage,
   }),
+  plans: async () => ({ default: (await import('./views/PlansPage.tsx')).PlansPage }),
+  planEdit: async () => ({ default: (await import('./views/PlansPage.tsx')).PlanEditPage }),
+  planPreview: async () => ({ default: (await import('./views/PlansPage.tsx')).PlanPreviewPage }),
+  planResult: async () => ({ default: (await import('./views/PlansPage.tsx')).PlanResultPage }),
   authSettings: async () => ({
     default: (await import('./views/AuthSettingsPage.tsx')).AuthSettingsPage,
   }),
@@ -104,6 +108,18 @@ export function matchAdminRoute(url: string): AdminPageId | null {
   }
   if (path === '/admin/signup-control') {
     return 'signupControl';
+  }
+  if (path === '/admin/config/plans') {
+    return 'plans';
+  }
+  if (path === '/admin/config/plans/new' || /^\/admin\/config\/plans\/[^/]+\/edit$/.test(path)) {
+    return 'planEdit';
+  }
+  if (path === '/admin/config/plans/preview') {
+    return 'planPreview';
+  }
+  if (path === '/admin/config/plans/apply' || path === '/admin/config/plans/resume') {
+    return 'planResult';
   }
   if (path === '/admin/config/auth') {
     return 'authSettings';

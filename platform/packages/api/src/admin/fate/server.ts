@@ -26,6 +26,7 @@ import {
   telemetrySources,
 } from './telemetry.ts';
 export type {
+  AdminPlans,
   AdminUsersPage,
   AdminProjectsPage,
   AdminDeploymentsPage,

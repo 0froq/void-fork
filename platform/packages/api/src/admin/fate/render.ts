@@ -7,6 +7,7 @@ import { renderAdminPage } from '../react/server.ts';
 import { createFateClient } from './client.generated.ts';
 import { fateServer } from './server.ts';
 import {
+  plansRequest,
   BuildDetailView,
   DeploymentDetailView,
   ProjectDetailView,
@@ -60,6 +61,8 @@ export async function renderDashboardFatePage(context: Context<ApiEnv>): Promise
 export async function renderFateListPage(
   context: Context<ApiEnv>,
   page:
+    | 'plans'
+    | 'planEdit'
     | 'users'
     | 'projects'
     | 'deployments'
@@ -73,6 +76,8 @@ export async function renderFateListPage(
     | 'zeroTrust',
 ): Promise<Response> {
   const title = {
+    plans: 'Plans',
+    planEdit: 'Plan',
     users: 'Users',
     projects: 'Projects',
     deployments: 'Deployments',
@@ -100,7 +105,9 @@ export async function renderFateListPage(
 
   const client = createServerClient(context);
   try {
-    if (page === 'users') {
+    if (page === 'plans' || page === 'planEdit') {
+      await client.request(plansRequest(path));
+    } else if (page === 'users') {
       await client.request(usersPageRequest(path));
     } else if (page === 'projects') {
       await client.request(projectsPageRequest(path));

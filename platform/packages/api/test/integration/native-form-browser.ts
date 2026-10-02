@@ -77,11 +77,26 @@ export async function nativeFormSubmission(input: {
       await page.locator(`input[name="${name}"]`).fill(value);
     }
     const button = page.getByRole('button', { name: input.button, exact: true });
-    const formAction = await button.evaluate(
-      (element) => (element as HTMLButtonElement).form?.action,
-    );
+    const formAction = await button.evaluate((element) => {
+      // A form input named action shadows HTMLFormElement.action.
+      const action = (element as HTMLButtonElement).form?.getAttribute('action');
+      return action ? new URL(action, location.href).href : null;
+    });
     if (!formAction) {
       throw new Error('The native submit button has no form action.');
+    }
+    const invalidFields = await button.evaluate((element) =>
+      Array.from((element as HTMLButtonElement).form?.querySelectorAll('input:invalid') ?? []).map(
+        (input) => ({
+          name: (input as HTMLInputElement).name,
+          message: (input as HTMLInputElement).validationMessage,
+        }),
+      ),
+    );
+    if (invalidFields.length) {
+      throw new Error(
+        `Native form validation blocked submission: ${JSON.stringify(invalidFields)}`,
+      );
     }
     await Promise.all([page.waitForURL(formAction), button.click()]);
     if (!submission) {

@@ -27,7 +27,7 @@ import type { Db } from '../../db.ts';
 import type { ApiEnv } from '../../env.ts';
 import { OperatorError } from '../../operator/common.ts';
 import { cliVersionStats } from '../../operator/system-operations.ts';
-import { readPlanCatalog, planFromCatalog } from '../../plans.ts';
+import { readPlanCatalog, readPlanCatalogWithAccounts, planFromCatalog } from '../../plans.ts';
 import { getPlatformApiUrl, platformConnectCommand } from '../../platform-identity.ts';
 import { projectWithUrl } from '../../project-url.ts';
 import { projectUrl } from '../../project-url.ts';
@@ -482,4 +482,25 @@ export async function loadZeroTrustPage(context: AdminContext, path: string) {
       count: entry.count,
     })),
   };
+}
+
+export async function loadPlansPage(context: AdminContext, path: string) {
+  const url = new URL(path, 'https://admin.invalid');
+  const home = '/admin/config/plans';
+  if (!path.startsWith(home) || url.origin !== 'https://admin.invalid') {
+    throw new OperatorError(400, 'Invalid plans page request.');
+  }
+  const match = /^\/admin\/config\/plans\/([a-z][a-z0-9-]{0,63})\/edit$/.exec(url.pathname);
+  if (url.pathname !== home && url.pathname !== home + '/new' && !match) {
+    throw new OperatorError(400, 'Invalid plans page request.');
+  }
+  const data = await readPlanCatalogWithAccounts(
+    context.get('db'),
+    context.env.PLATFORM_INSTALLATION_ID ? 'custom' : 'free',
+  );
+  const selectedPlanId = match?.[1] ?? null;
+  if (selectedPlanId && !data.catalog.plans.some((plan) => plan.id === selectedPlanId)) {
+    throw new OperatorError(404, 'Plan not found.');
+  }
+  return { id: path, ...data, selectedPlanId };
 }

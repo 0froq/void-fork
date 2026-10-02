@@ -10,6 +10,7 @@ import type { Context } from 'hono';
 import type { ApiEnv } from '../../env.ts';
 import { OperatorError } from '../../operator/common.ts';
 import {
+  loadPlansPage,
   loadBuildDetailPage,
   loadAuthEditPage,
   loadAuthNewPage,
@@ -27,6 +28,16 @@ import {
   loadUsersPage,
   loadZeroTrustPage,
 } from './page-data.ts';
+
+type PlansRecord = Awaited<ReturnType<typeof loadPlansPage>>;
+export const plansDataView = dataView<PlansRecord>('AdminPlans')({
+  id: true,
+  catalog: true,
+  accounts: true,
+  selectedPlanId: true,
+});
+export type AdminPlans = Entity<typeof plansDataView, 'AdminPlans'>;
+const plansSource: SourceDefinition<PlansRecord> = { id: 'id', view: plansDataView };
 
 type AdminContext = Context<ApiEnv>;
 type UsersPageRecord = Awaited<ReturnType<typeof loadUsersPage>>;
@@ -266,6 +277,7 @@ const emailProjectSource: SourceDefinition<EmailProjectRecord> = {
 const zeroTrustSource: SourceDefinition<ZeroTrustRecord> = { id: 'id', view: zeroTrustDataView };
 
 export const pageSourceByType = new Map<string, SourceDefinition>([
+  ['AdminPlans', plansSource],
   ['AdminUsersPage', usersSource],
   ['AdminProjectsPage', projectsSource],
   ['AdminDeploymentsPage', deploymentsSource],
@@ -305,6 +317,9 @@ async function loadPages<Item>(
     throw error;
   }
 }
+pageRegistry.set(plansSource, {
+  byIds: async ({ ctx, ids }) => loadPages(ctx, ids, loadPlansPage),
+});
 pageRegistry.set(usersSource, {
   byIds: async ({ ctx, ids }) => loadPages(ctx, ids, loadUsersPage),
 });
@@ -363,6 +378,7 @@ function pagePath(input: { args?: Record<string, unknown> }) {
 }
 
 export const PageRoot = {
+  plans: plansDataView,
   usersPage: usersPageDataView,
   projectsPage: projectsPageDataView,
   deploymentsPage: deploymentsPageDataView,
@@ -382,6 +398,24 @@ export const PageRoot = {
 };
 
 export const pageQueries = {
+  plans: {
+    resolve: ({
+      ctx,
+      input,
+      select,
+    }: {
+      ctx: AdminContext;
+      input: { args?: Record<string, unknown> };
+      select: Array<string>;
+    }) =>
+      resolveSourceById({
+        ctx,
+        id: pagePath(input),
+        input: { select },
+        registry: pageRegistry,
+        source: plansSource,
+      }),
+  },
   usersPage: {
     resolve: ({
       ctx,

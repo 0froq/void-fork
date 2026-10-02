@@ -1,5 +1,6 @@
 import { defer, view } from 'react-fate';
 import type {
+  AdminPlans,
   AdminDashboard,
   AdminTopProject,
   AdminHealth,
@@ -295,3 +296,12 @@ export const zeroTrustRequest = (path: string) =>
   ({
     zeroTrust: { view: ZeroTrustView, args: { path } },
   }) as const;
+
+export const PlansView = view<AdminPlans>()({
+  id: true,
+  catalog: true as never,
+  accounts: true,
+  selectedPlanId: true,
+});
+export const plansRequest = (path: string) =>
+  ({ plans: { view: PlansView, args: { path } } }) as const;

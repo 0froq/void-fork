@@ -15,7 +15,12 @@ import { and, asc, count, eq, gt, inArray } from 'drizzle-orm';
 import type { Context } from 'hono';
 import type { DbOrTx } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
-import { lockPlanCatalog, readPlanCatalog, writePlanCatalog } from '../plans.ts';
+import {
+  lockPlanCatalog,
+  readPlanCatalog,
+  readPlanCatalogWithAccounts,
+  writePlanCatalog,
+} from '../plans.ts';
 import { users } from '../schema.ts';
 import { getCurrentBillingPeriodStart } from '../tiers.ts';
 import { dryRun, OperatorError } from './common.ts';
@@ -275,12 +280,7 @@ async function accountCount(db: DbOrTx, planIds: Array<string>): Promise<number>
 }
 
 export async function getOperatorPlanCatalog(context: Context<ApiEnv>) {
-  const db = context.get('db');
-  const [catalog, accounts] = await Promise.all([
-    readPlanCatalog(db, initialPlanDefault(context)),
-    db.select({ planId: users.plan, count: count() }).from(users).groupBy(users.plan),
-  ]);
-  return { catalog, accounts };
+  return readPlanCatalogWithAccounts(context.get('db'), initialPlanDefault(context));
 }
 
 export async function mutateOperatorPlanCatalog(

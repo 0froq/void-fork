@@ -10,6 +10,10 @@ import { Layout } from './views/Layout.tsx';
 
 const TITLES: Partial<Record<AdminPageId, string>> = {
   dashboard: 'Dashboard',
+  plans: 'Plans',
+  planEdit: 'Edit plan',
+  planPreview: 'Review plan change',
+  planResult: 'Plan update',
   users: 'Users',
   userDetail: 'User',
   projects: 'Projects',

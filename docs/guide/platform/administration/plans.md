@@ -4,7 +4,7 @@ outline: deep
 
 # Plans and Limits
 
-Plans define the resource limits you assign to accounts on your platform. They do not bill users or purchase Cloudflare services. Sign in with an administrator account, then open the plan menu:
+Plans define the resource limits you assign to accounts on your platform. They do not bill users or purchase Cloudflare services. Sign in with an administrator account and open **Plans** in the administration dashboard, or use the CLI:
 
 ```sh
 void platform auth login
@@ -14,6 +14,16 @@ void platform config plans
 Choose a plan to inspect or edit it, copy one into a new plan, or choose the default for new accounts. Existing installations keep their plans, limits, and default until you change them. After upgrading the platform to support plan configuration, these changes require no app or platform redeploy.
 
 Inspection and previews are available immediately after a platform upgrade. Allow 15 minutes before applying changes.
+
+## Use the Dashboard
+
+Open **Plans** to see each plan's stable ID, account count, and signup default. Choose **Add plan** to copy an existing plan, or **Edit** to change its display name, limits, build size, and permission to use short project slugs.
+
+Choose **Review changes** to compare the current and proposed settings and see how many accounts are affected. Review any quota warnings, then choose **Apply changes**. If someone changed the catalog while you were reviewing, open the plan again and create a fresh review.
+
+The edit page also lets you choose the signup default, archive or restore assignments, reset a built-in plan, or remove a plan with an active replacement. Every action has a review step.
+
+Account updates continue automatically on the result page. If you leave the page or an update pauses, open **Plans** and choose **Continue account updates**. Finish pending account updates before changing plans again. Recorded usage and billing periods are preserved.
 
 ## Add a Plan
 

@@ -11,6 +11,7 @@ import {
   LogOut,
   Mail,
   Rocket,
+  SlidersHorizontal,
   ShieldCheck,
   ShieldLock,
   Terminal,
@@ -129,6 +130,12 @@ export function Layout({
             />
           </SideNavSection>
           <SideNavSection title="Platform">
+            <SideNavItem
+              label="Plans"
+              icon={SlidersHorizontal}
+              href="/admin/config/plans"
+              isSelected={path.startsWith('/admin/config/plans')}
+            />
             <SideNavItem
               label="Authentication"
               icon={ShieldCheck}
