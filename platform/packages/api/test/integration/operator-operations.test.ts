@@ -10,7 +10,7 @@ import {
   test,
   vi,
 } from 'vite-plus/test';
-import { createBuild, getDeployment } from '../../src/db.ts';
+import { getDeployment } from '../../src/db.ts';
 import { app } from '../../src/index.ts';
 import { loadSandboxDeploymentPageProjection } from '../../src/operator/sandbox-operations.ts';
 import { databaseTimestampMs } from '../../src/routes/deploy.ts';
@@ -24,6 +24,7 @@ import {
 } from '../../src/schema.ts';
 import { BUILD_INSTANCE_LARGE } from '../../src/tiers.ts';
 import {
+  createTestBuild,
   clearTables,
   createOperatorToken,
   createTestDeployment,
@@ -412,7 +413,7 @@ describe('operator deployment operations', () => {
 describe('operator build operations', () => {
   test('preserves log cursor, DO terminal status, and the recorded build size', async () => {
     const project = await createTestProject(env.db, ownerId);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: ownerId,
       executor: 'container',
@@ -443,7 +444,7 @@ describe('operator build operations', () => {
   });
   test('bounded build pages advance only past returned lines and retain buffered terminal logs', async () => {
     const project = await createTestProject(env.db, ownerId);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: ownerId,
       executor: 'container',
@@ -475,7 +476,7 @@ describe('operator build operations', () => {
   });
   test('disabled managed builds fail before resolving or calling a DO', async () => {
     const project = await createTestProject(env.db, ownerId);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: ownerId,
       executor: 'container',
@@ -502,7 +503,7 @@ describe('operator build operations', () => {
   });
   test('returns external build URLs without accessing container services', async () => {
     const project = await createTestProject(env.db, ownerId);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: ownerId,
       executor: 'github_actions',
@@ -522,7 +523,7 @@ describe('operator build operations', () => {
   });
   test('does not mask a failed log service as success', async () => {
     const project = await createTestProject(env.db, ownerId);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: ownerId,
       executor: 'container',

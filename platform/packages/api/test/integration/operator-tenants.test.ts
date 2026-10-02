@@ -11,7 +11,6 @@ import {
 } from 'vite-plus/test';
 import {
   acceptInvitationByEmail,
-  createBuild,
   createGitHubConnection,
   createInvitation,
   getBuild,
@@ -40,6 +39,7 @@ import {
 } from '../../src/schema.ts';
 import { getAllowlist } from '../../src/signup-allowlist.ts';
 import {
+  createTestBuild,
   clearTables,
   createOperatorToken,
   createTestDeployment,
@@ -1171,7 +1171,7 @@ describe('operator tenant mutations', () => {
       repositoryId: '8811',
       authorizedByUserId: authorizer.id,
     });
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: owner.id,
       executor: 'container',

@@ -33,6 +33,7 @@ import {
   platformSettings,
 } from '../../src/schema.ts';
 import {
+  createTestBuild,
   setupEnv,
   teardownEnv,
   clearTables,
@@ -815,7 +816,7 @@ describe('POST /projects/:id/prerender-token', () => {
   it('binds a derived token to its active build and revokes it with that build', async () => {
     const user = await createTestUser(env.db, 'prerender-bound-ci');
     const project = await createTestProject(env.db, user.id, 'prerender-bound-ci-app');
-    const build = await db.createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       status: 'building',
@@ -1045,7 +1046,7 @@ describe('POST /projects/:id/prerender-token', () => {
       role: 'collaborator',
       added_by_user_id: owner.id,
     });
-    const build = await db.createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: collaborator.id,
       status: 'building',

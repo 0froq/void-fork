@@ -1,7 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vite-plus/test';
 import {
-  createBuild,
   createGitHubConnection,
   createOrRefreshProjectInvitation,
   createProject,
@@ -22,6 +21,7 @@ import {
   users,
 } from '../../src/schema.ts';
 import {
+  createTestBuild,
   captureQueries,
   clearTables,
   createTestUser,
@@ -104,7 +104,7 @@ describe('project team lifecycle', () => {
       repositoryId: '101',
       authorizedByUserId: member.id,
     });
-    const activeBuild = await createBuild(env.db, {
+    const activeBuild = await createTestBuild(env.db, {
       projectId: project.id,
       userId: owner.id,
       status: 'building',

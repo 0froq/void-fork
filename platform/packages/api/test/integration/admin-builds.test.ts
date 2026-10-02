@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vite-plus/test';
-import { createBuild, updateBuildStatus } from '../../src/db.ts';
+import { updateBuildStatus } from '../../src/db.ts';
 import { app } from '../../src/index.ts';
 import { builds } from '../../src/schema.ts';
 import { BUILD_INSTANCE_LARGE } from '../../src/tiers.ts';
 import {
+  createTestBuild,
   setupEnv,
   teardownEnv,
   clearTables,
@@ -71,7 +72,7 @@ describe('GET /admin/builds/:id/logs', () => {
     const cookie = await admin();
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -138,7 +139,7 @@ describe('GET /admin/builds/:id/logs', () => {
     const cookie = await admin();
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -168,7 +169,7 @@ describe('GET /admin/builds/:id/logs', () => {
     const cookie = await admin();
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -197,7 +198,7 @@ describe('GET /admin/builds/:id/logs', () => {
     const cookie = await admin();
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -216,7 +217,7 @@ describe('GET /admin/builds/:id/logs', () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
     const logsUrl = 'https://github.com/acme/app/actions/runs/123';
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -266,7 +267,7 @@ describe('project detail Builds section', () => {
     const project = await createTestProject(env.db, user.id);
 
     // An ongoing (ACTIVE) build and a terminal build.
-    const ongoing = await createBuild(env.db, {
+    const ongoing = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -275,7 +276,7 @@ describe('project detail Builds section', () => {
       instanceType: null,
     });
     await updateBuildStatus(env.db, ongoing.id, 'building');
-    const done = await createBuild(env.db, {
+    const done = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -327,7 +328,7 @@ describe('GET /admin/builds/:id (build page)', () => {
     const cookie = await admin();
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -359,7 +360,7 @@ describe('GET /admin/builds/:id (build page)', () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
     const logsUrl = 'https://github.com/acme/app/actions/runs/123';
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -384,7 +385,7 @@ describe('GET /admin/builds/:id (build page)', () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
     const deployment = await createTestDeployment(env.db, project.id, 'live');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',

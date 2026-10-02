@@ -11,7 +11,6 @@ import {
   vi,
 } from 'vite-plus/test';
 import {
-  createBuild,
   createGitHubConnection as createGitHubConnectionRecord,
   deleteGitHubConnection,
   getBuild,
@@ -43,6 +42,7 @@ import {
   projectMembers,
 } from '../../src/schema.ts';
 import {
+  createTestBuild,
   clearTables,
   createTestDeployment,
   createTestProject,
@@ -624,7 +624,7 @@ describe('POST /webhooks/github', () => {
       buildExecutor: 'container',
     });
     await seedInstallation(env.db, '555');
-    const existing = await createBuild(env.db, {
+    const existing = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -672,7 +672,7 @@ describe('POST /webhooks/github', () => {
     await seedInstallation(env.db, '555');
     // An existing queued build (e.g. from a newer push) that must NOT be
     // superseded by this unverifiable older delivery.
-    const existing = await createBuild(env.db, {
+    const existing = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -717,7 +717,7 @@ describe('POST /webhooks/github', () => {
       buildExecutor: 'container',
     });
     await seedInstallation(env.db, '555');
-    const existing = await createBuild(env.db, {
+    const existing = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -1160,7 +1160,7 @@ describe('POST /webhooks/github', () => {
       branch: 'main',
       buildExecutor: 'container',
     });
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -1217,7 +1217,7 @@ describe('POST /webhooks/github', () => {
       .set({ commit: 'sha-success' })
       .where(eq(deployments.id, deployment.id));
 
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1254,7 +1254,7 @@ describe('POST /webhooks/github', () => {
       buildExecutor: 'github_actions',
     });
     await seedInstallation(env.db, '322');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1293,7 +1293,7 @@ describe('POST /webhooks/github', () => {
       buildExecutor: 'github_actions',
     });
     await seedInstallation(env.db, '331');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1344,7 +1344,7 @@ describe('POST /webhooks/github', () => {
       buildExecutor: 'github_actions',
     });
     await seedInstallation(env.db, '332');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1392,7 +1392,7 @@ describe('POST /webhooks/github', () => {
       buildExecutor: 'github_actions',
     });
     await seedInstallation(env.db, '333');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1435,7 +1435,7 @@ describe('POST /webhooks/github', () => {
       buildExecutor: 'github_actions',
     });
     await seedInstallation(env.db, '334');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1492,7 +1492,7 @@ describe('POST /webhooks/github', () => {
     await seedInstallation(env.db, '335');
     // Seed the build ALREADY terminal (an out-of-band cancel won the race before
     // the completion webhook arrived) but carrying a check_run_id.
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1547,7 +1547,7 @@ describe('POST /webhooks/github', () => {
       .update(deployments)
       .set({ commit: 'sha-throw' })
       .where(eq(deployments.id, deployment.id));
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1616,7 +1616,7 @@ describe('POST /webhooks/github', () => {
     await seedInstallation(env.db, '901');
 
     // Both projects have an in-flight build for the SAME run_id.
-    const buildX = await createBuild(env.db, {
+    const buildX = await createTestBuild(env.db, {
       projectId: projectX.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1625,7 +1625,7 @@ describe('POST /webhooks/github', () => {
       branch: 'main',
       githubRunId: '500',
     });
-    const buildY = await createBuild(env.db, {
+    const buildY = await createTestBuild(env.db, {
       projectId: projectY.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1696,7 +1696,7 @@ describe('POST /webhooks/github', () => {
       .where(eq(deployments.id, deploymentB.id));
 
     // Both projects have an ACTIVE build sharing ONE run_id (different project_id).
-    const buildA = await createBuild(env.db, {
+    const buildA = await createTestBuild(env.db, {
       projectId: projectA.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1705,7 +1705,7 @@ describe('POST /webhooks/github', () => {
       branch: 'main',
       githubRunId: '960',
     });
-    const buildB = await createBuild(env.db, {
+    const buildB = await createTestBuild(env.db, {
       projectId: projectB.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1758,7 +1758,7 @@ describe('POST /webhooks/github', () => {
     await seedInstallation(env.db, '950');
 
     // Prior attempt 1 for run 800, already terminal.
-    const terminal = await createBuild(env.db, {
+    const terminal = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1769,7 +1769,7 @@ describe('POST /webhooks/github', () => {
       githubRunAttempt: '1',
     });
     // The rerun: a fresh ACTIVE build for the SAME run_id, attempt 2.
-    const rerun = await createBuild(env.db, {
+    const rerun = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1821,7 +1821,7 @@ describe('POST /webhooks/github', () => {
     await seedInstallation(env.db, '951');
 
     // Attempt 1 for run 801, already terminal (failed).
-    const attempt1 = await createBuild(env.db, {
+    const attempt1 = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1832,7 +1832,7 @@ describe('POST /webhooks/github', () => {
       githubRunAttempt: '1',
     });
     // Attempt 2 for the SAME run_id, currently ACTIVE.
-    const attempt2 = await createBuild(env.db, {
+    const attempt2 = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1870,7 +1870,7 @@ describe('POST /webhooks/github', () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'wh-no-conn');
     // A build exists for the run_id, but the payload repo maps to no connection.
-    await createBuild(env.db, {
+    await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -2181,7 +2181,7 @@ describe('POST /webhooks/github', () => {
       buildExecutor: 'github_actions',
     });
     await seedInstallation(env.db, '612');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -2567,7 +2567,7 @@ describe('POST /webhooks/github — push idempotency + latest-wins', () => {
     await seedInstallation(env.db, '700');
 
     // B1: a previously-deployed commit C1, already `complete`.
-    const b1 = await createBuild(env.db, {
+    const b1 = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -2579,7 +2579,7 @@ describe('POST /webhooks/github — push idempotency + latest-wins', () => {
     await createTestDeployment(env.db, project.id, 'live', undefined, undefined, { commit: 'C2' });
     // B2: a NEWER in-flight build for C2 on the same project+branch (the commit
     // the branch advanced to, now being rolled back away from).
-    const b2 = await createBuild(env.db, {
+    const b2 = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -2628,7 +2628,7 @@ describe('POST /webhooks/github — push idempotency + latest-wins', () => {
     const depA = await createTestDeployment(env.db, project.id, 'live', undefined, undefined, {
       commit: 'C1',
     });
-    const b1 = await createBuild(env.db, {
+    const b1 = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -2711,7 +2711,7 @@ describe('scheduled() re-arms BUILD_SCHEDULER for orphaned queued builds', () =>
     const project = await createTestProject(env.db, user.id, 'wh-reaper');
     // Simulate the webhook having inserted the row but its poke having failed:
     // the row is queued, yet no alarm was armed.
-    await createBuild(env.db, {
+    await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -2737,7 +2737,7 @@ describe('scheduled() re-arms BUILD_SCHEDULER for orphaned queued builds', () =>
     const project = await createTestProject(env.db, user.id, 'wh-no-reaper');
     // A non-queued container build and a queued github_actions build must NOT
     // trigger the reaper — only queued container builds are scheduler-drained.
-    await createBuild(env.db, {
+    await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -2745,7 +2745,7 @@ describe('scheduled() re-arms BUILD_SCHEDULER for orphaned queued builds', () =>
       commitSha: 'sha-running',
       branch: 'main',
     });
-    await createBuild(env.db, {
+    await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -2766,7 +2766,7 @@ describe('scheduled() re-arms BUILD_SCHEDULER for orphaned queued builds', () =>
   it('does not throw if the scheduler poke fails (isolated from the rest of the tick)', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'wh-reaper-fail');
-    await createBuild(env.db, {
+    await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -2822,7 +2822,7 @@ describe('scheduled() reaps over-age active github_actions builds', () => {
   it('fails an over-age active github_actions build', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'wh-stale-actions');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -2844,7 +2844,7 @@ describe('scheduled() reaps over-age active github_actions builds', () => {
   it('does not reap a recent active github_actions build', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'wh-fresh-actions');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -2864,7 +2864,7 @@ describe('scheduled() reaps over-age active github_actions builds', () => {
   it('does not reap an over-age active container build (DO timeout owns those)', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'wh-stale-container');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -2914,7 +2914,7 @@ describe('POST /webhooks/github — revoke builds on App removal', () => {
       branch: 'main',
       buildExecutor: 'container',
     });
-    const container = await createBuild(env.db, {
+    const container = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -2960,7 +2960,7 @@ describe('POST /webhooks/github — revoke builds on App removal', () => {
       branch: 'main',
       buildExecutor: 'github_actions',
     });
-    const container = await createBuild(env.db, {
+    const container = await createTestBuild(env.db, {
       projectId: containerProject.id,
       userId: user.id,
       executor: 'container',
@@ -2968,7 +2968,7 @@ describe('POST /webhooks/github — revoke builds on App removal', () => {
       commitSha: 'sha-susp-c',
       branch: 'main',
     });
-    const actions = await createBuild(env.db, {
+    const actions = await createTestBuild(env.db, {
       projectId: actionsProject.id,
       userId: user.id,
       executor: 'github_actions',
@@ -3015,7 +3015,7 @@ describe('POST /webhooks/github — revoke builds on App removal', () => {
       branch: 'main',
       buildExecutor: 'github_actions',
     });
-    const removedBuild = await createBuild(env.db, {
+    const removedBuild = await createTestBuild(env.db, {
       projectId: removedProject.id,
       userId: user.id,
       executor: 'container',
@@ -3023,7 +3023,7 @@ describe('POST /webhooks/github — revoke builds on App removal', () => {
       commitSha: 'sha-rm',
       branch: 'main',
     });
-    const keptBuild = await createBuild(env.db, {
+    const keptBuild = await createTestBuild(env.db, {
       projectId: keptProject.id,
       userId: user.id,
       executor: 'github_actions',
@@ -3072,7 +3072,7 @@ describe('POST /webhooks/github — revoke builds on App removal', () => {
       branch: 'main',
       buildExecutor: 'container',
     });
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -3124,7 +3124,7 @@ describe('POST /webhooks/github — revoke builds on App removal', () => {
       branch: 'main',
       buildExecutor: 'container',
     });
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -3157,7 +3157,7 @@ describe('POST /webhooks/github — revoke builds on App removal', () => {
       branch: 'main',
       buildExecutor: 'container',
     });
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -3201,7 +3201,7 @@ describe('POST /webhooks/github — supersede stale actions builds on push', () 
       buildExecutor: 'github_actions',
     });
     await seedInstallation(env.db, '8101');
-    const stale = await createBuild(env.db, {
+    const stale = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -3244,7 +3244,7 @@ describe('POST /webhooks/github — supersede stale actions builds on push', () 
     });
     await seedInstallation(env.db, '8102');
     // A build that already exchanged OIDC for the new head commit c2.
-    const fresh = await createBuild(env.db, {
+    const fresh = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -3280,7 +3280,7 @@ describe('POST /webhooks/github — supersede stale actions builds on push', () 
     await seedInstallation(env.db, '8103');
     // An active build on a DIFFERENT branch (dev) must not be superseded by a
     // push to main.
-    const devBuild = await createBuild(env.db, {
+    const devBuild = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -3348,7 +3348,7 @@ describe('POST /webhooks/github — supersede stale container builds on push', (
       buildExecutor: 'container',
     });
     await seedInstallation(env.db, '9101');
-    const stale = await createBuild(env.db, {
+    const stale = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -3394,7 +3394,7 @@ describe('POST /webhooks/github — supersede stale container builds on push', (
     });
     await seedInstallation(env.db, '9102');
     // A build already in flight for the new head commit c2 (a redelivery race).
-    const fresh = await createBuild(env.db, {
+    const fresh = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -3434,7 +3434,7 @@ describe('POST /webhooks/github — supersede stale container builds on push', (
     await seedInstallation(env.db, '9103');
     // An active build on a DIFFERENT branch (dev) must not be superseded by a
     // push to main.
-    const devBuild = await createBuild(env.db, {
+    const devBuild = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -3468,7 +3468,7 @@ describe('POST /webhooks/github — supersede stale container builds on push', (
       buildExecutor: 'container',
     });
     await seedInstallation(env.db, '9104');
-    const building = await createBuild(env.db, {
+    const building = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -3629,7 +3629,7 @@ describe('POST /webhooks/github — repo removal matches immutable repository_id
       branch: 'main',
       buildExecutor: 'container',
     });
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -3667,7 +3667,7 @@ describe('POST /webhooks/github — repo removal matches immutable repository_id
       branch: 'main',
       buildExecutor: 'container',
     });
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -3720,7 +3720,7 @@ describe('POST /webhooks/github — CAS workflow_run completion', () => {
       .set({ commit: 'sha-cas' })
       .where(eq(deployments.id, deployment.id));
     // Seed the build ALREADY cancelled (a concurrent terminalizer won the race).
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -3781,7 +3781,7 @@ describe('POST /webhooks/github — revoke builds on branch delete', () => {
       branch: 'main',
       buildExecutor: 'container',
     });
-    const inflight = await createBuild(env.db, {
+    const inflight = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -3791,7 +3791,7 @@ describe('POST /webhooks/github — revoke builds on branch delete', () => {
     });
     // No created_at backdating needed: the handler reads its monotonic fence from
     // the DB clock (`select now()`) on the same clock that stamped this build, and
-    // captures it AFTER createBuild ran, so created_at <= fence holds naturally.
+    // captures it AFTER createTestBuild ran, so created_at <= fence holds naturally.
 
     const { app, appEnv, cancelledIds } = recordingApp();
     const res = await post(app, appEnv, 'push', {
@@ -3834,7 +3834,7 @@ describe('POST /webhooks/github — revoke builds on branch delete', () => {
       buildExecutor: 'container',
     });
     // An active build on the dev branch — a delete of `main` must NOT touch it.
-    const devBuild = await createBuild(env.db, {
+    const devBuild = await createTestBuild(env.db, {
       projectId: devProject.id,
       userId: user.id,
       executor: 'container',
@@ -3872,7 +3872,7 @@ describe('POST /webhooks/github — revoke builds on branch delete', () => {
     });
     // An active build on the connected branch, but the delete targets a branch
     // with no connection — nothing should be terminalized.
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -3910,7 +3910,7 @@ describe('POST /webhooks/github — revoke builds on branch delete', () => {
     });
     // A COMPLETE build for the branch being deleted — terminateBuildsForProject's
     // status guard (queued/starting/building/deploying only) must not touch it.
-    const done = await createBuild(env.db, {
+    const done = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -3953,7 +3953,7 @@ describe('POST /webhooks/github — revoke builds on branch delete', () => {
       buildExecutor: 'container',
     });
     // A fresh in-flight build for the recreated branch (a newer push enqueued it).
-    const inflight = await createBuild(env.db, {
+    const inflight = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -3998,7 +3998,7 @@ describe('POST /webhooks/github — revoke builds on branch delete', () => {
       branch: 'main',
       buildExecutor: 'container',
     });
-    const inflight = await createBuild(env.db, {
+    const inflight = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -4051,7 +4051,7 @@ describe('POST /webhooks/github — revoke builds on branch delete', () => {
     // column is `timestamp without time zone`, so a UTC string written directly
     // has its offset dropped and lands at the wrong instant under the harness's
     // non-UTC session timezone — mirror how `defaultNow` writes.
-    const orphan = await createBuild(env.db, {
+    const orphan = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -4065,7 +4065,7 @@ describe('POST /webhooks/github — revoke builds on branch delete', () => {
       .where(eq(builds.id, orphan.id));
     // Build for the recreated branch — modeled as enqueued AFTER the fence (the
     // check-to-cancel window) via a created_at an hour in the future.
-    const recreated = await createBuild(env.db, {
+    const recreated = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -4150,7 +4150,7 @@ describe('POST /webhooks/github — organization member_removed revocation', () 
       githubAccountId: G,
       ttlSeconds: 3600,
     });
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -4206,7 +4206,7 @@ describe('POST /webhooks/github — organization member_removed revocation', () 
       githubAccountId: G,
       ttlSeconds: 3600,
     });
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: owner.id,
       executor: 'container',
@@ -4308,7 +4308,7 @@ describe('POST /webhooks/github — organization member_removed revocation', () 
       githubAccountId: X,
       ttlSeconds: 3600,
     });
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: v.id,
       executor: 'container',
@@ -4451,7 +4451,7 @@ describe('POST /webhooks/github — organization member_removed revocation', () 
       githubAccountId: Z,
       ttlSeconds: 3600,
     });
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: vProj.id,
       userId: v.id,
       executor: 'container',
@@ -4657,7 +4657,7 @@ describe('POST /webhooks/github — organization member_removed revocation', () 
       githubAccountId: G,
       ttlSeconds: 3600,
     });
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -4828,7 +4828,7 @@ describe('POST /webhooks/github — rerun from the check run', () => {
     user: { id: string },
     status: 'queued' | 'failed' | 'complete' = 'failed',
   ) {
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -4859,7 +4859,7 @@ describe('POST /webhooks/github — rerun from the check run', () => {
   it('enqueues a fresh build when the previous build for the commit FAILED', async () => {
     const { project, user } = await seedContainerProject('wh-rerun-failed');
     // The state the button exists for: a terminal failed build on the branch head.
-    const failed = await createBuild(env.db, {
+    const failed = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -4990,7 +4990,7 @@ describe('POST /webhooks/github — rerun from the check run', () => {
       buildExecutor: 'github_actions',
     });
     await seedInstallation(env.db, '900');
-    const clicked = await createBuild(env.db, {
+    const clicked = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -5101,7 +5101,7 @@ describe('POST /webhooks/github — rerun from the check run', () => {
     const { project: clicked, user } = await seedContainerProject('wh-rerun-target');
     const { project: sibling } = await seedSiblingProject('wh-rerun-sibling', 'container');
     // The check the user clicked belongs to THIS build, on THIS project.
-    const failed = await createBuild(env.db, {
+    const failed = await createTestBuild(env.db, {
       projectId: clicked.id,
       userId: user.id,
       executor: 'container',
@@ -5129,7 +5129,7 @@ describe('POST /webhooks/github — rerun from the check run', () => {
       'wh-rerun-container-sib',
       'container',
     );
-    const actionsBuild = await createBuild(env.db, {
+    const actionsBuild = await createTestBuild(env.db, {
       projectId: actions.project.id,
       userId: actions.user.id,
       executor: 'github_actions',
@@ -5239,7 +5239,7 @@ describe('POST /webhooks/github — rerun from the check run', () => {
     // here would let anyone with rerun rights clear branch protection on a commit
     // that never built.
     const { project, user } = await seedContainerProject('wh-rerun-no-bypass');
-    const failed = await createBuild(env.db, {
+    const failed = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -5297,7 +5297,7 @@ describe('POST /webhooks/github — rerun from the check run', () => {
 
   it('completes a refused rerun as cancelled when the run had no conclusion', async () => {
     const { project, user } = await seedContainerProject('wh-rerun-null-conclusion');
-    const failed = await createBuild(env.db, {
+    const failed = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -5330,7 +5330,7 @@ describe('POST /webhooks/github — rerun from the check run', () => {
     const { project, user } = await seedContainerProject('wh-rerun-queued-reuse');
     // A queued build for this exact commit already exists — a duplicate webhook
     // delivery, or a push that landed first. The supersede tx REUSES it.
-    const queued = await createBuild(env.db, {
+    const queued = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -5365,7 +5365,7 @@ describe('POST /webhooks/github — rerun from the check run', () => {
 
   it('reports success, not neutral, when the commit is already built and live', async () => {
     const { project, user } = await seedContainerProject('wh-rerun-already-live');
-    const done = await createBuild(env.db, {
+    const done = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',

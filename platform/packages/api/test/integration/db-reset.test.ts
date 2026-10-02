@@ -1,6 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, expect, it } from 'vite-plus/test';
-import { createBuild } from '../../src/db.ts';
 import {
   builds,
   deployments,
@@ -13,6 +12,7 @@ import {
   users,
 } from '../../src/schema.ts';
 import {
+  createTestBuild,
   captureQueries,
   clearTables,
   createTestDeployment,
@@ -43,7 +43,7 @@ it('resets linked fixtures and independent ledgers in one query without resettin
   const user = await createTestUser(env.db);
   const project = await createTestProject(env.db, user.id);
   const deployment = await createTestDeployment(env.db, project.id);
-  const build = await createBuild(env.db, {
+  const build = await createTestBuild(env.db, {
     projectId: project.id,
     userId: user.id,
   });

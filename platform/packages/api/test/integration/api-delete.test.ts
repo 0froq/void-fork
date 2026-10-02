@@ -9,7 +9,6 @@ import {
   afterEach,
   vi,
 } from 'vite-plus/test';
-import { createBuild } from '../../src/db.ts';
 import * as db from '../../src/db.ts';
 import app, { FAST_CRON, scheduled } from '../../src/index.ts';
 import * as projectAccess from '../../src/project-access.ts';
@@ -26,6 +25,7 @@ import {
 } from '../../src/schema.ts';
 import * as zeroTrustService from '../../src/zero-trust/project.ts';
 import {
+  createTestBuild,
   setupEnv,
   teardownEnv,
   clearTables,
@@ -386,13 +386,13 @@ describe('DELETE /projects/:id', () => {
     // Two in-flight builds: a container build (has a live DO) and a
     // github_actions build (no DO — token revoked purely by terminalizing the
     // row). Both must be gone after delete, and the container DO torn down.
-    const containerBuild = await createBuild(env.db, {
+    const containerBuild = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
       status: 'building',
     });
-    const actionsBuild = await createBuild(env.db, {
+    const actionsBuild = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',

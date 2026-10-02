@@ -13,7 +13,6 @@ import {
 } from 'vite-plus/test';
 import { verifyDeployToken } from '../../src/auth/deploy-token.ts';
 import {
-  createBuild,
   createGitHubConnection as createGitHubConnectionRecord,
   createGithubActionsBuildWithinLimit,
   deleteGitHubConnection,
@@ -40,6 +39,7 @@ import {
   users,
 } from '../../src/schema.ts';
 import {
+  createTestBuild,
   JWT_SECRET,
   clearTables,
   createTestProject,
@@ -1243,7 +1243,7 @@ describe('POST /auth/github-oidc', () => {
   it('setBuildCheckRunId is immutable once set (never overwrites a persisted id)', async () => {
     const user = await createTestUser(env.db, 'octo-check-immutable');
     const project = await createTestProject(env.db, user.id, 'oidc-check-immutable');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1270,7 +1270,7 @@ describe('POST /auth/github-oidc', () => {
     // (the rerun-correctness fix), and NULL-attempt rows are exempt entirely.
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'oidc-unique-index');
-    await createBuild(env.db, {
+    await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1281,7 +1281,7 @@ describe('POST /auth/github-oidc', () => {
 
     // A second active row for the SAME run_id + attempt is rejected.
     await expect(
-      createBuild(env.db, {
+      createTestBuild(env.db, {
         projectId: project.id,
         userId: user.id,
         executor: 'github_actions',
@@ -1293,7 +1293,7 @@ describe('POST /auth/github-oidc', () => {
 
     // A DIFFERENT attempt of the same run_id is allowed to be transiently active
     // (a redelivered late completion for attempt 1 while attempt 2 builds).
-    await createBuild(env.db, {
+    await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1304,8 +1304,16 @@ describe('POST /auth/github-oidc', () => {
 
     // A NULL github_run_id (the container-build path) is exempt: many rows are
     // allowed, so the partial WHERE clause does not break container builds.
-    await createBuild(env.db, { projectId: project.id, userId: user.id, executor: 'container' });
-    await createBuild(env.db, { projectId: project.id, userId: user.id, executor: 'container' });
+    await createTestBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'container',
+    });
+    await createTestBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'container',
+    });
     const all = await getProjectBuilds(env.db, project.id);
     expect(all.filter((b) => b.github_run_id === null).length).toBe(2);
   });

@@ -10,11 +10,12 @@ import {
   vi,
 } from 'vite-plus/test';
 import { signDeployToken } from '../../src/auth/deploy-token.ts';
-import { createBuild, createDeployment } from '../../src/db.ts';
+import { createDeployment } from '../../src/db.ts';
 import * as db from '../../src/db.ts';
 import app from '../../src/index.ts';
 import { builds, deployments } from '../../src/schema.ts';
 import {
+  createTestBuild,
   setupEnv,
   teardownEnv,
   clearTables,
@@ -390,7 +391,7 @@ describe('deploy token scope enforcement', () => {
   it('rejects a deploy token whose bound build is cancelled (superseded runner)', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'build-cancelled');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -413,7 +414,7 @@ describe('deploy token scope enforcement', () => {
   it('lets a deploy token whose bound build is still active (building) through the build guard', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'build-active');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -469,7 +470,7 @@ describe('deploy token scope enforcement', () => {
       it(`rejects a deploy token bound to a ${status} build on ${route.name}`, async () => {
         const user = await createTestUser(env.db);
         const project = await createTestProject(env.db, user.id, `build-${status}-${route.path}`);
-        const build = await createBuild(env.db, {
+        const build = await createTestBuild(env.db, {
           projectId: project.id,
           userId: user.id,
           executor: 'github_actions',
@@ -499,7 +500,7 @@ describe('deploy token scope enforcement', () => {
     it(`lets a deploy token bound to an active (building) build through to ${route.name}`, async () => {
       const user = await createTestUser(env.db);
       const project = await createTestProject(env.db, user.id, `build-active-${route.path}`);
-      const build = await createBuild(env.db, {
+      const build = await createTestBuild(env.db, {
         projectId: project.id,
         userId: user.id,
         executor: 'github_actions',
@@ -530,7 +531,7 @@ describe('deploy token scope enforcement', () => {
     const projectP = await createTestProject(env.db, user.id, 'build-scope-self');
     const projectOther = await createTestProject(env.db, user.id, 'build-scope-other');
     // Active build, but it belongs to projectOther, while the token is scoped to projectP.
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: projectOther.id,
       userId: user.id,
       executor: 'github_actions',
@@ -583,7 +584,7 @@ describe('deploy token scope enforcement', () => {
   it('rejects a deploy whose bound build is cancelled mid-flight (final-tx re-check)', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'build-superseded-midflight');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -635,7 +636,7 @@ describe('deploy token scope enforcement', () => {
   it('lets a deploy go live when the bound build stays active through the final tx', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'build-active-through');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',

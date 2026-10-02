@@ -3,7 +3,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vite-plus
 import {
   cancelQueuedContainerBuildsForUsers,
   claimBuildForStartWithinLimit,
-  createBuild,
   createGitHubConnection as createGitHubConnectionRecord,
   createGithubActionsBuildWithinLimit,
   deleteGitHubConnection,
@@ -47,6 +46,7 @@ import {
   users,
 } from '../../src/schema.ts';
 import {
+  createTestBuild,
   clearTables,
   createTestDeployment,
   createTestProject,
@@ -114,11 +114,11 @@ beforeEach(async () => {
 });
 
 describe('builds', () => {
-  it('createBuild defaults executor=container, status=queued and getBuild reads it back', async () => {
+  it('createTestBuild defaults executor=container, status=queued and getBuild reads it back', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
 
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       commitSha: 'abc123',
@@ -137,11 +137,11 @@ describe('builds', () => {
     expect(fetched?.id).toBe(build.id);
   });
 
-  it('createBuild records github_actions executor + run/log metadata', async () => {
+  it('createTestBuild records github_actions executor + run/log metadata', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
 
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -164,9 +164,9 @@ describe('builds', () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
 
-    const first = await createBuild(env.db, { projectId: project.id, userId: user.id });
-    const second = await createBuild(env.db, { projectId: project.id, userId: user.id });
-    const third = await createBuild(env.db, { projectId: project.id, userId: user.id });
+    const first = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
+    const second = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
+    const third = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
 
     const all = await getProjectBuilds(env.db, project.id);
     expect(all.map((b) => b.id)).toEqual([third.id, second.id, first.id]);
@@ -179,8 +179,8 @@ describe('builds', () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
 
-    const q1 = await createBuild(env.db, { projectId: project.id, userId: user.id });
-    const q2 = await createBuild(env.db, { projectId: project.id, userId: user.id });
+    const q1 = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
+    const q2 = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
     // q1 is older than q2 so the per-project candidate is q1 (oldest).
     await env.db
       .update(builds)
@@ -191,7 +191,7 @@ describe('builds', () => {
       .set({ created_at: sql`now() - interval '1 minute'` })
       .where(eq(builds.id, q2.id));
     // queued github_actions build — wrong executor.
-    await createBuild(env.db, {
+    await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -212,10 +212,10 @@ describe('builds', () => {
     const idle = await createTestProject(env.db, user.id, 'starve-idle');
 
     // Project X (busy): an active build PLUS an older queued build.
-    await createBuild(env.db, { projectId: busy.id, userId: user.id, status: 'building' });
-    const busyQueued = await createBuild(env.db, { projectId: busy.id, userId: user.id });
+    await createTestBuild(env.db, { projectId: busy.id, userId: user.id, status: 'building' });
+    const busyQueued = await createTestBuild(env.db, { projectId: busy.id, userId: user.id });
     // Project Y (idle): a NEWER queued build that must still be surfaced.
-    const idleQueued = await createBuild(env.db, { projectId: idle.id, userId: user.id });
+    const idleQueued = await createTestBuild(env.db, { projectId: idle.id, userId: user.id });
 
     // busy's queued build is OLDER than idle's, so a per-user "oldest" scan would
     // have picked busy (and hidden idle behind it).
@@ -238,9 +238,9 @@ describe('builds', () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
 
-    await createBuild(env.db, { projectId: project.id, userId: user.id, status: 'starting' });
-    await createBuild(env.db, { projectId: project.id, userId: user.id });
-    await createBuild(env.db, { projectId: project.id, userId: user.id });
+    await createTestBuild(env.db, { projectId: project.id, userId: user.id, status: 'starting' });
+    await createTestBuild(env.db, { projectId: project.id, userId: user.id });
+    await createTestBuild(env.db, { projectId: project.id, userId: user.id });
 
     expect(await getQueuedBuilds(env.db, 50)).toEqual([]);
   });
@@ -250,8 +250,8 @@ describe('builds', () => {
     const projectA = await createTestProject(env.db, user.id, 'two-idle-a');
     const projectB = await createTestProject(env.db, user.id, 'two-idle-b');
 
-    const a = await createBuild(env.db, { projectId: projectA.id, userId: user.id });
-    const b = await createBuild(env.db, { projectId: projectB.id, userId: user.id });
+    const a = await createTestBuild(env.db, { projectId: projectA.id, userId: user.id });
+    const b = await createTestBuild(env.db, { projectId: projectB.id, userId: user.id });
 
     const queued = await getQueuedBuilds(env.db, 50);
     expect(queued).toHaveLength(2);
@@ -267,11 +267,11 @@ describe('builds', () => {
     const cappedProj = await createTestProject(env.db, capped.id, 'r95-capped');
     const eligibleProj = await createTestProject(env.db, eligible.id, 'r95-eligible');
 
-    const cappedBuild = await createBuild(env.db, {
+    const cappedBuild = await createTestBuild(env.db, {
       projectId: cappedProj.id,
       userId: capped.id,
     });
-    const eligibleBuild = await createBuild(env.db, {
+    const eligibleBuild = await createTestBuild(env.db, {
       projectId: eligibleProj.id,
       userId: eligible.id,
     });
@@ -294,9 +294,9 @@ describe('builds', () => {
     const projB = await createTestProject(env.db, user.id, 'age-b');
     const projC = await createTestProject(env.db, user.id, 'age-c');
 
-    const oldest = await createBuild(env.db, { projectId: projB.id, userId: user.id });
-    const middle = await createBuild(env.db, { projectId: projC.id, userId: user.id });
-    const newest = await createBuild(env.db, { projectId: projA.id, userId: user.id });
+    const oldest = await createTestBuild(env.db, { projectId: projB.id, userId: user.id });
+    const middle = await createTestBuild(env.db, { projectId: projC.id, userId: user.id });
+    const newest = await createTestBuild(env.db, { projectId: projA.id, userId: user.id });
     await env.db
       .update(builds)
       .set({ created_at: sql`now() - interval '3 minute'` })
@@ -333,31 +333,31 @@ describe('builds', () => {
     // (both count) on one project, plus a QUEUED container build on a second
     // project so the project-serialization filter doesn't hide their queued work.
     const projWith2 = await createTestProject(env.db, withQueued.id, 'owners-with-2');
-    await createBuild(env.db, {
+    await createTestBuild(env.db, {
       projectId: projWith.id,
       userId: withQueued.id,
       status: 'building',
     });
-    await createBuild(env.db, {
+    await createTestBuild(env.db, {
       projectId: projWith.id,
       userId: withQueued.id,
       executor: 'github_actions',
       status: 'deploying',
     });
-    await createBuild(env.db, { projectId: projWith2.id, userId: withQueued.id });
-    await createBuild(env.db, {
+    await createTestBuild(env.db, { projectId: projWith2.id, userId: withQueued.id });
+    await createTestBuild(env.db, {
       projectId: projWith.id,
       userId: withQueued.id,
       status: 'complete',
     });
-    await createBuild(env.db, {
+    await createTestBuild(env.db, {
       projectId: projWith.id,
       userId: withQueued.id,
       status: 'failed',
     });
 
     // noQueued: only a completed build — must NOT appear (no queued container work).
-    await createBuild(env.db, {
+    await createTestBuild(env.db, {
       projectId: projNo.id,
       userId: noQueued.id,
       status: 'complete',
@@ -379,17 +379,17 @@ describe('builds', () => {
     const activeProject = await createTestProject(env.db, suspended.id, 'batch-active');
     const idleProject = await createTestProject(env.db, suspended.id, 'batch-idle');
     const usageProject = await createTestProject(env.db, usageSuspended.id, 'batch-usage');
-    await createBuild(env.db, {
+    await createTestBuild(env.db, {
       projectId: activeProject.id,
       userId: suspended.id,
       status: 'building',
     });
-    const blocked = await createBuild(env.db, {
+    const blocked = await createTestBuild(env.db, {
       projectId: activeProject.id,
       userId: suspended.id,
     });
-    const idle = await createBuild(env.db, { projectId: idleProject.id, userId: suspended.id });
-    const usageQueued = await createBuild(env.db, {
+    const idle = await createTestBuild(env.db, { projectId: idleProject.id, userId: suspended.id });
+    const usageQueued = await createTestBuild(env.db, {
       projectId: usageProject.id,
       userId: usageSuspended.id,
     });
@@ -430,14 +430,14 @@ describe('builds', () => {
     // A queued container build for an ACTIVE project — getQueuedBuilds returns []
     // (it is blocked), but hasQueuedContainerBuilds must still report true so the
     // scheduler keeps a heartbeat until the project frees.
-    await createBuild(env.db, { projectId: project.id, userId: user.id, status: 'building' });
-    await createBuild(env.db, { projectId: project.id, userId: user.id });
+    await createTestBuild(env.db, { projectId: project.id, userId: user.id, status: 'building' });
+    await createTestBuild(env.db, { projectId: project.id, userId: user.id });
     expect(await getQueuedBuilds(env.db, 50)).toEqual([]);
     expect(await hasQueuedContainerBuilds(env.db)).toBe(true);
 
     // Only a queued github_actions build — not a container build.
     await env.db.delete(builds);
-    await createBuild(env.db, {
+    await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -454,41 +454,41 @@ describe('builds', () => {
     // Stamp a known instance_type on this one so the returned object's
     // instance_type can be asserted to round-trip (the post-commit DO teardown
     // needs it to address the right container-size namespace).
-    const queuedContainer = await createBuild(env.db, {
+    const queuedContainer = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       status: 'queued',
       instanceType: 'standard-4',
     });
-    const startingContainer = await createBuild(env.db, {
+    const startingContainer = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       status: 'starting',
     });
-    const buildingContainer = await createBuild(env.db, {
+    const buildingContainer = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       status: 'building',
     });
-    const deployingActions = await createBuild(env.db, {
+    const deployingActions = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
       status: 'deploying',
     });
     // Left alone: terminal rows.
-    const complete = await createBuild(env.db, {
+    const complete = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       status: 'complete',
     });
-    const failed = await createBuild(env.db, {
+    const failed = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       status: 'failed',
     });
     // Left alone: in-flight build on a DIFFERENT project.
-    const otherProj = await createBuild(env.db, {
+    const otherProj = await createTestBuild(env.db, {
       projectId: otherProject.id,
       userId: user.id,
       status: 'building',
@@ -531,19 +531,19 @@ describe('builds', () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
 
-    const mainContainer = await createBuild(env.db, {
+    const mainContainer = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       status: 'building',
       branch: 'main',
     });
-    const developContainer = await createBuild(env.db, {
+    const developContainer = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       status: 'building',
       branch: 'develop',
     });
-    const mainActions = await createBuild(env.db, {
+    const mainActions = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -802,7 +802,7 @@ describe('builds', () => {
 
     // B1: a previously-deployed commit C1 on main, already `complete`. No live
     // deployment links to it (the project is not currently on C1).
-    const b1 = await createBuild(env.db, {
+    const b1 = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -811,7 +811,7 @@ describe('builds', () => {
       branch: 'main',
     });
     // B2: a NEWER in-flight (building) build for C2 on the same project+branch.
-    const b2 = await createBuild(env.db, {
+    const b2 = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -886,7 +886,7 @@ describe('builds', () => {
     const depA = await createTestDeployment(env.db, project.id, 'live', undefined, undefined, {
       commit: 'A',
     });
-    const buildA = await createBuild(env.db, {
+    const buildA = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -900,7 +900,7 @@ describe('builds', () => {
     const depB = await createTestDeployment(env.db, project.id, 'live', undefined, undefined, {
       commit: 'B',
     });
-    const buildB = await createBuild(env.db, {
+    const buildB = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -951,7 +951,7 @@ describe('builds', () => {
     const depA = await createTestDeployment(env.db, project.id, 'live', undefined, undefined, {
       commit: 'A',
     });
-    const buildA = await createBuild(env.db, {
+    const buildA = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -995,7 +995,7 @@ describe('builds', () => {
 
     // Project is live on a different (unrelated) commit B.
     await createTestDeployment(env.db, project.id, 'live', undefined, undefined, { commit: 'B' });
-    const activeA = await createBuild(env.db, {
+    const activeA = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -1030,7 +1030,7 @@ describe('builds', () => {
     await seedActiveInstall(env.db, '12345');
 
     // An ACTIVE (building) container build for C1 on main.
-    const active = await createBuild(env.db, {
+    const active = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -1076,7 +1076,7 @@ describe('builds', () => {
 
     // An ACTIVE build already in flight for the new head commit C2 (a redelivery
     // race that already enqueued/started for C2).
-    const atHead = await createBuild(env.db, {
+    const atHead = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -1519,7 +1519,7 @@ describe('builds', () => {
     // Over-age active container build: started 90 min ago (> 75 min cutoff).
     // Stamp a known instance_type so the reaped object round-trips it out — the
     // scheduled reaper needs it to address the right container-size namespace.
-    const stale = await createBuild(env.db, {
+    const stale = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -1532,7 +1532,7 @@ describe('builds', () => {
       .where(eq(builds.id, stale.id));
 
     // Fresh active container build: started 5 min ago — must be left alone.
-    const fresh = await createBuild(env.db, {
+    const fresh = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -1565,7 +1565,7 @@ describe('builds', () => {
     const project = await createTestProject(env.db, user.id);
 
     // Over-age active GitHub Actions build — the CONTAINER reaper must not touch it.
-    const actions = await createBuild(env.db, {
+    const actions = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -1587,7 +1587,7 @@ describe('builds', () => {
   it('claimBuildForStartWithinLimit atomically flips queued -> starting once', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, { projectId: project.id, userId: user.id });
+    const build = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
 
     const claimed = await claimBuildForStartWithinLimit(env.db, {
       buildId: build.id,
@@ -1611,7 +1611,7 @@ describe('builds', () => {
   it('claimBuildForStartWithinLimit does not start a queued build for a manually suspended owner', async () => {
     const user = await createTestUser(env.db, 'claim-suspended-owner');
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, { projectId: project.id, userId: user.id });
+    const build = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
     await env.db
       .update(users)
       .set({ suspended_reason: 'platform policy violation' })
@@ -1631,12 +1631,12 @@ describe('builds', () => {
     const user = await createTestUser(env.db, 'claim-current-plan');
     const activeProject = await createTestProject(env.db, user.id);
     const queuedProject = await createTestProject(env.db, user.id);
-    await createBuild(env.db, {
+    await createTestBuild(env.db, {
       projectId: activeProject.id,
       userId: user.id,
       status: 'building',
     });
-    const queued = await createBuild(env.db, {
+    const queued = await createTestBuild(env.db, {
       projectId: queuedProject.id,
       userId: user.id,
     });
@@ -1654,7 +1654,7 @@ describe('builds', () => {
   it('requeueBuildIfStarting returns a starting row to queued (CAS)', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, { projectId: project.id, userId: user.id });
+    const build = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
 
     // Claim flips queued -> starting.
     await claimBuildForStartWithinLimit(env.db, {
@@ -1672,7 +1672,7 @@ describe('builds', () => {
   it('requeueBuildIfStarting no-ops on a cancelled row (terminal preserved)', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, { projectId: project.id, userId: user.id });
+    const build = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
 
     // Claim -> starting, then a concurrent terminalizer cancels it.
     await claimBuildForStartWithinLimit(env.db, {
@@ -1691,7 +1691,7 @@ describe('builds', () => {
   it('requeueBuildIfStarting no-ops on a building row', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, { projectId: project.id, userId: user.id });
+    const build = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
 
     // Claim -> starting, then onStart's CAS flips starting -> building.
     await claimBuildForStartWithinLimit(env.db, {
@@ -1713,7 +1713,7 @@ describe('builds', () => {
   it('markBuildProgressIfActive advances an active building row to deploying (CAS, true)', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, { projectId: project.id, userId: user.id });
+    const build = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
 
     // Drive the row active: queued -> starting -> building.
     await claimBuildForStartWithinLimit(env.db, {
@@ -1734,7 +1734,7 @@ describe('builds', () => {
   it('markBuildProgressIfActive no-ops on a cancelled row (terminal preserved)', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, { projectId: project.id, userId: user.id });
+    const build = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
 
     // Claim -> starting, then a concurrent terminalizer cancels it.
     await claimBuildForStartWithinLimit(env.db, {
@@ -1754,7 +1754,7 @@ describe('builds', () => {
   it('markBuildProgressIfActive no-ops on a complete row (false)', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, { projectId: project.id, userId: user.id });
+    const build = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
 
     await updateBuildStatus(env.db, build.id, 'complete');
     expect(await markBuildProgressIfActive(env.db, build.id, 'deploying')).toBe(false);
@@ -1764,7 +1764,7 @@ describe('builds', () => {
   it('setBuildCheckRunId persists the check-run id and getBuild reads it back', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, { projectId: project.id, userId: user.id });
+    const build = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
 
     // A fresh build has no check run yet.
     expect((await getBuild(env.db, build.id))!.check_run_id).toBeNull();
@@ -1779,13 +1779,13 @@ describe('builds', () => {
     const user = await createTestUser(env.db, 'serialuser', 'github', undefined, 'pro');
     const project = await createTestProject(env.db, user.id);
     // Two queued container builds for the SAME project: commit A older, B newer.
-    const a = await createBuild(env.db, {
+    const a = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       commitSha: 'aaa',
       branch: 'main',
     });
-    const b = await createBuild(env.db, {
+    const b = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       commitSha: 'bbb',
@@ -1834,8 +1834,8 @@ describe('builds', () => {
     const user = await createTestUser(env.db, 'twoproj', 'github', undefined, 'pro');
     const projectA = await createTestProject(env.db, user.id);
     const projectB = await createTestProject(env.db, user.id);
-    const a = await createBuild(env.db, { projectId: projectA.id, userId: user.id });
-    const b = await createBuild(env.db, { projectId: projectB.id, userId: user.id });
+    const a = await createTestBuild(env.db, { projectId: projectA.id, userId: user.id });
+    const b = await createTestBuild(env.db, { projectId: projectB.id, userId: user.id });
 
     expect(
       await claimBuildForStartWithinLimit(env.db, {
@@ -1859,7 +1859,7 @@ describe('builds', () => {
   it('claimBuildForStartWithinLimit persists the effective instance_type at claim time', async () => {
     const user = await createTestUser(env.db, 'claiminst', 'github', undefined, 'pro');
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       instanceType: null,
@@ -1882,7 +1882,7 @@ describe('builds', () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
     const deployment = await createTestDeployment(env.db, project.id);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       instanceType: 'standard-1',
@@ -1907,7 +1907,7 @@ describe('builds', () => {
   it('updateBuildStatus records an error + exit code on failure', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, { projectId: project.id, userId: user.id });
+    const build = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
 
     await updateBuildStatus(env.db, build.id, 'failed', { error: 'boom', exitCode: 1 });
 
@@ -1921,7 +1921,7 @@ describe('builds', () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
     const deployment = await createTestDeployment(env.db, project.id);
-    const build = await createBuild(env.db, { projectId: project.id, userId: user.id });
+    const build = await createTestBuild(env.db, { projectId: project.id, userId: user.id });
     // Point the build at the deployment so both build->project and
     // build->deployment FKs (ON DELETE NO ACTION) are in play during teardown.
     await updateBuildStatus(env.db, build.id, 'complete', { deploymentId: deployment.id });
@@ -1941,14 +1941,14 @@ describe('builds', () => {
   it('terminalizes + returns in-flight builds so the caller can stop their container DOs', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const container = await createBuild(env.db, {
+    const container = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
       status: 'building',
       instanceType: 'standard-4',
     });
-    const actions = await createBuild(env.db, {
+    const actions = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -2067,7 +2067,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       role: 'admin',
       added_by_user_id: currentOwner.id,
     });
-    const occupying = await createBuild(env.db, {
+    const occupying = await createTestBuild(env.db, {
       projectId: otherProject.id,
       userId: currentOwner.id,
       executor: 'container',
@@ -2240,7 +2240,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
     });
     await seedActiveInstall(env.db, 'inst-branch');
 
-    const onDevelop = await createBuild(env.db, {
+    const onDevelop = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -2764,7 +2764,7 @@ describe('getBuildByProjectRunIdAndAttempt', () => {
 
     // Attempt 1 (terminal) and attempt 2 (active) for the same run_id, plus an
     // old null-attempt row.
-    const a1 = await createBuild(env.db, {
+    const a1 = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -2772,7 +2772,7 @@ describe('getBuildByProjectRunIdAndAttempt', () => {
       githubRunId: '7001',
       githubRunAttempt: '1',
     });
-    const a2 = await createBuild(env.db, {
+    const a2 = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -2780,7 +2780,7 @@ describe('getBuildByProjectRunIdAndAttempt', () => {
       githubRunId: '7001',
       githubRunAttempt: '2',
     });
-    const aNull = await createBuild(env.db, {
+    const aNull = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',

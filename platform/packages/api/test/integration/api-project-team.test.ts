@@ -1,11 +1,6 @@
 import { and, count, eq, gt, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
-import {
-  createBuild,
-  createGitHubConnection,
-  getBuild,
-  upsertGitHubInstallation,
-} from '../../src/db.ts';
+import { createGitHubConnection, getBuild, upsertGitHubInstallation } from '../../src/db.ts';
 import app from '../../src/index.ts';
 import * as projectAccess from '../../src/project-access.ts';
 import {
@@ -16,6 +11,7 @@ import {
   users,
 } from '../../src/schema.ts';
 import {
+  createTestBuild,
   clearTables,
   createTestProject,
   createTestUser,
@@ -142,7 +138,7 @@ describe('project team API', () => {
       repositoryId: '7711',
       authorizedByUserId: admin.id,
     });
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: owner.id,
       executor: 'container',

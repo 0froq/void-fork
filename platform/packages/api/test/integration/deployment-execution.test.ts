@@ -13,12 +13,7 @@ import {
 } from 'vite-plus/test';
 import { importLegacyAuthentication } from '../../src/auth/configuration.ts';
 import { signDeployToken, signProjectCredentialToken } from '../../src/auth/deploy-token.ts';
-import {
-  cancelDeployment,
-  countUserDeploymentsToday,
-  createBuild,
-  failStaleDeployments,
-} from '../../src/db.ts';
+import { cancelDeployment, countUserDeploymentsToday, failStaleDeployments } from '../../src/db.ts';
 import {
   dispatchPendingDeployments,
   getDeploymentOperation,
@@ -41,6 +36,7 @@ import {
 } from '../../src/schema.ts';
 import type { DeployEvent } from '../../src/types.ts';
 import {
+  createTestBuild,
   clearTables,
   cfSuccess,
   createTestDeployment,
@@ -753,7 +749,7 @@ describe('durable execution claim and revocation', () => {
   });
 
   it('rejects a queued deployment whose bound build was revoked before execution', async () => {
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       status: 'deploying',

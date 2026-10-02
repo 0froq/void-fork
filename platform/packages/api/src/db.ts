@@ -3894,41 +3894,6 @@ export async function purgeExpiredAuthCodes(db: Db): Promise<void> {
 // builds
 // ---------------------------------------------------------------------------
 
-export async function createBuild(
-  db: Db,
-  args: {
-    projectId: string;
-    userId: string;
-    executor?: Build['executor'];
-    commitSha?: string | null;
-    branch?: string | null;
-    githubRunId?: string | null;
-    githubRunAttempt?: string | null;
-    logsUrl?: string | null;
-    instanceType?: string | null;
-    status?: Build['status'];
-  },
-): Promise<Build> {
-  const id = generateId('bld');
-  const [row] = await db
-    .insert(builds)
-    .values({
-      id,
-      project_id: args.projectId,
-      user_id: args.userId,
-      executor: args.executor ?? 'container',
-      status: args.status ?? 'queued',
-      commit_sha: args.commitSha ?? null,
-      branch: args.branch ?? null,
-      github_run_id: args.githubRunId ?? null,
-      github_run_attempt: args.githubRunAttempt ?? null,
-      logs_url: args.logsUrl ?? null,
-      instance_type: args.instanceType ?? null,
-    })
-    .returning();
-  return row;
-}
-
 export async function getBuild(db: Db, id: string): Promise<Build | null> {
   const [row] = await db.select().from(builds).where(eq(builds.id, id)).limit(1);
   return row ?? null;

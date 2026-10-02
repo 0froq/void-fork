@@ -15,7 +15,6 @@ import { hmacSignState } from '../../src/auth/hmac.ts';
 import { createCodeChallenge } from '../../src/auth/pkce.ts';
 import type { Db } from '../../src/db.ts';
 import {
-  createBuild,
   createGitHubConnection,
   getBuild,
   getGitHubConnection,
@@ -47,6 +46,7 @@ import {
   projects,
 } from '../../src/schema.ts';
 import {
+  createTestBuild,
   JWT_SECRET,
   clearTables,
   createTestProject,
@@ -1125,7 +1125,7 @@ describe('GitHub connection project-admin provenance', () => {
       repositoryId: '9101',
       authorizedByUserId: admin.id,
     });
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: owner.id,
       executor: 'container',
@@ -2631,14 +2631,14 @@ describe('PATCH /projects/:id/github', () => {
       env,
     );
 
-    const mainBuild = await createBuild(env.db, {
+    const mainBuild = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
       status: 'building',
       branch: 'main',
     });
-    const developBuild = await createBuild(env.db, {
+    const developBuild = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -2691,13 +2691,13 @@ describe('PATCH /projects/:id/github', () => {
       env,
     );
 
-    const containerBuild = await createBuild(env.db, {
+    const containerBuild = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
       status: 'building',
     });
-    const actionsBuild = await createBuild(env.db, {
+    const actionsBuild = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -2752,13 +2752,13 @@ describe('PATCH /projects/:id/github', () => {
       env,
     );
 
-    const actionsBuild = await createBuild(env.db, {
+    const actionsBuild = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
       status: 'building',
     });
-    const containerBuild = await createBuild(env.db, {
+    const containerBuild = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -2814,7 +2814,7 @@ describe('PATCH /projects/:id/github', () => {
       env,
     );
 
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -2878,14 +2878,14 @@ describe('PATCH /projects/:id/github', () => {
 
     // A stray build on the OLD branch (`main`) that must NOT be terminated, and a
     // build on the CURRENT locked branch (`release`) that MUST be terminated.
-    const mainBuild = await createBuild(env.db, {
+    const mainBuild = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
       status: 'building',
       branch: 'main',
     });
-    const releaseBuild = await createBuild(env.db, {
+    const releaseBuild = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -2992,33 +2992,33 @@ describe('DELETE /projects/:id/github', () => {
       env,
     );
 
-    const actionsBuild = await createBuild(env.db, {
+    const actionsBuild = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
       status: 'building',
       githubRunId: '1000',
     });
-    const activeContainer = await createBuild(env.db, {
+    const activeContainer = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
       status: 'building',
     });
-    const queuedContainer = await createBuild(env.db, {
+    const queuedContainer = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
       status: 'queued',
     });
-    const deployingContainer = await createBuild(env.db, {
+    const deployingContainer = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
       status: 'deploying',
     });
     // Terminal — left untouched, never sent to the DO.
-    const completeContainer = await createBuild(env.db, {
+    const completeContainer = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -3087,7 +3087,7 @@ describe('DELETE /projects/:id/github', () => {
       env,
     );
 
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',

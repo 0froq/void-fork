@@ -1,9 +1,10 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vite-plus/test';
-import { createBuild, updateBuildStatus } from '../../src/db.ts';
+import { updateBuildStatus } from '../../src/db.ts';
 import app from '../../src/index.ts';
 import { builds } from '../../src/schema.ts';
 import {
+  createTestBuild,
   clearTables,
   createTestProject,
   createTestUser,
@@ -52,12 +53,12 @@ describe('user-facing build routes', () => {
   it('lists a project builds newest-first for the owner', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const b1 = await createBuild(env.db, {
+    const b1 = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
     });
-    const b2 = await createBuild(env.db, {
+    const b2 = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -83,7 +84,7 @@ describe('user-facing build routes', () => {
   it('fronts the BuildManager DO for a container build logs', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -125,7 +126,7 @@ describe('user-facing build routes', () => {
     // must OR in the DO's terminal so `--follow` can finish after its log drain.
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -184,7 +185,7 @@ describe('user-facing build routes', () => {
     // there to make the interleave deterministic.
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -227,7 +228,7 @@ describe('user-facing build routes', () => {
   it('only infers completion for durable never-started terminal builds', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -253,7 +254,7 @@ describe('user-facing build routes', () => {
   it('normalizes a non-numeric since to 0 when fronting the DO', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
@@ -267,7 +268,7 @@ describe('user-facing build routes', () => {
   it('returns the external GitHub URL for a github_actions build without touching the DO', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'github_actions',
@@ -290,7 +291,7 @@ describe('user-facing build routes', () => {
     const user = await createTestUser(env.db);
     const projectA = await createTestProject(env.db, user.id, 'a');
     const projectB = await createTestProject(env.db, user.id, 'b');
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: projectB.id,
       userId: user.id,
       executor: 'container',
@@ -303,7 +304,7 @@ describe('user-facing build routes', () => {
     const owner = await createTestUser(env.db, 'owner2');
     const other = await createTestUser(env.db, 'intruder2');
     const project = await createTestProject(env.db, owner.id);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: owner.id,
       executor: 'container',

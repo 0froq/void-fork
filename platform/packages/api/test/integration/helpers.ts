@@ -33,6 +33,7 @@ import {
   githubWebhookRedeliveries,
 } from '../../src/schema.ts';
 import type { PlanId } from '../../src/tiers.ts';
+import type { Build } from '../../src/types.ts';
 import { loadPGliteTemplateBundle } from './db-template.ts';
 import { setTestDb, clearTestDb } from './setup.ts';
 
@@ -653,6 +654,41 @@ export async function createTestProject(
   const id = `proj_test${n}`;
   await db.insert(projects).values({ id, user_id: userId, slug: s });
   return { id, slug: s };
+}
+
+export async function createTestBuild(
+  db: Db,
+  args: {
+    projectId: string;
+    userId: string;
+    executor?: Build['executor'];
+    commitSha?: string | null;
+    branch?: string | null;
+    githubRunId?: string | null;
+    githubRunAttempt?: string | null;
+    logsUrl?: string | null;
+    instanceType?: string | null;
+    status?: Build['status'];
+  },
+): Promise<Build> {
+  const id = generateId('bld');
+  const [row] = await db
+    .insert(builds)
+    .values({
+      id,
+      project_id: args.projectId,
+      user_id: args.userId,
+      executor: args.executor ?? 'container',
+      status: args.status ?? 'queued',
+      commit_sha: args.commitSha ?? null,
+      branch: args.branch ?? null,
+      github_run_id: args.githubRunId ?? null,
+      github_run_attempt: args.githubRunAttempt ?? null,
+      logs_url: args.logsUrl ?? null,
+      instance_type: args.instanceType ?? null,
+    })
+    .returning();
+  return row;
 }
 
 let deploymentCounter = 0;

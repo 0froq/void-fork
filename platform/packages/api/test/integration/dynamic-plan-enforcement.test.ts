@@ -8,7 +8,6 @@ import {
 } from '../../src/auth/deploy-token.ts';
 import {
   claimBuildForStartWithinLimit,
-  createBuild,
   createUser,
   createUserForPlatform,
   updateUserPlan,
@@ -17,6 +16,7 @@ import app from '../../src/index.ts';
 import { writePlanCatalog } from '../../src/plans.ts';
 import { builds } from '../../src/schema.ts';
 import {
+  createTestBuild,
   clearTables,
   createTestUser,
   createTestProject,
@@ -165,7 +165,7 @@ describe('dynamic plan enforcement', () => {
     await writePlanCatalog(env.db, studioCatalog());
     const user = await createTestUser(env.db, 'running-builder', 'github', undefined, 'studio');
     const project = await createTestProject(env.db, user.id);
-    const build = await createBuild(env.db, {
+    const build = await createTestBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       status: 'building',
