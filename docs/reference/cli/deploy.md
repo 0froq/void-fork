@@ -80,6 +80,6 @@ Use `void secret put <NAME>` for production server values. Local `.env` values a
 
 Sandbox requires [Workers Paid](https://dash.cloudflare.com/?to=/:account/workers/plans), Docker, and Containers access. API tokens need Account / Containers: Edit and Account / Cloudchamber: Edit.
 
-For email, set `email.from` and run `void email setup --platform cloudflare` locally. Commit the lock file and pass `--require-email` in CI. See [Email setup](../../guide/email.md#your-own-cloudflare-account).
+For email, set `email.from` and run `void email setup --platform cloudflare` locally. Commit the lock file and pass `--require-email` in CI. See [Email setup](../../guide/email/domains.md#your-own-cloudflare-account).
 
 For Access credentials, Hyperdrive permissions, readiness, and rollback, see [Cloudflare deployment](../../integrations/cloudflare.md#deploy-to-your-own-cloudflare-account).

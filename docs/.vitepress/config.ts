@@ -296,7 +296,16 @@ export default extendConfig(
             items: [
               { text: 'Authentication', link: '/guide/auth' },
               { text: 'AI', link: '/guide/ai' },
-              { text: 'Email', link: '/guide/email' },
+              {
+                text: 'Email',
+                link: '/guide/email',
+                collapsed: true,
+                items: [
+                  { text: 'Sending Email', link: '/guide/email/sending' },
+                  { text: 'Receiving Email', link: '/guide/email/receiving' },
+                  { text: 'Domains and Setup', link: '/guide/email/domains' },
+                ],
+              },
               { text: 'Sandboxes', link: '/guide/sandboxes' },
               { text: 'Cron Jobs', link: '/guide/jobs' },
               { text: 'Queues', link: '/guide/queues' },

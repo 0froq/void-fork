@@ -126,7 +126,7 @@ Void creates missing resources, builds the app, checks secrets and migrations, u
 
 A failed build or validation can leave provisioned resources in your account. Run the first deploy from one machine at a time, then commit the lock file before deploying from other machines or CI.
 
-Apps using email need `email.from` in `void.config.ts`. Void reviews the domain's setup before building and asks before changing it. See [Email](../guide/email.md#your-own-cloudflare-account).
+Apps using email need `email.from` in `void.config.ts`. Void reviews the domain's setup before building and asks before changing it. See [Email](../guide/email/domains.md#your-own-cloudflare-account).
 
 ### Deploying from CI
 
@@ -193,7 +193,7 @@ Void deploys native apps, static sites, SPAs, supported SSGs, and Cloudflare bui
 - `--skip-build` works for existing static output. Worker apps require a fresh build.
 - Named Cloudflare environments aren't supported. Use a separate Void project config for each target.
 - Sandbox requires Workers Paid and Docker. See [Sandbox requirements](../guide/sandboxes.md#deployment) for plan and token permissions.
-- Email to arbitrary recipients requires Workers Paid; verified recipients and inbound mail work on Workers Free. See [Email](../guide/email.md#your-own-cloudflare-account).
+- Email to arbitrary recipients requires Workers Paid; verified recipients and inbound mail work on Workers Free. See [Email](../guide/email/domains.md#your-own-cloudflare-account).
 - Node.js, Bun, and Deno use their [own deployment path](./nodejs-bun-deno.md).
 
 Commit Durable Object migration history in `void.lock.json`. Do not delete or reorder deployed steps.

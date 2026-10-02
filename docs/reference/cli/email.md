@@ -56,7 +56,7 @@ Remove one recipient from the project's destination list. New sends to that addr
 void email domain <add|status|list|sync|rotate-secret|remove> [<domain>] [--project <name>]
 ```
 
-Send and receive at your own domain on a Cloudflare zone you own, registered to the project. Void platform only — on your own Cloudflare account the mail domain comes from `email.from` instead (see `void email setup`). The walkthrough is [Your own domain on the platform](../../guide/email.md#your-own-domain-on-the-platform).
+Send and receive at your own domain on a Cloudflare zone you own, registered to the project. Void platform only — on your own Cloudflare account the mail domain comes from `email.from` instead (see `void email setup`). The walkthrough is [Your own domain on the platform](../../guide/email/domains.md#your-own-domain-on-the-platform).
 
 ### `void email domain add` {#void-email-domain-add}
 
@@ -126,4 +126,4 @@ Set up email before deploying from CI. Requires `email.from` in `void.config.ts`
 
 Void shows the planned DNS, routing, plus-addressing, and sending changes and asks before applying them. Commit `void.lock.json`, then run `void deploy --platform cloudflare --require-email` in CI.
 
-On Workers Free, inbound mail and sends to verified recipients remain available. Run this command again after upgrading to Workers Paid to enable arbitrary recipients. See [Email setup](../../guide/email.md#your-own-cloudflare-account).
+On Workers Free, inbound mail and sends to verified recipients remain available. Run this command again after upgrading to Workers Paid to enable arbitrary recipients. See [Email setup](../../guide/email/domains.md#your-own-cloudflare-account).

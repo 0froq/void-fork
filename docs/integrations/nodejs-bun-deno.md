@@ -118,7 +118,7 @@ You can still define [cron jobs](../guide/jobs.md) in `crons/` and they will com
 
 ### No inbound email
 
-[Inbound email handlers](../guide/email.md#inbound) and `sendEmail` require Cloudflare. Use an external mail provider on other targets.
+[Inbound email handlers](../guide/email/receiving.md#inbound) and `sendEmail` require Cloudflare. Use an external mail provider on other targets.
 
 ### No prerendering
 

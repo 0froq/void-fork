@@ -117,7 +117,7 @@ Generate schema with `void gen model` or write it by hand. Generate migrations w
 
 ## `email/`
 
-[Inbound email handlers](/guide/email#inbound). A file's name selects the recipient; `_default.ts` handles other addresses.
+[Inbound email handlers](../guide/email/receiving.md#inbound). A file's name selects the recipient; `_default.ts` handles other addresses.
 
 ## `durable-objects/`
 

@@ -8,10 +8,11 @@ function redirect() {
   if (router.route.data.relativePath !== props.page) {
     return;
   }
-  const target = props.links[router.route.hash.slice(1)];
-  if (!target) {
+  const anchor = router.route.hash.slice(1);
+  if (!Object.hasOwn(props.links, anchor)) {
     return;
   }
+  const target = props.links[anchor];
   const [pathname, hash] = target.split('#');
   void router.go(`${withBase(pathname)}${router.route.query}#${hash}`, { replace: true });
 }

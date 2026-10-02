@@ -35,7 +35,7 @@ project's existing framework and deployment destination.
 | Durable State and WebSockets               | `docs/guide/durable-state.md`, `docs/guide/websockets.md`                                 |
 | Server-sent events and live streams        | `docs/guide/sse.md`, `docs/guide/live.md`                                                 |
 | Sandboxes                                  | `docs/guide/sandboxes.md`                                                                 |
-| Email                                      | `docs/guide/email.md`                                                                     |
+| Email                                      | `docs/guide/email.md`, then the matching guide under `docs/guide/email/`                  |
 | KV / storage / queues / cron jobs          | `docs/guide/kv.md`, `docs/guide/storage.md`, `docs/guide/queues.md`, `docs/guide/jobs.md` |
 | SSR and caching                            | `docs/guide/ssr.md`, `docs/guide/edge/*.md`                                               |
 | Rewrites, redirects, fallbacks             | `docs/guide/edge/rewrites.md`, `docs/guide/edge/redirects.md`, `docs/reference/config.md` |
