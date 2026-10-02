@@ -34,7 +34,7 @@ import {
 } from '../email/settings.ts';
 import { getSharedEmailRecipientReadiness } from '../email/shared-recipient-service.ts';
 import type { ApiEnv } from '../env.ts';
-import { isForeignKeyViolation, isUniqueViolation } from '../pg-errors.ts';
+import { isForeignKeyViolation } from '../pg-errors.ts';
 import {
   ProjectAccessDeniedError,
   ProjectNotFoundError,
