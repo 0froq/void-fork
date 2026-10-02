@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
-import { build } from 'vite';
+import { build, type Manifest } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { routingPlugin } from '../../src/plugin-routing.ts';
 
@@ -103,14 +103,23 @@ beforeAll(async () => {
   });
   const stableManifest = JSON.parse(
     readFileSync(join(stableOutput, '.vite/manifest.json'), 'utf8'),
-  );
-  expect(stableManifest['client.js']).not.toHaveProperty('immutableFiles');
-  for (const file of [stableManifest['client.js'].file, ...stableManifest['client.js'].css]) {
+  ) as Manifest;
+  // A single-input build can use a synthetic manifest key. Verify the emitted
+  // entry and its stable filenames rather than assuming its source-path key.
+  const stableEntries = Object.values(stableManifest).filter((entry) => entry.isEntry);
+  expect(stableEntries).toHaveLength(1);
+  const [stableEntry] = stableEntries;
+  expect(stableEntry).toMatchObject({
+    file: 'static/client-settings.js',
+    css: ['static/client-settings.css'],
+  });
+  expect(stableEntry).not.toHaveProperty('immutableFiles');
+  for (const file of [stableEntry.file, ...stableEntry.css!]) {
     writeFileSync(join(assets, file), readFileSync(join(stableOutput, file)));
   }
   writeFileSync(
     join(assets, '.vite/manifest.json'),
-    JSON.stringify({ ...manifest, stable: stableManifest['client.js'] }),
+    JSON.stringify({ ...manifest, stable: stableEntry }),
   );
   mkdirSync(join(assets, 'static'), { recursive: true });
   for (const file of ['app-settings.json', 'client.js', 'page-abcdefgh.html']) {
