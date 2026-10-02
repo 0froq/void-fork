@@ -35,7 +35,7 @@ After reviewing `--plan`, run the command printed under **Next step: run this co
 
 ## Choose login methods
 
-The installer offers GitHub, Google, generic OIDC, and Cloudflare Access login.
+The installer offers GitHub, Google, generic OIDC, and Cloudflare Access login. Select all methods you want to enable; none are selected initially.
 Cloudflare Access protection is a separate choice from Access login. The
 GitHub OAuth steps below apply when you select GitHub login.
 

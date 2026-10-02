@@ -123,8 +123,8 @@ export async function selectInstallationAuthentication(
       ? ['github' as const]
       : answer(
           await multiselect<PlatformLoginKind>({
-            message: 'Platform login methods:',
-            initialValues: ['github'],
+            message: 'Platform login methods (select all that apply):',
+            initialValues: [],
             required: true,
             options: [
               { value: 'github' as const, label: 'GitHub' },

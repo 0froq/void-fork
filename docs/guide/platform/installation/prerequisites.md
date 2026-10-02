@@ -8,7 +8,7 @@ To run a Void platform, you need:
 
 - A Cloudflare account with Workers for Platforms and R2 enabled.
 - An empty hosted PostgreSQL database.
-- An account with your chosen login provider. GitHub is the default; Google, OIDC, and Cloudflare Access are also supported.
+- An account with your chosen login provider: GitHub, Google, OIDC, or Cloudflare Access.
 - A domain for your apps, or `workers.dev` for testing. You can [add a domain later](/guide/platform/installation/domains#adding-a-domain).
 
 Void creates the Workers, storage, queues, routing, and database tables through the CLI.

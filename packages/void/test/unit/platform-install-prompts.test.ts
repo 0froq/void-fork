@@ -100,6 +100,7 @@ afterEach(() => {
 
 describe('interactive platform installation prompts', () => {
   it('uses the selected Hyperdrive without a second confirmation', async () => {
+    mocks.multiselect.mockResolvedValueOnce(['google', 'oidc']);
     vi.spyOn(PlatformCloudflareClient.prototype, 'listHyperdriveConfigs').mockResolvedValue([
       { id: 'other-id', name: 'another-database' },
       { id: 'terraform-id', name: 'company-managed-postgres' },
@@ -146,9 +147,17 @@ describe('interactive platform installation prompts', () => {
       ],
     });
     expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(mocks.multiselect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Platform login methods (select all that apply):',
+        initialValues: [],
+        required: true,
+      }),
+    );
     expect(mocks.plan).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
+        authentication: { providers: ['google', 'oidc'], configurable: true },
         externalHyperdrive: {
           id: 'terraform-id',
           name: 'company-managed-postgres',
