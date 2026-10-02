@@ -71,7 +71,7 @@ jobs:
         run: node platform/scripts/kitchen-sink-platform-fixture.ts
       - name: Deploy kitchen-sink
         working-directory: ${{ steps.fixture.outputs.path }}
-        run: node ../../packages/void/dist/cli/cli.mjs deploy --project kitchen-sink
+        run: node "$GITHUB_WORKSPACE/packages/void/dist/cli/cli.mjs" deploy --project kitchen-sink
         env:
           VOID_TOKEN: ${{ secrets.VOID_TOKEN_STAGING }}
           VOID_API_URL: https://api.staging.void.cloud
