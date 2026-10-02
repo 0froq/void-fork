@@ -752,18 +752,36 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       }
     }
 
-    if (needsManagementToken) {
-      openPlatformSetupPage(platformManagementSetupPage(plan));
+    let managementApiToken =
+      operatorCredential.source === 'oauth' ? checkpoint?.managementApiToken || '' : '';
+    if (needsManagementToken || managementApiToken) {
+      let token = managementApiToken;
+      let openedManagementPage = false;
+      const forgetRejectedManagementToken = () => {
+        managementApiToken = '';
+        if (existing && checkpoint?.managementApiToken) {
+          delete checkpoint.managementApiToken;
+          writePendingInstallationSecrets(existing, checkpoint);
+        }
+        token = '';
+      };
       while (true) {
-        const token = (
-          await promptSecret('Paste management API token:', true, (value) =>
-            value.trim() ? undefined : 'A value is required.',
-          )
-        ).trim();
+        if (!token) {
+          if (!openedManagementPage) {
+            openPlatformSetupPage(platformManagementSetupPage(plan));
+            openedManagementPage = true;
+          }
+          token = (
+            await promptSecret('Paste management API token:', true, (value) =>
+              value.trim() ? undefined : 'A value is required.',
+            )
+          ).trim();
+        }
         const management = new PlatformCloudflareClient(token, { apiBase: client.apiBaseUrl });
         try {
           const authorizedAccounts = await management.listAccounts();
           if (!authorizedAccounts.some((account) => account.id === accountId)) {
+            forgetRejectedManagementToken();
             log.warn(
               `This token cannot access ${plan.account.name}. Check its account scope and try again.`,
             );
@@ -778,11 +796,13 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
           assertPlatformInstallPlanUnchanged(plan, verified, 'management API token');
           client = management;
           plan = verified;
+          managementApiToken = token;
           break;
         } catch (error) {
           if (!isPlatformTokenAuthorizationError(error)) {
             throw error;
           }
+          forgetRejectedManagementToken();
           log.warn(
             'Cloudflare rejected this token. Check its permissions and account/zone scope, then paste a replacement.',
           );
@@ -797,8 +817,13 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
     const setupManifest = existing;
     const credentialSetup = isPlatformSetupDraft(existing);
     const values: Record<string, string> = { ...checkpoint };
+    if (managementApiToken) {
+      values.managementApiToken = managementApiToken;
+    }
     if (externalHyperdrive) {
       values.externalHyperdriveJson = JSON.stringify(externalHyperdrive);
+    }
+    if (managementApiToken || externalHyperdrive) {
       writePendingInstallationSecrets(setupManifest, values);
     }
     const saveValues = (updates: Record<string, string>) => {

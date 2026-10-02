@@ -130,6 +130,8 @@ import { createDefaultRunWrangler, resolvePinnedApiBaseUrl } from './provision.t
 export const REMOTE_INSTALLATION_MANIFEST_KEY: string = PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY;
 
 export type PlatformInstallationSecrets = Readonly<{
+  /** Local operator credential, never included in Worker secrets. */
+  managementApiToken?: string;
   /** Retain external selection details until an adoption receipt can identify the resource. */
   externalHyperdriveJson?: string;
   authenticationPreparation?: Readonly<Record<string, string>>;
@@ -540,6 +542,7 @@ export function createPlatformInstallationSecrets(input: {
     authenticationPreparation: Object.fromEntries(
       Object.entries(checkpoint).filter(([name]) => isPlatformAuthenticationPreparationKey(name)),
     ),
+    ...(checkpoint.managementApiToken ? { managementApiToken: checkpoint.managementApiToken } : {}),
     ...(checkpoint.externalHyperdriveJson
       ? { externalHyperdriveJson: checkpoint.externalHyperdriveJson }
       : {}),
@@ -736,6 +739,7 @@ function secretCheckpoint(
   workerSecretUpdateIntent?: PlatformWorkerSecretUpdateIntent | null,
 ): Record<string, string> {
   return {
+    ...(secrets.managementApiToken ? { managementApiToken: secrets.managementApiToken } : {}),
     ...(secrets.externalHyperdriveJson
       ? { externalHyperdriveJson: secrets.externalHyperdriveJson }
       : {}),

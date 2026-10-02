@@ -494,7 +494,7 @@ describe('platform credential onboarding', () => {
     expect(listInstallationManifests()).toEqual([]);
   });
 
-  it('collects a management token and continues with it without exporting or persisting it', async () => {
+  it('saves a prompted management token encrypted and keeps it separate from the runtime token', async () => {
     requireManagementToken();
     const fetcher = vi.fn<typeof fetch>(async () => Response.json({ success: true, result: {} }));
     vi.stubGlobal('fetch', fetcher);
@@ -520,9 +520,179 @@ describe('platform credential onboarding', () => {
     expect(secrets?.cloudflareApiToken).toBe(
       environment.VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN,
     );
-    expect(Object.values(secrets!)).not.toContain('management-secret');
+    expect(secrets?.managementApiToken).toBe('management-secret');
+    expect(mocks.install.mock.calls[0]![1].managementApiToken).toBe('management-secret');
+    const savedFiles = readdirSync(directory, { recursive: true }).filter(
+      (entry): entry is string => typeof entry === 'string' && /\.(json|enc)$/.test(entry),
+    );
+    for (const file of savedFiles) {
+      expect(readFileSync(join(directory, file), 'utf8')).not.toContain('management-secret');
+    }
     expect(process.env.CLOUDFLARE_API_TOKEN).toBe('');
     expect(vi.mocked(console.log).mock.calls.flat().join(' ')).not.toContain('management-secret');
+  });
+
+  it.each([true, false])(
+    'reuses the saved management token on resume with pending DNS changes: %s',
+    async (needsDns) => {
+      if (needsDns) {
+        requireManagementToken();
+      }
+      const manifest = await interruptedInstall();
+      writePendingInstallationSecrets(manifest, {
+        ...readPendingInstallationSecrets(manifest),
+        managementApiToken: 'saved-management-secret',
+      });
+      for (const [key, value] of Object.entries(environment)) {
+        vi.stubEnv(key, value);
+      }
+      const fetcher = vi.fn<typeof fetch>(async () => Response.json({ success: true, result: {} }));
+      vi.stubGlobal('fetch', fetcher);
+
+      await runPlatformLifecycleCommand(
+        parsePlatformArgs(['install', '--resume', '--name', manifest.id]),
+      );
+
+      expect(mocks.password).not.toHaveBeenCalled();
+      expect(mocks.open).not.toHaveBeenCalled();
+      expect(mocks.plan).toHaveBeenCalledTimes(2);
+      const client = mocks.install.mock.calls[0]![3].client as PlatformCloudflareClient;
+      await client.request('/management-token-check');
+      expect(fetcher).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({ Authorization: 'Bearer saved-management-secret' }),
+        }),
+      );
+      expect(mocks.install.mock.calls[0]![1].cloudflareApiToken).toBe('saved-runtime-token');
+      expect(readPendingInstallationSecrets(manifest)?.managementApiToken).toBe(
+        'saved-management-secret',
+      );
+    },
+  );
+
+  it('retains a verified management token if the next credential prompt is cancelled', async () => {
+    requireManagementToken();
+    mocks.password
+      .mockResolvedValueOnce('management-secret')
+      .mockResolvedValueOnce(Symbol('cancel'));
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(args))).rejects.toThrow('Cancelled');
+    const manifest = listInstallationManifests()[0]!;
+    expect(isPlatformSetupDraft(manifest)).toBe(true);
+    expect(readPendingInstallationSecrets(manifest)?.managementApiToken).toBe('management-secret');
+    vi.clearAllMocks();
+    await runPlatformLifecycleCommand(
+      parsePlatformArgs(['install', '--resume', '--name', manifest.id]),
+    );
+    expect(
+      mocks.password.mock.calls.some(([input]) => input.message === 'Paste management API token:'),
+    ).toBe(false);
+    expect(mocks.install).toHaveBeenCalledOnce();
+  });
+
+  it.each(['unauthorized', 'wrong account', 'plan denied'] as const)(
+    'replaces a rejected saved management token: %s',
+    async (reason) => {
+      requireManagementToken();
+      const manifest = await interruptedInstall();
+      writePendingInstallationSecrets(manifest, {
+        ...readPendingInstallationSecrets(manifest),
+        managementApiToken: 'rejected-secret',
+      });
+      const accounts = vi.mocked(PlatformCloudflareClient.prototype.listAccounts);
+      accounts.mockResolvedValueOnce([{ id: 'account', name: 'Account' }]);
+      if (reason === 'wrong account') {
+        accounts.mockResolvedValueOnce([{ id: 'other', name: 'Other' }]);
+      }
+      if (reason === 'unauthorized') {
+        accounts.mockRejectedValueOnce(new PlatformCloudflareApiError('expired', 401));
+      }
+      if (reason === 'plan denied') {
+        const original = mocks.plan.getMockImplementation()!;
+        mocks.plan
+          .mockImplementationOnce(original)
+          .mockRejectedValueOnce(new PlatformCloudflareApiError('denied', 403));
+      }
+      mocks.password.mockResolvedValueOnce('replacement-secret');
+      await runPlatformLifecycleCommand(
+        parsePlatformArgs(['install', '--resume', '--name', manifest.id]),
+      );
+      expect(
+        mocks.password.mock.calls.filter(
+          ([input]) => input.message === 'Paste management API token:',
+        ),
+      ).toHaveLength(1);
+      expect(mocks.open).toHaveBeenCalledWith(
+        expect.stringContaining('Management'),
+        expect.any(Function),
+      );
+      expect(readPendingInstallationSecrets(manifest)?.managementApiToken).toBe(
+        'replacement-secret',
+      );
+      expect(mocks.install).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('forgets a rejected management token if replacement is cancelled, preserving other credentials', async () => {
+    requireManagementToken();
+    const manifest = await interruptedInstall();
+    const checkpoint = readPendingInstallationSecrets(manifest)!;
+    writePendingInstallationSecrets(manifest, {
+      ...checkpoint,
+      managementApiToken: 'expired-secret',
+    });
+    vi.mocked(PlatformCloudflareClient.prototype.listAccounts)
+      .mockResolvedValueOnce([{ id: 'account', name: 'Account' }])
+      .mockRejectedValueOnce(new PlatformCloudflareApiError('expired', 401));
+    mocks.password.mockResolvedValueOnce(Symbol('cancel'));
+    await expect(
+      runPlatformLifecycleCommand(
+        parsePlatformArgs(['install', '--resume', '--name', manifest.id]),
+      ),
+    ).rejects.toThrow('Cancelled');
+    expect(readPendingInstallationSecrets(manifest)).toEqual(checkpoint);
+    expect(mocks.install).not.toHaveBeenCalled();
+  });
+
+  it('retains the saved management token after a service failure without requesting a replacement', async () => {
+    requireManagementToken();
+    const manifest = await interruptedInstall();
+    const checkpoint = {
+      ...readPendingInstallationSecrets(manifest),
+      managementApiToken: 'saved-secret',
+    };
+    writePendingInstallationSecrets(manifest, checkpoint);
+    vi.mocked(PlatformCloudflareClient.prototype.listAccounts)
+      .mockResolvedValueOnce([{ id: 'account', name: 'Account' }])
+      .mockRejectedValueOnce(new PlatformCloudflareApiError('unavailable', 503));
+    await expect(
+      runPlatformLifecycleCommand(
+        parsePlatformArgs(['install', '--resume', '--name', manifest.id]),
+      ),
+    ).rejects.toThrow('unavailable');
+    expect(readPendingInstallationSecrets(manifest)).toEqual(checkpoint);
+    expect(mocks.password).not.toHaveBeenCalled();
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(mocks.install).not.toHaveBeenCalled();
+  });
+
+  it('keeps an environment override ahead of a saved management token', async () => {
+    requireManagementToken();
+    const manifest = await interruptedInstall();
+    writePendingInstallationSecrets(manifest, {
+      ...readPendingInstallationSecrets(manifest),
+      managementApiToken: 'saved-secret',
+    });
+    mocks.operatorCredential.mockResolvedValue({ source: 'environment', token: 'explicit-token' });
+    await runPlatformLifecycleCommand(
+      parsePlatformArgs(['install', '--resume', '--name', manifest.id]),
+    );
+    expect(mocks.plan).toHaveBeenCalledOnce();
+    expect(
+      mocks.password.mock.calls.some(([input]) => input.message === 'Paste management API token:'),
+    ).toBe(false);
+    expect(readPendingInstallationSecrets(manifest)?.managementApiToken).toBe('saved-secret');
+    expect(mocks.install).toHaveBeenCalledOnce();
   });
 
   it.each(['wrong account', 'rejected token'])(

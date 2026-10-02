@@ -172,7 +172,7 @@ If Void created a zone, it stops in `waiting-for-dns` and prints nameservers. Se
 void platform install --resume --name <installation-id>
 ```
 
-Resume prompts for a management token if DNS changes still need one; you can also supply it through `CLOUDFLARE_API_TOKEN`. When using a source build, also pass the same `--runtime` directory. Resume uses the saved checkpoint and original secrets; do not start a second installation or generate replacement keys. If setup stopped before a checkpoint was saved, rerun `void platform install` and select your saved plan, or rerun the original command.
+Resume reuses the saved management token and asks for one if it is missing or rejected by Cloudflare. You can override it through `CLOUDFLARE_API_TOKEN`. When using a source build, also pass the same `--runtime` directory. Resume uses the saved checkpoint and original secrets; do not start a second installation or generate replacement keys. If setup stopped before a checkpoint was saved, rerun `void platform install` and select your saved plan, or rerun the original command.
 
 You can also rerun `void platform install` and choose **Continue setup** for an unfinished installation. For non-interactive recovery, use `--resume --name <id>`. Manage completed platforms with `platform status`, `repair`, or `upgrade`.
 

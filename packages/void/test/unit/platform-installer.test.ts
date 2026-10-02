@@ -322,6 +322,7 @@ describe('platform installer', () => {
         configurableAuthentication: true,
         authSetupToken: 't'.repeat(64),
         authBootstrapCode: code,
+        checkpoint: { managementApiToken: 'local-management-secret' },
       });
       const deployed: Array<{
         config: Record<string, unknown>;
@@ -430,6 +431,11 @@ describe('platform installer', () => {
       expect(initialized).toBe(1);
       expect(verifiedProtection).toBe(protection ? 1 : 0);
       expect(result.manifest.status).toBe('installed');
+      expect(readInstallationRecoverySecrets(result.manifest)?.managementApiToken).toBe(
+        'local-management-secret',
+      );
+      expect(JSON.stringify(deployed)).not.toContain('local-management-secret');
+      expect(JSON.stringify(result.manifest)).not.toContain('local-management-secret');
       expect(result.manifest.deployment.authentication).toEqual({
         providers: [kind],
         configurable: true,
