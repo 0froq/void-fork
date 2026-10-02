@@ -5,6 +5,7 @@ import {
   type PlatformAppAccessSetup,
 } from '@void/platform';
 import { sql } from 'drizzle-orm';
+import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import {
   afterAll,
   afterEach,
@@ -15,12 +16,13 @@ import {
   it,
   vi,
 } from 'vite-plus/test';
+import { importLegacyAuthentication } from '../../src/auth/configuration.ts';
 import { getProject } from '../../src/db.ts';
 import type { ApiEnv } from '../../src/env.ts';
 import app from '../../src/index.ts';
 import { getPlatformSetting, setPlatformSetting } from '../../src/platform-settings.ts';
 import { tryActivateDomain } from '../../src/provisioning/activate-domain.ts';
-import { domains } from '../../src/schema.ts';
+import { domains, platformAuthSettings } from '../../src/schema.ts';
 import { readZeroTrustConfigurationStrict } from '../../src/zero-trust/configuration.ts';
 import { configurePlatformZeroTrust } from '../../src/zero-trust/installation.ts';
 import {
@@ -44,7 +46,7 @@ const setupKey = 'one-time-setup-authority'.repeat(3);
 beforeAll(async () => {
   env = await setupEnv();
   await env.db.execute(
-    sql`CREATE TABLE IF NOT EXISTS __void_platform_installation (singleton boolean PRIMARY KEY, installation_id text NOT NULL, lifecycle_manifest jsonb)`,
+    sql`CREATE TABLE IF NOT EXISTS __void_platform_installation (singleton boolean PRIMARY KEY, installation_id text NOT NULL, ownership_nonce text NOT NULL DEFAULT 'test-owner', lifecycle_manifest jsonb)`,
   );
 });
 afterAll(async () => {
@@ -76,7 +78,7 @@ function bindings(choice: 'platform' | 'public' = 'platform') {
 async function claim(choice: 'platform' | 'public' = 'platform', status = 'verifying') {
   const value = JSON.stringify({ id: installationId, status, deployment: { appAccess: choice } });
   await env.db.execute(
-    sql`INSERT INTO __void_platform_installation VALUES (true, ${installationId}, ${value}::jsonb)`,
+    sql`INSERT INTO __void_platform_installation (singleton, installation_id, lifecycle_manifest) VALUES (true, ${installationId}, ${value}::jsonb)`,
   );
 }
 function setup(mode: 'protected' | 'public' = 'protected', managed = true): PlatformAppAccessSetup {
@@ -104,11 +106,14 @@ function request(body: unknown, token = 'installer-proof') {
     body: JSON.stringify(body),
   });
 }
-function accessApi() {
+function accessApi(identity?: { issuer: string; jwk: Record<string, unknown> }) {
   const applications = new Map<string, Record<string, unknown>>();
   let next = 0;
   const controls = { loseCreateResponse: false, rejectToken: false, domainVerified: false };
   const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    if (identity && String(input) === `${identity.issuer}/cdn-cgi/access/certs`) {
+      return Response.json({ keys: [identity.jwk] });
+    }
     const path = new URL(String(input)).pathname.split('/access/')[1];
     const response = (result: unknown, status = 200) =>
       Response.json(
@@ -200,6 +205,46 @@ function accessApi() {
 }
 
 describe('installer app access handoff', () => {
+  it('initializes behind platform Access with both a scoped service identity and setup authority', async () => {
+    const issuer = 'https://installer-company.cloudflareaccess.com';
+    const pair = await generateKeyPair('RS256', { extractable: true });
+    accessApi({
+      issuer,
+      jwk: { ...(await exportJWK(pair.publicKey)), alg: 'RS256', kid: 'setup-key', use: 'sig' },
+    });
+    await claim();
+    await importLegacyAuthentication(env.db, env);
+    await env.db.update(platformAuthSettings).set({
+      protection: {
+        teamDomain: issuer,
+        applications: [{ origin: 'https://platform.example.test', audience: 'installer-api' }],
+      },
+    });
+    const assertion = (audience: string) =>
+      new SignJWT({ type: 'app', common_name: 'installer.access' })
+        .setIssuer(issuer)
+        .setAudience(audience)
+        .setSubject('')
+        .setIssuedAt()
+        .setExpirationTime('5m')
+        .setProtectedHeader({ alg: 'RS256', kid: 'setup-key' })
+        .sign(pair.privateKey);
+    expect((await app.fetch(request(setup()), bindings())).status).toBe(403);
+    const wrongAudience = request(setup());
+    wrongAudience.headers.set('Cf-Access-Jwt-Assertion', await assertion('another-app'));
+    expect((await app.fetch(wrongAudience, bindings())).status).toBe(403);
+    const service = await assertion('installer-api');
+    const healthOnly = request(setup());
+    healthOnly.headers.set('Cf-Access-Jwt-Assertion', service);
+    healthOnly.headers.delete('X-Void-App-Access-Setup');
+    expect((await app.fetch(healthOnly, bindings())).status).toBe(404);
+    const authorized = request(setup());
+    authorized.headers.set('Cf-Access-Jwt-Assertion', service);
+    const response = await app.fetch(authorized, bindings());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ installationId, ready: true });
+  });
+
   it('rejects a health proof without setup authority and rejects a modified signed body', async () => {
     const cf = accessApi();
     await claim();
