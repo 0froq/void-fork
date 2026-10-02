@@ -40,18 +40,6 @@ import { Layout } from './Layout.tsx';
 import { ProjectsTable } from './ProjectsTable.tsx';
 import { ProjectUrlLink } from './ProjectUrlLink.tsx';
 
-export type TopProjectRow = Readonly<{
-  url?: string;
-  id: string;
-  user_id: string;
-  slug: string;
-  type: string;
-  owner_login: string | null;
-  requests: number;
-  bandwidthBytes: number;
-  lastSeen: string;
-}>;
-
 const AdminSuspense = Suspense as unknown as (props: {
   children: ReactNode;
   fallback: ReactNode;
