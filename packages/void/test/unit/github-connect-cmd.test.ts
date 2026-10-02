@@ -195,6 +195,8 @@ const originalIsTTY = process.stdin.isTTY;
 beforeEach(() => {
   mockExecFile.mockReset();
   mockText.mockReset();
+  // A CI checkout must not supply a default repository for these prompt fixtures.
+  vi.stubEnv('GITHUB_REPOSITORY', undefined);
   // Force the non-interactive (non-TTY) path so tests never hit clack prompts.
   (process.stdin as { isTTY?: boolean }).isTTY = false;
   exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
@@ -214,6 +216,7 @@ afterEach(() => {
   messageSpy.mockRestore();
   infoSpy.mockRestore();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe('runConnect — non-owner member connect-authorization round-trip', () => {
