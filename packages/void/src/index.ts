@@ -1961,7 +1961,7 @@ export function voidPlugin(options?: {
       if (remoteMode && (bindings.needsD1 || bindings.needsKV || bindings.needsR2)) {
         const credentials = readVoidDevCredentials(root);
         if (credentials.status === 'ok') {
-          const lines = ['\x1b[36mRemote bindings active\x1b[39m'];
+          const lines = [pc.blue('Remote bindings active')];
           if (bindings.needsD1) {
             lines.push('  DB      \x1b[2m→ remote D1\x1b[22m');
           }

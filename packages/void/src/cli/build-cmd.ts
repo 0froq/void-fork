@@ -197,7 +197,7 @@ async function runBuildLogsCommand(
 
   // github_actions builds keep their logs on GitHub.
   if (first.external) {
-    log.message(`This build ran on GitHub Actions. View logs:\n${pc.cyan(first.external)}`);
+    log.message(`This build ran on GitHub Actions. View logs:\n${pc.blue(first.external)}`);
     return;
   }
 

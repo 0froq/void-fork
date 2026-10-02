@@ -623,7 +623,7 @@ export async function emailDomainAdd(
           'Create the token in three clicks: Continue to summary → Create Token → Copy.',
           'Watching the clipboard for it — nothing is read until you copy, and it is cleared afterwards.',
           '(Enter pastes it yourself instead.)',
-          `If the browser didn't open, visit:\n${pc.cyan(url)}`,
+          `If the browser didn't open, visit:\n${pc.blue(url)}`,
         ].join('\n'),
       );
       const spinner = watchSpinner;

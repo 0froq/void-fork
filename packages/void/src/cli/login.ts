@@ -79,7 +79,7 @@ export async function promptForLoginToken(
   try {
     const onUrl = (url: string) => {
       s.message(
-        `Waiting for ${providerName} login. If your browser didn't open, visit:\n${pc.cyan(url)}`,
+        `Waiting for ${providerName} login. If your browser didn't open, visit:\n${pc.blue(url)}`,
       );
     };
     const token = platform

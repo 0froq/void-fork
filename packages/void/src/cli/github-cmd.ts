@@ -250,7 +250,7 @@ export async function runInstall(
     }
   }
 
-  log.message(`Open this URL to install the Void GitHub App:\n${pc.cyan(url)}`);
+  log.message(`Open this URL to install the Void GitHub App:\n${pc.blue(url)}`);
   const { execFile } = await import('node:child_process');
   openBrowser(url, execFile);
   log.message('After installing, run `void github connect` to link a repository to your project.');
@@ -289,7 +289,7 @@ export async function runGithubLink(root: string, client: PlatformClient): Promi
         return url;
       },
       describeError: (p) => (p.get('error') ? 'GitHub authorization failed.' : null),
-      onUrl: (url) => log.message(`Open this URL to link your GitHub account:\n${pc.cyan(url)}`),
+      onUrl: (url) => log.message(`Open this URL to link your GitHub account:\n${pc.blue(url)}`),
       finalize: async (params) => {
         const linkCode = params.get('link_code');
         if (!linkCode) {
@@ -349,7 +349,7 @@ export async function performGithubJoin(client: PlatformClient): Promise<number>
     describeError: (p) => (p.get('error') ? 'GitHub authorization failed.' : null),
     onUrl: (url) =>
       log.message(
-        `Open this URL to join your organization's shared GitHub App installations:\n${pc.cyan(url)}`,
+        `Open this URL to join your organization's shared GitHub App installations:\n${pc.blue(url)}`,
       ),
     finalize: async (params) => {
       const joinCode = params.get('join_code');
@@ -452,7 +452,7 @@ async function runGithubConnectAuthorize(
       return e ? 'GitHub authorization failed.' : null;
     },
     onUrl: (url) =>
-      log.message(`Open this URL to authorize access to ${repoFullName}:\n${pc.cyan(url)}`),
+      log.message(`Open this URL to authorize access to ${repoFullName}:\n${pc.blue(url)}`),
     finalize: async (params) => {
       const grant = params.get('connect_grant');
       if (!grant) {

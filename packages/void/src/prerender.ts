@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, relative } from 'pathslash';
+import pc from 'picocolors';
 import { getApiUrl, getProxyUrl, getToken, isStagingMode } from './cli/auth.ts';
 import { ensurePlatformProxyAccess } from './cli/cf-access.ts';
 import { ensureWranglerCompat } from './cli/wrangler.ts';
@@ -407,7 +408,7 @@ export async function prerenderPages(options: {
         if (error !== undefined) {
           voidWarn(`prerender ${path} failed: ${error}`);
         } else {
-          voidLog(`prerender \x1b[36m${outputFile}\x1b[39m`);
+          voidLog(`prerender ${pc.blue(outputFile)}`);
         }
       },
     );
@@ -542,7 +543,7 @@ export async function prerenderPagesNode(options: {
   });
 
   for (const path of result.rendered) {
-    voidLog(`prerender \x1b[36m${outputFileForPath(path)}\x1b[39m`);
+    voidLog(`prerender ${pc.blue(outputFileForPath(path))}`);
   }
   for (const { path, error } of result.failed) {
     voidWarn(`prerender ${path} failed: ${error}`);

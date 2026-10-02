@@ -1,4 +1,6 @@
-const tag = '\x1b[1m\x1b[35m[void]\x1b[39m\x1b[22m';
+import pc from 'picocolors';
+
+const tag = pc.bold(pc.blue('[void]'));
 
 const timeFormat = new Intl.DateTimeFormat(undefined, {
   hour: 'numeric',
@@ -16,7 +18,7 @@ function prefix(): string {
   if (!showTimestamp) {
     return tag;
   }
-  return `\x1b[2m${timeFormat.format()}\x1b[22m ${tag}`;
+  return `${pc.dim(timeFormat.format())} ${tag}`;
 }
 
 export function voidLog(msg: string): void {
@@ -24,9 +26,9 @@ export function voidLog(msg: string): void {
 }
 
 export function voidWarn(msg: string): void {
-  console.log(`${prefix()} \x1b[33m${msg}\x1b[39m`);
+  console.log(`${prefix()} ${pc.yellow(msg)}`);
 }
 
 export function voidError(msg: string): void {
-  console.log(`${prefix()} \x1b[31m${msg}\x1b[39m`);
+  console.log(`${prefix()} ${pc.red(msg)}`);
 }

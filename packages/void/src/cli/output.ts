@@ -79,7 +79,7 @@ export function sectionTitle(title: string): string {
 }
 
 export function categoryTitle(title: string): string {
-  return pc.reset(pc.bold(pc.cyan(title)));
+  return pc.reset(pc.bold(title));
 }
 
 export function dim(text: string): string {
