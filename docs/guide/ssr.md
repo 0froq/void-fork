@@ -98,25 +98,8 @@ import App from './App';
 hydrateRoot(document.getElementById('root')!, <App url={window.location.pathname} />);
 ```
 
-## Client Asset Injection
-
-Place the client asset tags in the HTML returned by your `render()` function.
-
-The `assetTags` values are computed by Void:
-
-- In production: from `dist/client/.vite/manifest.json` (entry script, CSS, modulepreload)
-- In dev: includes Vite HMR client and React refresh preamble (when React plugin is active), plus the client entry script
-
 ## Caching
 
 See [Revalidation](./edge/revalidation.md) for stale-while-revalidate caching of SSR pages.
 
-## Request flow
-
-With SSR enabled:
-
-1. `/api/*` requests go to worker API routes
-2. static asset hits are served from R2
-3. unmatched non-API requests fall back to `render(c, assetTags)`
-
-Without SSR entries, non-API requests keep SPA static fallback behavior.
+API routes and static files are served before custom rendering. Unmatched non-API requests use `render(c, assetTags)`.
