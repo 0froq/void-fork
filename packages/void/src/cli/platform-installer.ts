@@ -71,6 +71,7 @@ import type {
 import { dirname, join, resolve } from 'pathslash';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { ensurePlatformAccessToken } from './cf-access.ts';
+import { ensurePlatformAccessHealthChecks } from './platform-access-health.ts';
 import { verifyInstalledPlatformAccessProtection } from './platform-access-preflight.ts';
 import {
   activatePlatformAccessCredentials,
@@ -136,6 +137,7 @@ export type PlatformInstallationSecrets = Readonly<{
   externalHyperdriveJson?: string;
   authenticationPreparation?: Readonly<Record<string, string>>;
   accessProvisioningJson?: string;
+  accessHealthProvisioningJson?: string;
   accessCredentialsJson?: string;
   authenticationSetupJson?: string;
   authSetupToken?: string;
@@ -332,6 +334,7 @@ export type PlatformInstallerDependencies = Readonly<{
   >;
   initializeAuthentication?: typeof initializeInstalledPlatformAuthentication;
   verifyAccessProtection?: typeof verifyInstalledPlatformAccessProtection;
+  prepareHealthAccess?: typeof ensurePlatformAccessHealthChecks;
   acquireDatabaseLifecycleLock: (
     databaseUrl: string,
     installationId: string,
@@ -550,6 +553,9 @@ export function createPlatformInstallationSecrets(input: {
     ...(checkpoint.accessProvisioningJson
       ? { accessProvisioningJson: checkpoint.accessProvisioningJson }
       : {}),
+    ...(checkpoint.accessHealthProvisioningJson
+      ? { accessHealthProvisioningJson: checkpoint.accessHealthProvisioningJson }
+      : {}),
     ...(checkpoint.accessCredentialsJson
       ? { accessCredentialsJson: checkpoint.accessCredentialsJson }
       : {}),
@@ -757,6 +763,9 @@ function secretCheckpoint(
       : {}),
     ...(secrets.accessProvisioningJson
       ? { accessProvisioningJson: secrets.accessProvisioningJson }
+      : {}),
+    ...(secrets.accessHealthProvisioningJson
+      ? { accessHealthProvisioningJson: secrets.accessHealthProvisioningJson }
       : {}),
     ...(secrets.accessCredentialsJson
       ? { accessCredentialsJson: secrets.accessCredentialsJson }
@@ -1720,6 +1729,26 @@ export async function installPlatform(
         protection,
         checkpoint: secretCheckpoint(secrets, workerSecretUpdateIntent),
       });
+      dependencies.onProgress?.('Preparing Access for authenticated platform health checks');
+      try {
+        await (dependencies.prepareHealthAccess ?? ensurePlatformAccessHealthChecks)({
+          client: dependencies.client,
+          manifest,
+          plan,
+          checkpoint: secretCheckpoint(secrets, workerSecretUpdateIntent),
+          save: (accessHealthProvisioningJson) => {
+            secrets = { ...secrets, accessHealthProvisioningJson };
+            manifest = checkpointAuthenticationResources(manifest!, secrets, now());
+            writePendingInstallationSecrets(manifest, {
+              ...secretCheckpoint(secrets, workerSecretUpdateIntent),
+              databaseClaimState: 'claimed',
+            });
+            writeInstallationManifest(manifest);
+          },
+        });
+      } finally {
+        await releaseDatabaseLock.checkpoint?.(manifest);
+      }
     }
 
     // Establish the durable installation checkpoint before creating any
@@ -2474,6 +2503,7 @@ export async function installPlatform(
     }
     const healthCheckContext: PlatformHealthCheckContext = {
       accountName: plan.account.name,
+      ...(plan.deployment.authentication.accessProtection ? { accessProtected: true } : {}),
       workers: [
         plan.deployment.resources.apiWorker,
         plan.deployment.resources.proxyWorker,
@@ -2851,7 +2881,11 @@ function checkpointAuthenticationResources(
   secrets: PlatformInstallationSecrets,
   updatedAt: string,
 ): PlatformInstallationManifest {
-  return checkpointPlatformAccessResources(manifest, secrets.accessProvisioningJson, updatedAt);
+  return checkpointPlatformAccessResources(
+    checkpointPlatformAccessResources(manifest, secrets.accessProvisioningJson, updatedAt),
+    secrets.accessHealthProvisioningJson,
+    updatedAt,
+  );
 }
 
 async function writeR2OwnershipMarkerIfNeeded(
@@ -6418,6 +6452,7 @@ function errorMessage(error: unknown): string {
 
 export type PlatformHealthCheckContext = Readonly<{
   accountName: string;
+  accessProtected?: boolean;
   workers: ReadonlyArray<string>;
   resumeCommand?: string;
   emailGatewayUrl?: string;
@@ -6426,27 +6461,37 @@ export type PlatformHealthCheckContext = Readonly<{
 export class PlatformAccessBlockedError extends Error {
   constructor(url: string, context?: PlatformHealthCheckContext) {
     super(
-      [
-        'platform: Cloudflare Access blocked the platform health checks (Default-Deny, error 1050).',
-        `Blocked URL: ${url}`,
-        '',
-        'To make this test platform publicly reachable:',
-        '',
-        `1. In ${context ? `account ${JSON.stringify(context.accountName)}` : 'your Cloudflare account'}, open:`,
-        '   Zero Trust → Access controls → Applications → Create new application.',
-        '2. Choose Self-hosted. When adding destinations, choose Worker and select:',
-        `   ${context ? context.workers.join(', ') + '.' : "This installation's API, proxy, and dispatch Workers."}`,
-        '3. Add a policy: Action → Bypass; Include → Everyone.',
-        context?.resumeCommand
-          ? `4. Save the policy and application, then resume:\n\n   ${context.resumeCommand}`
-          : '4. Save the policy and application, then rerun your platform command.',
-        '',
-        'This removes Cloudflare Access protection for these Workers.',
-        'Void’s own authentication stays enabled. Keep account-wide Default-Deny on.',
-        '',
-        'For platforms that must remain Access-protected:',
-        'https://void.cloud/guide/platform/installation/maintenance#cloudflare-access',
-      ].join('\n'),
+      context?.accessProtected
+        ? [
+            'platform: Cloudflare Access blocked a protected platform health check (Default-Deny, error 1050).',
+            `Blocked URL: ${url}`,
+            'Keep employee Access protection and account-wide Default-Deny enabled.',
+            'The reserved dispatch /health endpoint uses a path-only Access exception and still requires Void’s private probe token.',
+            'Resume to verify the health exceptions and saved installer credentials.',
+            ...(context.resumeCommand ? [`Resume: ${context.resumeCommand}`] : []),
+            'https://void.cloud/guide/platform/installation/maintenance#cloudflare-access',
+          ].join('\n')
+        : [
+            'platform: Cloudflare Access blocked the platform health checks (Default-Deny, error 1050).',
+            `Blocked URL: ${url}`,
+            '',
+            'To make this test platform publicly reachable:',
+            '',
+            `1. In ${context ? `account ${JSON.stringify(context.accountName)}` : 'your Cloudflare account'}, open:`,
+            '   Zero Trust → Access controls → Applications → Create new application.',
+            '2. Choose Self-hosted. When adding destinations, choose Worker and select:',
+            `   ${context ? context.workers.join(', ') + '.' : "This installation's API, proxy, and dispatch Workers."}`,
+            '3. Add a policy: Action → Bypass; Include → Everyone.',
+            context?.resumeCommand
+              ? `4. Save the policy and application, then resume:\n\n   ${context.resumeCommand}`
+              : '4. Save the policy and application, then rerun your platform command.',
+            '',
+            'This removes Cloudflare Access protection for these Workers.',
+            'Void’s own authentication stays enabled. Keep account-wide Default-Deny on.',
+            '',
+            'For platforms that must remain Access-protected:',
+            'https://void.cloud/guide/platform/installation/maintenance#cloudflare-access',
+          ].join('\n'),
     );
   }
 }
@@ -6504,10 +6549,15 @@ export async function verifyPlatformHealth(
     context?.emailGatewayUrl ? request(`${context.emailGatewayUrl}/health`) : undefined,
   ]);
   if (!health.ok) {
-    throw await platformProbeFailure('Health check', apiUrl, health, context);
+    throw await platformProbeFailure('Health check', `${apiUrl}/health`, health, context);
   }
   if (!discovery.ok) {
-    throw await platformProbeFailure('Discovery check', apiUrl, discovery, context);
+    throw await platformProbeFailure(
+      'Discovery check',
+      `${apiUrl}/.well-known/void-platform`,
+      discovery,
+      context,
+    );
   }
   const body = (await discovery.json()) as {
     installationId?: unknown;
@@ -6526,16 +6576,21 @@ export async function verifyPlatformHealth(
     );
   }
   if (!proxy.ok) {
-    throw await platformProbeFailure('Proxy health check', proxyUrl, proxy, context);
+    throw await platformProbeFailure('Proxy health check', `${proxyUrl}/health`, proxy, context);
   }
   if (!dispatch.ok) {
-    throw await platformProbeFailure('Dispatch health check', dispatchUrl, dispatch, context);
+    throw await platformProbeFailure(
+      'Dispatch health check',
+      `${dispatchUrl}/health`,
+      dispatch,
+      context,
+    );
   }
   if (emailGateway) {
     if (!emailGateway.ok) {
       throw await platformProbeFailure(
         'Email gateway health check',
-        context!.emailGatewayUrl!,
+        `${context!.emailGatewayUrl!}/health`,
         emailGateway,
         context,
       );

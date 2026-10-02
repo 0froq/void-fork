@@ -28,6 +28,13 @@ existing gate, verify that its service policy admits the installation token and
 that the application covers the printed API and proxy origins. A Cloudflare
 management API token does not authenticate an Access-protected HTTP request.
 
+For automatic setup, resuming also creates or verifies an Access exception
+limited to `/health` on the reserved dispatch health hostname. Void still requires
+its private probe token on that endpoint; requests without it cannot reach an
+application. This lets installation check routing while employee protection and
+account-wide Default-Deny remain enabled. It does not bypass Access for an entire
+Worker or for deployed apps.
+
 For externally supplied credentials, set `VOID_ACCESS_CREDENTIALS` from your
 secret manager to an object keyed by each exact API/proxy origin, with
 `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` in each entry. Then rerun

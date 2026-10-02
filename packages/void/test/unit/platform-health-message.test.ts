@@ -60,3 +60,23 @@ it('does not invent resource names when no installation context is available', (
   expect(error.message).toContain("This installation's API, proxy, and dispatch Workers.");
   expect(error.message).not.toContain('undefined');
 });
+
+it('keeps protected installations out of the public Worker bypass instructions', () => {
+  const error = new PlatformAccessBlockedError(
+    'https://void-platform-health.apps.example.com/health',
+    {
+      accountName: 'Company',
+      accessProtected: true,
+      workers: ['api', 'proxy', 'dispatch'],
+      resumeCommand: 'void platform install --resume --name team',
+    },
+  );
+  expect(error.message).toContain(
+    'Keep employee Access protection and account-wide Default-Deny enabled.',
+  );
+  expect(error.message).toContain('Void’s private probe token');
+  expect(error.message).toContain(
+    'Blocked URL: https://void-platform-health.apps.example.com/health',
+  );
+  expect(error.message).not.toMatch(/Bypass|Everyone|publicly reachable/);
+});

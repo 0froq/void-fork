@@ -331,6 +331,7 @@ describe('platform installer', () => {
       const create = async (_account: string, name: string) => ({ id: `${name}-id`, name });
       let initialized = 0;
       let verifiedProtection = 0;
+      let verifiedHealthAccess = 0;
       let claimed = false;
       let prepared = false;
       const result = await installPlatform(plan, secrets, null, {
@@ -339,6 +340,28 @@ describe('platform installer', () => {
           expect(input.protection).toEqual(JSON.parse(setupJson).protection);
           expect(deployed).toHaveLength(0);
           expect(prepared).toBe(true);
+        },
+        prepareHealthAccess: async (input) => {
+          verifiedHealthAccess++;
+          expect(verifiedProtection).toBe(1);
+          expect(deployed).toHaveLength(0);
+          expect(input.checkpoint.accessProvisioningJson).toBeTruthy();
+          input.save(
+            JSON.stringify({
+              version: 1,
+              accountId: 'account',
+              installationId: input.manifest.id,
+              nonce: 'a'.repeat(32),
+              resources: {
+                'health-dispatch': {
+                  id: 'health-app',
+                  name: 'Health check',
+                  fingerprint: 'test',
+                  pending: false,
+                },
+              },
+            }),
+          );
         },
         claimDatabase: async () => {
           claimed = true;
@@ -430,6 +453,7 @@ describe('platform installer', () => {
       });
       expect(initialized).toBe(1);
       expect(verifiedProtection).toBe(protection ? 1 : 0);
+      expect(verifiedHealthAccess).toBe(protection ? 1 : 0);
       expect(result.manifest.status).toBe('installed');
       expect(readInstallationRecoverySecrets(result.manifest)?.managementApiToken).toBe(
         'local-management-secret',
@@ -444,7 +468,11 @@ describe('platform installer', () => {
       if (protection) {
         expect(result.manifest.authenticationResources).toMatchObject([
           { id: 'access-app', ownership: 'adopted' },
+          { id: 'health-app', ownership: 'created' },
         ]);
+        expect(
+          readInstallationRecoverySecrets(result.manifest)?.accessHealthProvisioningJson,
+        ).toContain('health-app');
       }
       expect(JSON.stringify(result.manifest)).not.toContain('google-secret');
       expect(JSON.stringify(result.manifest)).not.toContain(code);
@@ -2589,7 +2617,9 @@ describe('platform installer', () => {
           fetcher,
         ),
       ).rejects.toEqual(
-        new Error(`platform: Health check failed at https://api.example.com (HTTP ${status}).`),
+        new Error(
+          `platform: Health check failed at https://api.example.com/health (HTTP ${status}).`,
+        ),
       );
     },
   );
