@@ -4,7 +4,7 @@ outline: deep
 
 # API Reference
 
-This page is the source of truth for user-facing `void` exports. Use it when you already know what feature you want and need the exact import, signature, or return type. Some exported subpaths are implementation support for adapters, generated workers, or internal runtime wiring and are intentionally not listed as app APIs.
+Use this reference to find public imports, signatures, and return types. For setup and examples, start with the [guides](../guide/index.md).
 
 ## Plugin
 
@@ -118,7 +118,7 @@ The inferred output types of each validator slot. For a `ValidatorSlots` with `b
 
 ### `defineMiddleware(handler)`
 
-Type-safe wrapper for Hono middleware. At runtime, returns the function unchanged.
+Type-safe wrapper for Hono middleware.
 
 ```ts
 import { defineMiddleware } from 'void';
@@ -323,14 +323,14 @@ interface CloudContext {
 **Caveats:**
 
 - `destination` must start with a single `/` and point at an internal path. External URLs, protocol-relative destinations (`//host/...`), and anything non-path-absolute throw immediately — use `fetch()` for cross-origin calls.
-- Destinations whose final path segment ends in a known static-asset extension (e.g. `/hero.png`, `/app.css`, `/data.json`) throw `VoidAssetRewriteError` (exported from `"void"`) before the re-dispatch. Runtime rewrites cannot reach assets — use a static `routing.rewrites` rule or a `_redirects` `200!` entry. `.html` is deliberately excluded from this guard because `.html` paths may be legitimate route handlers. See the [guide](../guide/edge/rewrites.md#runtime-rewrites-cannot-reach-static-assets) for the full extension list and rationale.
+- Destinations whose final path segment ends in a known static-asset extension (e.g. `/hero.png`, `/app.css`, `/data.json`) throw `VoidAssetRewriteError` (exported from `"void"`) before the re-dispatch. Runtime rewrites cannot reach assets — use a static `routing.rewrites` rule or a `_redirects` `200!` entry. `.html` is deliberately excluded from this guard because `.html` paths may be legitimate route handlers. See [Rewrites](../guide/edge/rewrites.md#runtime-rewrites-cannot-reach-static-assets).
 - Middleware re-runs on every rewrite hop. Guard side-effects with [`c.isRewritten()`](#c-originalurl-c-isrewritten).
 - Client-side SPA navigation via `Link` does not trigger server rewrites; only full HTTP requests do.
-- [ISR](../guide/edge/revalidation.md) cache keys follow the rewritten path, not the original URL.
+- Purge the destination path to clear rewritten [ISR entries](../guide/edge/revalidation.md#cache-keys-and-rewrites).
 
 ### `c.originalUrl()` / `c.isRewritten()`
 
-Context methods for inspecting rewrite state. `c.originalUrl()` returns the pre-rewrite URL as a `URL` object, or `null` on the first, non-rewritten hop. `c.isRewritten()` returns `true` on any re-dispatched context and `false` on the original. Both helpers read from an in-worker `WeakMap<Request, URL>` keyed on `c.req.raw`; the `X-Void-Original-URL` header is only how edge dispatch forwards the pre-rewrite URL to the worker, and entry middleware migrates it into the map once per request.
+Context methods for inspecting rewrite state. `c.originalUrl()` returns the pre-rewrite URL as a `URL` object, or `null` on the first, non-rewritten hop. `c.isRewritten()` returns `true` on any re-dispatched context and `false` on the original. Use them for both static and middleware rewrites.
 
 ```ts
 import { defineMiddleware } from 'void';
@@ -359,7 +359,7 @@ interface CloudContext {
 import type { RewriteDestination } from 'void/routes';
 ```
 
-Union of the exact route patterns from your generated `RouteMap` plus a `string` fallback (`RouteName | (string & {})`). Known route patterns (e.g. `/posts/[id]`) are offered as autocomplete entries in your editor, while the `string` branch keeps the type assignable from concrete runtime paths like `` `/posts/${id}` `` — there is no `:id` template-literal resolution at the type level. Used as:
+Suggests known route patterns in your editor while also accepting dynamic strings. Used as:
 
 - The parameter type of [`c.rewrite()`](#c-rewrite-destination).
 - The type of `destination` entries in `routing.rewrites` and `routing.fallbacks` in [`void.config.ts`](./config.md#routing).
@@ -661,13 +661,11 @@ import { users } from '@schema';
 const allUsers = await db.select().from(users).all();
 ```
 
-When the Void plugin is active, `void/db` is served as a virtual module that auto-wires the active database with your schema.
+`db` uses your configured dialect and schema.
 
 - D1 projects resolve the `DB` binding and expose `DrizzleD1Database<Schema>`.
 - PostgreSQL projects use `DATABASE_URL` during local development and Hyperdrive's `connectionString` in production, exposing `NodePgDatabase<Schema>`.
 - MySQL projects use the same connection sources and expose `MySql2Database<Schema>`.
-
-The published npm fallback uses a lazy D1 proxy that resolves the `DB` binding at first access.
 
 ### `createDb(database)`
 
