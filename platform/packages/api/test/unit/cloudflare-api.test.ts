@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vite-plus/test';
 import {
   addQueueConsumer,
+  cfFetch,
   createD1Database,
   enableD1ReadReplication,
   createHyperdrive,
@@ -24,6 +25,89 @@ function cfSuccess(result: unknown): Response {
 function cfError(message: string): Response {
   return Response.json({ success: false, errors: [{ code: 100, message }] }, { status: 400 });
 }
+
+describe('Cloudflare API deadlines', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it.each(['headers', 'body'])(
+    'aborts a queue request stalled while reading %s without retrying the mutation',
+    async (stalledAt) => {
+      let signal: AbortSignal | undefined;
+      const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+        signal = init.signal!;
+        if (stalledAt === 'headers') {
+          return new Promise<Response>((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(signal!.reason), { once: true });
+          });
+        }
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"success":true,"result":'));
+              signal?.addEventListener('abort', () => controller.error(signal!.reason), {
+                once: true,
+              });
+            },
+          }),
+        );
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const pending = cfFetch(
+        'https://api.cloudflare.com/client/v4/accounts/test/queues/q/consumers',
+        TOKEN,
+        {
+          method: 'POST',
+          body: '{}',
+        },
+      ).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(signal?.aborted).toBe(true);
+      expect(await pending).toMatchObject({
+        message: expect.stringMatching(/timed out.*POST.*consumers/i),
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it('preserves caller cancellation and clears the request deadline', async () => {
+    const controller = new AbortController();
+    const reason = new DOMException('Stopped by caller', 'AbortError');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+        });
+      }),
+    );
+    const pending = cfFetch('https://api.cloudflare.com/client/v4/test', TOKEN, {
+      signal: controller.signal,
+    }).catch((error: unknown) => error);
+    controller.abort(reason);
+    expect(await pending).toBe(reason);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('clears the deadline after a successful request or a provider error', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(cfSuccess({ id: 'consumer' }))
+      .mockResolvedValueOnce(cfError('insufficient permissions'));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(cfFetch('https://api.cloudflare.com/client/v4/test', TOKEN)).resolves.toEqual({
+      id: 'consumer',
+    });
+    await expect(cfFetch('https://api.cloudflare.com/client/v4/test', TOKEN)).rejects.toThrow(
+      'insufficient permissions',
+    );
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
 
 describe('createD1Database', () => {
   afterEach(() => vi.unstubAllGlobals());

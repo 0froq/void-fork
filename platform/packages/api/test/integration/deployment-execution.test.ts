@@ -13,7 +13,12 @@ import {
 } from 'vite-plus/test';
 import { importLegacyAuthentication } from '../../src/auth/configuration.ts';
 import { signDeployToken, signProjectCredentialToken } from '../../src/auth/deploy-token.ts';
-import { cancelDeployment, countUserDeploymentsToday, failStaleDeployments } from '../../src/db.ts';
+import {
+  cancelDeployment,
+  countUserDeploymentsToday,
+  failStaleDeployments,
+  getProject,
+} from '../../src/db.ts';
 import {
   dispatchPendingDeployments,
   getDeploymentOperation,
@@ -708,6 +713,110 @@ describe('durable execution claim and revocation', () => {
       expect(execute).toHaveBeenCalledOnce();
       expect(migrate).toHaveBeenCalledOnce();
       expect(await countUserDeploymentsToday(env.db, user.id)).toBe(1);
+    },
+  );
+
+  it.each(['snapshot', 'update'])(
+    'bounds a stalled queue consumer %s and preserves the live deployment',
+    async (stalledAt) => {
+      queuedEnv.DISPATCH = {
+        get: () => ({ fetch: async () => Response.json({ ready: true }) }),
+      } as unknown as DispatchNamespace;
+      const workerPayload = (maxBatchSize: number) => ({
+        ...payload(),
+        manifest: {
+          version: 3,
+          assetManifestVersion: 2,
+          bindings: {},
+          type: 'void',
+          queues: [{ name: 'demo-queue', bindingName: 'QUEUE_DEMO_QUEUE', maxBatchSize }],
+        },
+        workerFiles: { 'index.js': btoa('export default {};') },
+      });
+      const first = await post(crypto.randomUUID(), workerPayload(7));
+      const liveId = first.headers.get('x-void-deployment-id')!;
+      expect((await run(liveId)).ack).toHaveBeenCalledOnce();
+      const queueKey = `queue:${project.id.toLowerCase().replaceAll('_', '-')}-demo-queue`;
+      const liveRoute = await env.ROUTING.get(queueKey);
+      const consumer = {
+        consumer_id: 'consumer',
+        script: 'void-dispatch',
+        type: 'worker',
+        settings: { batch_size: 7 },
+      };
+      mockCfApi({
+        listQueueConsumers: () => cfSuccess([consumer]),
+        addQueueConsumer: () =>
+          Response.json(
+            { success: false, errors: [{ code: 100, message: 'queue already has a consumer' }] },
+            { status: 400 },
+          ),
+        updateQueueConsumer: (_url, init) => {
+          consumer.settings = JSON.parse(String(init!.body)).settings;
+          return cfSuccess(consumer);
+        },
+      });
+      const second = await post(crypto.randomUUID(), workerPayload(1));
+      const id = second.headers.get('x-void-deployment-id')!;
+      const provider = globalThis.fetch;
+      let release: (() => void) | undefined;
+      let notify!: () => void;
+      const reached = new Promise<void>((resolve) => {
+        notify = resolve;
+      });
+      let stalled = false;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (...args: Parameters<typeof fetch>) => {
+          const response = await provider(...args);
+          const method = args[1]?.method ?? 'GET';
+          if (
+            !stalled &&
+            String(args[0]).includes('/consumers') &&
+            method === (stalledAt === 'snapshot' ? 'GET' : 'PUT')
+          ) {
+            stalled = true;
+            return new Promise<Response>((resolve, reject) => {
+              release = () => resolve(response);
+              args[1]?.signal?.addEventListener('abort', () => reject(args[1]!.signal!.reason), {
+                once: true,
+              });
+              notify();
+            });
+          }
+          return response;
+        }),
+      );
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      let settled = false;
+      const processing = run(id).then((result) => {
+        settled = true;
+        return result;
+      });
+      try {
+        await reached;
+        await vi.advanceTimersByTimeAsync(60_000);
+        await vi.waitFor(() => expect(settled).toBe(true));
+        const result = await processing;
+        expect(result.ack).toHaveBeenCalledOnce();
+        expect(result.retry).not.toHaveBeenCalled();
+        expect(await getProject(env.db, project.id)).toMatchObject({
+          active_deployment_id: liveId,
+        });
+        expect(await env.ROUTING.get(queueKey)).toBe(liveRoute);
+        expect(consumer.settings).toEqual({ batch_size: 7 });
+        const operation = await getDeploymentOperation(env.db, id);
+        expect(operation?.status).toBe('terminal');
+        expect(operation?.events.at(-1)?.event).toMatchObject({
+          event: 'error',
+          step: 'queue_setup',
+        });
+        expect((await post(crypto.randomUUID(), workerPayload(1))).status).toBe(200);
+      } finally {
+        vi.useRealTimers();
+        release?.();
+        await processing;
+      }
     },
   );
 

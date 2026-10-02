@@ -35,24 +35,51 @@ export class InvalidHyperdriveConnectionStringError extends Error {
 }
 
 export async function cfFetch<T>(url: string, apiToken: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
-  });
-  const json = (await response.json()) as CfApiResult<T>;
-  if (!json.success) {
-    const message = json.errors.map((error) => error.message).join(', ');
-    throw new CloudflareApiError(
-      `Cloudflare API error: ${message}`,
-      response.status,
-      json.errors.map((error) => error.code),
+  const deadline = new AbortController();
+  const method = init?.method ?? 'GET';
+  const pathname = new URL(url).pathname;
+  const timer = setTimeout(() => {
+    deadline.abort(
+      new Error(
+        `Cloudflare API request timed out after 60 seconds: ${method} ${pathname}.` +
+          (method === 'GET' || method === 'HEAD'
+            ? ''
+            : ' The write may have succeeded; inspect its state before retrying.'),
+      ),
     );
+  }, 60_000);
+  const signal = init?.signal ? AbortSignal.any([init.signal, deadline.signal]) : deadline.signal;
+  try {
+    signal.throwIfAborted();
+    const response = await fetch(url, {
+      ...init,
+      signal,
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+        ...init?.headers,
+      },
+    });
+    // Keep the same deadline through the body read: receiving headers does
+    // not prove a stalled provider response has completed. Never replay writes.
+    const json = (await response.json()) as CfApiResult<T>;
+    if (!json.success) {
+      const message = json.errors.map((error) => error.message).join(', ');
+      throw new CloudflareApiError(
+        `Cloudflare API error: ${message}`,
+        response.status,
+        json.errors.map((error) => error.code),
+      );
+    }
+    return json.result;
+  } catch (error) {
+    if (deadline.signal.aborted && !init?.signal?.aborted) {
+      throw deadline.signal.reason;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
-  return json.result;
 }
 
 export type D1DatabaseInfo = Readonly<{
