@@ -34,10 +34,10 @@ export const action = defineHandler.withValidator({
 When a page needs multiple mutations, such as updating and deleting a user on the same page, export `actions` (plural) instead of `action`:
 
 ```ts
-// pages/users/edit.server.ts
+// pages/users/[id].server.ts
 import { defineHandler } from 'void';
 import { db, eq } from 'void/db';
-import { users } from '@schema';
+import { users, updateUserSchema } from '@schema';
 
 export const actions = {
   update: defineHandler.withValidator({
@@ -46,17 +46,16 @@ export const actions = {
     await db
       .update(users)
       .set(body)
-      .where(eq(users.id, c.req.param('id')));
+      .where(eq(users.id, Number(c.req.param('id'))));
   }),
 
   delete: defineHandler(async (c) => {
-    const { id } = await c.req.json<{ id: string }>();
-    await db.delete(users).where(eq(users.id, id));
+    await db.delete(users).where(eq(users.id, Number(c.req.param('id'))));
   }),
 };
 ```
 
-Named actions are dispatched via a `?actionName` suffix on the URL (e.g. `/users/edit?update`). The client primitives `useForm` and `action()` handle this automatically.
+Named actions are dispatched via a `?actionName` suffix on the URL (e.g. `/users/42?update`). The client primitives `useForm` and `action()` handle this automatically.
 
 `export const action` (singular) still works for pages that only need one mutation. Named actions are opt-in. Exporting both `action` and `actions` from the same file is an error.
 
