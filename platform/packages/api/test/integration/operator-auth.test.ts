@@ -2,7 +2,6 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test';
 import { signJwt, verifyJwt } from '../../src/auth/jwt.ts';
 import { app } from '../../src/index.ts';
-import { SANDBOX_DRAIN_STATE_KEY } from '../../src/sandbox-drain.ts';
 import { operatorEvents, operatorSessions, users } from '../../src/schema.ts';
 import {
   clearTables,
@@ -22,7 +21,7 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   await clearTables(env.db);
-  await env.ROUTING.delete(SANDBOX_DRAIN_STATE_KEY);
+  await env.ROUTING.delete(PLATFORM_SANDBOX_DRAIN_KEY);
   vi.restoreAllMocks();
 });
 
@@ -161,7 +160,7 @@ describe('operator authentication', () => {
         )
       ).status,
     ).toBe(200);
-    await env.ROUTING.delete(SANDBOX_DRAIN_STATE_KEY);
+    await env.ROUTING.delete(PLATFORM_SANDBOX_DRAIN_KEY);
   });
 
   test('rejects regular users, browser cookies, API tokens and scoped deploy tokens for operations', async () => {
@@ -249,3 +248,4 @@ describe('operator authentication', () => {
     expect(await env.db.select().from(operatorEvents)).toHaveLength(0);
   });
 });
+import { PLATFORM_SANDBOX_DRAIN_KEY } from '@void/platform';

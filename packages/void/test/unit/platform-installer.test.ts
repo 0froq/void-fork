@@ -127,18 +127,9 @@ const TEST_PLATFORM_EMAIL_SIGNING_SECRET = 'test-only-email-signing-secret-mater
 const TEST_PLATFORM_PROJECT_SECRET_KEY = Buffer.alloc(32, 5).toString('base64');
 
 function sandboxDrainPreparation(state: 'complete' | 'pending') {
-  const checkpointState = state === 'complete' ? 'complete' : 'draining';
   return {
     admissionProtocol: 3 as const,
     generation: 'generation-1',
-    mirrorValue: JSON.stringify({
-      completedAt: state === 'complete' ? '2026-09-16T00:00:00.000Z' : undefined,
-      generation: 'generation-1',
-      startedAt: '2026-09-16T00:00:00.000Z',
-      state: checkpointState,
-      updatedAt: '2026-09-16T00:00:00.000Z',
-      version: 1,
-    }),
     state,
   } as const;
 }
@@ -3015,13 +3006,10 @@ describe('platform installer', () => {
       const prepared = await preparePlatformSandboxDrainConnection(connection);
       expect(prepared.state).toBe(expected);
       expect(prepared.admissionProtocol).toBe(0);
-      expect(JSON.parse(prepared.mirrorValue)).toEqual({
-        ...(empty ? { completedAt: '2026-09-16T00:00:00.000Z' } : {}),
+      expect(prepared).toEqual({
+        admissionProtocol: 0,
         generation: expect.stringMatching(/^[0-9a-f-]{36}$/),
-        startedAt: '2026-09-16T00:00:00.000Z',
-        state,
-        updatedAt: '2026-09-16T00:00:00.000Z',
-        version: 1,
+        state: expected,
       });
       expect(inserts).toHaveLength(1);
       expect(inserts[0]?.slice(1)).toEqual([
@@ -4337,10 +4325,7 @@ describe('platform installer', () => {
           },
           deployWorker: async (config, secrets) => {
             expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
-            expect(JSON.parse(routingValues.get(PLATFORM_SANDBOX_DRAIN_KEY)!)).toMatchObject({
-              state: 'complete',
-              version: 1,
-            });
+            expect(routingValues.has(PLATFORM_SANDBOX_DRAIN_KEY)).toBe(false);
             lifecycleEvents.push(`deploy:${String(config.name)}`);
             deployed.push(String(config.name));
             deployedTrafficStates.push(
@@ -5729,11 +5714,7 @@ describe('platform installer', () => {
     ]);
     expect(migrations).toBe(0);
     expect(new Set(upgradeKvWrites)).toEqual(
-      new Set([
-        '__void/platform/installation/v1',
-        PLATFORM_DISABLED_KEY,
-        PLATFORM_SANDBOX_DRAIN_KEY,
-      ]),
+      new Set(['__void/platform/installation/v1', PLATFORM_DISABLED_KEY]),
     );
     expect(upgraded.manifest.status).toBe('installed');
     expect(upgraded.manifest.platformVersion).toBe(readPlatformRuntimeManifest().platformVersion);

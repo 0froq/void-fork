@@ -18,7 +18,6 @@ import {
   checkpointSandboxDrain,
   completeSandboxDrain,
   readSandboxDrainCheckpoint,
-  writeSandboxDrainMirror,
   type SandboxDrainCursor,
   type SandboxDrainPhase,
 } from '../sandbox-drain.ts';
@@ -550,7 +549,6 @@ export async function drainManagedSandboxes(
 
   const lease = await acquireSandboxDrainLease(db);
   if (lease.kind === 'complete') {
-    await writeSandboxDrainMirror(env.ROUTING, lease.checkpoint);
     return { ok: true, partial: false, complete: true, checkpoint: lease.checkpoint };
   }
   if (lease.kind === 'busy') {
@@ -563,7 +561,6 @@ export async function drainManagedSandboxes(
       message: 'Another Sandbox drain page is in progress. Retry after its lease expires.',
     };
   }
-  await writeSandboxDrainMirror(env.ROUTING, lease.checkpoint);
   const cursor = (lease.checkpoint.cursor ?? { pass: '1' }) as SandboxDrainCursor;
   const page =
     lease.checkpoint.phase === 'deployments'
@@ -587,7 +584,6 @@ export async function drainManagedSandboxes(
   const next = nextPosition(lease.checkpoint.phase, cursor, page);
   if (next.complete) {
     const checkpoint = await completeSandboxDrain(db, leaseIdentity);
-    await writeSandboxDrainMirror(env.ROUTING, checkpoint);
     return {
       ok: true,
       partial: false,

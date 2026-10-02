@@ -44,7 +44,6 @@ import {
   PLATFORM_HEALTH_HOSTNAME_LABEL,
   PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
-  PLATFORM_SANDBOX_DRAIN_KEY,
   recordInstallationResource,
   recordInstallationStep,
   setInstallationDesiredState,
@@ -257,7 +256,6 @@ export type PlatformDatabaseState = Readonly<{
 export type PlatformSandboxDrainPreparation = Readonly<{
   admissionProtocol: 0 | 2 | 3;
   generation: string;
-  mirrorValue: string;
   state: 'complete' | 'pending';
 }>;
 
@@ -1850,21 +1848,6 @@ export async function installPlatform(
         'platform: The database did not arm the Sandbox admission protocol required by this runtime.',
       );
     }
-    const sandboxDrainRoutingKvId = requireId(
-      Object.fromEntries(manifest.resources.map((resource) => [resource.key, resource.id])),
-      'routing-kv',
-    );
-    const writeSandboxDrainMirror = async (preparation: PlatformSandboxDrainPreparation) => {
-      await dependencies.client.putKvValue(
-        plan.account.id,
-        sandboxDrainRoutingKvId,
-        PLATFORM_SANDBOX_DRAIN_KEY,
-        preparation.mirrorValue,
-      );
-    };
-    if (sandboxDrainPreparation) {
-      await writeSandboxDrainMirror(sandboxDrainPreparation);
-    }
     const sandboxDrainState = sandboxDrainPreparation?.state ?? 'complete';
     if (
       targetSandboxDrainProtocol >= 1 &&
@@ -2539,7 +2522,6 @@ export async function installPlatform(
           'platform: Sandbox drain completion changed while it was being verified. Traffic remains disabled.',
         );
       }
-      await writeSandboxDrainMirror(completedDrain);
     }
     if (requiresStagedCommit) {
       if (!authenticationCutoverCommitted) {
@@ -4094,14 +4076,6 @@ export async function preparePlatformSandboxDrainConnection(
     return {
       admissionProtocol: row.admission_protocol,
       generation: row.generation,
-      mirrorValue: JSON.stringify({
-        version: 1,
-        generation: row.generation,
-        state: row.state,
-        startedAt: row.started_at,
-        updatedAt: row.updated_at,
-        ...(row.completed_at ? { completedAt: row.completed_at } : {}),
-      }),
       state: row.state === 'complete' ? 'complete' : 'pending',
     };
   };

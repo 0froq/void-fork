@@ -1,4 +1,4 @@
-import { PLATFORM_APPLICATION_KEY } from '@void/platform';
+import { PLATFORM_APPLICATION_KEY, PLATFORM_SANDBOX_DRAIN_KEY } from '@void/platform';
 import { eq, sql } from 'drizzle-orm';
 import {
   afterAll,
@@ -14,7 +14,7 @@ import { getDeployment } from '../../src/db.ts';
 import { app } from '../../src/index.ts';
 import { loadSandboxDeploymentPageProjection } from '../../src/operator/sandbox-operations.ts';
 import { databaseTimestampMs } from '../../src/routes/deploy.ts';
-import { SANDBOX_DRAIN_STATE_KEY } from '../../src/sandbox-drain.ts';
+import { readSandboxDrainCheckpoint } from '../../src/sandbox-drain.ts';
 import {
   deployments,
   operatorEvents,
@@ -49,7 +49,7 @@ beforeEach(async () => {
   await env.db.delete(platformEvents);
   await clearTables(env.db);
   await env.db.delete(sandboxDrainCheckpoints);
-  await env.ROUTING.delete(SANDBOX_DRAIN_STATE_KEY);
+  await env.ROUTING.delete(PLATFORM_SANDBOX_DRAIN_KEY);
   delete env.PLATFORM_INSTALLATION_ID;
   delete env.PLATFORM_CAPABILITIES;
   const user = await createTestUser(env.db, 'operator', 'github', undefined, 'free', 'admin');
@@ -928,7 +928,7 @@ describe('operator installation-aware system and worker operations', () => {
       applications: [],
       blockers: [expect.objectContaining({ kind: 'active_deployment' })],
     });
-    expect(await env.ROUTING.get(SANDBOX_DRAIN_STATE_KEY)).toBeNull();
+    expect(await env.ROUTING.get(PLATFORM_SANDBOX_DRAIN_KEY)).toBeNull();
     expect(cf.state.containerApps.has(application.id)).toBe(true);
 
     const firstApply = await req(
@@ -976,9 +976,10 @@ describe('operator installation-aware system and worker operations', () => {
     );
     expect(cf.state.containerApps.has(application.id)).toBe(false);
     expect((await getDeployment(env.db, deployment.id))?.status).toBe('canceled');
-    expect(JSON.parse((await env.ROUTING.get(SANDBOX_DRAIN_STATE_KEY))!)).toMatchObject({
+    expect(await readSandboxDrainCheckpoint(env.db)).toMatchObject({
       state: 'complete',
     });
+    expect(await env.ROUTING.get(PLATFORM_SANDBOX_DRAIN_KEY)).toBeNull();
     const events = await env.db.select().from(operatorEvents);
     expect(events).toHaveLength(1 + resumedPages.length);
     expect(events.at(-1)).toEqual(

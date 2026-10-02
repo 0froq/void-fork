@@ -1,8 +1,7 @@
-import { PLATFORM_DISABLED_KEY } from '@void/platform';
+import { PLATFORM_DISABLED_KEY, PLATFORM_SANDBOX_DRAIN_KEY } from '@void/platform';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vite-plus/test';
 import app from '../../src/index.ts';
-import { SANDBOX_DRAIN_STATE_KEY } from '../../src/sandbox-drain.ts';
 import { sandboxDrainCheckpoints } from '../../src/schema.ts';
 import { USAGE_SIGNING_KEY_KV_KEY } from '../../src/usage-auth.ts';
 import { setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
@@ -112,7 +111,7 @@ describe('GET /health', () => {
   it('does not trust a stale complete KV mirror without a DB checkpoint', async () => {
     await env.db.delete(sandboxDrainCheckpoints);
     await env.ROUTING.put(
-      SANDBOX_DRAIN_STATE_KEY,
+      PLATFORM_SANDBOX_DRAIN_KEY,
       JSON.stringify({
         version: 1,
         generation: 'stale-generation',
@@ -143,7 +142,7 @@ describe('GET /health', () => {
         phase: null,
       });
     } finally {
-      await env.ROUTING.delete(SANDBOX_DRAIN_STATE_KEY);
+      await env.ROUTING.delete(PLATFORM_SANDBOX_DRAIN_KEY);
       await establishBootstrapSandboxDrainCheckpoint();
     }
   });

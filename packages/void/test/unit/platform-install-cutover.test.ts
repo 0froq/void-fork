@@ -362,14 +362,6 @@ async function runInstall(
         prepareSandboxDrain: async () => ({
           admissionProtocol: 3 as const,
           generation: 'generation-1',
-          mirrorValue: JSON.stringify({
-            completedAt: '2026-10-01T00:00:00.000Z',
-            generation: 'generation-1',
-            startedAt: '2026-10-01T00:00:00.000Z',
-            state: 'complete',
-            updatedAt: '2026-10-01T00:00:00.000Z',
-            version: 1,
-          }),
           state: 'complete' as const,
         }),
       }),

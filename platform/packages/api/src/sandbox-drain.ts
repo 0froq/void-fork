@@ -2,36 +2,11 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { Db } from './db.ts';
 import { sandboxDrainCheckpoints } from './schema.ts';
 
-export const SANDBOX_DRAIN_STATE_KEY = '__void/platform/sandbox-drain/v1';
 const LEASE_MS = 120_000;
 
 export type SandboxDrainPhase = 'deployments' | 'resources';
 export type SandboxDrainCursor = Readonly<Record<string, string>>;
 export type SandboxDrainCheckpoint = typeof sandboxDrainCheckpoints.$inferSelect;
-
-export type SandboxDrainState = Readonly<{
-  version: 1;
-  generation: string;
-  state: 'draining' | 'complete';
-  startedAt: string;
-  updatedAt: string;
-  completedAt?: string;
-}>;
-
-export async function writeSandboxDrainMirror(
-  routing: Pick<KVNamespace, 'put'>,
-  checkpoint: SandboxDrainCheckpoint,
-): Promise<void> {
-  const state: SandboxDrainState = {
-    version: 1,
-    generation: checkpoint.generation,
-    state: checkpoint.state,
-    startedAt: checkpoint.started_at,
-    updatedAt: checkpoint.updated_at,
-    ...(checkpoint.completed_at ? { completedAt: checkpoint.completed_at } : {}),
-  };
-  await routing.put(SANDBOX_DRAIN_STATE_KEY, JSON.stringify(state));
-}
 
 export async function readSandboxDrainCheckpoint(db: Db): Promise<SandboxDrainCheckpoint | null> {
   const [row] = await db
