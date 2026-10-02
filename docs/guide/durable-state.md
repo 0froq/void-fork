@@ -6,9 +6,9 @@ outline: deep
 
 Use a Durable Object when requests need to share state under one name, such as a shopping cart, room, or rate limiter. Void gives you typed methods and stores the object's state between calls.
 
-Void turns each module in `durable-objects/` into a SQLite-backed Cloudflare Durable Object. By default, the filename determines the binding, Worker class, and initial Cloudflare migration, so no manual Cloudflare configuration is needed.
+Create a module in `durable-objects/` with `defineDurableState()`. Void provides a SQLite-backed Cloudflare Durable Object for it. This feature supports native Void apps deployed directly to Cloudflare.
 
-Void records the inferred binding and migration entry in `void.lock.json`. Commit that file: Cloudflare Durable Object migrations are append-only, and the persisted order ensures a newly added module is migrated after every class already deployed.
+Commit `void.lock.json` when Void adds a resource. Keep its deployed migration entries in their original order.
 
 ## Define state and methods
 
@@ -44,46 +44,9 @@ For `counter.ts`, Void generates:
 
 Names are derived from kebab-case filenames: `shopping-cart.ts` becomes `SHOPPING_CART` and `ShoppingCartDurableObject`.
 
-## Rename a file while keeping its state
-
-Existing definitions need no changes. Before renaming a deployed definition, run:
-
-```sh
-void info
-```
-
-For `durable-objects/counter.ts`, Void prints:
-
-```text
-To preserve this resource when moving its code, add this to 'defineDurableState':
-  name: "counter",
-```
-
-Add that property to the existing definition:
-
-```ts
-export const Counter = defineDurableState({
-  name: 'counter',
-  initialState: { count: 0 },
-  methods: {
-    read(context) {
-      return context.state.count;
-    },
-  },
-});
-
-export default Counter;
-```
-
-You can now rename the file within `durable-objects/`, update its imports, and deploy normally. Keep `name: 'counter'` and the same names passed to `Counter.get()`: the binding, Worker class, migration history, and stored state stay the same. Pinning the displayed name does not require a Cloudflare class migration.
-
-`name` is optional. Use a static string, either inline or in a local `const`, containing words that start with a letter, such as `'shopping-cart'`. Names must produce distinct Worker classes and bindings. Changing an existing resource's `name` selects a different resource.
-
-If you already moved the file, `void info` also shows resources recorded in `void.lock.json` without a matching definition. Identify the original resource and use its suggested name. If no name can be suggested, restore the original file from source history and run `void info` before moving it again. Keep the existing lock and migration history.
-
 ## Call it from a route
 
-Import the same named definition and select an object by name. Calls are typed from the method definitions, including arguments and return values.
+Import your definition and call `get()` with a name to select an object. Method arguments and return values are typed:
 
 ```ts
 // routes/api/counter.ts
@@ -165,6 +128,43 @@ export default Counter;
 These state migrations are separate from Cloudflare's Durable Object class migration. Void generates the latter with `new_sqlite_classes` when it discovers the file.
 
 Do not delete or reorder generated Durable Object migrations in `void.lock.json` after deployment. For a class addition, rename, or removal on an existing Worker, review the migration and run `void deploy --platform cloudflare --atomic`. If this Worker needs atomic publication on every deploy, set `deploy: { cloudflare: { mode: 'atomic' } }` in `void.config.ts`. Cloudflare applies class lifecycle changes in one deployment. The Worker receives traffic before Void checks readiness, and you cannot roll back across that migration boundary. Staged deploys keep pre-traffic readiness verification.
+
+## Rename a file while keeping its state
+
+Before renaming a deployed definition, run:
+
+```sh
+void info
+```
+
+For `durable-objects/counter.ts`, Void prints:
+
+```text
+To preserve this resource when moving its code, add this to 'defineDurableState':
+  name: "counter",
+```
+
+Add that property to the existing definition:
+
+```ts
+export const Counter = defineDurableState({
+  name: 'counter',
+  initialState: { count: 0 },
+  methods: {
+    read(context) {
+      return context.state.count;
+    },
+  },
+});
+
+export default Counter;
+```
+
+You can now rename the file within `durable-objects/`, update its imports, and deploy normally. Keep `name: 'counter'` and the same names passed to `Counter.get()`: the binding, Worker class, migration history, and stored state stay the same. Pinning the displayed name does not require a Cloudflare class migration.
+
+`name` is optional. Use a static string, either inline or in a local `const`, containing words that start with a letter, such as `'shopping-cart'`. Names must produce distinct Worker classes and bindings. Changing an existing resource's `name` selects a different resource.
+
+If you already moved the file, `void info` also shows resources recorded in `void.lock.json` without a matching definition. Identify the original resource and use its suggested name. If no name can be suggested, restore the original file from source history and run `void info` before moving it again. Keep the existing lock and migration history.
 
 ## Deployment support
 

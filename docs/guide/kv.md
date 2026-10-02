@@ -4,7 +4,7 @@ outline: deep
 
 # Key-Value Storage
 
-Void provides a typed KV client with automatic JSON serialization for [Cloudflare Workers KV](https://developers.cloudflare.com/kv/). Import `kv` from `void/kv` and start reading and writing data.
+Read and write data in [Cloudflare Workers KV](https://developers.cloudflare.com/kv/) with `kv` from `void/kv`. Values are stored as JSON, and `kv.map()` gives a collection its own key prefix and value type.
 
 ## Basic Operations
 

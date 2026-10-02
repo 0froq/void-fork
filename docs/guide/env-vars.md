@@ -1,11 +1,6 @@
 # Environment variables
 
-Void uses one schema, one local dotenv file, and one production rule:
-
-- `env.ts` declares every application environment variable.
-- `.env` supplies local development values only. It is never deployed.
-- Production server values live in the platform's encrypted secret store.
-- Client-prefixed values are embedded at build time, so they are public by definition.
+Declare your environment variables in `env.ts`, then read them through `env` from `void/env`. Use `.env` for local values and `void secret put` for production server values.
 
 ## Define the schema
 
@@ -22,7 +17,7 @@ export default defineEnv({
 });
 ```
 
-Void generates `.void/env.d.ts`, validates values, and provides the typed `env` proxy:
+Import the typed `env` object in your app:
 
 ```ts
 import { env } from 'void/env';
@@ -109,7 +104,7 @@ Invalid-value diagnostics redact the supplied value by default. Set `VOID_ENV_UN
 
 ## Imports inside `env.ts`
 
-Void loads `env.ts` through Node's native `import()` before Vite transforms application code. Use relative imports or package names for schema helpers and shared constants. TypeScript path aliases and imports requiring custom Vite transforms are not supported in this file.
+Use relative imports or package names inside `env.ts`. TypeScript path aliases and imports that need Vite transforms are not supported.
 
 ## Migrating from the multi-file model
 

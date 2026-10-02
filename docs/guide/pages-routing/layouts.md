@@ -54,9 +54,11 @@ function namedLayoutItems(ext) {
 
 # Layouts & Shared Data
 
+Use layouts for navigation, headers, and other UI shared by several pages. Layouts nest with your directories and keep their component state as you navigate.
+
 ## Layouts
 
-Place a layout file in any `pages/` directory to wrap all pages in that subtree:
+Place a layout file in a `pages/` directory to wrap its pages:
 
 <FileTree :items="layoutBasicItems" adapter-tabs default-expanded />
 

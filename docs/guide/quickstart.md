@@ -85,7 +85,7 @@ export default defineConfig({
 
 Then run `void init` with your package manager to configure the remaining project files.
 
-## Once You Have a Working App
+## Run and deploy
 
 ### 1. Edit the generated API route
 
@@ -110,32 +110,31 @@ Then visit:
 - App: `http://localhost:5173`
 - API route: `http://localhost:5173/api/hello`
 
-### 3. Choose where to deploy
+### 3. Deploy
 
-If you chose a deployment target during setup, you're ready. If you skipped it, run `void init` again or choose Cloudflare for the first deploy:
-
-```sh
-void deploy --platform cloudflare
-```
-
-Void opens your browser to sign in when needed. To use your team's platform, connect using the API URL from your administrator:
-
-```sh
-void connect https://platform.example.com
-void project link
-```
-
-### 4. Deploy
-
-With your target configured, run:
+If you chose a deployment target during setup, run:
 
 ```sh
 void deploy
 ```
 
-Void builds the app, provisions the resources it uses, applies pending migrations, and prints the deployed URL. If it reports a missing production secret, [configure that secret](./env-vars.md) and deploy again.
+If you skipped deployment setup, select your Cloudflare account for the first deploy:
 
-Subsequent deploys use the same target. See [Deployment](./deployment.md) for CI setup, migrations, and rollback. To generate a supported push-to-deploy workflow, run `void init --github`.
+```sh
+void deploy --platform cloudflare
+```
+
+Void opens your browser to sign in when needed. To use your team's platform, connect using the API URL from your administrator, then link a project and deploy:
+
+```sh
+void connect https://platform.example.com
+void project link
+void deploy
+```
+
+Void builds the app, provisions its resources, applies pending migrations, and prints the deployed URL. If a production secret is missing, [set it](./env-vars.md) and deploy again. Later deploys use the saved target.
+
+See [Deployment](./deployment.md) for CI setup and rollback.
 
 ## Next steps
 

@@ -8,11 +8,11 @@ outline: deep
 Typed WebSocket routes currently work in native Void apps. They aren't available in meta-framework mode yet.
 :::
 
-Create a `.ws.ts` route to add a typed WebSocket endpoint. Void runs each route instance in a Cloudflare Durable Object, which coordinates the clients connected to it. These routes require the Cloudflare target; Node.js, Bun, and Deno builds reject them.
+Create a `.ws.ts` route to send typed messages between your server and connected clients. Each route instance has its own Cloudflare Durable Object for shared state. WebSocket routes require the Cloudflare target.
 
 New WebSocket route classes use SQLite-backed Durable Objects on both deployment platforms.
 
-For example, a chat route at `/rooms/[id]` gives each room its own instance. Use it for chat, presence, collaborative documents, or notifications.
+For example, `/rooms/[id]` gives each chat room its own instance. Use it for chat, presence, collaborative documents, or notifications.
 
 ## Route files
 
@@ -33,49 +33,6 @@ Filename rules match regular server routes:
 - `chat.dev.ws.ts` / `chat.prod.ws.ts` restrict the route to one environment
 
 The environment suffix goes **before** `.ws`. `chat.ws.dev.ts` is not recognised.
-
-## Move a route while keeping its state
-
-Existing routes keep their current behavior without any changes. Before moving a deployed route, run `void info`. For `routes/chat/[room].ws.ts`, the output includes:
-
-```text
-To preserve this resource when moving its code, add this to 'defineRoom':
-  name: "chat-room",
-```
-
-Add the displayed name to your existing definition:
-
-```ts
-export default defineRoom({
-  name: 'chat-room',
-  messages: { client: ClientMessage, server: ServerMessage },
-  // Keep your existing hooks.
-});
-```
-
-Move the file to `routes/rooms/[room].ws.ts`, update clients to connect to `/rooms/:room`, and deploy normally. Keep the same parameter names and values: room `general` still uses its existing storage. The Worker class, binding, and migration history stay the same on both Cloudflare and Void platform deployments.
-
-Both `defineRoom()` and `defineWebSocket()` accept optional `name`. Use a static string, inline or in a local `const`. Each route must produce a distinct Worker class; changing the name selects a different resource. If you already moved a route, `void info` also shows unmatched identities recorded in `void.lock.json`. Identify the original resource before adopting its suggested name; otherwise restore the original source and discover the name there.
-
-### Rename a route parameter
-
-By default, the instance key includes parameter names. `/chat/:room` with `room: 'general'` uses `room=general`; a route without parameters uses `default`. Multiple parameters are joined in route order, for example `team=acme&room=general`.
-
-If you also rename `[room]` to `[id]`, preserve the old key explicitly:
-
-```ts
-// routes/rooms/[id].ws.ts
-export default defineRoom({
-  name: 'chat-room',
-  key: ({ params }) => `room=${params.id}`,
-  messages: { client: ClientMessage, server: ServerMessage },
-  // Keep your existing hooks.
-});
-```
-
-Clients now connect to `/rooms/:id` with `params: { id: 'general' }`. The key remains `room=general`, so storage and `ctx.id` stay the same. Returning only `params.id` would select a different instance.
-
-`key` is optional on both WebSocket helpers. It must return a string synchronously and consistently for the same parameters. Preserve the complete old key when migrating multiple parameters. Keep the callback stable after deployment.
 
 ## `defineRoom()`
 
@@ -158,6 +115,28 @@ export default defineWebSocket({
 });
 ```
 
+## Client
+
+Use `connect()` from `void/ws` on the client:
+
+```ts
+import { connect } from 'void/ws';
+
+const socket = connect('/chat/:room', {
+  params: { room: 'general' },
+});
+
+socket.on('message', (event) => {
+  if (event.type === 'chat.message') {
+    console.log(event.text);
+  }
+});
+
+socket.send({ type: 'chat.message', text: 'hello' });
+```
+
+`connect()` resolves relative URLs against the current origin and automatically uses `ws:` or `wss:`. It also buffers messages until the socket opens and reconnects by default.
+
 ## Typed messages
 
 Define schemas for messages sent by the client and server:
@@ -168,9 +147,9 @@ Define schemas for messages sent by the client and server:
 - `ctx.room.broadcast()`, `ctx.connection.send()`, and `ctx.socket.send()` are typed from `messages.server`
 - `connect()` infers route params, outgoing client messages, and incoming server messages from generated route types
 
-The default protocol is JSON events. Raw string or binary framing is not the primary API.
+Messages are JSON events. Raw string and binary messages are not supported.
 
-## Ambient auth
+## Authentication
 
 WebSocket hooks use the same built-in session resolution as HTTP auth. When Void auth is enabled, `ctx.user` is available in:
 
@@ -206,27 +185,48 @@ Every hook receives a context with:
 
 If a route does not define `onRequest()`, non-WebSocket requests return `426 Upgrade Required`.
 
-## Client
+## Move a route while keeping its state
 
-Use `connect()` from `void/ws` on the client:
+Before moving a deployed route, run `void info`. For `routes/chat/[room].ws.ts`, the output includes:
 
-```ts
-import { connect } from 'void/ws';
-
-const socket = connect('/chat/:room', {
-  params: { room: 'general' },
-});
-
-socket.on('message', (event) => {
-  if (event.type === 'chat.message') {
-    console.log(event.text);
-  }
-});
-
-socket.send({ type: 'chat.message', text: 'hello' });
+```text
+To preserve this resource when moving its code, add this to 'defineRoom':
+  name: "chat-room",
 ```
 
-`connect()` resolves relative URLs against the current origin and automatically uses `ws:` or `wss:`. It also buffers messages until the socket opens and reconnects by default.
+Add the displayed name to your existing definition:
+
+```ts
+export default defineRoom({
+  name: 'chat-room',
+  messages: { client: ClientMessage, server: ServerMessage },
+  // Keep your existing hooks.
+});
+```
+
+Move the file to `routes/rooms/[room].ws.ts`, update clients to connect to `/rooms/:room`, and deploy normally. Keep the same parameter names and values: room `general` still uses its existing storage. The Worker class, binding, and migration history stay the same on both Cloudflare and Void platform deployments.
+
+Both `defineRoom()` and `defineWebSocket()` accept optional `name`. Use a static string, inline or in a local `const`. Each route must produce a distinct Worker class; changing the name selects a different resource. If you already moved a route, `void info` also shows unmatched identities recorded in `void.lock.json`. Identify the original resource before adopting its suggested name; otherwise restore the original source and discover the name there.
+
+### Rename a route parameter
+
+By default, the instance key includes parameter names. `/chat/:room` with `room: 'general'` uses `room=general`; a route without parameters uses `default`. Multiple parameters are joined in route order, for example `team=acme&room=general`.
+
+If you also rename `[room]` to `[id]`, preserve the old key explicitly:
+
+```ts
+// routes/rooms/[id].ws.ts
+export default defineRoom({
+  name: 'chat-room',
+  key: ({ params }) => `room=${params.id}`,
+  messages: { client: ClientMessage, server: ServerMessage },
+  // Keep your existing hooks.
+});
+```
+
+Clients now connect to `/rooms/:id` with `params: { id: 'general' }`. The key remains `room=general`, so storage and `ctx.id` stay the same. Returning only `params.id` would select a different instance.
+
+`key` is optional on both WebSocket helpers. It must return a string synchronously and consistently for the same parameters. Preserve the complete old key when migrating multiple parameters. Keep the callback stable after deployment.
 
 ## Constraints
 

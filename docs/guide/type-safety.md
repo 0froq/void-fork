@@ -4,7 +4,7 @@ outline: deep
 
 # Type Safety
 
-Void provides end-to-end type safety across the stack. Types come from your source code and Drizzle schema, so you are not hand-writing or duplicating interfaces.
+Void infers types from your database schema, route handlers, and page loaders. When you change a field, TypeScript shows which queries, requests, and components need to change.
 
 ## The Type Pipeline
 
@@ -114,7 +114,7 @@ The `action()` helper gets the same type checking. See [Actions & Forms](./pages
 
 ## Serialization
 
-Handler return types are transformed via `Serialize<T>` so the client sees what actually arrives over the wire:
+The client types reflect JSON serialization through `Serialize<T>`:
 
 | Source type                       | Serialized type                                        |
 | --------------------------------- | ------------------------------------------------------ |

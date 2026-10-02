@@ -6,8 +6,6 @@ outline: deep
 
 Use an action to change server data from a form or button. Define it in the page's `.server.ts` file with `defineHandler`, just like a [loader](./loaders) or [server route](../server-routing.md). Actions handle `POST`, `PUT`, `PATCH`, and `DELETE` requests.
 
-Browser submissions must come from the same origin as the page, including its scheme, hostname, and port. Void rejects cross-origin page actions with `403 Forbidden`. Server clients can call actions without browser origin headers; actions still need authentication and authorization for protected data.
-
 ## Defining an Action
 
 Export `action` from a `.server.ts` file. Use `withValidator()` with a [schema-derived validator](../database.md#schema-derived-validators) to validate the request body:
@@ -269,6 +267,10 @@ export const action = defineHandler(async (c) => {
   // ...
 });
 ```
+
+## Authentication and origin checks
+
+Browser submissions must come from the same origin as the page, including its scheme, hostname, and port. Void rejects cross-origin page actions with `403 Forbidden`. Server clients can call actions without browser origin headers; actions still need authentication and authorization for protected data.
 
 ## File Uploads
 
