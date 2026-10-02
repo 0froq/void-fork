@@ -714,8 +714,12 @@ describe('platform credential onboarding', () => {
     expect(descriptions).toContain(
       'https://void.cloud/guide/platform/installation/prerequisites#platform-database',
     );
-    expect(descriptions).toContain('Signs platform login tokens. Run openssl rand -base64 32');
-    expect(descriptions).toContain('Encrypts app secrets. Run openssl rand -base64 32 separately');
+    expect(descriptions).toContain(
+      'Create a JWT signing key for platform login tokens. Run openssl rand -base64 32',
+    );
+    expect(descriptions).toContain(
+      'Generate a project encryption key for app secrets. Run openssl rand -base64 32 separately',
+    );
     expect(descriptions).not.toContain(environment.VOID_PLATFORM_DATABASE_URL);
     expect(descriptions).not.toContain(environment.VOID_PLATFORM_JWT_SECRET);
     expect(descriptions).not.toContain(environment.VOID_PLATFORM_PROJECT_SECRET_KEY);

@@ -28,7 +28,7 @@ export function platformSetupFieldHelp(
       return {
         placeholder: 'postgresql://user:pw@…/database',
         description:
-          'Stores platform users, projects, and deployments. Use an empty hosted database, e.g. ' +
+          'Provide a PostgreSQL database URL for platform users, projects, and deployments. Use an empty hosted database, e.g. ' +
           platformSetupLink({ title: 'Neon', url: 'https://neon.com/' }) +
           '. ' +
           docs('prerequisites', 'platform-database', 'Database setup'),
@@ -36,13 +36,13 @@ export function platformSetupFieldHelp(
     case 'jwtSecret':
       return {
         description:
-          'Signs platform login tokens. Run openssl rand -base64 32. Save the key in your password manager. ' +
+          'Create a JWT signing key for platform login tokens. Run openssl rand -base64 32. Save the key in your password manager. ' +
           docs('credentials', 'signing-and-encryption-keys', 'Key setup'),
       };
     case 'projectSecretKey':
       return {
         description:
-          'Encrypts app secrets. Run openssl rand -base64 32 separately. Save this key for recovery. ' +
+          'Generate a project encryption key for app secrets. Run openssl rand -base64 32 separately. Save this key for recovery. ' +
           docs('credentials', 'signing-and-encryption-keys', 'Key setup'),
       };
     default:

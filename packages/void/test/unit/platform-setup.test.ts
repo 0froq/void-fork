@@ -162,10 +162,10 @@ describe('platform credential setup links', () => {
       expect(help.description).not.toContain('\n');
     }
     expect(platformSetupFieldHelp('jwtSecret')!.description).toContain(
-      'Signs platform login tokens',
+      'Create a JWT signing key for platform login tokens',
     );
     expect(platformSetupFieldHelp('projectSecretKey')!.description).toContain(
-      'Encrypts app secrets',
+      'Generate a project encryption key for app secrets',
     );
     expect(platformSetupFieldHelp('cloudflareApiToken')).toBeUndefined();
   });
