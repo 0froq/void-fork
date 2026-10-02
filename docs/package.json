@@ -11,7 +11,6 @@
   "devDependencies": {
     "@iconify/vue": "5.0.3",
     "@voidzero-dev/vitepress-theme": "catalog:",
-    "oxc-minify": "^0.152.0",
     "reka-ui": "2.10.5",
     "vitepress": "2.0.0-alpha.20",
     "vitepress-plugin-group-icons": "^1.7.6",
