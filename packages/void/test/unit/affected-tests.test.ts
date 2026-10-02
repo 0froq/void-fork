@@ -209,7 +209,8 @@ describe('Git change collection', () => {
         join(root, 'committed.ts').replaceAll('\\', '/'),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      // Git integrations can finish background writes after the command exits.
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });

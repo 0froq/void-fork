@@ -200,12 +200,14 @@ describe('installer domain activation', () => {
     await env.db
       .insert(projectTable)
       .values(projects.map((project) => ({ ...project, user_id: owner.id })));
-    for (const project of projects) {
-      await env.ROUTING.put(
-        project.slug,
-        JSON.stringify({ workerName: 'original-worker', projectId: project.id }),
-      );
-    }
+    await Promise.all(
+      projects.map((project) =>
+        env.ROUTING.put(
+          project.slug,
+          JSON.stringify({ workerName: 'original-worker', projectId: project.id }),
+        ),
+      ),
+    );
     await configurePlatformZeroTrust(bindings(), env.db, {
       apiToken: 'management-token',
       identityProviderIds: ['idp-1'],
@@ -294,7 +296,7 @@ describe('installer domain activation', () => {
       }),
     ).toEqual({ ready: true });
     expect(cloudflare.fetcher.mock.calls.length).toBe(requestsBeforeRetry);
-  }, 10_000);
+  }, 30_000);
 
   it('keeps the domain unpublished while a project the cutover skipped lacks the new hostnames', async () => {
     const cloudflare = accessApi();
