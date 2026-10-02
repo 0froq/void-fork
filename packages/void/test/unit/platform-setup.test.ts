@@ -44,6 +44,62 @@ function plan(domain = ''): PlatformInstallPlan {
   };
 }
 describe('platform credential setup links', () => {
+  it.each([false, true])(
+    'includes Access in the management token only, with protection: %s',
+    (protection) => {
+      const input = plan();
+      const selected = {
+        ...input,
+        deployment: {
+          ...input.deployment,
+          authentication: {
+            providers: ['cloudflare-access'] as const,
+            configurable: true as const,
+            ...(protection ? { accessProtection: true as const } : {}),
+          },
+        },
+      };
+      const page = platformManagementSetupPage(selected);
+      const permissions = JSON.parse(new URL(page.url).searchParams.get('permissionGroupKeys')!);
+      expect(permissions).toContainEqual({ key: 'access', type: 'edit' });
+      expect(permissions).toContainEqual({ key: 'access_acct', type: 'read' });
+      expect(permissions.some(({ key }: { key: string }) => key === 'access_service_token')).toBe(
+        protection,
+      );
+      if (protection) {
+        expect(permissions).toContainEqual({ key: 'access_service_token', type: 'edit' });
+      }
+      expect(
+        permissions.some(({ key }: { key: string }) =>
+          ['zone', 'dns', 'workers_routes'].includes(key),
+        ),
+      ).toBe(false);
+      expect(page.instructions).toContain('Scope it to Account.');
+      const runtime = JSON.parse(
+        new URL(platformSetupPages(selected).runtime.url).searchParams.get('permissionGroupKeys')!,
+      );
+      expect(runtime.some(({ key }: { key: string }) => key.startsWith('access'))).toBe(false);
+      const disabled = JSON.parse(
+        new URL(platformManagementSetupPage(selected, { access: false }).url).searchParams.get(
+          'permissionGroupKeys',
+        )!,
+      );
+      expect(disabled.some(({ key }: { key: string }) => key.startsWith('access'))).toBe(false);
+    },
+  );
+
+  it('uses read permissions for existing Access applications', () => {
+    const permissions = JSON.parse(
+      new URL(
+        platformManagementSetupPage(plan(), { access: { readOnly: true, protection: true } }).url,
+      ).searchParams.get('permissionGroupKeys')!,
+    );
+    expect(permissions.filter(({ key }: { key: string }) => key.startsWith('access'))).toEqual([
+      { key: 'access', type: 'read' },
+      { key: 'access_acct', type: 'read' },
+      { key: 'access_service_token', type: 'read' },
+    ]);
+  });
   it('prefills a separate management token with account provisioning and zone permissions', () => {
     const original = plan('example.com');
     const page = platformManagementSetupPage(original);

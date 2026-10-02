@@ -6,6 +6,8 @@ import {
   readWranglerOAuthCredential,
   resolvePlatformCloudflareCredential,
   resolvePlatformCloudflareCredentialWithInput,
+  platformOperatorNeedsManagementToken,
+  verifyPlatformManagementAccess,
 } from '../../src/cli/platform-auth.ts';
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -23,6 +25,45 @@ afterEach(() => {
 });
 
 describe('platform Cloudflare authentication', () => {
+  it('requires a management token for Access even without DNS writes', () => {
+    const credential = { source: 'oauth' as const, token: 'browser' };
+    const plan = { actions: [] };
+    expect(platformOperatorNeedsManagementToken(credential, plan)).toBe(false);
+    expect(
+      platformOperatorNeedsManagementToken(credential, plan, { protection: true, readOnly: false }),
+    ).toBe(true);
+    expect(() =>
+      assertPlatformOperatorCredentialCanApplyPlan(credential, plan, {
+        protection: true,
+        readOnly: false,
+      }),
+    ).toThrow('Access: Service Tokens → Edit');
+    expect(
+      platformOperatorNeedsManagementToken({ source: 'environment', token: 'manager' }, plan, {
+        protection: true,
+        readOnly: false,
+      }),
+    ).toBe(false);
+  });
+  it.each([false, true])(
+    'checks Access permissions using only reads, with protection: %s',
+    async (protection) => {
+      const request = vi.fn(async (_path: string) => ({}));
+      await verifyPlatformManagementAccess({ request } as never, 'account', {
+        protection,
+        readOnly: false,
+      });
+      expect(request.mock.calls.map(([path]) => path)).toEqual([
+        '/accounts/account/access/organizations',
+        '/accounts/account/access/identity_providers?per_page=1',
+        '/accounts/account/access/groups?per_page=1',
+        '/accounts/account/access/policies?per_page=1',
+        '/accounts/account/access/apps?per_page=1',
+        ...(protection ? ['/accounts/account/access/service_tokens?per_page=1'] : []),
+      ]);
+      expect(request.mock.calls.every((call) => call.length === 1)).toBe(true);
+    },
+  );
   it('requires an API token before browser OAuth applies zone or DNS writes', () => {
     const action = (kind: 'dns-record' | 'zone', action: 'create' | 'reuse') => ({
       action,

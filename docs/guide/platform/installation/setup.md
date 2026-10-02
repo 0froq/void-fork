@@ -12,7 +12,7 @@ For workers.dev testing, start the interactive install and choose your login met
 void platform install --workers-dev
 ```
 
-For a domain installation, Void guides you to create a management API token and paste it into a masked prompt. Browser login can preview DNS, but cannot change it. The token-creation link preselects the permissions; scope the token to your account and application zone. No shell environment variable is needed for interactive installation.
+For a domain installation or Access setup, Void guides you to create a management API token and paste it into a masked prompt. Browser login can preview DNS, but cannot change it or configure Access. The token-creation link preselects the permissions for your choices; scope the token to your account and, when using a domain, its zone. No shell environment variable is needed for interactive installation.
 
 ::: details Use an existing management token from the shell
 
@@ -106,10 +106,13 @@ company policies, including device and MFA requirements.
 The setup credential needs **Access: Apps and Policies Write** and
 **Access: Organizations, Identity Providers, and Groups Read** in the identity
 account. Creating protection also needs **Access: Service Tokens Write**.
-If your Cloudflare management credential lacks these permissions, the installer
-links to this guide and asks for an Access setup API token. Scripts can supply it
-through `VOID_PLATFORM_ACCESS_SETUP_TOKEN`. These permissions are not required by
-the platform's runtime token. See Cloudflare's
+For setup in the installation account, the initial management-token link includes
+these permissions. Void checks Access reads before provisioning and reuses that
+management token during Access setup, so you do not need a second API token.
+For applications in another account, provide a token scoped to that identity
+account when asked. Scripts can supply an explicit override through
+`VOID_PLATFORM_ACCESS_SETUP_TOKEN`. The platform's runtime token does not need
+Access management permissions. See Cloudflare's
 [Access API](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/)
 and [service-token permissions](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/service_tokens/methods/create/).
 

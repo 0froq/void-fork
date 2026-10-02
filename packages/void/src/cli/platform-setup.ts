@@ -3,6 +3,7 @@ import { log } from '@clack/prompts';
 import type { PlatformDeploymentManifest } from '@void/platform';
 import { openBrowser } from './auth.ts';
 import { pc } from './output.ts';
+import type { PlatformManagementAccess } from './platform-auth.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
 
 export type PlatformSetupPage = Readonly<{ title: string; url: string; instructions: string }>;
@@ -80,17 +81,38 @@ function platformAccountTokenPermissions(includeAiGateway: boolean) {
   ];
 }
 
-export function platformManagementSetupPage(plan: PlatformInstallPlan): PlatformSetupPage {
+export function platformManagementSetupPage(
+  plan: PlatformInstallPlan,
+  options: { access?: PlatformManagementAccess | false } = {},
+): PlatformSetupPage {
   const createsZone = plan.actions.some(
     (action) => action.kind === 'zone' && action.action === 'create',
   );
   const zoneName = plan.deployment.application.zoneName;
   const apiHostname = plan.deployment.controlPlane.apiHostname;
+  const access =
+    options.access ??
+    (plan.deployment.authentication.accessProtection ||
+    plan.deployment.authentication.providers.includes('cloudflare-access')
+      ? { protection: !!plan.deployment.authentication.accessProtection, readOnly: false }
+      : undefined);
+  const accessLevel = access && access.readOnly ? 'read' : 'edit';
   const permissions = [
     ...platformAccountTokenPermissions(true),
-    { key: 'zone', type: createsZone ? 'edit' : 'read' },
-    { key: 'dns', type: 'edit' },
-    { key: 'workers_routes', type: 'edit' },
+    ...(zoneName || apiHostname || createsZone
+      ? [
+          { key: 'zone', type: createsZone ? 'edit' : 'read' },
+          { key: 'dns', type: 'edit' },
+          { key: 'workers_routes', type: 'edit' },
+        ]
+      : []),
+    ...(access
+      ? [
+          { key: 'access', type: accessLevel },
+          { key: 'access_acct', type: 'read' },
+          ...(access.protection ? [{ key: 'access_service_token', type: accessLevel }] : []),
+        ]
+      : []),
     ...(zoneName && plan.deployment.application.baseDomain !== zoneName
       ? [{ key: 'ssl_and_certificates', type: 'read' }]
       : []),
@@ -105,12 +127,19 @@ export function platformManagementSetupPage(plan: PlatformInstallPlan): Platform
         permissionGroupKeys: JSON.stringify(permissions),
       }),
     instructions: [
-      'Browser login can preview DNS, but cannot change it. This token lets the CLI install your platform.',
-      `Scope it to ${plan.account.name}${createsZone ? '; allow zone creation.' : ` and zone ${plan.deployment.application.zoneName}.`}`,
+      access
+        ? `Browser login cannot configure Cloudflare Access${zoneName ? ' or change DNS' : ''}. This token lets the CLI install your platform.`
+        : 'Browser login can preview DNS, but cannot change it. This token lets the CLI install your platform.',
+      `Scope it to ${plan.account.name}${createsZone ? '; allow zone creation.' : zoneName ? ` and zone ${zoneName}.` : '.'}`,
       ...(apiHostname && apiHostname !== zoneName && !apiHostname.endsWith(`.${zoneName}`)
         ? [`Also include the zone for ${apiHostname}.`]
         : []),
       'Create the token with the preselected permissions, then paste it here.',
+      ...(access
+        ? [
+            `Access: Apps and Policies ${accessLevel === 'edit' ? 'Edit' : 'Read'}, Organizations/Identity Providers/Groups Read${access.protection ? `, Service Tokens ${accessLevel === 'edit' ? 'Edit' : 'Read'}` : ''}.`,
+          ]
+        : []),
       'Permission checklist: ' +
         platformSetupLink({
           title: 'Void token permissions',
@@ -204,10 +233,21 @@ export function platformSetupPages(plan: PlatformInstallPlan): {
 
 export function formatPlatformSetupPlan(
   plan: PlatformInstallPlan,
-  options: { managementToken?: boolean } = {},
+  options: { managementToken?: boolean; managementAccess?: boolean } = {},
 ): string {
+  const writesDns = plan.actions.some(
+    (action) =>
+      (action.kind === 'zone' && action.action === 'create') ||
+      (action.kind === 'dns-record' && action.action !== 'reuse'),
+  );
   const credentials = [
-    ...(options.managementToken ? ['Cloudflare management API token for DNS changes'] : []),
+    ...(options.managementToken
+      ? [
+          options.managementAccess
+            ? `Cloudflare management API token for ${writesDns ? 'DNS changes and ' : ''}Access setup`
+            : 'Cloudflare management API token for DNS changes',
+        ]
+      : []),
     'PostgreSQL database URL',
     'Cloudflare runtime token',
     'R2 upload token',

@@ -13,6 +13,7 @@ import { readPlatformHyperdriveSelection } from './platform-auth-database.ts';
 import {
   assertPlatformOperatorCredentialCanApplyPlan,
   platformOperatorNeedsManagementToken,
+  verifyPlatformManagementAccess,
   resolvePlatformCloudflareCredential,
   resolvePlatformCloudflareCredentialWithInput,
 } from './platform-auth.ts';
@@ -25,6 +26,7 @@ import {
 import {
   selectInstallationAuthentication,
   collectInstallationAuthentication,
+  platformManagementAccessForAuthentication,
 } from './platform-install-auth.ts';
 import {
   acquirePlatformDatabaseLifecycleLock,
@@ -724,10 +726,20 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       pc.bold(args.plan ? 'Read-only installation plan' : 'Installation plan'),
     );
     note(formatPlatformRuntime(runtime), pc.bold('Platform runtime'));
-    const needsManagementToken = platformOperatorNeedsManagementToken(operatorCredential, plan);
+    const managementAccess = process.env.VOID_PLATFORM_ACCESS_SETUP_TOKEN
+      ? undefined
+      : platformManagementAccessForAuthentication(authenticationSelection, accountId, checkpoint);
+    const needsManagementToken = platformOperatorNeedsManagementToken(
+      operatorCredential,
+      plan,
+      managementAccess,
+    );
     if (args.plan) {
       note(
-        formatPlatformSetupPlan(plan, { managementToken: needsManagementToken }),
+        formatPlatformSetupPlan(plan, {
+          managementToken: needsManagementToken,
+          managementAccess: !!managementAccess,
+        }),
         pc.bold('Required Credentials'),
       );
       if (!existing) {
@@ -742,7 +754,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       return;
     }
     if (!process.stdin.isTTY) {
-      assertPlatformOperatorCredentialCanApplyPlan(operatorCredential, plan);
+      assertPlatformOperatorCredentialCanApplyPlan(operatorCredential, plan, managementAccess);
     }
     if (process.stdin.isTTY && !args.yes) {
       const proceed = await confirm({ message: 'Apply this plan?', initialValue: true });
@@ -768,7 +780,9 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       while (true) {
         if (!token) {
           if (!openedManagementPage) {
-            openPlatformSetupPage(platformManagementSetupPage(plan));
+            openPlatformSetupPage(
+              platformManagementSetupPage(plan, { access: managementAccess ?? false }),
+            );
             openedManagementPage = true;
           }
           token = (
@@ -794,6 +808,9 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
             planOptions,
           );
           assertPlatformInstallPlanUnchanged(plan, verified, 'management API token');
+          if (managementAccess) {
+            await verifyPlatformManagementAccess(management, accountId, managementAccess);
+          }
           client = management;
           plan = verified;
           managementApiToken = token;
@@ -808,6 +825,8 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
           );
         }
       }
+    } else if (managementAccess) {
+      await verifyPlatformManagementAccess(client, accountId, managementAccess);
     }
 
     if (!existing) {
@@ -817,13 +836,17 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
     const setupManifest = existing;
     const credentialSetup = isPlatformSetupDraft(existing);
     const values: Record<string, string> = { ...checkpoint };
+    if (managementAccess) {
+      // A verified management token replaces an older, separately collected Access token.
+      delete values.accessManagementToken;
+    }
     if (managementApiToken) {
       values.managementApiToken = managementApiToken;
     }
     if (externalHyperdrive) {
       values.externalHyperdriveJson = JSON.stringify(externalHyperdrive);
     }
-    if (managementApiToken || externalHyperdrive) {
+    if (managementApiToken || externalHyperdrive || managementAccess) {
       writePendingInstallationSecrets(setupManifest, values);
     }
     const saveValues = (updates: Record<string, string>) => {

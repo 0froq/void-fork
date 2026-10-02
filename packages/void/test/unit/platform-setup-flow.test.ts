@@ -30,6 +30,7 @@ import {
   isPlatformInstallInProgress,
   savePlatformSetupDraft,
 } from '../../src/cli/platform-setup-draft.ts';
+import { platformAccessFixture } from '../fixtures/platform-access.ts';
 
 const mocks = vi.hoisted(() => ({
   confirm: vi.fn(),
@@ -134,6 +135,8 @@ beforeEach(() => {
     'VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION',
     'CLOUDFLARE_API_TOKEN',
     'CF_API_TOKEN',
+    'VOID_PLATFORM_ACCESS_SETUP_TOKEN',
+    'VOID_ACCESS_CREDENTIALS',
   ]) {
     vi.stubEnv(key, '');
   }
@@ -326,7 +329,161 @@ function requireManagementToken() {
   });
 }
 
+function accessManagementPlan() {
+  const original = mocks.plan.getMockImplementation()!;
+  mocks.plan.mockImplementation(async (...input) => {
+    const plan = await original(...input);
+    return {
+      ...plan,
+      deployment: createPlatformDeploymentManifest({
+        installationSlug: plan.deployment.installationSlug,
+        displayName: plan.deployment.displayName,
+        application: plan.deployment.application,
+        authentication: input[1].authentication,
+        capabilities: { githubOAuth: false },
+        resources: plan.deployment.resources,
+      }),
+    };
+  });
+  for (const [key, value] of Object.entries(environment)) {
+    vi.stubEnv(key, value);
+  }
+  return [...args, '--login-methods', 'cloudflare-access', '--access-protection'];
+}
+
 describe('platform credential onboarding', () => {
+  it('uses one management token from initial setup through automatic Access provisioning', async () => {
+    const installArgs = accessManagementPlan();
+    const access = platformAccessFixture();
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer management-secret');
+      const url = new URL(String(input));
+      const path = url.pathname.slice(url.pathname.indexOf('/accounts/')) + url.search;
+      const result = path.includes('/access/groups')
+        ? []
+        : await access.transport.request(path, init);
+      return Response.json({ success: true, result });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    mocks.password.mockResolvedValueOnce('management-secret');
+    mocks.select.mockImplementation(async ({ options }) => options[0].value);
+    mocks.multiselect.mockImplementation(async ({ options }) =>
+      options
+        .map(({ value }: { value: string }) => value)
+        .filter((value: string) => ['company-idp', 'employees'].includes(value)),
+    );
+    mocks.install.mockImplementation(async (_plan, _secrets, manifest, dependencies) => {
+      await dependencies.prepareAuthentication(manifest);
+      return { manifest, waitingForDns: false, waitingForSandboxDrain: false };
+    });
+    await runPlatformLifecycleCommand(parsePlatformArgs(installArgs));
+    expect(mocks.password).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ message: 'Paste management API token:' }),
+    );
+    expect(access.apps.size).toBe(2);
+    expect(access.tokens.size).toBe(1);
+    expect(mocks.install.mock.calls[0]![1].cloudflareApiToken).toBe(
+      environment.VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN,
+    );
+    const manifest = listInstallationManifests()[0]!;
+    writePendingInstallationSecrets(manifest, {
+      ...readPendingInstallationSecrets(manifest),
+      accessManagementToken: 'stale-separate-access-token',
+    });
+    vi.clearAllMocks();
+    await runPlatformLifecycleCommand(
+      parsePlatformArgs(['install', '--resume', '--name', manifest.id]),
+    );
+    expect(mocks.password).not.toHaveBeenCalled();
+    expect(readPendingInstallationSecrets(manifest)?.accessManagementToken).toBeUndefined();
+    expect(access.apps.size).toBe(2);
+    expect(access.tokens.size).toBe(1);
+  });
+
+  it('rejects missing Access permissions at the initial management prompt before provisioning', async () => {
+    const installArgs = accessManagementPlan();
+    mocks.password
+      .mockResolvedValueOnce('missing-access')
+      .mockResolvedValueOnce('complete-manager');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>(async (_input, init) =>
+        new Headers(init?.headers).get('Authorization') === 'Bearer missing-access'
+          ? Response.json(
+              { success: false, errors: [{ message: 'Access denied', code: 10000 }] },
+              { status: 403 },
+            )
+          : Response.json({ success: true, result: [] }),
+      ),
+    );
+    await runPlatformLifecycleCommand(parsePlatformArgs(installArgs));
+    expect(mocks.password.mock.calls.map(([input]) => input.message)).toEqual([
+      'Paste management API token:',
+      'Paste management API token:',
+    ]);
+    expect(mocks.install).toHaveBeenCalledOnce();
+    expect(mocks.install.mock.calls[0]![1].managementApiToken).toBe('complete-manager');
+    expect(mocks.install.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mocks.password.mock.invocationCallOrder[1]!,
+    );
+  });
+
+  it('propagates Access service failures without reprompting or provisioning', async () => {
+    const installArgs = accessManagementPlan();
+    mocks.password.mockResolvedValueOnce('management-secret');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>(async () =>
+        Response.json(
+          { success: false, errors: [{ message: 'Access unavailable', code: 10000 }] },
+          { status: 503 },
+        ),
+      ),
+    );
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(installArgs))).rejects.toThrow(
+      'Access unavailable',
+    );
+    expect(mocks.password).toHaveBeenCalledOnce();
+    expect(mocks.install).not.toHaveBeenCalled();
+    expect(listInstallationManifests()).toEqual([]);
+  });
+
+  it('previews the Access management requirement without collecting or probing credentials', async () => {
+    const installArgs = accessManagementPlan();
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    await runPlatformLifecycleCommand(parsePlatformArgs([...installArgs, '--plan']));
+    expect(note).toHaveBeenCalledWith(
+      expect.stringContaining('Cloudflare management API token for Access setup'),
+      expect.any(String),
+    );
+    expect(mocks.password).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(mocks.install).not.toHaveBeenCalled();
+  });
+
+  it('checks an explicit management token before provisioning without replacing it interactively', async () => {
+    const installArgs = accessManagementPlan();
+    mocks.operatorCredential.mockResolvedValue({
+      source: 'environment',
+      token: 'explicit-manager',
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>(async () =>
+        Response.json(
+          { success: false, errors: [{ message: 'Access denied', code: 10000 }] },
+          { status: 403 },
+        ),
+      ),
+    );
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(installArgs))).rejects.toThrow(
+      'Access denied',
+    );
+    expect(mocks.password).not.toHaveBeenCalled();
+    expect(mocks.install).not.toHaveBeenCalled();
+    expect(listInstallationManifests()).toEqual([]);
+  });
   it.each([false, true])(
     'resumes external Hyperdrive before adoption with a saved selection: %s',
     async (savedSelection) => {

@@ -8,6 +8,7 @@ import type { PlatformCloudflareClient } from '../../src/cli/platform-cloudflare
 import {
   collectInstallationAuthentication,
   selectInstallationAuthentication,
+  platformManagementAccessForAuthentication,
 } from '../../src/cli/platform-install-auth.ts';
 import { createPlatformInstallationSecrets } from '../../src/cli/platform-installer.ts';
 import type { PlatformInstallPlan } from '../../src/cli/platform-plan.ts';
@@ -41,6 +42,56 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 describe('installer login selection', () => {
+  it('requests Access management only for setup in the installation account', () => {
+    const selection = {
+      authentication: {
+        providers: ['cloudflare-access'] as const,
+        configurable: true as const,
+        accessProtection: true as const,
+      },
+    };
+    expect(platformManagementAccessForAuthentication(selection, 'account', null)).toEqual({
+      protection: true,
+      readOnly: false,
+    });
+    expect(
+      platformManagementAccessForAuthentication(
+        {
+          ...selection,
+          authentication: { providers: ['github'], configurable: true, accessProtection: true },
+        },
+        'account',
+        null,
+      ),
+    ).toEqual({ protection: true, readOnly: false });
+    expect(
+      platformManagementAccessForAuthentication(selection, 'account', {
+        accessSetupSpecJson: JSON.stringify({ mode: 'existing', accountId: 'other' }),
+      }),
+    ).toBeUndefined();
+    expect(
+      platformManagementAccessForAuthentication(selection, 'account', {
+        accessSetupSpecJson: JSON.stringify({ mode: 'existing', accountId: 'account' }),
+      }),
+    ).toEqual({ protection: true, readOnly: true });
+    expect(
+      platformManagementAccessForAuthentication(
+        {
+          authentication: { providers: ['cloudflare-access'], configurable: true },
+          file: { connections: [{ configuration: { kind: 'cloudflare-access' } }] },
+        },
+        'account',
+        null,
+      ),
+    ).toBeUndefined();
+    expect(
+      platformManagementAccessForAuthentication(
+        { authentication: { providers: ['github'] } },
+        'account',
+        null,
+      ),
+    ).toBeUndefined();
+  });
   it('uses planned login and protection choices without interactive selection', async () => {
     expect(
       await selectInstallationAuthentication(undefined, undefined, {
