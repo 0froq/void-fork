@@ -32,6 +32,90 @@ function accessSetupGuide(): string {
   });
 }
 
+async function selectCompanyAccessPolicies(
+  client: PlatformAccessClient,
+  initialPolicies: Array<Record<string, unknown>>,
+  accountId: string,
+  mode: PlatformAccessSetupSpec['mode'],
+): Promise<Array<string>> {
+  const create = '__create__';
+  const refresh = '__refresh__';
+  let policies = initialPolicies;
+  let selectedIds: Array<string> = [];
+  while (true) {
+    const options = policies
+      .filter(
+        (policy) =>
+          typeof policy.id === 'string' && ['allow', 'deny'].includes(String(policy.decision)),
+      )
+      .map((policy) => ({
+        value: String(policy.id),
+        label: stripVTControlCharacters(String(policy.name ?? policy.id)),
+      }));
+    const available = new Set(options.map((option) => option.value));
+    selectedIds = selectedIds.filter((id) => available.has(id));
+    const actions = [
+      {
+        value: create,
+        label: 'Create new',
+        hint: 'Set up a policy in Cloudflare, then return here',
+      },
+      { value: refresh, label: 'Refresh list' },
+    ];
+    let choices: Array<string>;
+    if (options.length === 0) {
+      log.info(
+        'No reusable Allow or Deny policies were found in this account. Create an Allow policy for your company, or refresh after saving one.',
+      );
+      choices = [answer(await select({ message: 'Company Access policies:', options: actions }))];
+    } else {
+      choices = answer(
+        await multiselect({
+          message: 'Company Access policies (select all that apply):',
+          options: [...options, ...actions],
+          initialValues: selectedIds,
+          required: true,
+        }),
+      );
+    }
+    selectedIds = choices.filter((id) => available.has(id));
+    if (choices.includes(create)) {
+      note(
+        [
+          '1. Open Zero Trust → Access controls → Policies → Add a policy in this account.',
+          '2. Name the policy and choose Allow.',
+          '3. Include your company’s identity-provider group or Emails ending in your company domain, such as example.com.',
+          '4. Require your selected company login method and your company’s MFA/device checks.',
+          ...(mode === 'existing'
+            ? [
+                '5. Save the policy and attach it to the existing Access applications you’re connecting, then return here.',
+              ]
+            : ['5. Save the policy, then return here.']),
+        ].join('\n'),
+        pc.bold('Create an Access policy'),
+      );
+      console.log(
+        platformSetupLink({
+          title: 'Open Cloudflare account',
+          url: `https://dash.cloudflare.com/${encodeURIComponent(accountId)}`,
+        }),
+      );
+      const completed = answer(
+        await confirm({
+          message: 'Have you saved the new policy?',
+          initialValue: true,
+        }),
+      );
+      if (!completed) {
+        continue;
+      }
+    } else if (!choices.includes(refresh)) {
+      return selectedIds;
+    }
+    policies = await client.list('policies');
+  }
+}
+
 export function platformAccessResourceInventory(
   encoded: string | undefined,
   installationId: string,
@@ -405,6 +489,10 @@ export async function preparePlatformAccessSetup(input: {
           }),
         )
       : []);
+  if (identityProviderIds.length) {
+    spec = { ...spec, identityProviderIds };
+    input.save({ accessSetupSpecJson: JSON.stringify(spec) });
+  }
   if (!spec.policyIds && process.stdin.isTTY) {
     log.info(
       'Choose which existing access rules apply to this platform, including MFA and device requirements.',
@@ -413,22 +501,7 @@ export async function preparePlatformAccessSetup(input: {
   const policyIds =
     spec.policyIds ??
     (process.stdin.isTTY
-      ? answer(
-          await multiselect({
-            message: 'Company Access policies:',
-            required: true,
-            options: policies
-              .filter(
-                (policy) =>
-                  typeof policy.id === 'string' &&
-                  ['allow', 'deny'].includes(String(policy.decision)),
-              )
-              .map((policy) => ({
-                value: String(policy.id),
-                label: stripVTControlCharacters(String(policy.name ?? policy.id)),
-              })),
-          }),
-        )
+      ? await selectCompanyAccessPolicies(client, policies, accountId, spec.mode)
       : []);
   if (!identityProviderIds.length || !policyIds.length) {
     throw new Error('platform: Access setup requires explicit identityProviderIds and policyIds.');
