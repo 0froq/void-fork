@@ -21,7 +21,7 @@ void platform project list --user <user-id>
 void platform project show <project-id>
 ```
 
-Project details include resources, domains, and recent builds and deployments. The [command reference](/reference/cli#operator-commands) also covers suspending and restoring users, deleting projects, and removing accounts.
+Project details include resources, domains, and recent builds and deployments. The [command reference](../../../reference/cli/platform.md#operator-commands) also covers suspending and restoring users, deleting projects, and removing accounts.
 
 In the admin dashboard, open a project to view its team. Search for a platform user and choose a role to add them immediately; an email address is not required. You can also change or remove existing members. Pending invitations created through other project workflows remain visible until accepted or revoked. If email is unavailable for a pending invitation, share its ID so the user can accept it with `void project team accept <invitation-id>`. The owner cannot be removed from the team; transfer ownership first.
 

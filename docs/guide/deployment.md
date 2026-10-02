@@ -119,7 +119,7 @@ void github status
 
 If your organization already installed the App, Void can join that installation during setup. Organization repositories require browser authorization.
 
-Push to the configured branch to deploy, then follow progress with `void build logs --follow`. See [GitHub commands](../reference/cli.md#github) for installation sharing and connection options.
+Push to the configured branch to deploy, then follow progress with `void build logs --follow`. See [GitHub commands](../reference/cli/github.md#github) for installation sharing and connection options.
 
 ### GitHub Actions
 

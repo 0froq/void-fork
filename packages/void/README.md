@@ -6,7 +6,7 @@ You can also administer a team platform with the same CLI. Sign in with
 `void platform auth login`, then manage users, signup access, projects, and logs.
 Commands show a preview before applying changes and support `--json` for scripts.
 See [Platform Administration](../../docs/guide/platform-administration.md) for a
-walkthrough and the [CLI reference](../../docs/reference/cli.md#operator-commands)
+walkthrough and the [CLI reference](../../docs/reference/cli/platform.md#operator-commands)
 for every command.
 
 Use `void platform config auth` to manage login methods and company signup.

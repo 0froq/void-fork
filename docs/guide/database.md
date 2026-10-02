@@ -359,7 +359,7 @@ npm install arktype
 | `void db status`   | Check schema drift and pending migrations            |
 | `void db seed`     | Reset the local database and run a seed file         |
 
-See the [CLI reference](../reference/cli.md#database) for connection setup, SQL execution, Studio, exports, and other commands.
+See the [CLI reference](../reference/cli/database.md#database) for connection setup, SQL execution, Studio, exports, and other commands.
 
 ## Scaffolding
 
@@ -376,4 +376,4 @@ This creates:
 3. `routes/api/posts/index.ts`: `GET` for list and `POST` for insert with validation
 4. `routes/api/posts/[id].ts`: `GET` by id with `404` handling
 
-See the [CLI reference](../reference/cli.md#code-generation) for the full list of generators.
+See the [CLI reference](../reference/cli/generate.md#code-generation) for the full list of generators.

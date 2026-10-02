@@ -9,8 +9,9 @@ Read only the guides needed for the user's task. The bundled documentation lives
 under `docs/` beside this skill; in an installed project it is available at
 `node_modules/void/skills/void/docs/`.
 
-Before running a Void command, read `docs/reference/cli.md` for its syntax,
-options, and deployment target. Use Void commands for application and platform
+Before running a Void command, find its group in `docs/reference/cli.md`, then
+read the matching page under `docs/reference/cli/` for syntax, options, and
+deployment target. Use Void commands for application and platform
 workflows. Mention Wrangler only when the user needs to recognize a literal
 configuration file or environment variable.
 
@@ -22,7 +23,7 @@ project's existing framework and deployment destination.
 | User intent                                | Docs file(s)                                                                              |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------- |
 | CLI command syntax, flags, env vars        | `docs/reference/cli.md`                                                                   |
-| Initial setup, onboarding, first app       | `docs/guide/quickstart.md`, `docs/reference/cli.md`                                       |
+| Initial setup, onboarding, first app       | `docs/guide/quickstart.md`, `docs/reference/cli/setup.md`                                 |
 | App type detection and mode behavior       | `docs/guide/app-types.md`, `docs/reference/config.md`                                     |
 | Server/API routing and middleware          | `docs/guide/server-routing.md`, `docs/integrations/hono.md`                               |
 | Pages mode, loader/action, forms, layouts  | `docs/guide/pages-routing/*.md`, `docs/guide/type-safety.md`                              |
@@ -39,20 +40,20 @@ project's existing framework and deployment destination.
 | SSR and caching                            | `docs/guide/ssr.md`, `docs/guide/edge/*.md`                                               |
 | Rewrites, redirects, fallbacks             | `docs/guide/edge/rewrites.md`, `docs/guide/edge/redirects.md`, `docs/reference/config.md` |
 | Static site generation                     | `docs/guide/ssg.md`                                                                       |
-| Deployment and CI                          | `docs/guide/deployment.md`, `docs/reference/cli.md`                                       |
-| Install or maintain a company platform     | `docs/guide/self-hosted-platform.md`, `docs/reference/cli.md`                             |
+| Deployment and CI                          | `docs/guide/deployment.md`, `docs/reference/cli/deploy.md`                                |
+| Install or maintain a company platform     | `docs/guide/self-hosted-platform.md`, `docs/reference/cli/platform-installation.md`       |
 | Develop or deploy a platform fork          | `docs/guide/platform-development.md`, `docs/guide/self-hosted-platform.md`                |
-| Platform administration                    | `docs/guide/platform-administration.md`, `docs/reference/cli.md`                          |
-| Platform plans and account limits          | `docs/guide/platform/administration/plans.md`, `docs/reference/cli.md`                    |
-| Self-host deploy to own Cloudflare account | `docs/integrations/cloudflare.md`, `docs/reference/cli.md`                                |
-| Project status, deployment history         | `docs/reference/cli.md`                                                                   |
-| Cache purging                              | `docs/reference/cli.md`                                                                   |
-| Project logs, runtime errors               | `docs/reference/cli.md`                                                                   |
-| Secrets management (put/sync/delete)       | `docs/reference/cli.md`, `docs/guide/env-vars.md`                                         |
+| Platform administration                    | `docs/guide/platform-administration.md`, `docs/reference/cli/platform.md`                 |
+| Platform plans and account limits          | `docs/guide/platform/administration/plans.md`, `docs/reference/cli/platform-config.md`    |
+| Self-host deploy to own Cloudflare account | `docs/integrations/cloudflare.md`, `docs/reference/cli/deploy.md`                         |
+| Project status, deployment history         | `docs/reference/cli/project.md`                                                           |
+| Cache purging                              | `docs/reference/cli/project.md`                                                           |
+| Project logs, runtime errors               | `docs/reference/cli/project.md`                                                           |
+| Secrets management (put/sync/delete)       | `docs/reference/cli/secrets.md`, `docs/guide/env-vars.md`                                 |
 | Typed env vars (`defineEnv`, `env.ts`)     | `docs/guide/env-vars.md`                                                                  |
-| Custom domain setup                        | `docs/reference/cli.md`                                                                   |
-| Database status, reset, seed, export       | `docs/reference/cli.md`, `docs/guide/database.md`                                         |
-| Auth login/logout/whoami                   | `docs/reference/cli.md`                                                                   |
+| Custom domain setup                        | `docs/reference/cli/domains.md`                                                           |
+| Database status, reset, seed, export       | `docs/reference/cli/database.md`, `docs/guide/database.md`                                |
+| Auth login/logout/whoami                   | `docs/reference/cli/auth.md`                                                              |
 | Overview / introduction                    | `docs/guide/index.md`                                                                     |
 | API surface details                        | `docs/reference/api.md`                                                                   |
 | Meta framework integration                 | `docs/integrations/frameworks/*.md`                                                       |

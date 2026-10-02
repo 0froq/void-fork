@@ -12,7 +12,7 @@ Create a consumer in `queues/`. TypeScript and JavaScript files are supported (`
 
 The resulting name must follow Cloudflare's queue naming rules: 1–63 characters, only letters, digits, and `-`, beginning and ending with a letter or digit.
 
-Export a default handler wrapped with [`defineQueue<T>`](../reference/api.md#definequeue-t-handler). `T` defines the message body for both the consumer and calls to `send()`:
+Export a default handler wrapped with [`defineQueue<T>`](../reference/api/handlers.md#definequeue-t-handler). `T` defines the message body for both the consumer and calls to `send()`:
 
 ```ts
 // queues/emails.ts

@@ -101,7 +101,7 @@ Before moving deployed Durable State or WebSocket definitions, run `void info` a
 
 Full docs at [void.cloud](https://void.cloud). Run `vp run dev:docs` in this repo to view the documentation locally.
 
-Run `void connect` to choose a deployment destination and sign in, `void connect --platform cloudflare` for your own account, or `void connect <url>` for your team's platform. See the [connection reference](./docs/reference/cli.md#connect).
+Run `void connect` to choose a deployment destination and sign in, `void connect --platform cloudflare` for your own account, or `void connect <url>` for your team's platform. See the [connection reference](./docs/reference/cli/auth.md#connect).
 
 To install a shared company platform, start with [Install a Void Platform](./docs/guide/self-hosted-platform.md). The installation pages cover Cloudflare setup, a domain, PostgreSQL, credentials, and your choice of GitHub, Google, OIDC, or Cloudflare Access sign-in, then preview the installation with `void platform install --plan`. Void creates the core API, routing, proxy, and telemetry resources.
 

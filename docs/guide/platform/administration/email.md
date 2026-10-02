@@ -24,7 +24,7 @@ establishes that creation did not occur. Absence alone does not establish the
 outcome. Run the same command with `--yes` after inspection. Recovery records
 the decision in platform events without creating or deleting rules. Normal
 reconciliation verifies delivery afterward; a deleting project stays closed
-and its deletion can be retried. See [operator email commands](/reference/cli#operator-email)
+and its deletion can be retried. See [operator email commands](../../../reference/cli/platform-email.md#operator-email)
 for the recovery requirements.
 
 ### Deciding who mail may reach

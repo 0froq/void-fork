@@ -70,7 +70,7 @@ void platform system health
 Commands use the selected platform connection. Add `--plan` to preview a change,
 `--yes` to apply it in a script, and `--json` to read structured results. The
 [Platform Administration guide](../docs/guide/platform-administration.md) covers
-the workflows; the [CLI reference](../docs/reference/cli.md#operator-commands)
+the workflows; the [CLI reference](../docs/reference/cli/platform.md#operator-commands)
 lists all commands and options.
 
 The CLI and browser admin UI share the same server operations and record their

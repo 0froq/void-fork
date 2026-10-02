@@ -165,7 +165,7 @@ The recorded `env` is enforced by `isRouteEnabledForEnvironment()`. The scanners
 
 ## Code Generation (`void gen`)
 
-The [CLI reference](../../docs/reference/cli.md#code-generation) lists
+The [CLI reference](../../docs/reference/cli/generate.md#code-generation) lists
 scaffolding commands and flags. Keep generation in `src/cli/gen.ts` aligned
 with `src/cli/gen-args.ts`, CLI help and the interactive command-group hint.
 

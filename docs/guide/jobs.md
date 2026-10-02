@@ -45,7 +45,7 @@ export default defineScheduled(async (controller, env) => {
 
 ## `defineScheduled`
 
-Wrap a handler with [`defineScheduled()`](../reference/api.md#definescheduled-handler) to type its scheduled event, environment, and execution context.
+Wrap a handler with [`defineScheduled()`](../reference/api/handlers.md#definescheduled-handler) to type its scheduled event, environment, and execution context.
 
 Jobs sharing a cron expression each run once per invocation. Void waits for all matching jobs and reports any failures. Files and directories starting with `_` are ignored.
 

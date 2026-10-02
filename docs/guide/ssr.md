@@ -53,7 +53,7 @@ export default defineRender(async (c, assetTags) => {
 });
 ```
 
-You can also export a named `render(c, assetTags)` function with the same signature. See [`defineRender`](../reference/api.md#definerender-handler) for the types.
+You can also export a named `render(c, assetTags)` function with the same signature. See [`defineRender`](../reference/api/handlers.md#definerender-handler) for the types.
 
 ## Hydrate in the browser
 
