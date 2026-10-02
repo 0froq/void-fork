@@ -19,7 +19,6 @@ playground/*/.node-version
 .tanstack
 .worktrees
 playground-local
-.worktrees
 .svelte-kit/
 .next/
 next-env.d.ts
