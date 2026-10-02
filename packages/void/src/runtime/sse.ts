@@ -113,6 +113,7 @@ export function eventStream(
       return;
     }
     closedOnce = true;
+    options.signal?.removeEventListener('abort', abort);
     if (!signalController.signal.aborted) {
       signalController.abort();
     }
@@ -132,11 +133,12 @@ export function eventStream(
   }
 
   async function fail(error: unknown): Promise<void> {
-    if (closedOnce) {
-      return;
-    }
     markClosed();
     await writer.abort(error).catch(() => {});
+  }
+
+  function abort(): void {
+    void fail(options.signal?.reason ?? new SseStreamClosedError());
   }
 
   async function write(text: string): Promise<void> {
@@ -167,16 +169,16 @@ export function eventStream(
     void close();
   });
 
-  if (options.signal?.aborted) {
-    void close();
-  } else {
-    options.signal?.addEventListener('abort', () => void close(), { once: true });
-  }
-
   if (keepAlive) {
     keepAliveTimer = setInterval(() => {
       void stream.comment(keepAlive.comment).catch(() => close());
     }, keepAlive.intervalMs);
+  }
+
+  if (options.signal?.aborted) {
+    abort();
+  } else {
+    options.signal?.addEventListener('abort', abort, { once: true });
   }
 
   queueMicrotask(() => {

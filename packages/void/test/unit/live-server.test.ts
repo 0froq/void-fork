@@ -617,6 +617,45 @@ describe('live Durable Object runtime', () => {
     await firstReader.cancel().catch(() => {});
     await secondReader.cancel();
   });
+
+  it('reconnects while the previous connection has an unread write', async () => {
+    const harness = createHarness();
+    const connectionId = 'connection-stalled-0001';
+    const connection = harness.stub(`live:app:connection:${connectionId}`);
+    const message = { streamId: 'app', connectionId, owner: 'user:1', limits: LIMITS };
+    const first = await connection.fetch(jsonRequest('/connect', message));
+    const second = await connection.fetch(jsonRequest('/connect', message));
+    const reader = second.body!.getReader();
+    try {
+      expect(await readFrame(reader)).toBe(': connected');
+      await expect(first.text()).rejects.toThrow();
+    } finally {
+      await reader.cancel();
+    }
+  });
+
+  it('disconnects an overflowing queue without waiting for the reader', async () => {
+    const harness = createHarness();
+    const connectionId = 'connection-overflow-0001';
+    const connection = harness.stub(`live:app:connection:${connectionId}`);
+    const limits = { ...LIMITS, maxQueuedEventsPerConnection: 1 };
+    const message = { streamId: 'app', connectionId, owner: 'user:1', limits };
+    const response = await connection.fetch(jsonRequest('/connect', message));
+    await connection.fetch(
+      jsonRequest('/control', {
+        ...message,
+        operations: [{ kind: 'subscribe', id: 'card', topic: 'post:12' }],
+      }),
+    );
+    await harness.publish('app', 'post:12', 'first');
+    await harness.publish('app', 'post:12', 'overflow');
+    await expect(response.text()).rejects.toThrow();
+    expect(
+      (await connection.fetch(jsonRequest('/control', { ...message, operations: [] }))).status,
+    ).toBe(404);
+    const topicName = `live:app:topic:${await topicDigest('app', 'post:12')}`;
+    expect(await harness.subscriberCount(topicName)).toBe(0);
+  });
 });
 
 function createHarness(options?: {

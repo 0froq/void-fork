@@ -112,6 +112,27 @@ describe('eventStream', () => {
     vi.useRealTimers();
   });
 
+  it('aborts pending writes without waiting for the client to read', async () => {
+    const controller = new AbortController();
+    let stream!: SseStream;
+    let pending!: Promise<void>;
+    const response = eventStream(
+      (value) => {
+        stream = value;
+        pending = value.send({ data: 'unread' });
+        return pending;
+      },
+      { signal: controller.signal, keepAlive: false },
+    );
+    await Promise.resolve();
+    const rejected = expect(pending).rejects.toBeInstanceOf(SseStreamClosedError);
+    controller.abort(new Error('cancelled'));
+    await rejected;
+    await stream.closed;
+    expect(stream.signal.aborted).toBe(true);
+    await expect(response.text()).rejects.toThrow('cancelled');
+  });
+
   it('returns SSE headers and closes finite streams when start returns', async () => {
     const response = eventStream(
       async (stream) => {

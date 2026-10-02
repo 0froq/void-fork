@@ -76,6 +76,7 @@ type ActiveSubscription = {
 
 type ActiveConnection = {
   stream: SseStream;
+  abort: AbortController;
   owner: string | null;
   generation: number;
   subscriptions: Map<string, ActiveSubscription>;
@@ -161,7 +162,7 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
         for (const subscription of previous.subscriptions.values()) {
           subscription.active = false;
         }
-        await previous.stream.close().catch(() => {});
+        previous.abort.abort();
         await Promise.all(
           active.map((sub) => this.unregisterTopic(message.streamId, message.connectionId, sub)),
         );
@@ -169,6 +170,7 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
 
       const generation = ((await this.state.storage.get<number>(GENERATION_KEY)) ?? 0) + 1;
       await this.state.storage.put(GENERATION_KEY, generation);
+      const abort = new AbortController();
 
       return eventStream(
         async (stream) => {
@@ -179,6 +181,7 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
           }
           this.connection = {
             stream,
+            abort,
             owner: message.owner,
             generation,
             subscriptions,
@@ -186,11 +189,19 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
             queued: 0,
             limits: message.limits,
           };
-          await stream.comment('connected');
-          await stream.closed;
-          if (this.connection?.generation === generation) {
-            const active = [...this.connection.subscriptions.values()].filter((sub) => sub.active);
-            this.connection = null;
+          try {
+            await stream.comment('connected');
+            await stream.closed;
+          } finally {
+            const active = [...subscriptions.values()].filter(
+              (sub) => sub.active && sub.generation === generation,
+            );
+            for (const sub of active) {
+              sub.active = false;
+            }
+            if (this.connection?.generation === generation) {
+              this.connection = null;
+            }
             await Promise.all(
               active.map((sub) =>
                 this.unregisterTopic(message.streamId, message.connectionId, sub),
@@ -198,7 +209,7 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
             );
           }
         },
-        { keepAlive: { intervalMs: 15_000, comment: 'keep-alive' } },
+        { signal: abort.signal, keepAlive: { intervalMs: 15_000, comment: 'keep-alive' } },
       );
     }
 
@@ -308,8 +319,10 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
           continue;
         }
         if (connection.queued >= connection.limits.maxQueuedEventsPerConnection) {
-          await connection.stream.close().catch(() => {});
-          this.connection = null;
+          connection.abort.abort();
+          if (this.connection === connection) {
+            this.connection = null;
+          }
           return new Response('connection queue full', { status: 410 });
         }
         const event: LiveClientEvent = {
@@ -331,7 +344,7 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
             if (this.connection === activeConnection) {
               this.connection = null;
             }
-            void connection.stream.close().catch(() => {});
+            connection.abort.abort();
           })
           .finally(() => {
             connection.queued--;
