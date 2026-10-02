@@ -71,11 +71,7 @@ await unsubscribePost();
 stream.close();
 ```
 
-The helper opens one native `EventSource`, waits for it to open, then sends
-batched `POST` control operations. Subscription ids are scoped to the
-connection. Reusing an id replaces the previous subscription with that id. If
-the transport drops, the helper reconnects and resubmits active subscriptions
-with their latest `eventId` as `lastEventId`.
+Subscription IDs are scoped to a connection. Reusing an ID replaces its subscription. After reconnecting, the helper restores active subscriptions and sends their latest `eventId` as `lastEventId`.
 
 ## Publish
 
@@ -101,19 +97,7 @@ await live.withEnv(env).publish('post:12', { title: 'Updated title' });
 
 ## Authorization
 
-Every live connection has an owner. The owner is the identity allowed to send
-control operations for that SSE connection. `connect()` resolves and stores the
-owner; `control()` resolves the owner again and rejects the request if it does
-not match.
-
-The quickstart uses an anonymous stream:
-
-```ts
-export const live = defineLiveStream({
-  id: 'app',
-  allowAnonymousControl: true,
-});
-```
+Only a connection's owner can change its subscriptions. The example above allows anonymous connections; authenticated streams use the current Void user by default.
 
 For authenticated streams, pass the same owner key to `connect()` and
 `control()`:
@@ -134,13 +118,6 @@ export const live = defineLiveStream({
     return session ? `user:${session.userId}` : null;
   },
 });
-```
-
-Then the route handlers can stay thin:
-
-```ts
-export const GET = defineHandler((c) => live.connect(c));
-export const POST = defineHandler((c) => live.control(c));
 ```
 
 When `identifyConnection` returns `null` or `undefined`, Void falls back to the
@@ -189,16 +166,6 @@ export const live = defineLiveStream({
 
 ## Delivery Semantics
 
-Live delivery is at most once: clients may miss events, and Void doesn't replay them automatically.
+Events are ordered within a topic and delivered at most once. Deploys, rollbacks, restarts, and reconnects can drop live state, so clients may miss events. Raw HTTP clients must resubscribe after reconnecting.
 
-- one SSE connection can hold many topic subscriptions
-- publish cost is proportional to subscribers of the topic
-- events are ordered within one topic
-- clients using the raw HTTP protocol must resubscribe after reconnect
-- deploys, rollbacks, Worker restarts, browser reconnects, and network changes
-  can drop live state
-- your app handles replay, cache invalidation, live queries, and client state
-
-Use an application database, queue, or custom Durable Object for replay. Use
-`eventId` and caller-provided `lastEventId` values as application protocol
-fields when you build that layer.
+For replay, store events in your application and use `eventId` and `lastEventId` to resume. Void does not store events or manage client state.
