@@ -36,6 +36,9 @@ jobs:
     if: ${{ vars.VOID_PLATFORM_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main' }}
     needs: check-ref
     uses: ./.github/workflows/platform-ci.yml
+    with:
+      # Exercise the production baseline before main can be tagged for release.
+      require-schema-compat: true
     permissions:
       contents: read
       deployments: read

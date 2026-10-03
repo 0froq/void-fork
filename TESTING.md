@@ -166,7 +166,8 @@ API integration fixtures reset their tables with one ordered SQL block. Use `cle
 than repeating per-table cleanup; it keeps foreign-key delete behavior and migration history
 intact in PGlite and PostgreSQL.
 
-The schema-compatibility job copies the candidate's `.github/scripts/schema-compat-tests.ts` runner
+Staging CI on main also runs the production schema-compatibility gate, so its failures are caught
+before tagging a release. The job copies the candidate's `.github/scripts/schema-compat-tests.ts` runner
 before checking out the deployed revision. It runs every deployed API test file against its own
 clone of the upgraded PostgreSQL database, with two files in flight. Separate databases
 prevent cross-project cleanup races and leaked fixture tables while preserving real multi-connection
