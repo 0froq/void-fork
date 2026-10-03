@@ -947,7 +947,16 @@ describe('durable zone email connections', () => {
       const user = await createTestUser(env.db);
       const first = await createTestProject(env.db, user.id, 'concurrent-zone-first');
       const second = await createTestProject(env.db, user.id, 'concurrent-zone-second');
-      stubCustomerCf({ zones });
+      // Both lookups must identify the same provider zone for this locking regression.
+      stubCustomerCf({
+        zones: {
+          ...zones,
+          'concurrent-two.example.com': {
+            ...zones['concurrent-two.example.com']!,
+            id: zones['concurrent-one.example.com']!.id,
+          },
+        },
+      });
       const actor = { kind: 'owner' as const, userId: user.id };
 
       const results = await Promise.allSettled([
