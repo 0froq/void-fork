@@ -6,7 +6,12 @@ import { pc } from './output.ts';
 import type { PlatformManagementAccess } from './platform-auth.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
 
-export type PlatformSetupPage = Readonly<{ title: string; url: string; instructions: string }>;
+export type PlatformSetupPage = Readonly<{
+  title: string;
+  url: string;
+  instructions: string;
+  linkInTitle?: boolean;
+}>;
 
 export function platformSetupLink(
   page: Pick<PlatformSetupPage, 'title' | 'url'>,
@@ -123,6 +128,7 @@ export function platformManagementSetupPage(
   ];
   return {
     title: 'Cloudflare management API token',
+    linkInTitle: true,
     url:
       'https://dash.cloudflare.com/?' +
       new URLSearchParams({
@@ -131,24 +137,11 @@ export function platformManagementSetupPage(
         permissionGroupKeys: JSON.stringify(permissions),
       }),
     instructions: [
-      access
-        ? `Browser login cannot configure Cloudflare Access${zoneName ? ' or change DNS' : ''}. This token lets the CLI install your platform.`
-        : 'Browser login can preview DNS, but cannot change it. This token lets the CLI install your platform.',
+      'This token lets the Void CLI install your platform. Void will now open a pre-configured token creation site. Please review the permissions and then paste the token here.',
       `Scope it to ${plan.account.name}${createsZone ? '; allow zone creation.' : zoneName ? ` and zone ${zoneName}.` : '.'}`,
       ...(apiHostname && apiHostname !== zoneName && !apiHostname.endsWith(`.${zoneName}`)
         ? [`Also include the zone for ${apiHostname}.`]
         : []),
-      'Create the token with the preselected permissions, then paste it here.',
-      ...(access || appAccess
-        ? [
-            `Access: Apps and Policies ${appAccessLevel === 'edit' ? 'Edit' : 'Read'}, Organizations/Identity Providers/Groups Read${access && access.protection ? `, Service Tokens ${accessLevel === 'edit' ? 'Edit' : 'Read'}` : ''}.`,
-          ]
-        : []),
-      'Permission checklist: ' +
-        platformSetupLink({
-          title: 'Void token permissions',
-          url: 'https://void.cloud/guide/platform/installation/credentials#runtime-token-permissions',
-        }),
     ].join('\n'),
   };
 }
@@ -186,25 +179,10 @@ export function platformSetupPages(plan: PlatformInstallPlan): {
   return {
     runtime: {
       title: 'Cloudflare runtime token',
+      linkInTitle: true,
       url: 'https://dash.cloudflare.com/?' + query,
-      instructions: [
-        'Review the preselected permissions for account ' + plan.account.name + '.',
-        'Edit: Workers Scripts, KV, R2, D1, Queues, Hyperdrive' +
-          (needsGateway ? ', AI Gateway.' : '.'),
-        'Read: Account Settings, Account Analytics, Workers Tail.',
-        ...(plan.deployment.application.zoneName
-          ? ['Zone ' + plan.deployment.application.zoneName + ': Cache Purge: Purge.']
-          : []),
-        ...(plan.deployment.capabilities.customDomains
-          ? ['Custom project domains also need SSL and Certificates: Edit on that zone.']
-          : []),
-        ...(plan.deployment.capabilities.email
-          ? [
-              'Email-enabled installations need Email Routing Addresses: Edit and Email Sending: Edit on the account, plus Zone: Read, Zone Settings: Edit and Email Routing Rules: Edit on the mail zones.',
-            ]
-          : []),
-        'If the form differs, match the permissions above. Create the token, then paste it here.',
-      ].join('\n'),
+      instructions:
+        'Create a Cloudflare runtime token that Void can use to manage the platform. Please review the permissions and then paste the token here.',
     },
     github: {
       title: 'GitHub OAuth App',
@@ -371,8 +349,10 @@ export function openPlatformSetupPage(
   page: PlatformSetupPage,
   dependencies: { interactive?: boolean; open?: (url: string) => void } = {},
 ): void {
-  log.info(page.title + '\n' + page.instructions);
-  console.log(platformSetupLink({ ...page, title: 'Open ' + page.title }));
+  log.info((page.linkInTitle ? platformSetupLink(page) : page.title) + '\n' + page.instructions);
+  if (!page.linkInTitle) {
+    console.log(platformSetupLink({ ...page, title: 'Open ' + page.title }));
+  }
   if (dependencies.interactive ?? process.stdin.isTTY === true) {
     try {
       (dependencies.open ?? ((url) => openBrowser(url, execFile)))(page.url);

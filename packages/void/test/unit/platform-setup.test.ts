@@ -124,8 +124,9 @@ describe('platform credential setup links', () => {
     expect(
       permissions.some(({ key }: { key: string }) => ['cache', 'account_api_tokens'].includes(key)),
     ).toBe(false);
-    expect(page.instructions).toContain('Browser login can preview DNS, but cannot change it.');
-    expect(page.instructions).toContain('Scope it to Account and zone example.com.');
+    expect(page.instructions).toBe(
+      'This token lets the Void CLI install your platform. Void will now open a pre-configured token creation site. Please review the permissions and then paste the token here.\nScope it to Account and zone example.com.',
+    );
     const createZone = platformManagementSetupPage({
       ...original,
       actions: [
@@ -227,7 +228,7 @@ describe('platform credential setup links', () => {
     );
     expect(platformSetupFieldHelp('cloudflareApiToken')).toBeUndefined();
   });
-  it('scopes the runtime form to the account and preselects every required permission with an accurate fallback', () => {
+  it('scopes the runtime form to the account and preselects every required permission', () => {
     const pages = platformSetupPages(plan());
     const url = new URL(pages.runtime.url);
     expect(url.origin).toBe('https://dash.cloudflare.com');
@@ -251,12 +252,9 @@ describe('platform credential setup links', () => {
         ['cache', 'ssl_and_certificates', 'account_api_tokens'].includes(permission.key),
       ),
     ).toBe(false);
-    expect(pages.runtime.instructions).toContain('Hyperdrive, AI Gateway.');
-    expect(pages.runtime.instructions).toContain(
-      'Read: Account Settings, Account Analytics, Workers Tail.',
+    expect(pages.runtime.instructions).toBe(
+      'Create a Cloudflare runtime token that Void can use to manage the platform. Please review the permissions and then paste the token here.',
     );
-    expect(pages.runtime.instructions).not.toContain('Also select');
-    expect(pages.runtime.instructions).not.toContain('Zone');
     expect(new URL(pages.r2.url).searchParams.get('to')).toBe('/account/r2/api-tokens/create');
     expect(new URL(pages.r2.url).searchParams.get('type')).toBe('account');
     expect(pages.r2.instructions).toContain('Object Read & Write');
@@ -323,10 +321,6 @@ describe('platform credential setup links', () => {
     expect(permissions(original).some((permission) => emailKeys.includes(permission.key))).toBe(
       false,
     );
-    expect(platformSetupPages(withEmail).runtime.instructions).toContain(
-      'Email Routing Addresses: Edit',
-    );
-    expect(platformSetupPages(withEmail).runtime.instructions).toContain('Email Sending: Edit');
     expect(platformSetupPages(original).runtime.instructions).not.toContain(
       'Email Routing Addresses',
     );
@@ -386,7 +380,6 @@ describe('platform credential setup links', () => {
       key: 'cache',
       type: 'purge',
     });
-    expect(page.instructions).toContain('Zone example.com: Cache Purge: Purge');
   });
   it('opens only in interactive mode and retains a manual link if opening fails', () => {
     const open = vi.fn(() => {
