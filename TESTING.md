@@ -162,7 +162,18 @@ real subprocess/lock deadline tests retain their actual timing semantics.
 
 API integration fixtures reset their tables with one ordered SQL block. Use `clearTables` rather
 than repeating per-table cleanup; it keeps foreign-key delete behavior and migration history
-intact in both PGlite and the shared PostgreSQL compatibility run.
+intact in PGlite and PostgreSQL.
+
+The schema-compatibility job copies the candidate's `.github/scripts/schema-compat-tests.ts` runner
+before checking out the deployed revision. It runs every deployed API test file against its own
+clone of the upgraded PostgreSQL database, with two files in flight. Separate databases
+prevent cross-project cleanup races and leaked fixture tables while preserving real multi-connection
+tests within each file. The original upgraded database and its seeded compatibility records remain
+untouched. The runner accepts only the disposable loopback `void_schema_compat` database as `void_ci`.
+It also repairs one known legacy email concurrency fixture, gated by its full file checksum: the
+two mocked lookups must return the same zone ID to exercise the same-zone lock. This changes only
+fixture IDs; deployed runtime source and test assertions stay intact. Unknown revisions are left
+untouched, so a new failure cannot silently inherit an old fixture exception.
 
 CLI and deploy tests that stub their network boundary and call production functions directly run
 in the unit project. The integration project is reserved for real builds, subprocesses, servers,
