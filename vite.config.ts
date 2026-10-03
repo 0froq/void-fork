@@ -459,7 +459,9 @@ export default defineConfig({
         test: {
           name: 'platform-api-integration-threads',
           fsModuleCache: true,
-          pool: 'threads',
+          // Node 24 on Linux can abort while unregistering PGlite's Wasm JIT
+          // allocations across worker threads. Keep each database in its own process.
+          pool: process.platform === 'linux' ? 'forks' : 'threads',
           include: ['platform/packages/api/test/integration/**/*.test.ts'],
           exclude: apiTimezoneTests,
           globalSetup: ['platform/packages/api/test/integration/global-setup.ts'],
