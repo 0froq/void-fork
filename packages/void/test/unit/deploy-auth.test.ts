@@ -202,7 +202,12 @@ describe('runDeploy project access', () => {
     mkdirSync(join(root, '.void'));
     writeFileSync(
       join(root, '.void', 'project.json'),
-      JSON.stringify({ projectId: 'proj_1', slug, platform: 'void' }),
+      JSON.stringify({
+        projectId: 'proj_1',
+        slug,
+        platform: 'void',
+        platformUrl: 'https://api.test',
+      }),
     );
   }
 

@@ -164,6 +164,18 @@ export function readProjectApplicationDomain(root: string): string | null {
   return typeof value === 'string' && value !== '' ? normalizeApplicationDomain(value) : null;
 }
 
+/** A deploy can establish a first link, but must never replace a saved destination. */
+export function shouldLinkDeployProject(root: string, apiUrl: string): boolean {
+  const platform = readDeploymentPlatform(root);
+  const selectedUrl = readProjectPlatformUrl(root);
+  return (
+    !readProjectConfig(root) &&
+    platform !== 'cloudflare' &&
+    platform !== 'none' &&
+    (!selectedUrl || selectedUrl === normalizePlatformApiUrl(apiUrl))
+  );
+}
+
 /** Resolve the immutable platform identity that every newly linked project records. */
 export function attachSelectedPlatform(
   root: string,

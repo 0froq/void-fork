@@ -114,7 +114,13 @@ function installPlatformMocks(role: ProjectRole = 'owner'): Captured {
     const reqInit = init ?? {};
     const method = (reqInit.method ?? 'GET').toUpperCase();
 
-    if (url.endsWith('/projects/proj_named_layouts_test') && method === 'GET') {
+    if (url.endsWith('/projects/resolve?slug=named-layouts-test') && method === 'GET') {
+      return json({ project: null });
+    }
+    if (
+      (url.endsWith('/projects/proj_named_layouts_test') && method === 'GET') ||
+      (url.endsWith('/projects') && method === 'POST')
+    ) {
       return json({
         id: 'proj_named_layouts_test',
         user_id: 'user_owner',
@@ -347,6 +353,37 @@ describe('runFullDeploy emits manifest.pages (Void pages app, end-to-end)', () =
     // the `isFrameworkMode ? undefined :` gate in assembleVoidManifest turns
     // this RED (pages becomes the populated array instead of undefined).
     expect(captured.finalizeBody!.manifest?.pages).toBeUndefined();
+  });
+
+  it('uses the alternate project for Worker packaging and prerendering while retaining the saved link', async () => {
+    const original = readFileSync(projectJson, 'utf8');
+    const saved = JSON.stringify({
+      projectId: 'project-on-original-platform',
+      slug: 'named-layouts-test',
+      platformUrl: 'https://original.example.test',
+      platform: 'void',
+    });
+    writeFileSync(projectJson, saved);
+    try {
+      const captured = installPlatformMocks();
+      await runDeploy(fixture, { projectSlug: 'named-layouts-test', skipBuild: true });
+      expect(readFileSync(projectJson, 'utf8')).toBe(saved);
+      expect(mockCollectPrerenderPaths).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 'proj_named_layouts_test',
+          voidToken: 'scoped-prerender-token',
+        }),
+      );
+      expect(captured.finalizeBody?.manifest?.pages).toBeDefined();
+      const urls = fetchMock.mock.calls.map(([url]) => String(url));
+      expect(urls.every((url) => url.startsWith('https://platform.example.test/'))).toBe(true);
+      expect(urls.some((url) => url.includes('project-on-original-platform'))).toBe(false);
+      expect(urls).toContain(
+        'https://platform.example.test/projects/proj_named_layouts_test/deploy',
+      );
+    } finally {
+      writeFileSync(projectJson, original);
+    }
   });
 
   it('rejects a saved reader project before building or uploading', async () => {

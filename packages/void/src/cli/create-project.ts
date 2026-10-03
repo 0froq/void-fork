@@ -51,6 +51,7 @@ export function reportProjectCreationWarnings(project: CreateProjectResponse): v
 export async function promptAndCreateProject(
   root: string,
   client: PlatformClient,
+  options: { link?: boolean } = {},
 ): Promise<ProjectConfig> {
   // promptProjectSlug exits the process on Ctrl+C, so it never returns undefined.
   const project = await createProjectWithSlugRetry(
@@ -64,7 +65,9 @@ export async function promptAndCreateProject(
     throw new Error('Project creation cancelled.');
   }
   const config: ProjectConfig = { projectId: project.id, slug: project.slug };
-  writeProjectConfig(root, attachSelectedPlatform(root, config, client.apiUrl));
+  if (options.link !== false) {
+    writeProjectConfig(root, attachSelectedPlatform(root, config, client.apiUrl));
+  }
   if (project.owner_email_destination) {
     // The platform registers the owner's address after it has answered, so
     // the response cannot say whether Cloudflare mailed a verification link

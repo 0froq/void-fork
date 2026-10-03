@@ -17,7 +17,7 @@ export type ProjectSetupAction = 'create' | 'link';
 
 export async function promptProjectSetupAction(
   message = 'Set up a Void project:',
-  options: { includeLink?: boolean } = {},
+  options: { includeLink?: boolean; link?: boolean } = {},
 ): Promise<ProjectSetupAction> {
   const result = await select({
     message,
@@ -25,7 +25,13 @@ export async function promptProjectSetupAction(
       { value: 'create', label: 'Create a new project' },
       ...(options.includeLink === false
         ? []
-        : [{ value: 'link', label: 'Link an existing project' }]),
+        : [
+            {
+              value: 'link',
+              label:
+                options.link === false ? 'Use an existing project' : 'Link an existing project',
+            },
+          ]),
     ],
   });
 
@@ -41,7 +47,7 @@ export async function promptProjectSelection(
   projects: Array<ProjectResponse>,
   message = 'Select a project:',
   root: string = process.cwd(),
-  options: { confirmExisting?: boolean; includeCreate?: boolean } = {},
+  options: { confirmExisting?: boolean; includeCreate?: boolean; link?: boolean } = {},
 ): Promise<PromptResult> {
   const choices = [
     ...(options.includeCreate === false
@@ -74,7 +80,9 @@ export async function promptProjectSelection(
       message:
         project.role === 'reader'
           ? `Link to ${project.slug} with read-only access? Deploying requires collaborator access or higher.`
-          : `Linking to an existing project. Running \`void deploy\` will overwrite the current deployment of ` +
+          : (options.link === false
+              ? 'This deployment will overwrite the current deployment of '
+              : `Linking to an existing project. Running \`void deploy\` will overwrite the current deployment of `) +
             `${project.url ?? `${project.slug}.${getSiteDomain(root)}`}. Continue?`,
     });
     if (isCancel(confirmed) || !confirmed) {

@@ -59,6 +59,20 @@ For the Void platform, project resolution precedence is:
 
 If no project is linked and no override is provided, CLI prompts to link or create one. In CI (non-TTY), `void deploy` errors out instead — set `VOID_PROJECT` or pass `--project <slug>`.
 
+To deploy to another connected Void platform for one invocation:
+
+```sh
+void connect https://second.example.com
+VOID_API_URL=https://second.example.com void deploy --platform void --project my-app
+```
+
+`VOID_API_URL` selects the platform and `--project` selects its project. You must
+name the project when overriding a different platform's saved link. Existing
+project links and deployment preferences remain unchanged, even when the target
+project is created. The same applies to `VOID_PROJECT` and to another project on
+the current platform. A first deployment still links the project when no destination
+is configured. See [Deploy to another Void platform](../../guide/deployment.md#deploy-to-another-void-platform).
+
 ## `void deploy --platform cloudflare` {#void-deploy-platform-cloudflare}
 
 Build and deploy to your Cloudflare account using `void.config.ts`:

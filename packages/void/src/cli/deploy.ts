@@ -252,6 +252,7 @@ import {
   attachSelectedPlatform,
   readDeploymentPlatform,
   readProjectConfig,
+  shouldLinkDeployProject,
   writeProjectConfig,
   type DeploymentPlatform,
   type ProjectConfig,
@@ -7055,10 +7056,20 @@ async function runManagedDeploy(
   cliLog: CliLogger,
 ): Promise<void> {
   // Resolve the connected recipient before credentials, OIDC, builds, or platform requests.
-  getApiUrl(root);
+  const apiUrl = getApiUrl(root);
+  const requestedProjectSlug = getRequestedProjectSlug(options);
   let reauthenticated = false;
   while (true) {
     try {
+      // Project IDs and implicit slugs belong to the platform that issued them.
+      // Re-read after reauthentication: this attempt may have established its first link.
+      const savedProject = readProjectConfig(root);
+      const linkedProject = savedProject?.platformUrl === apiUrl ? savedProject : null;
+      if (savedProject && !linkedProject && !requestedProjectSlug) {
+        throw new Error(
+          `deploy: This project is linked to ${savedProject.platformUrl}. Pass --project <slug> to deploy to ${apiUrl} without changing the saved link.`,
+        );
+      }
       // 1. Auth — resolve the deploy token by precedence:
       //   1. explicit `VOID_TOKEN` env  (deliberate override; wins everywhere)
       //   2. GitHub Actions OIDC exchange  (in Actions, when no explicit token)
@@ -7080,7 +7091,7 @@ async function runManagedDeploy(
         // .void/project.json — the same sources the deploy path uses below. A
         // workflow with `id-token: write` intends OIDC, so an unknown slug is a
         // hard error — we do NOT silently fall back to a saved token.
-        const slug = getRequestedProjectSlug(options) ?? readProjectConfig(root)?.slug;
+        const slug = requestedProjectSlug ?? linkedProject?.slug;
         if (!slug) {
           throw new Error(
             'deploy: running in GitHub Actions but the project is unknown — pass --project <slug> or link the project.',
@@ -7115,8 +7126,6 @@ async function runManagedDeploy(
       // spawn env — see that helper for the full rationale.
 
       // 2. Resolve target project (CLI flag > env var > linked project file)
-      const requestedProjectSlug = getRequestedProjectSlug(options);
-      const linkedProject = readProjectConfig(root);
       let config: ProjectConfig | null = null;
 
       if (requestedProjectSlug) {
@@ -7342,6 +7351,7 @@ export async function promptDeployProjectConfig(
   cliLog?: CliLogger,
 ): Promise<ProjectConfig> {
   const projects = await client.listProjectChoices();
+  const link = shouldLinkDeployProject(root, client.apiUrl);
   const deployableProjects = projects.filter((project) => project.role !== 'reader');
   if (deployableProjects.length !== projects.length) {
     log.warn(
@@ -7350,10 +7360,13 @@ export async function promptDeployProjectConfig(
   }
   const action = await promptProjectSetupAction('Set up a Void project for deploy:', {
     includeLink: deployableProjects.length > 0,
+    ...(link ? {} : { link: false }),
   });
 
   if (action === 'create') {
-    return promptAndCreateProject(root, client);
+    return promptAndCreateProject(root, client, {
+      link,
+    });
   }
 
   // Project names are only shown after the user opts into linking.
@@ -7361,16 +7374,20 @@ export async function promptDeployProjectConfig(
     deployableProjects,
     'Select a project to deploy to:',
     root,
-    { confirmExisting: true, includeCreate: false },
+    { confirmExisting: true, includeCreate: false, ...(link ? {} : { link: false }) },
   );
 
   if (result.action === 'create') {
     throw new Error('Unexpected project selection result.');
   }
   const config = { projectId: result.project.id, slug: result.project.slug };
-  writeProjectConfig(root, attachSelectedPlatform(root, config, client.apiUrl));
-  log.step(`Linked to ${pc.blue(config.slug)}`);
-  cliLog?.info('project_linked', { projectId: config.projectId, slug: config.slug });
+  if (shouldLinkDeployProject(root, client.apiUrl)) {
+    writeProjectConfig(root, attachSelectedPlatform(root, config, client.apiUrl));
+    log.step(`Linked to ${pc.blue(config.slug)}`);
+    cliLog?.info('project_linked', { projectId: config.projectId, slug: config.slug });
+  } else {
+    log.step(`Using ${pc.blue(config.slug)} for this deployment. Saved destination unchanged.`);
+  }
   return config;
 }
 
@@ -8994,7 +9011,9 @@ async function createProjectFromSlug(
   cliLog?.info('project_create_start', { slug });
   const project = await client.createProject(slug);
   const config = { projectId: project.id, slug: project.slug };
-  writeProjectConfig(root, attachSelectedPlatform(root, config, client.apiUrl));
+  if (shouldLinkDeployProject(root, client.apiUrl)) {
+    writeProjectConfig(root, attachSelectedPlatform(root, config, client.apiUrl));
+  }
   log.success(`Project created: ${pc.blue(config.slug)}`);
   reportProjectCreationWarnings(project);
   cliLog?.info('project_create_success', { projectId: config.projectId, slug: config.slug });

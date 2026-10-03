@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -68,9 +68,51 @@ describe('promptDeployProjectConfig', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     delete process.env.VOID_PLATFORM_REGISTRY_DIR;
     rmSync(root, { recursive: true, force: true });
   });
+
+  it.each(['create', 'link'])(
+    'keeps the saved destination when choosing to %s a temporary deployment project',
+    async (action) => {
+      const { promptDeployProjectConfig } = await import('../../src/cli/deploy.ts');
+      const client = createClient();
+      vi.stubEnv('VOID_API_URL', client.apiUrl);
+      const projectFile = join(root, '.void/project.json');
+      mkdirSync(join(root, '.void'));
+      const original = JSON.stringify({
+        platform: 'void',
+        platformUrl: 'https://original.example.com',
+        projectId: 'original',
+        slug: 'original',
+      });
+      writeFileSync(projectFile, original);
+      client.listProjectChoices.mockResolvedValue([{ id: 'proj_new', slug: 'new-app' }]);
+      client.createProject.mockResolvedValue({ id: 'proj_new', slug: 'new-app' });
+      mockSelect.mockResolvedValueOnce(action).mockResolvedValueOnce('proj_new');
+      mockText.mockResolvedValue('new-app');
+      mockConfirm.mockResolvedValue(true);
+      expect(await promptDeployProjectConfig(root, client)).toEqual({
+        projectId: 'proj_new',
+        slug: 'new-app',
+      });
+      expect(readFileSync(projectFile, 'utf8')).toBe(original);
+      expect(mockSelect.mock.calls[0]?.[0].options).toContainEqual({
+        value: 'link',
+        label: 'Use an existing project',
+      });
+      if (action === 'link') {
+        expect(mockConfirm).toHaveBeenCalledWith({
+          message:
+            'This deployment will overwrite the current deployment of new-app.void.app. Continue?',
+        });
+        expect(mockStep).toHaveBeenCalledWith(
+          expect.stringContaining('Saved destination unchanged.'),
+        );
+      }
+    },
+  );
 
   it('does not show link option when there are no existing projects', async () => {
     const { promptDeployProjectConfig } = await import('../../src/cli/deploy.ts');
