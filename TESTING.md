@@ -174,7 +174,8 @@ prevent cross-project cleanup races and leaked fixture tables while preserving r
 tests within each file. The original upgraded database and its seeded compatibility records remain
 untouched. The runner accepts only the disposable loopback `void_schema_compat` database as `void_ci`.
 It also repairs two legacy fixtures, each gated by its full file checksum: the email concurrency
-fixture must return the same zone ID for both lookups, and the oversized deploy-body fixture must
+fixture must return the same zone ID for both lookups and model DNS for whichever request wins,
+and the oversized deploy-body fixture must
 consume its response before the next test clears its tables. Deployed runtime source and all test
 assertions stay intact. Unknown revisions are left untouched, so a new failure cannot silently
 inherit an old fixture exception.

@@ -6,8 +6,10 @@ import {
   correctLegacyEmailFixture,
   correctedDeployBodyFixture,
   correctedZoneFixture,
+  correctedZoneProvision,
   legacyDeployBodyFixture,
   legacyZoneFixture,
+  legacyZoneProvision,
   runIsolatedCompatibilityTests,
 } from '../../../../.github/scripts/schema-compat-tests.ts';
 
@@ -38,7 +40,9 @@ describe('schema compatibility database isolation', () => {
       'utf8',
     ).replaceAll('\r\n', '\n');
     expect(current).toContain(correctedZoneFixture);
-    const legacy = current.replace(correctedZoneFixture, legacyZoneFixture);
+    const legacy = current
+      .replace(correctedZoneFixture, legacyZoneFixture)
+      .replace(correctedZoneProvision, legacyZoneProvision);
     expect(correctLegacyEmailFixture(legacy)).toBe(current);
     expect(correctLegacyEmailFixture(legacy.replaceAll('\n', '\r\n'))).toBe(
       current.replaceAll('\n', '\r\n'),

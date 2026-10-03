@@ -10,6 +10,11 @@ import { pathToFileURL } from 'node:url';
 export const legacyZoneFixture = `      const second = await createTestProject(env.db, user.id, 'concurrent-zone-second');
       stubCustomerCf({ zones });`;
 export const correctedZoneFixture = `      const second = await createTestProject(env.db, user.id, 'concurrent-zone-second');
+      const mx: Record<string, Array<string>> = {
+        'concurrent-one.example.com': [],
+        'concurrent-two.example.com': [],
+      };
+      let provisionedDomain = '';
       // Both lookups must identify the same provider zone for this locking regression.
       stubCustomerCf({
         zones: {
@@ -19,7 +24,17 @@ export const correctedZoneFixture = `      const second = await createTestProjec
             id: zones['concurrent-one.example.com']!.id,
           },
         },
+        mx,
+        on: {
+          routingDns: () => {
+            mx[provisionedDomain] = ['route1.mx.cloudflare.net'];
+          },
+        },
       });`;
+
+export const legacyZoneProvision = `      await runEmailOperation(env.db, bindings(), accepted.value.operationId);`;
+export const correctedZoneProvision = `      provisionedDomain = (await env.db.select().from(emailDomainRoutes))[0]!.domain;
+      await runEmailOperation(env.db, bindings(), accepted.value.operationId);`;
 
 export const legacyDeployBodyFixture = `    expect(res.status).not.toBe(413);
   });`;
@@ -31,17 +46,19 @@ export const correctedDeployBodyFixture = `    expect(res.status).not.toBe(413);
 function correctKnownFixture(
   source: string,
   checksum: string,
-  before: string,
-  after: string,
+  replacements: ReadonlyArray<readonly [string, string]>,
 ): string {
   const normalized = source.replaceAll('\r\n', '\n');
   if (createHash('sha256').update(normalized).digest('hex') !== checksum) {
     return source;
   }
-  if (normalized.split(before).length !== 2) {
-    throw new Error('The known compatibility fixture correction no longer matches.');
+  let corrected = normalized;
+  for (const [before, after] of replacements) {
+    if (corrected.split(before).length !== 2) {
+      throw new Error('The known compatibility fixture correction no longer matches.');
+    }
+    corrected = corrected.replace(before, after);
   }
-  const corrected = normalized.replace(before, after);
   return source.includes('\r\n') ? corrected.replaceAll('\n', '\r\n') : corrected;
 }
 
@@ -50,8 +67,10 @@ export function correctLegacyEmailFixture(source: string): string {
   return correctKnownFixture(
     source,
     'bf3ec4cd84c85a9e2cd01c7906ca6952dce5d7b957dc38487d6cfe99e9257eed',
-    legacyZoneFixture,
-    correctedZoneFixture,
+    [
+      [legacyZoneFixture, correctedZoneFixture],
+      [legacyZoneProvision, correctedZoneProvision],
+    ],
   );
 }
 
@@ -59,8 +78,7 @@ export function correctLegacyDeployFixture(source: string): string {
   return correctKnownFixture(
     source,
     'a62cdbc79573bba09da2212c441ebdcec74569d5ec4193d494f54fad98722f33',
-    legacyDeployBodyFixture,
-    correctedDeployBodyFixture,
+    [[legacyDeployBodyFixture, correctedDeployBodyFixture]],
   );
 }
 

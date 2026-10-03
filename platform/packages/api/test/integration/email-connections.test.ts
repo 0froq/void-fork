@@ -947,6 +947,11 @@ describe('durable zone email connections', () => {
       const user = await createTestUser(env.db);
       const first = await createTestProject(env.db, user.id, 'concurrent-zone-first');
       const second = await createTestProject(env.db, user.id, 'concurrent-zone-second');
+      const mx: Record<string, Array<string>> = {
+        'concurrent-one.example.com': [],
+        'concurrent-two.example.com': [],
+      };
+      let provisionedDomain = '';
       // Both lookups must identify the same provider zone for this locking regression.
       stubCustomerCf({
         zones: {
@@ -954,6 +959,12 @@ describe('durable zone email connections', () => {
           'concurrent-two.example.com': {
             ...zones['concurrent-two.example.com']!,
             id: zones['concurrent-one.example.com']!.id,
+          },
+        },
+        mx,
+        on: {
+          routingDns: () => {
+            mx[provisionedDomain] = ['route1.mx.cloudflare.net'];
           },
         },
       });
@@ -989,6 +1000,7 @@ describe('durable zone email connections', () => {
       expect(await env.db.select().from(emailZoneConnections)).toHaveLength(1);
       expect(await env.db.select().from(emailDomainRoutes)).toHaveLength(1);
 
+      provisionedDomain = (await env.db.select().from(emailDomainRoutes))[0]!.domain;
       await runEmailOperation(env.db, bindings(), accepted.value.operationId);
       const deferredProject = acceptedIndex === 0 ? second : first;
       const deferredDomain =
