@@ -2,8 +2,11 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vite-plus/test';
 import {
   compatibilityTemplate,
+  correctLegacyDeployFixture,
   correctLegacyEmailFixture,
+  correctedDeployBodyFixture,
   correctedZoneFixture,
+  legacyDeployBodyFixture,
   legacyZoneFixture,
   runIsolatedCompatibilityTests,
 } from '../../../../.github/scripts/schema-compat-tests.ts';
@@ -11,6 +14,21 @@ import {
 const templateUrl = 'postgresql://void_ci:test@127.0.0.1:5432/void_schema_compat';
 
 describe('schema compatibility database isolation', () => {
+  it('drains only the known unfinished legacy deploy fixture without changing its assertion', () => {
+    const current = readFileSync(
+      new URL(
+        '../../../../platform/packages/api/test/integration/deploy-direct-r2.test.ts',
+        import.meta.url,
+      ),
+      'utf8',
+    ).replaceAll('\r\n', '\n');
+    expect(current).toContain(correctedDeployBodyFixture);
+    const legacy = current.replace(correctedDeployBodyFixture, legacyDeployBodyFixture);
+    expect(correctLegacyDeployFixture(legacy)).toBe(current);
+    expect(correctLegacyDeployFixture(current)).toBe(current);
+    expect(correctLegacyDeployFixture(legacy + '\n')).toBe(legacy + '\n');
+  });
+
   it('corrects only the checksum-verified legacy fixture and preserves all assertions', () => {
     const current = readFileSync(
       new URL(

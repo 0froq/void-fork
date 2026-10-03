@@ -1474,6 +1474,8 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     // need the body cap NOT to 413. Anything other than 413 is a pass
     // for this regression check.
     expect(res.status).not.toBe(413);
+    // Finish the deployment's database work before the next fixture resets its tables.
+    await res.text();
   });
 
   it('reuploads legacy KV assets on an unchanged static redeploy and preserves the old deployment', async () => {

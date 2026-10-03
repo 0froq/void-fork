@@ -172,10 +172,11 @@ clone of the upgraded PostgreSQL database, with two files in flight. Separate da
 prevent cross-project cleanup races and leaked fixture tables while preserving real multi-connection
 tests within each file. The original upgraded database and its seeded compatibility records remain
 untouched. The runner accepts only the disposable loopback `void_schema_compat` database as `void_ci`.
-It also repairs one known legacy email concurrency fixture, gated by its full file checksum: the
-two mocked lookups must return the same zone ID to exercise the same-zone lock. This changes only
-fixture IDs; deployed runtime source and test assertions stay intact. Unknown revisions are left
-untouched, so a new failure cannot silently inherit an old fixture exception.
+It also repairs two legacy fixtures, each gated by its full file checksum: the email concurrency
+fixture must return the same zone ID for both lookups, and the oversized deploy-body fixture must
+consume its response before the next test clears its tables. Deployed runtime source and all test
+assertions stay intact. Unknown revisions are left untouched, so a new failure cannot silently
+inherit an old fixture exception.
 
 CLI and deploy tests that stub their network boundary and call production functions directly run
 in the unit project. The integration project is reserved for real builds, subprocesses, servers,

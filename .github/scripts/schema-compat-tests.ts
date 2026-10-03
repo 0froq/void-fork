@@ -21,20 +21,47 @@ export const correctedZoneFixture = `      const second = await createTestProjec
         },
       });`;
 
-/** Correct only the known deployed test fixture; runtime code and every assertion stay intact. */
-export function correctLegacyEmailFixture(source: string): string {
+export const legacyDeployBodyFixture = `    expect(res.status).not.toBe(413);
+  });`;
+export const correctedDeployBodyFixture = `    expect(res.status).not.toBe(413);
+    // Finish the deployment's database work before the next fixture resets its tables.
+    await res.text();
+  });`;
+
+function correctKnownFixture(
+  source: string,
+  checksum: string,
+  before: string,
+  after: string,
+): string {
   const normalized = source.replaceAll('\r\n', '\n');
-  if (
-    createHash('sha256').update(normalized).digest('hex') !==
-    'bf3ec4cd84c85a9e2cd01c7906ca6952dce5d7b957dc38487d6cfe99e9257eed'
-  ) {
+  if (createHash('sha256').update(normalized).digest('hex') !== checksum) {
     return source;
   }
-  if (normalized.split(legacyZoneFixture).length !== 2) {
-    throw new Error('The known email fixture correction no longer matches.');
+  if (normalized.split(before).length !== 2) {
+    throw new Error('The known compatibility fixture correction no longer matches.');
   }
-  const corrected = normalized.replace(legacyZoneFixture, correctedZoneFixture);
+  const corrected = normalized.replace(before, after);
   return source.includes('\r\n') ? corrected.replaceAll('\n', '\r\n') : corrected;
+}
+
+/** Correct only the known deployed test fixture; runtime code and every assertion stay intact. */
+export function correctLegacyEmailFixture(source: string): string {
+  return correctKnownFixture(
+    source,
+    'bf3ec4cd84c85a9e2cd01c7906ca6952dce5d7b957dc38487d6cfe99e9257eed',
+    legacyZoneFixture,
+    correctedZoneFixture,
+  );
+}
+
+export function correctLegacyDeployFixture(source: string): string {
+  return correctKnownFixture(
+    source,
+    'a62cdbc79573bba09da2212c441ebdcec74569d5ec4193d494f54fad98722f33',
+    legacyDeployBodyFixture,
+    correctedDeployBodyFixture,
+  );
 }
 
 /** Only the disposable CI database may be used as a template. */
@@ -180,16 +207,20 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
     throw new Error('Select existing platform API integration test files.');
   }
   const files = selected.length ? selected : allFiles;
-  const emailFixture = 'platform/packages/api/test/integration/email-connections.test.ts';
-  if (files.includes(emailFixture)) {
-    const emailFixturePath = join(root, emailFixture);
-    const originalFixture = readFileSync(emailFixturePath, 'utf8');
-    const correctedFixture = correctLegacyEmailFixture(originalFixture);
-    if (correctedFixture !== originalFixture) {
-      writeFileSync(emailFixturePath, correctedFixture);
-      console.log(
-        '[schema-compat] Corrected the checksum-verified legacy same-zone fixture IDs; assertions unchanged.',
-      );
+  for (const [fixture, correct] of [
+    ['platform/packages/api/test/integration/email-connections.test.ts', correctLegacyEmailFixture],
+    ['platform/packages/api/test/integration/deploy-direct-r2.test.ts', correctLegacyDeployFixture],
+  ] as const) {
+    if (files.includes(fixture)) {
+      const fixturePath = join(root, fixture);
+      const original = readFileSync(fixturePath, 'utf8');
+      const corrected = correct(original);
+      if (corrected !== original) {
+        writeFileSync(fixturePath, corrected);
+        console.log(
+          `[schema-compat] Corrected checksum-verified legacy fixture ${fixture}; assertions unchanged.`,
+        );
+      }
     }
   }
   const maintenance = new URL(template);
