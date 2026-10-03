@@ -5,7 +5,6 @@ import Spacer from '@components/shared/Spacer.vue';
 import { useData } from 'vitepress';
 import bg from './hero-bg.jpg';
 import Hero from './Hero.vue';
-import TerminalDemos from './terminal/TerminalDemos.vue';
 
 const { frontmatter } = useData();
 </script>
@@ -18,10 +17,6 @@ const { frontmatter } = useData();
       </div>
     </template>
   </Hero>
-
-  <Spacer />
-
-  <TerminalDemos />
 
   <Spacer />
 
