@@ -1,0 +1,261 @@
+import type { TerminalDemo, TerminalEvent, TerminalSegment, TerminalTone } from './timeline.ts';
+
+const s = (text: string, tone: TerminalTone = 'base', bold = false): TerminalSegment => ({
+  text,
+  tone,
+  bold,
+});
+const write = (at: number, id: string, ...segments: Array<TerminalSegment>): TerminalEvent => ({
+  at,
+  type: 'write',
+  line: { id, segments },
+});
+const blank = (at: number, id: string) => write(at, id, s(' '));
+const command = (at: number, id: string, text: string): TerminalEvent => ({
+  at,
+  type: 'type',
+  id,
+  text,
+  duration: Math.min(1600, text.length * 35),
+  prefix: [s('$ ', 'muted')],
+});
+const spinner = (at: number, id: string, message: string): TerminalEvent => ({
+  at,
+  type: 'write',
+  line: { id, spinner: true, segments: [s(message)] },
+});
+const done = (at: number, id: string, text: string) => write(at, id, s('◇ ', 'muted'), s(text));
+const remove = (at: number, id: string): TerminalEvent => ({ at, type: 'remove', id });
+const boxTop = (
+  at: number,
+  id: string,
+  title: string,
+  width: number,
+  tone: TerminalTone = 'base',
+) =>
+  write(
+    at,
+    id,
+    s('╭─ ', 'muted'),
+    s(title, tone),
+    s(' ' + '─'.repeat(width - title.length - 5) + '╮', 'muted'),
+  );
+const boxRow = (at: number, id: string, width: number, ...segments: Array<TerminalSegment>) => {
+  const length = segments.reduce((total, segment) => total + Array.from(segment.text).length, 0);
+  return write(
+    at,
+    id,
+    s('│  ', 'muted'),
+    ...segments,
+    s(' '.repeat(width - length - 4) + '│', 'muted'),
+  );
+};
+const boxBottom = (at: number, id: string, width: number) =>
+  write(at, id, s('╰' + '─'.repeat(width - 2) + '╯', 'muted'));
+
+// Sample values, accelerated timing, and prepared credentials. Wording and transient
+// spinner replacement follow deploy.ts, platform-lifecycle.ts, platform-installer.ts,
+// logs.ts, rollback.ts, and the shared Vite+ renderer. See README.md when refreshing.
+const deploy: TerminalDemo = {
+  id: 'deploy',
+  label: 'Deploy an app',
+  title: 'From your terminal to the world.',
+  description:
+    'Build your app, provision its resources, apply migrations, and put it online. One command.',
+  directory: '~/kiwi/blog',
+  command: 'void deploy',
+  duration: 15500,
+  context:
+    'A React app with server routes, a D1 database, and prerendered pages. Already connected to the Kiwi Void platform.',
+  link: '/guide/deployment',
+  linkLabel: 'Explore deployment',
+  events: [
+    command(0, 'command', 'void deploy'),
+    blank(1100, 'gap'),
+    write(1100, 'intro', s('void deploy', 'blue')),
+    blank(1400, 'intro-gap'),
+    write(1400, 'build', s('◇  ', 'muted'), s('Building (vp build)...')),
+    write(
+      1750,
+      'vite',
+      s('vite ', 'green'),
+      s('building client environment for production...', 'muted'),
+    ),
+    write(2250, 'modules', s('✓ ', 'green'), s('142 modules transformed.')),
+    write(
+      2550,
+      'client',
+      s('dist/client/assets/index-D9h2kL.js', 'blue'),
+      s('  38.42 kB', 'muted'),
+    ),
+    write(2800, 'built', s('✓ built in 428ms', 'green')),
+    write(3150, 'migrations', s('●  ', 'blue'), s('Found 1 migration(s)')),
+    spinner(3550, 'check', 'Checking for changes'),
+    done(4400, 'check', 'Checked for changes'),
+    spinner(4850, 'deploy', 'Packaging'),
+    spinner(5700, 'deploy', 'Uploading assets (3 new, 12 cached)'),
+    spinner(6900, 'deploy', 'Provisioning D1'),
+    spinner(8100, 'deploy', 'Running 1 migration'),
+    spinner(8950, 'deploy', 'Applied migration: 0001_create_posts.sql (43ms)'),
+    spinner(9900, 'deploy', 'Uploading worker'),
+    spinner(10900, 'deploy', 'Prerendering 8 pages'),
+    done(12100, 'deploy', 'Deployed!'),
+    blank(12400, 'summary-gap'),
+    boxTop(12400, 'box-top', 'https://blog.kiwi-company.example', 44, 'blue'),
+    boxRow(12600, 'box-gap', 44),
+    boxRow(12800, 'summary1', 44, s('1 worker module(s), 15 static asset(s)')),
+    boxRow(13000, 'summary2', 44, s('1 migration(s) applied')),
+    boxRow(13200, 'summary3', 44, s('8 page(s) prerendered')),
+    boxRow(13400, 'summary4', 44, s('SSR enabled')),
+    boxBottom(13600, 'box-bottom', 44),
+    blank(13900, 'outro-gap'),
+    write(13900, 'outro', s('Done!')),
+  ],
+};
+
+const install: TerminalDemo = {
+  id: 'install',
+  label: 'Install a platform',
+  title: 'Your cloud. Your platform.',
+  description: 'Give your team a shared deployment environment in your own Cloudflare account.',
+  directory: '~/kiwi',
+  command: 'void platform install',
+  duration: 21700,
+  context:
+    'Sample Kiwi Cloud installation. Cloudflare login, PostgreSQL, GitHub OAuth, and required credentials are prepared; setup output is condensed.',
+  link: '/guide/self-hosted-platform',
+  linkLabel: 'Explore the platform',
+  events: [
+    command(0, 'command', 'void platform install'),
+    blank(1450, 'gap'),
+    write(1450, 'intro', s('void platform install', 'blue')),
+    blank(1750, 'intro-gap'),
+    write(1750, 'name', s('› ', 'blue'), s('Installation name:')),
+    { at: 2050, type: 'type', id: 'name-value', text: 'kiwi', duration: 400, prefix: [s('  ')] },
+    done(2850, 'name', 'Installation name:'),
+    write(2850, 'name-value', s('  kiwi', 'muted')),
+    write(3100, 'where', s('› ', 'blue'), s('Where should your apps live?')),
+    write(3100, 'domain-option', s('  › Use a domain', 'blue', true), s(': recommended', 'muted')),
+    write(3100, 'workers-option', s('    Use workers.dev for testing', 'muted')),
+    write(3100, 'instructions', s('  ↑/↓ navigate · Enter confirm', 'muted')),
+    done(4050, 'where', 'Where should your apps live?'),
+    write(4050, 'domain-option', s('  Use a domain', 'muted')),
+    remove(4050, 'workers-option'),
+    remove(4050, 'instructions'),
+    write(4350, 'domain', s('› ', 'blue'), s('Application base domain:')),
+    {
+      at: 4650,
+      type: 'type',
+      id: 'domain-value',
+      text: 'kiwi-company.example',
+      duration: 900,
+      prefix: [s('  ')],
+    },
+    done(5900, 'domain', 'Application base domain:'),
+    write(5900, 'domain-value', s('  kiwi-company.example', 'muted')),
+    done(6200, 'zone', 'Cloudflare zone:'),
+    write(6200, 'zone-value', s('  kiwi-company.example', 'muted')),
+    done(6500, 'display', 'Platform display name:'),
+    write(6500, 'display-value', s('  Kiwi Cloud', 'muted')),
+    blank(6900, 'plan-gap'),
+    boxTop(6900, 'plan-top', 'Installation plan', 50),
+    boxRow(7050, 'plan1', 50, s('Kiwi Cloud in Kiwi Company', 'base', true)),
+    boxRow(7200, 'plan2', 50, s('Applications: *.kiwi-company.example')),
+    boxRow(7350, 'plan3', 50, s('Login methods: github')),
+    boxRow(7500, 'plan4', 50, s('Database: PostgreSQL via Hyperdrive')),
+    boxRow(7650, 'plan5', 50),
+    boxRow(7800, 'plan6', 50, s('create  dispatch-namespace  void-kiwi-users')),
+    boxRow(7950, 'plan7', 50, s('create  kv-namespace        void-kiwi-routing')),
+    boxRow(8100, 'plan8', 50, s('create  r2-bucket           void-kiwi-assets')),
+    boxBottom(8250, 'plan-bottom', 50),
+    write(8600, 'apply', s('› ', 'blue'), s('Apply this plan?')),
+    write(8600, 'apply-value', s('  › ', 'blue'), s('Yes', 'base', true), s(' /   No', 'muted')),
+    done(9650, 'apply', 'Apply this plan?'),
+    write(9650, 'apply-value', s('  Yes', 'muted')),
+    blank(9950, 'progress-gap'),
+    spinner(9950, 'install', 'Preparing the platform database'),
+    spinner(10800, 'install', 'Applying platform database migrations'),
+    spinner(11800, 'install', 'Checking and creating Cloudflare resources'),
+    spinner(13300, 'install', 'Deploying the api service'),
+    spinner(14300, 'install', 'Deploying the proxy service'),
+    spinner(15300, 'install', 'Deploying the dispatch service'),
+    spinner(16300, 'install', 'Verifying platform health'),
+    spinner(17300, 'install', 'Enabling the api service'),
+    spinner(18200, 'install', 'Verifying the enabled platform'),
+    done(19300, 'install', 'Platform installed.'),
+    write(
+      19700,
+      'installed',
+      s('◆  ', 'muted'),
+      s('Kiwi Cloud is installed at https://api.kiwi-company.example/admin.'),
+    ),
+    write(20100, 'url', s('●  ', 'blue'), s('API URL: https://api.kiwi-company.example')),
+    blank(20500, 'outro-gap'),
+    write(
+      20500,
+      'outro',
+      s('Run `void account login`, then deploy an app with `void deploy --platform void`.'),
+    ),
+  ],
+};
+
+const recover: TerminalDemo = {
+  id: 'recover',
+  label: 'Logs & rollback',
+  title: 'Find the failure. Roll it back.',
+  description:
+    'Inspect a failed request and restore a previous deployment, without leaving your terminal.',
+  directory: '~/kiwi/blog',
+  command: 'void project logs → void project rollback',
+  duration: 18700,
+  context:
+    'A linked project on Kiwi Cloud. The previous retained deployment uses the same database schema; rollback restores the code, not database migrations.',
+  link: '/reference/cli/project',
+  linkLabel: 'Explore project commands',
+  events: [
+    command(0, 'logs-command', 'void project logs --level error --range 15m'),
+    blank(1900, 'logs-gap'),
+    write(1900, 'logs-intro', s('void project logs', 'blue')),
+    blank(2250, 'logs-intro-gap'),
+    write(2250, 'request', s('14:32:07 ', 'muted'), s('POST /api/comments '), s('500', 'red')),
+    write(2650, 'error', s('  [error] ', 'red'), s('Comment could not be saved')),
+    write(3050, 'exception', s('  [exception] ', 'red'), s('TypeError: Cannot read properties')),
+    write(3050, 'exception-continuation', s("              of undefined (reading 'id')")),
+    blank(3550, 'logs-outro-gap'),
+    write(3550, 'logs-outro', s('1 log entries', 'muted')),
+    blank(4800, 'rollback-gap'),
+    command(4800, 'rollback-command', 'void project rollback'),
+    blank(6100, 'rollback-intro-gap'),
+    write(6100, 'rollback-intro', s('void project rollback', 'blue')),
+    blank(6550, 'select-gap'),
+    write(6550, 'select-title', s('› ', 'blue'), s('Select a deployment to roll back to:')),
+    write(6550, 'selected', s('  › dpl_7c42a1 18m ago', 'blue', true), s(': via cli', 'muted')),
+    write(6550, 'option', s('    dpl_3b9e80 2h ago', 'muted')),
+    write(6550, 'instructions', s('  ↑/↓ navigate · Enter confirm', 'muted')),
+    done(8200, 'select-title', 'Select a deployment to roll back to:'),
+    write(8200, 'selected', s('  dpl_7c42a1 18m ago', 'muted')),
+    remove(8200, 'option'),
+    remove(8200, 'instructions'),
+    spinner(8600, 'rollback', 'Rolling back'),
+    done(10400, 'rollback', 'Rollback complete.'),
+    write(
+      10900,
+      'rolled-back',
+      s('◆  ', 'muted'),
+      s('Rolled back to '),
+      s('dpl_7c42a1', 'base', true),
+    ),
+    write(11400, 'traffic', s('Traffic is now serving the rolled-back deployment.', 'muted')),
+    blank(12700, 'verify-gap'),
+    command(12700, 'verify-command', 'void project logs --range 1m'),
+    blank(14400, 'verify-intro-gap'),
+    write(14400, 'verify-intro', s('void project logs', 'blue')),
+    blank(14800, 'verify-request-gap'),
+    write(14800, 'verify-request', s('14:33:21 ', 'muted'), s('POST /api/comments 201')),
+    write(15400, 'verify-log', s('  [info] ', 'muted'), s('Comment saved')),
+    blank(16000, 'verify-outro-gap'),
+    write(16000, 'verify-outro', s('1 log entries', 'muted')),
+  ],
+};
+
+export const terminalDemos = [deploy, install, recover];

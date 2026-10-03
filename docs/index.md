@@ -10,6 +10,9 @@ hero:
     - theme: brand
       text: Get Started
       link: ./guide/
+    - theme: alt
+      text: See It in Action
+      link: '#terminal'
   image:
     src: /hero.svg
     alt: Void deployment platform
