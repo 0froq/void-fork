@@ -3276,7 +3276,7 @@ export async function deleteUser(db: Db, id: string): Promise<ReadonlyArray<Term
       // Pending invitations are in the lock set so acceptance cannot add a
       // membership after discovery. Re-read the connections under every lock:
       // a creator that acquired a project lock first may have inserted after
-      // discovery and must not be left with NULL provenance by the FK.
+      // discovery and would otherwise block the user delete below.
       const authorizedConnections = await tx
         .select({ projectId: githubConnections.project_id })
         .from(githubConnections)
@@ -4253,8 +4253,7 @@ export async function hasQueuedContainerBuilds(db: Db): Promise<boolean> {
  * FAILS CLOSED unless the exact connection still belongs to the project, has
  * durable authority, and its active installation still covers the repo. Every
  * connection records the project owner/admin who completed the repository proof;
- * that authorizer must still be the owner or an admin. A connection without an
- * authorizer (its user was deleted) has no authority.
+ * that authorizer must still be the owner or an admin.
  * An `all` install covers every repo; a `selected` install requires the immutable
  * repo id in its cache. This is the shared predicate used by webhook and OIDC
  * resolvers as well as enqueue and final startup checks.
@@ -4309,13 +4308,8 @@ async function installationCoversRepoInTx(
   connectionId: string,
   projectId: string,
   installationId: string,
-  repositoryId: string | null,
+  repositoryId: string,
 ): Promise<boolean> {
-  // Every connection records its immutable repository id; a row without one
-  // cannot prove coverage.
-  if (repositoryId === null) {
-    return false;
-  }
   const [row] = await tx
     .select({ id: githubConnections.id })
     .from(githubConnections)
@@ -4347,8 +4341,8 @@ async function installationCoversRepoInTx(
  * repo. Identical fail-closed predicate — returns false unless the
  * `github_installations` row exists AND `status === 'active'` AND the repo is
  * still in the install's selection (`repository_selection === 'all'`, or the
- * immutable numeric repo id is in the cached `repositories` set). A missing
- * connection id or repository id fails closed.
+ * immutable numeric repo id is in the cached `repositories` set). A stored
+ * build config without a connection id fails closed.
  *
  * Used by the container `BuildManager.startBuild` to re-verify coverage at token
  * mint, AFTER a queue wait during which an uninstall/suspension/repo-removal
@@ -4362,9 +4356,9 @@ export async function installationCoversRepo(
   connectionId: string,
   projectId: string,
   installationId: string,
-  repositoryId: string | null,
+  repositoryId: string,
 ): Promise<boolean> {
-  if (!connectionId || !repositoryId) {
+  if (!connectionId) {
     return false;
   }
   const [row] = await db
@@ -4406,7 +4400,7 @@ export async function supersedeAndCreateContainerBuild(
     commitSha: string;
     connectionId: string;
     installationId: string;
-    repositoryId: string | null;
+    repositoryId: string;
   },
 ): Promise<{
   build: Build | null;
@@ -4632,26 +4626,24 @@ export async function supersedeAndCreateContainerBuild(
  * the same `run_id` with an incremented `run_attempt`, so the `workflow_run` completion
  * handler must scope to the attempt: a redelivered/late completion for attempt
  * 1 must NOT resolve to attempt 2's active build (which would let it finalize
- * the wrong attempt). When `githubRunAttempt` is null (an old delivery whose
- * payload lacks `run_attempt`), it falls back to `IS NULL` so old null-attempt
- * rows still match. Active builds are ordered first (then `created_at desc`),
+ * the wrong attempt). Active builds are ordered first (then `created_at desc`),
  * so the in-flight attempt wins on a tie.
  */
 export async function getBuildByProjectRunIdAndAttempt(
   db: Db,
   projectId: string,
   githubRunId: string,
-  githubRunAttempt: string | null,
+  githubRunAttempt: string,
 ): Promise<Build | null> {
-  const attemptMatch =
-    githubRunAttempt != null
-      ? eq(builds.github_run_attempt, githubRunAttempt)
-      : isNull(builds.github_run_attempt);
   const [row] = await db
     .select()
     .from(builds)
     .where(
-      and(eq(builds.project_id, projectId), eq(builds.github_run_id, githubRunId), attemptMatch),
+      and(
+        eq(builds.project_id, projectId),
+        eq(builds.github_run_id, githubRunId),
+        eq(builds.github_run_attempt, githubRunAttempt),
+      ),
     )
     .orderBy(sql`(${inArray(builds.status, ACTIVE_BUILD_STATUSES)}) desc`, desc(builds.created_at))
     .limit(1);
@@ -4857,11 +4849,11 @@ export async function createGithubActionsBuildWithinLimit(
     commitSha?: string | null;
     branch?: string | null;
     githubRunId: string;
-    githubRunAttempt?: string | null;
+    githubRunAttempt: string;
     logsUrl?: string | null;
     connectionId: string;
     installationId: string;
-    repositoryId: string | null;
+    repositoryId: string;
     // The authorized workflow path the OIDC gate matched (the token's own
     // workflow file). Re-checked under the connection lock so a concurrent
     // PATCH that re-pins `workflow_path` can't let a now-de-authorized workflow
@@ -5002,13 +4994,7 @@ export async function createGithubActionsBuildWithinLimit(
     // Idempotent reuse: an already in-flight build for this exact run ATTEMPT
     // does not consume a new slot and must not be double-inserted. Matching on
     // the attempt (not run_id alone) ensures a RERUN — same run_id, incremented
-    // run_attempt — does NOT wrongly reuse the prior attempt's build. Falls back
-    // to IS NULL when the attempt is null (backward-compat for tokens that lack
-    // the claim).
-    const attemptMatch =
-      args.githubRunAttempt != null
-        ? eq(builds.github_run_attempt, args.githubRunAttempt)
-        : isNull(builds.github_run_attempt);
+    // run_attempt — does NOT wrongly reuse the prior attempt's build.
     const [existing] = await tx
       .select()
       .from(builds)
@@ -5016,7 +5002,7 @@ export async function createGithubActionsBuildWithinLimit(
         and(
           eq(builds.project_id, args.projectId),
           eq(builds.github_run_id, args.githubRunId),
-          attemptMatch,
+          eq(builds.github_run_attempt, args.githubRunAttempt),
         ),
       )
       .orderBy(
@@ -5077,7 +5063,7 @@ export async function createGithubActionsBuildWithinLimit(
         commit_sha: args.commitSha ?? null,
         branch: args.branch ?? null,
         github_run_id: args.githubRunId,
-        github_run_attempt: args.githubRunAttempt ?? null,
+        github_run_attempt: args.githubRunAttempt,
         logs_url: args.logsUrl ?? null,
       })
       .returning();
@@ -5500,8 +5486,9 @@ export async function upsertGitHubInstallation(
     .onConflictDoUpdate({
       target: githubInstallations.installation_id,
       set: {
-        // Only personal (account_type='User') installs carry an owner;
-        // organization installs always pass a null user. Preserve an
+        // Only personal (account_type='User') installs carry an owner. A
+        // personal account converted into an organization arrives here with the
+        // organization type, so it drops its owner. Otherwise preserve an
         // already-linked user_id when a webhook upsert arrives with no user
         // (install-before-signin can be backfilled later). When a user is
         // provided, adopt it ONLY if the row is unowned or already owned by the
@@ -5510,9 +5497,11 @@ export async function upsertGitHubInstallation(
         // would freeze repositories/status refreshes on the webhook re-upsert,
         // and `user_id = NULL` is never true.)
         user_id:
-          args.userId === undefined || args.userId === null
-            ? sql`${githubInstallations.user_id}`
-            : sql`CASE WHEN ${githubInstallations.user_id} IS NULL OR ${githubInstallations.user_id} = ${args.userId} THEN ${args.userId} ELSE ${githubInstallations.user_id} END`,
+          args.accountType === 'Organization'
+            ? null
+            : args.userId === undefined || args.userId === null
+              ? sql`${githubInstallations.user_id}`
+              : sql`CASE WHEN ${githubInstallations.user_id} IS NULL OR ${githubInstallations.user_id} = ${args.userId} THEN ${args.userId} ELSE ${githubInstallations.user_id} END`,
         account_login: args.accountLogin,
         account_id: args.accountId,
         account_type: args.accountType,
@@ -5742,15 +5731,14 @@ export async function getGitHubInstallationsByAccount(
  * app clock, so a skewed worker cannot mint a longer- or shorter-lived
  * membership than intended. A re-join hits the unique `(installation_id,
  * user_id)` index and refreshes `github_account_id`/`verified_at`/`expires_at`
- * in place (count stays 1). Tolerates a null `githubAccountId` (the
- * backstop/JOIN callers may not carry a caller account id).
+ * in place (count stays 1).
  */
 export async function upsertGitHubInstallationMember(
   db: Db,
   args: {
     installationId: string;
     userId: string;
-    githubAccountId: string | null;
+    githubAccountId: string;
     ttlSeconds: number;
   },
 ): Promise<GitHubInstallationMember> {
@@ -6012,17 +6000,14 @@ export async function getInstallationRevocationAt(
  * Batch revocation tombstones for `(installationIds, githubAccountId)` as a Map
  * installation_id → revoked_at-epoch-ms. Installs with no tombstone are simply
  * absent from the Map. Empty id list → empty Map (never emits `WHERE ... IN ()`).
- * A null/empty `githubAccountId` (a null-github artifact — e.g. a join_code with
- * no proven account id) also yields an empty Map: no tombstone can apply, and such
- * an artifact is deploy-inert anyway.
  */
 export async function getInstallationRevocationsForAccount(
   db: Db,
   installationIds: ReadonlyArray<string>,
-  githubAccountId: string | null,
+  githubAccountId: string,
 ): Promise<Map<string, number>> {
   const result = new Map<string, number>();
-  if (installationIds.length === 0 || !githubAccountId) {
+  if (installationIds.length === 0) {
     return result;
   }
   const rows = await db

@@ -123,7 +123,7 @@ type JoinState = {
 type JoinCode = {
   purpose: 'join';
   installationIds: Array<string>;
-  githubAccountId: string | null;
+  githubAccountId: string;
   codeChallenge: string;
   codeChallengeMethod: 'S256';
   // The moment GitHub access was PROVEN (the public callback ran). Compared
@@ -812,7 +812,13 @@ export const githubRoutes = new Hono<ApiEnv>()
     }
 
     const joinCode = await verifyLinkPayload<JoinCode>(body.join_code, context.env.JWT_SECRET);
-    if (!joinCode || joinCode.purpose !== 'join' || !Array.isArray(joinCode.installationIds)) {
+    if (
+      !joinCode ||
+      joinCode.purpose !== 'join' ||
+      !Array.isArray(joinCode.installationIds) ||
+      typeof joinCode.githubAccountId !== 'string' ||
+      joinCode.githubAccountId === ''
+    ) {
       return context.json({ error: 'invalid join_code' }, 400);
     }
     if (
@@ -856,9 +862,8 @@ export const githubRoutes = new Hono<ApiEnv>()
       // tombstones from the webhook payload even when no Void user existed yet.
       // A join_code minted AT OR BEFORE a revocation (iat <= revoked_at) is a
       // stale artifact a removed member is replaying — its installs are skipped
-      // below so membership is never resurrected. When `githubAccountId` is null
-      // the helper returns an empty Map (the membership would be deploy-inert
-      // anyway). Under the install-row lock above this is now race-safe, not
+      // below so membership is never resurrected. Under the install-row lock
+      // above this is now race-safe, not
       // merely best-effort; the connect route's in-tx recheck remains the deploy
       // gate.
       const revocations = await getInstallationRevocationsForAccount(
@@ -875,9 +880,9 @@ export const githubRoutes = new Hono<ApiEnv>()
           continue;
         }
         // The signed join_code lists only Organization installs (the callback's
-        // eligibility gate), and account_type is immutable, so every install here
-        // is an organization install with no owner. The installer joins like any
-        // other member.
+        // eligibility gate), and GitHub never converts an organization back into a
+        // personal account, so every install here is an organization install with
+        // no owner. The installer joins like any other member.
         //
         // Skip installs whose join_code predates a revocation (stale replay). A
         // legit re-join AFTER re-add mints a fresh join_code with iat > revoked_at,
@@ -1441,8 +1446,9 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
       // Org-share connect is Organization-only. Memberships are only ever written for
       // organization installs; this gate keeps a personal install unreachable through
       // membership even if one existed, with the SAME opaque 404 (never reveal the
-      // install exists / its type to a non-member). account_type is immutable, so the
-      // pre-lock row is authoritative (no locked re-read).
+      // install exists / its type to a non-member). GitHub never converts an
+      // organization back into a personal account, so the pre-lock row is
+      // authoritative (no locked re-read).
       if (installation.account_type !== 'Organization') {
         return context.json({ error: 'installation not found' }, 404);
       }
