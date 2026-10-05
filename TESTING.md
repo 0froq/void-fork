@@ -166,6 +166,14 @@ API integration fixtures reset their tables with one ordered SQL block. Use `cle
 than repeating per-table cleanup; it keeps foreign-key delete behavior and migration history
 intact in PGlite and PostgreSQL.
 
+Platform CI runs the candidate's PostgreSQL concurrency cases in a separate job. The selector
+finds API integration files that read `process.env.VOID_TEST_DATABASE_URL`, excluding mentions
+in comments or strings. Each selected file runs against its own database clone, with two files
+in flight, using the same bounded runner as schema compatibility. This exercises real locks
+without repeating the entire API suite. To run it locally, migrate a disposable loopback
+`void_schema_compat` database as `void_ci`, then set `COMPAT_DATABASE_URL` and run
+`node .github/scripts/postgres-concurrency-tests.ts`.
+
 Staging CI on main also runs the production schema-compatibility gate, so its failures are caught
 before tagging a release. The job copies the candidate's `.github/scripts/schema-compat-tests.ts` runner
 before checking out the deployed revision. It runs every deployed API test file against its own

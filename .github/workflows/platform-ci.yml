@@ -14,6 +14,7 @@ on:
       - '.github/scripts/production-baseline.ts'
       - '.github/scripts/schema-fixture.mjs'
       - '.github/scripts/schema-compat-tests.ts'
+      - '.github/scripts/postgres-concurrency-tests.ts'
   workflow_call:
     inputs:
       require-schema-compat:
@@ -88,6 +89,48 @@ jobs:
       - run: vp run build
       - run: vp run --filter './platform/packages/**' build
       - run: vp test run --project '${{ matrix.project }}*'
+
+  postgres-concurrency:
+    runs-on: ${{ github.repository == 'voidzero-dev/void' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      POSTGRES_USER: void_ci
+      POSTGRES_PASSWORD: void_ci_pass
+      POSTGRES_DB: void_schema_compat
+      COMPAT_DATABASE_URL: postgresql://void_ci:void_ci_pass@localhost:5432/void_schema_compat
+      TZ: UTC
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U $POSTGRES_USER"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@1b32467adbe183473499fd9d5d372c3ed9641754 # v1.18.0
+        with:
+          cache: true
+          node-version-file: .node-version
+      - run: vp run build
+      - run: vp run --filter './platform/packages/**' build
+      - name: Create the candidate PostgreSQL schema
+        run: vp run --filter @voidcloud/api migrate
+        env:
+          DATABASE_URL: ${{ env.COMPAT_DATABASE_URL }}
+      - name: Run candidate PostgreSQL concurrency tests
+        run: node .github/scripts/postgres-concurrency-tests.ts
 
   # Upgrade a populated previous schema, then run that immutable runtime's tests.
   # The prod branch can already be the candidate, so never use it as the baseline.
