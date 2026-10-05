@@ -45,28 +45,34 @@ describe('shouldCopyPlaygroundPath', () => {
   });
 });
 
-it('keeps copied manifests outside the actual workspace package glob during cleanup', () => {
+it('keeps scratch apps and copied manifests outside the actual workspace package globs', () => {
   const workspace = mkdtempSync(join(tmpdir(), 'void-isolated-playground-'));
   const source = join(workspace, 'playground', 'app');
   mkdirSync(source, { recursive: true });
   writeFileSync(join(source, 'package.json'), JSON.stringify({ name: 'original-app' }));
   writeFileSync(join(source, 'entry.ts'), 'export const marker = "original";');
+  const scratch = join(workspace, 'playground-local', 'ad-hoc');
+  mkdirSync(scratch, { recursive: true });
+  writeFileSync(join(scratch, 'package.json'), JSON.stringify({ name: 'scratch-app' }));
   const patterns = readFileSync(new URL('../../../../pnpm-workspace.yaml', import.meta.url), 'utf8')
+    .split('\n\n')[0]!
     .split('\n')
-    .flatMap((line) => line.match(/^ {2}- (playground-local\/\S+)$/)?.[1] ?? []);
-  expect(patterns).toEqual(['playground-local/*']);
+    .flatMap((line) => line.match(/^ {2}- (\S+)$/)?.[1] ?? []);
+  expect(patterns).toContain('playground/*');
   const first = createIsolatedPlayground(workspace, 'playground/app');
   const second = createIsolatedPlayground(workspace, 'playground/app');
   try {
     const manifests = () =>
-      patterns.flatMap((pattern) => globSync(`${pattern}/package.json`, { cwd: workspace }));
-    expect(manifests()).toEqual([]);
+      patterns
+        .flatMap((pattern) => globSync(`${pattern}/package.json`, { cwd: workspace }))
+        .map((path) => path.replaceAll('\\', '/'));
+    expect(manifests()).toEqual(['playground/app/package.json']);
     expect(readFileSync(join(first.root, 'entry.ts'), 'utf8')).toContain('original');
     expect(JSON.parse(readFileSync(join(first.root, 'package.json'), 'utf8')).name).not.toBe(
       JSON.parse(readFileSync(join(second.root, 'package.json'), 'utf8')).name,
     );
     first.cleanup();
-    expect(manifests()).toEqual([]);
+    expect(manifests()).toEqual(['playground/app/package.json']);
     expect(existsSync(join(second.root, 'package.json'))).toBe(true);
     expect(JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')).name).toBe(
       'original-app',

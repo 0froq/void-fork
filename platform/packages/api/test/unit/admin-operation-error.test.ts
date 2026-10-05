@@ -27,7 +27,9 @@ describe('admin operation rejection rendering', () => {
     const response = await app.request('/action', { method: 'POST' });
     expect(response.status).toBe(401);
     const html = await response.text();
-    expect(html).toMatch(/<a href="\/admin\/logout"[^>]*>[\s\S]*?Sign in again[\s\S]*?<\/a>/);
+    expect(html).toMatch(
+      /<a\b[^>]*\shref="\/admin\/logout"[^>]*>[\s\S]*?Sign in again[\s\S]*?<\/a>/,
+    );
   });
 
   it('leaves unexpected exceptions to the application error handler', async () => {

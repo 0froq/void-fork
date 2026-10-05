@@ -32,10 +32,10 @@
     "cross-spawn": "^7.0.6",
     "eslint-plugin-react-hooks": "^7.1.1",
     "playwright": "^1.63.0",
-    "rolldown": "^1.2.11",
+    "rolldown": "^1.2.12",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:"
   },
-  "packageManager": "pnpm@12.8.1"
+  "packageManager": "pnpm@12.9.1"
 }

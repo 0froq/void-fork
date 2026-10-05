@@ -4,7 +4,6 @@ packages:
   - platform
   - platform/packages/*
   - playground/*
-  - playground-local/*
 
 catalogMode: strict
 
@@ -27,18 +26,18 @@ catalog:
   # with `@types/node` under packages/void's `types: ["node", "@cloudflare/workers-types"]`
   # (Buffer loses its members; ~30 typecheck errors). Revisit when upstream drops those globals.
   '@cloudflare/workers-types': ^4.20260702.1
-  '@types/node': ^26.6.3
+  '@types/node': ^26.6.4
   typescript: 7.0.2
   '@voidzero-dev/vitepress-theme': ^5.0.7
   pathslash: ^0.1.0
   vite: npm:@voidzero-dev/vite-plus-core@1.0.0
   vite-plus: 1.0.0
-  vitest: 5.0.2
-  wrangler: 4.144.0
-  cf: 1.0.0-beta.9
+  vitest: 5.0.3
+  wrangler: 4.147.0
+  cf: 1.0.0-beta.12
   oauth4webapi: ^3.8.8
-  '@astryxdesign/core': 0.6.3
-  '@astryxdesign/theme-neutral': 0.6.3
+  '@astryxdesign/core': 0.6.5
+  '@astryxdesign/theme-neutral': 0.6.5
   '@stylexjs/stylex': 0.19.1
 
 catalogs:
@@ -46,25 +45,25 @@ catalogs:
     typescript: 6.0.3
   platform:
     '@cloudflare/workers-types': ^5.20260929.1
-    hono: 4.13.11
-    wrangler: ^4.144.0
+    hono: 4.13.13
+    wrangler: ^4.147.0
   sveltekit:
     typescript: 6.0.3
 
 packageExtensions:
-  '@analogjs/vite-plugin-angular@2.7.5':
+  '@analogjs/vite-plugin-angular@2.8.0':
     peerDependencies:
       typescript: '>=6.0 <6.1'
 
 overrides:
   # Keep Vite+'s pinned Vitest internals on the same patch as the runner.
-  '@vitest/browser': 5.0.2
-  '@vitest/browser-preview': 5.0.2
-  '@vitest/mocker': 5.0.2
-  '@vitest/pretty-format': 5.0.2
-  '@vitest/snapshot': 5.0.2
-  '@vitest/spy': 5.0.2
-  '@vitest/utils': 5.0.2
+  '@vitest/browser': 5.0.3
+  '@vitest/browser-preview': 5.0.3
+  '@vitest/mocker': 5.0.3
+  '@vitest/pretty-format': 5.0.3
+  '@vitest/snapshot': 5.0.3
+  '@vitest/spy': 5.0.3
+  '@vitest/utils': 5.0.3
   esbuild: ^0.28.2
   react-server-dom-webpack: 19.3.0
   vite@*: 'catalog:'
@@ -84,11 +83,11 @@ minimumReleaseAgeExclude:
   - react-fate
   - void
   - void-fate
-  # Required by cf beta 9; keep these exceptions limited to its exact dependency releases.
-  - '@cloudflare/build-output-utils@0.8.4'
-  - '@cloudflare/codemods@0.3.0'
-  - '@cloudflare/config@0.22.0'
-  - '@cloudflare/runtime-types@0.1.6'
+  # Required by cf beta 12; keep these exceptions limited to its exact dependency releases.
+  - '@cloudflare/build-output-utils@0.8.5'
+  - '@cloudflare/codemods@0.4.0'
+  - '@cloudflare/config@0.23.0'
+  - '@cloudflare/runtime-types@0.1.7'
   - '@cloudflare/workerd-darwin-64@1.20260930.2'
   - '@cloudflare/workerd-darwin-arm64@1.20260930.2'
   - '@cloudflare/workerd-linux-64@1.20260930.2'
@@ -96,3 +95,5 @@ minimumReleaseAgeExclude:
   - '@cloudflare/workerd-windows-64@1.20260930.2'
   - 'miniflare@5.20260930.0-alpha'
   - 'workerd@1.20260930.2'
+  - hono@4.13.13
+  - lucide-react@1.52.0
