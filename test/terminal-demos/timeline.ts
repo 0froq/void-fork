@@ -1,5 +1,7 @@
 export type TerminalTone = 'base' | 'muted' | 'blue' | 'green' | 'yellow' | 'red';
 
+export const playbackSpeeds = [0.75, 1, 1.5, 2] as const;
+
 export interface TerminalSegment {
   text: string;
   tone?: TerminalTone;

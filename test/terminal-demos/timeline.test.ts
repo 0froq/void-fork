@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { terminalDemos } from './demos.ts';
-import { PlaybackClock, terminalFrame, type TerminalDemo } from './timeline.ts';
+import { PlaybackClock, playbackSpeeds, terminalFrame, type TerminalDemo } from './timeline.ts';
 
 test('pause and speed changes preserve playback position without counting paused time', () => {
   const clock = new PlaybackClock(20000);
@@ -34,14 +34,20 @@ test('endpoints clamp and replay starts at the beginning', () => {
 
 test('seeking backwards restores transient prompt options and spinner states', () => {
   const demo = terminalDemos.find((item) => item.id === 'recover')!;
-  const intermediate = terminalFrame(demo, 7000);
+  const selectionTime = demo.events.find(
+    (event) => event.type === 'write' && event.line.id === 'option',
+  )!.at;
+  const rollbackTime = demo.events.find(
+    (event) => event.type === 'write' && event.line.id === 'rollback',
+  )!.at;
+  const intermediate = terminalFrame(demo, selectionTime);
   assert.ok(intermediate.some((line) => line.id === 'option'));
-  const rolling = terminalFrame(demo, 9000);
+  const rolling = terminalFrame(demo, rollbackTime);
   assert.ok(!rolling.some((line) => line.id === 'option'));
   assert.equal(rolling.find((line) => line.id === 'rollback')?.spinner, true);
   const completed = terminalFrame(demo, demo.duration);
   assert.ok(completed.every((line) => !line.spinner && !line.caret));
-  assert.deepEqual(terminalFrame(demo, 7000), intermediate);
+  assert.deepEqual(terminalFrame(demo, selectionTime), intermediate);
 });
 
 test('typed Unicode characters are never split and finish without a caret', () => {
@@ -73,6 +79,20 @@ test('all demo timelines finish, stay ordered, and render complete aligned boxes
       }
       if (text.startsWith('│') || text.startsWith('╰')) {
         assert.equal(Array.from(text).length, width, `${demo.id}: ${text}`);
+      }
+    }
+  }
+});
+
+test('every demo finishes within ten seconds at every available playback speed', () => {
+  for (const demo of terminalDemos) {
+    for (const speed of playbackSpeeds) {
+      assert.ok(demo.duration / speed <= 10000, `${demo.id} at ${speed}×`);
+    }
+    for (const event of demo.events) {
+      if (event.type === 'type') {
+        const nextEvent = demo.events.find((next) => next.at > event.at);
+        assert.ok(event.at + event.duration <= (nextEvent?.at ?? demo.duration), event.id);
       }
     }
   }

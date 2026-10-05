@@ -3,7 +3,7 @@ import { Icon } from '@iconify/vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { terminalDemos } from './demos.ts';
 import TerminalPlayer from './TerminalPlayer.vue';
-import { terminalFrame } from './timeline.ts';
+import { playbackSpeeds, terminalFrame } from './timeline.ts';
 
 const props = withDefaults(defineProps<{ studio?: boolean }>(), { studio: false });
 const selected = ref('deploy');
@@ -133,7 +133,7 @@ onMounted(() => {
       selected.value = requested!;
     }
     const rate = Number(params.get('speed'));
-    if ([0.75, 1, 1.5, 2].includes(rate)) {
+    if (playbackSpeeds.some((allowed) => allowed === rate)) {
       speed.value = rate;
     }
     capture.value = params.get('capture') === '1';
@@ -235,10 +235,9 @@ onBeforeUnmount(() => {
           <div class="demo-settings">
             <label
               >Speed<select v-model="speed" aria-label="Playback speed" @change="syncUrl">
-                <option :value="0.75">0.75×</option>
-                <option :value="1">1×</option>
-                <option :value="1.5">1.5×</option>
-                <option :value="2">2×</option>
+                <option v-for="rate in playbackSpeeds" :key="rate" :value="rate">
+                  {{ rate }}×
+                </option>
               </select></label
             >
             <label class="demo-loop"

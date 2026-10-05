@@ -6,7 +6,7 @@ Run `vp dev --config test/terminal-demos/vite.config.ts` from the repository roo
 
 `TerminalDemos.vue` provides the recording controls. `TerminalPlayer.vue` can play one `TerminalDemo` directly. The player uses a single animation clock, pauses offscreen or in a hidden tab, and shows a static final frame for reduced motion. Explicit Play still allows a visitor to run a demo.
 
-The studio includes pause, replay, scrubbing, a final-frame button, 0.75×–2× speed, and an optional cycle through all three flows. Clean capture hides the controls and starts the selected demo after three seconds. Use CleanShot's area recording on the terminal. `R` replays with the same lead-in, `Space` pauses/resumes, and `Esc` exits clean capture. Controls are outside the recording area.
+The studio includes pause, replay, scrubbing, a final-frame button, 0.75×–2× speed, and an optional cycle through all three flows. Each animation lasts 7.5 seconds at 1× and at most ten seconds at the slowest setting. Clean capture hides the controls and starts the selected demo after three seconds. Use CleanShot's area recording on the terminal. `R` replays with the same lead-in, `Space` pauses/resumes, and `Esc` exits clean capture. Controls are outside the recording area.
 
 Links preserve `?demo=deploy|install|recover&speed=1|1.5|2|0.75`. Add `&capture=1` to open just the terminal. The demos are local scripted output; they make no CLI calls and require no Cloudflare credentials.
 
