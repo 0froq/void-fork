@@ -557,9 +557,8 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
     }
     if (attempt.purpose === 'test' || attempt.purpose === 'link') {
       await db.transaction(async (transaction) => {
-        const tx = transaction as unknown as Db;
-        await lockAuthSettings(tx);
-        const latest = await readLoginConnection(tx, connection.id);
+        await lockAuthSettings(transaction);
+        const latest = await readLoginConnection(transaction, connection.id);
         const actor = saved.actor;
         if (
           !actor ||
@@ -572,7 +571,7 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
           !(saved.recovery
             ? attempt.purpose === 'test' &&
               (await validateRecoveryTest(
-                tx,
+                transaction,
                 context.env,
                 saved.recovery,
                 attempt,
@@ -580,7 +579,7 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
                 actor.userId,
               ))
             : await validateHumanSession(
-                tx,
+                transaction,
                 { sub: actor.userId, sid: actor.sessionId, aud: actor.audience },
                 currentCompany,
               ))
@@ -592,9 +591,12 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
           );
         }
         if (attempt.purpose === 'link') {
-          await requireRecentAuthentication(tx, { ...actor, companyIdentity: currentCompany });
+          await requireRecentAuthentication(transaction, {
+            ...actor,
+            companyIdentity: currentCompany,
+          });
         }
-        await tx.insert(platformLoginTests).values({
+        await transaction.insert(platformLoginTests).values({
           id: saved.testId,
           user_id: actor.userId,
           connection_id: connection.id,

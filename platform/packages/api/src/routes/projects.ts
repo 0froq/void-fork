@@ -898,17 +898,11 @@ const app = new Hono<ApiEnv>()
       const minted = await context.get('db').transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${project.id} FOR SHARE`);
         await tx.execute(drizzleSql`SELECT id FROM builds WHERE id = ${deployBuild} FOR UPDATE`);
-        const txDb = tx as unknown as Db;
-        const lockedAccess = await requireProjectRouteCapability(
-          context,
-          project.id,
-          'deploy',
-          txDb,
-        );
+        const lockedAccess = await requireProjectRouteCapability(context, project.id, 'deploy', tx);
         if (lockedAccess instanceof Response) {
           return lockedAccess;
         }
-        const boundBuild = await getBuild(txDb, deployBuild);
+        const boundBuild = await getBuild(tx, deployBuild);
         if (
           lockedAccess.project.status === 'deleting' ||
           !boundBuild ||
@@ -978,18 +972,17 @@ const app = new Hono<ApiEnv>()
 
     return context.get('db').transaction(async (tx) => {
       await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-      const txDb = tx as unknown as Db;
-      const lockedAccess = await requireProjectRouteCapability(context, projectId, 'deploy', txDb);
+      const lockedAccess = await requireProjectRouteCapability(context, projectId, 'deploy', tx);
       if (lockedAccess instanceof Response) {
         return lockedAccess;
       }
 
-      const deployment = await getDeployment(txDb, deploymentId);
+      const deployment = await getDeployment(tx, deploymentId);
       if (!deployment || deployment.project_id !== projectId) {
         return context.json({ error: 'deployment not found' }, 404);
       }
 
-      const canceling = await cancelDeployment(txDb, deploymentId, 'canceled by user');
+      const canceling = await cancelDeployment(tx, deploymentId, 'canceled by user');
       if (!canceling) {
         return context.json(
           { error: 'deployment already completed', status: deployment.status },
@@ -1099,13 +1092,7 @@ const app = new Hono<ApiEnv>()
     try {
       const rollbackLease = await context.get('db').transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-        const txDb = tx as unknown as Db;
-        const lockedAccess = await requireProjectRouteCapability(
-          context,
-          projectId,
-          'deploy',
-          txDb,
-        );
+        const lockedAccess = await requireProjectRouteCapability(context, projectId, 'deploy', tx);
         if (lockedAccess instanceof Response) {
           const denied = await getProjectAccessErrorBody(lockedAccess);
           throw new RollbackError(
@@ -1120,18 +1107,18 @@ const app = new Hono<ApiEnv>()
           throw new RollbackError(409, 'project is being deleted');
         }
         try {
-          await requireNormalizedProject(txDb, lockedProject);
+          await requireNormalizedProject(tx, lockedProject);
         } catch (error) {
           if (error instanceof ProjectRequiresNormalizationError) {
             throw new RollbackError(409, error.code, undefined, error.message);
           }
           throw error;
         }
-        const pendingOperation = await getPendingDeploymentOperation(txDb, projectId);
+        const pendingOperation = await getPendingDeploymentOperation(tx, projectId);
         if (pendingOperation) {
           throw new RollbackError(409, `deploy in progress: ${pendingOperation.id}`);
         }
-        const activeDeploy = await getActiveDeployment(txDb, projectId);
+        const activeDeploy = await getActiveDeployment(tx, projectId);
         if (activeDeploy) {
           if (activeDeploy.source === 'rollback-lease' && activeDeploy.manifest) {
             try {
@@ -1160,7 +1147,7 @@ const app = new Hono<ApiEnv>()
                   throw new RollbackError(409, `deploy in progress: ${activeDeploy.id}`);
                 }
                 const migrationDiff = lease.migrationDiff as Array<string>;
-                const released = await deleteRollbackLease(txDb, activeDeploy.id, lease.ownerId);
+                const released = await deleteRollbackLease(tx, activeDeploy.id, lease.ownerId);
                 if (!released) {
                   throw new RollbackError(409, `deploy in progress: ${activeDeploy.id}`);
                 }
@@ -1172,7 +1159,7 @@ const app = new Hono<ApiEnv>()
                 (lease.state === 'retryable' || staleRunningLease)
               ) {
                 const adopted = await updateRollbackLeaseState(
-                  txDb,
+                  tx,
                   activeDeploy.id,
                   deploymentId,
                   'running',
@@ -1191,7 +1178,7 @@ const app = new Hono<ApiEnv>()
           throw new RollbackError(409, `deploy in progress: ${activeDeploy.id}`);
         }
         const lease = await createDeployment(
-          txDb,
+          tx,
           projectId,
           JSON.stringify({
             version: 1,
@@ -1218,12 +1205,11 @@ const app = new Hono<ApiEnv>()
           // first statement in the locked section so serialization is
           // established before any subsequent read or write.
           await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-          const txDb = tx as unknown as Db;
           const lockedAccess = await requireProjectRouteCapability(
             context,
             projectId,
             'deploy',
-            txDb,
+            tx,
           );
           if (lockedAccess instanceof Response) {
             const denied = await getProjectAccessErrorBody(lockedAccess);
@@ -1239,7 +1225,7 @@ const app = new Hono<ApiEnv>()
           // rewritten by a concurrent /rename; manifest and retained are
           // stable in practice but re-reading is cheap and removes every
           // time-of-check / time-of-use hazard on this row.
-          const target = await getDeployment(txDb, deploymentId);
+          const target = await getDeployment(tx, deploymentId);
           if (!target || target.project_id !== projectId) {
             throw new RollbackError(404, 'deployment not found');
           }
@@ -1291,11 +1277,11 @@ const app = new Hono<ApiEnv>()
           if (lockedProject.status === 'deleting') {
             throw new RollbackError(409, 'project is being deleted');
           }
-          const pendingOperation = await getPendingDeploymentOperation(txDb, projectId);
+          const pendingOperation = await getPendingDeploymentOperation(tx, projectId);
           if (pendingOperation) {
             throw new RollbackError(409, `deploy in progress: ${pendingOperation.id}`);
           }
-          const activeDeploy = await getActiveDeployment(txDb, projectId);
+          const activeDeploy = await getActiveDeployment(tx, projectId);
           let ownsRollbackLease = false;
           if (activeDeploy && activeDeploy.id === rollbackLeaseId && activeDeploy.manifest) {
             try {
@@ -1316,9 +1302,9 @@ const app = new Hono<ApiEnv>()
             ? JSON.parse(target.applied_migrations)
             : [];
 
-          const projectMigrationNames = await getProjectMigrationNames(txDb, projectId);
+          const projectMigrationNames = await getProjectMigrationNames(tx, projectId);
           const currentActive = lockedProject.active_deployment_id
-            ? await getDeployment(txDb, lockedProject.active_deployment_id)
+            ? await getDeployment(tx, lockedProject.active_deployment_id)
             : null;
           const currentMigrations: Array<string> =
             projectMigrationNames.length > 0
@@ -1385,7 +1371,7 @@ const app = new Hono<ApiEnv>()
           const workerName = getProjectDeploymentWorkerName(lockedProject.slug, target.id);
           const existingRouting = await context.env.ROUTING.get(lockedProject.slug);
           const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
-          const zeroTrust = await resolveProjectZeroTrustRouting(txDb, projectId).catch(
+          const zeroTrust = await resolveProjectZeroTrustRouting(tx, projectId).catch(
             (error: unknown) => {
               const message = zeroTrustNotReadyMessage(error);
               throw message
@@ -1454,8 +1440,8 @@ const app = new Hono<ApiEnv>()
 
           // PG flip FIRST. If this throws, no external state is mutated
           // yet — the tx rolls back cleanly and the caller can retry.
-          await updateProjectType(txDb, projectId, targetType);
-          await setActiveDeployment(txDb, projectId, target.id);
+          await updateProjectType(tx, projectId, targetType);
+          await setActiveDeployment(tx, projectId, target.id);
 
           const snapshottedRoutingKeys = new Set<string>();
           const snapshotRoutingKey = async (key: string): Promise<void> => {
@@ -1544,7 +1530,7 @@ const app = new Hono<ApiEnv>()
             }
 
             // Update custom domain routing
-            const projectDomains = await getDomainsByProjectId(txDb, projectId);
+            const projectDomains = await getDomainsByProjectId(tx, projectId);
             for (const domain of projectDomains) {
               if (domain.status === 'active') {
                 await putRouting(`domain:${domain.hostname}`, routingJson);
@@ -1568,8 +1554,8 @@ const app = new Hono<ApiEnv>()
             // excluded, so rollback does not clobber KV routes an in-flight
             // deploy is provisioning.
             const [activatedDeployments, terminalFailedDeployments] = await Promise.all([
-              getActivatedDeployments(txDb, projectId),
-              getTerminalFailedDeployments(txDb, projectId),
+              getActivatedDeployments(tx, projectId),
+              getTerminalFailedDeployments(tx, projectId),
             ]);
             const sweepQueueNames = new Set<string>();
             const unionSource = [...activatedDeployments, ...terminalFailedDeployments];
@@ -1596,7 +1582,7 @@ const app = new Hono<ApiEnv>()
             for (const name of targetQueueNames) {
               sweepQueueNames.add(name);
             }
-            const queueResources = await getProjectResources(txDb, projectId);
+            const queueResources = await getProjectResources(tx, projectId);
             const dispatchWorkerName = context.env.DISPATCH_WORKER_NAME ?? 'void-dispatch';
             const queueResourceByName = new Map(
               queueResources
@@ -1705,7 +1691,7 @@ const app = new Hono<ApiEnv>()
           // `active_deployment_id` alone is insufficient when the requested
           // rollback target was already active before this transaction began.
           const witnessed = await updateRollbackLeaseState(
-            txDb,
+            tx,
             rollbackLeaseId!,
             deploymentId,
             'applied',
@@ -1771,8 +1757,7 @@ const app = new Hono<ApiEnv>()
               await tx.execute(
                 drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
               );
-              const txDb = tx as unknown as Db;
-              const activeLease = await getActiveDeployment(txDb, projectId);
+              const activeLease = await getActiveDeployment(tx, projectId);
               let stillOwnsLease = false;
               if (activeLease && activeLease.id === rollbackLeaseId && activeLease.manifest) {
                 try {
@@ -1785,7 +1770,7 @@ const app = new Hono<ApiEnv>()
               if (!stillOwnsLease) {
                 return;
               }
-              const zeroTrust = await resolveProjectZeroTrustRoutingForPublication(txDb, projectId);
+              const zeroTrust = await resolveProjectZeroTrustRoutingForPublication(tx, projectId);
               for (const undo of [...externalUndo].reverse()) {
                 try {
                   await undo(zeroTrust);
@@ -1813,7 +1798,7 @@ const app = new Hono<ApiEnv>()
               } catch (compensationError) {
                 compensationErrors.push(compensationError);
               }
-              for (const domain of await getDomainsByProjectId(txDb, projectId)) {
+              for (const domain of await getDomainsByProjectId(tx, projectId)) {
                 try {
                   if (domain.status === 'active' && restoredProjectRouting !== null) {
                     await context.env.ROUTING.put(
@@ -2107,7 +2092,6 @@ const app = new Hono<ApiEnv>()
     // which would leave D1 and pg permanently diverged.
     try {
       const outcome = await context.get('db').transaction(async (tx) => {
-        const txDb = tx as unknown as Db;
         // Per-project row lock. Must be the first statement so all
         // subsequent reads/writes serialize against any concurrent
         // /apply, /rename, or /rollback holding the same row.
@@ -2116,7 +2100,7 @@ const app = new Hono<ApiEnv>()
           context,
           projectId,
           'configure',
-          txDb,
+          tx,
         );
         if (lockedAccess instanceof Response) {
           return {
@@ -2125,7 +2109,7 @@ const app = new Hono<ApiEnv>()
           };
         }
 
-        const resources = await getProjectResources(txDb, projectId);
+        const resources = await getProjectResources(tx, projectId);
         const d1Resource = resources.find((r) => r.type === 'd1');
         if (!d1Resource) {
           return { status: 400 as const, body: { error: 'no D1 database found for this project' } };
@@ -2189,14 +2173,14 @@ const app = new Hono<ApiEnv>()
         const effectiveNames = [...result.applied, ...result.skipped];
         if (effectiveNames.length > 0) {
           await appendProjectMigrations(
-            txDb,
+            tx,
             projectId,
             effectiveNames,
             locked?.active_deployment_id ?? undefined,
           );
         }
         if (effectiveNames.length > 0 && locked?.active_deployment_id) {
-          await appendAppliedMigrations(txDb, locked.active_deployment_id, effectiveNames);
+          await appendAppliedMigrations(tx, locked.active_deployment_id, effectiveNames);
         }
 
         if (result.failed) {
@@ -2304,7 +2288,6 @@ const app = new Hono<ApiEnv>()
     // name to pg.
     try {
       const outcome = await context.get('db').transaction(async (tx) => {
-        const txDb = tx as unknown as Db;
         // Per-project row lock. Must be the first statement so all
         // subsequent reads/writes serialize against any concurrent
         // /apply, /rename, or /rollback holding the same row.
@@ -2313,7 +2296,7 @@ const app = new Hono<ApiEnv>()
           context,
           projectId,
           'configure',
-          txDb,
+          tx,
         );
         if (lockedAccess instanceof Response) {
           return {
@@ -2325,7 +2308,7 @@ const app = new Hono<ApiEnv>()
           };
         }
 
-        const resources = await getProjectResources(txDb, projectId);
+        const resources = await getProjectResources(tx, projectId);
         const d1Resource = resources.find((r) => r.type === 'd1');
         if (!d1Resource) {
           return { status: 400 as const, body: { error: 'no D1 database found for this project' } };
@@ -2393,10 +2376,10 @@ const app = new Hono<ApiEnv>()
             // row is durable proof that this exact (project_id, from, to)
             // rename was already committed here — which fat-finger
             // requests will never have.
-            const stalePg = await activeDeploymentContainsMigration(txDb, projectId, from);
+            const stalePg = await activeDeploymentContainsMigration(tx, projectId, from);
             const auditLogged = stalePg
               ? false
-              : await migrationRenameExists(txDb, projectId, from, to);
+              : await migrationRenameExists(tx, projectId, from, to);
             if (!stalePg && !auditLogged) {
               return {
                 status: 400 as const,
@@ -2557,12 +2540,12 @@ const app = new Hono<ApiEnv>()
         // same locked tx as the heal/record, so a rollback unwinds all
         // three together.
         if (committed.length > 0) {
-          await renameProjectMigrations(txDb, projectId, committed);
-          await renameAppliedMigrationsForProject(txDb, projectId, committed);
+          await renameProjectMigrations(tx, projectId, committed);
+          await renameAppliedMigrationsForProject(tx, projectId, committed);
           for (const { from } of committed) {
-            await invalidateMigrationRenamesForOldName(txDb, projectId, from);
+            await invalidateMigrationRenamesForOldName(tx, projectId, from);
           }
-          await recordMigrationRenames(txDb, projectId, committed);
+          await recordMigrationRenames(tx, projectId, committed);
         }
 
         if (pairFailure) {
@@ -3039,12 +3022,11 @@ const app = new Hono<ApiEnv>()
     try {
       const lockedResponse = await context.get('db').transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-        const txDb = tx as unknown as Db;
         const lockedAccess = await requireProjectRouteCapability(
           context,
           projectId,
           'configure',
-          txDb,
+          tx,
         );
         if (lockedAccess instanceof Response) {
           return lockedAccess;
@@ -3055,7 +3037,7 @@ const app = new Hono<ApiEnv>()
 
         // Re-read after acquiring the lock. Membership changes, teardown, and
         // a competing database provision all serialize on this project row.
-        const lockedResources = await getProjectResources(txDb, projectId);
+        const lockedResources = await getProjectResources(tx, projectId);
         if (lockedResources.some((resource) => resource.type === 'hyperdrive')) {
           return context.json(
             { error: 'Hyperdrive already provisioned. Use PUT /database-url to update.' },
@@ -3115,13 +3097,13 @@ const app = new Hono<ApiEnv>()
           // COMMIT fails, the outer catch removes a Hyperdrive we created so
           // no untracked CF object is left behind.
           await upsertProjectDatabaseUrl(
-            txDb,
+            tx,
             projectId,
             encrypted.ciphertext,
             encrypted.iv,
             encrypted.keyVersion,
           );
-          await createResource(txDb, projectId, 'hyperdrive', hyperdriveId, 'HYPERDRIVE');
+          await createResource(tx, projectId, 'hyperdrive', hyperdriveId, 'HYPERDRIVE');
         } catch (error) {
           throw new DatabaseUrlPersistenceError(error);
         }
@@ -3181,12 +3163,11 @@ const app = new Hono<ApiEnv>()
     try {
       const lockedResponse = await context.get('db').transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-        const txDb = tx as unknown as Db;
         const lockedAccess = await requireProjectRouteCapability(
           context,
           projectId,
           'configure',
-          txDb,
+          tx,
         );
         if (lockedAccess instanceof Response) {
           return lockedAccess;
@@ -3198,7 +3179,7 @@ const app = new Hono<ApiEnv>()
         // Resolve the resource only after taking the lock. This prevents two
         // creates and ensures a downgrade/removal is authoritative before any
         // live Hyperdrive update is sent to Cloudflare.
-        const lockedResources = await getProjectResources(txDb, projectId);
+        const lockedResources = await getProjectResources(tx, projectId);
         const lockedHyperdrive = lockedResources.find((resource) => resource.type === 'hyperdrive');
         if (lockedHyperdrive) {
           try {
@@ -3262,7 +3243,7 @@ const app = new Hono<ApiEnv>()
             }
           }
           try {
-            await createResource(txDb, projectId, 'hyperdrive', hyperdriveId, 'HYPERDRIVE');
+            await createResource(tx, projectId, 'hyperdrive', hyperdriveId, 'HYPERDRIVE');
           } catch (error) {
             throw new DatabaseUrlPersistenceError(error);
           }
@@ -3270,7 +3251,7 @@ const app = new Hono<ApiEnv>()
 
         try {
           await upsertProjectDatabaseUrl(
-            txDb,
+            tx,
             projectId,
             encrypted.ciphertext,
             encrypted.iv,

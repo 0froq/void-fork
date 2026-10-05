@@ -22,8 +22,7 @@ export async function updateUserRevokingInheritedDestinations(
 
   await db.transaction(async (tx) => {
     await lockEmailPolicy(tx);
-    const txDb = tx as unknown as Db;
-    await updateUser(txDb, userId, login, nextEmail);
-    await revokeOwnerVerifiedDestinationsForUserChange(txDb, userId, previousEmail);
+    await updateUser(tx, userId, login, nextEmail);
+    await revokeOwnerVerifiedDestinationsForUserChange(tx, userId, previousEmail);
   });
 }

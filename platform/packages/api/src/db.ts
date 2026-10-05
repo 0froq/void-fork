@@ -18,7 +18,7 @@ import {
   sql,
   getTableColumns,
 } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/node-postgres';
+import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { alias } from 'drizzle-orm/pg-core';
 import { ACTIVE_BUILD_STATUSES } from './build-status.ts';
 export { ACTIVE_BUILD_STATUSES } from './build-status.ts';
@@ -95,7 +95,8 @@ import type {
 export function createDb(connectionString: string) {
   return drizzle(connectionString, { schema });
 }
-export type Db = ReturnType<typeof createDb>;
+/** Query surface shared by database clients and transaction handles. */
+export type Db = NodePgDatabase<typeof schema>;
 /** The transaction handle inside `db.transaction` — same query surface, savepoint-nested. */
 export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 export type DbOrTx = Db | Tx;
@@ -205,12 +206,11 @@ export async function bootstrapPlatformAdmin(
     return null;
   }
   return db.transaction(async (tx) => {
-    const txDb = tx as unknown as Db;
     let user: User;
     try {
       // Share the first-user lock and identity check with normal signup. Keep
       // the user and OAuth identity in one transaction so neither can be orphaned.
-      user = await createUserForPlatform(txDb, provider, providerId, login, email, installationId, {
+      user = await createUserForPlatform(tx, provider, providerId, login, email, installationId, {
         additionalSignupAllowed: false,
         bootstrapGitHubId,
       });
@@ -220,9 +220,9 @@ export async function bootstrapPlatformAdmin(
       }
       // A concurrent dashboard/CLI login may have created the owner after the
       // callback's initial lookup. Re-read under the lock, never promote a user.
-      return getUserByOAuthAccount(txDb, provider, providerId);
+      return getUserByOAuthAccount(tx, provider, providerId);
     }
-    await createOAuthAccount(txDb, user.id, provider, providerId);
+    await createOAuthAccount(tx, user.id, provider, providerId);
     return user;
   });
 }
@@ -364,7 +364,6 @@ export async function linkGitHubIdentity(
 ): Promise<'linked' | 'already_linked'> {
   try {
     return await db.transaction(async (tx) => {
-      const txDb = tx as unknown as Db;
       // Serialize concurrent same-user links (see doc comment). Mirrors the
       // deploy/build per-user FOR UPDATE pattern.
       await tx
@@ -374,7 +373,7 @@ export async function linkGitHubIdentity(
         .for('update')
         .limit(1);
 
-      const owner = await getUserByOAuthAccount(txDb, 'github', providerId);
+      const owner = await getUserByOAuthAccount(tx, 'github', providerId);
       if (owner) {
         if (owner.id === userId) {
           return 'already_linked';
@@ -385,7 +384,7 @@ export async function linkGitHubIdentity(
       // Enforce one github identity per Void account: a pre-existing github row
       // for this user must be a DIFFERENT provider_id (the same-id case is the
       // `owner.id === userId` short-circuit above), so reject.
-      const existing = await txDb
+      const existing = await tx
         .select({ providerId: oauthAccounts.provider_id })
         .from(oauthAccounts)
         .where(and(eq(oauthAccounts.user_id, userId), eq(oauthAccounts.provider, 'github')))
@@ -394,7 +393,7 @@ export async function linkGitHubIdentity(
         throw new GitHubIdentityAlreadyLinkedError();
       }
 
-      await createOAuthAccount(txDb, userId, 'github', providerId);
+      await createOAuthAccount(tx, userId, 'github', providerId);
       return 'linked';
     });
   } catch (error) {
@@ -691,13 +690,12 @@ export async function addProjectMember(
   },
 ): Promise<ProjectMember> {
   return db.transaction(async (tx) => {
-    const txDb = tx as unknown as Db;
-    const project = await lockProject(txDb, args.projectId);
-    await requireLockedMembersCapability(txDb, project, args.actorUserId, args.platformAdmin);
+    const project = await lockProject(tx, args.projectId);
+    await requireLockedMembersCapability(tx, project, args.actorUserId, args.platformAdmin);
     if (project.user_id === args.subjectUserId) {
       throw new ProjectTeamMutationError('owner-conflict');
     }
-    const [target] = await txDb
+    const [target] = await tx
       .select({ id: users.id })
       .from(users)
       .where(eq(users.id, args.subjectUserId))
@@ -706,13 +704,13 @@ export async function addProjectMember(
     if (!target) {
       throw new ProjectTeamMutationError('target-user-not-found');
     }
-    if (await getProjectMember(txDb, args.projectId, args.subjectUserId)) {
+    if (await getProjectMember(tx, args.projectId, args.subjectUserId)) {
       throw new ProjectTeamMutationError('member-conflict');
     }
 
     // A direct grant supersedes an invitation. The project lock also serializes
     // this with an attempt to accept that invitation.
-    const [pending] = await txDb
+    const [pending] = await tx
       .select()
       .from(projectInvitations)
       .where(
@@ -725,11 +723,11 @@ export async function addProjectMember(
       .for('update')
       .limit(1);
     if (pending) {
-      await txDb
+      await tx
         .update(projectInvitations)
         .set({ status: 'revoked', revoked_at: sql`now()`, revoked_by_user_id: args.actorUserId })
         .where(eq(projectInvitations.id, pending.id));
-      await createProjectAccessEvent(txDb, {
+      await createProjectAccessEvent(tx, {
         projectId: args.projectId,
         actorUserId: args.actorUserId,
         subjectUserId: args.subjectUserId,
@@ -739,7 +737,7 @@ export async function addProjectMember(
       });
     }
 
-    const [member] = await txDb
+    const [member] = await tx
       .insert(projectMembers)
       .values({
         project_id: args.projectId,
@@ -748,7 +746,7 @@ export async function addProjectMember(
         added_by_user_id: args.actorUserId,
       })
       .returning();
-    await createProjectAccessEvent(txDb, {
+    await createProjectAccessEvent(tx, {
       projectId: args.projectId,
       actorUserId: args.actorUserId,
       subjectUserId: args.subjectUserId,
@@ -770,20 +768,19 @@ export async function setProjectMemberRole(
   },
 ): Promise<{ member: ProjectMember; cancelledBuilds: ReadonlyArray<TerminatedBuild> }> {
   return db.transaction(async (tx) => {
-    const txDb = tx as unknown as Db;
-    const project = await lockProject(txDb, args.projectId);
-    await requireLockedMembersCapability(txDb, project, args.actorUserId, args.platformAdmin);
+    const project = await lockProject(tx, args.projectId);
+    await requireLockedMembersCapability(tx, project, args.actorUserId, args.platformAdmin);
     if (project.user_id === args.subjectUserId) {
       throw new ProjectTeamMutationError('owner-conflict');
     }
-    const current = await getProjectMember(txDb, args.projectId, args.subjectUserId);
+    const current = await getProjectMember(tx, args.projectId, args.subjectUserId);
     if (!current) {
       throw new ProjectTeamMutationError('member-not-found');
     }
     if (current.role === args.role) {
       return { member: current, cancelledBuilds: [] };
     }
-    const [member] = await txDb
+    const [member] = await tx
       .update(projectMembers)
       .set({ role: args.role, updated_at: sql`now()` })
       .where(
@@ -793,7 +790,7 @@ export async function setProjectMemberRole(
         ),
       )
       .returning();
-    await createProjectAccessEvent(txDb, {
+    await createProjectAccessEvent(tx, {
       projectId: args.projectId,
       actorUserId: args.actorUserId,
       subjectUserId: args.subjectUserId,
@@ -805,7 +802,7 @@ export async function setProjectMemberRole(
       args.role === 'admin'
         ? []
         : await invalidateGitHubConnectionAuthorizedBy(
-            txDb,
+            tx,
             args.projectId,
             args.subjectUserId,
             'github connection authorizer lost admin access',
@@ -819,21 +816,20 @@ export async function removeProjectMember(
   args: { projectId: string; subjectUserId: string; actorUserId: string; platformAdmin?: boolean },
 ): Promise<{ cancelledBuilds: ReadonlyArray<TerminatedBuild> }> {
   return db.transaction(async (tx) => {
-    const txDb = tx as unknown as Db;
-    const project = await lockProject(txDb, args.projectId);
+    const project = await lockProject(tx, args.projectId);
     if (project.user_id === args.subjectUserId) {
       throw new ProjectTeamMutationError('owner-conflict');
     }
-    const current = await getProjectMember(txDb, args.projectId, args.subjectUserId);
+    const current = await getProjectMember(tx, args.projectId, args.subjectUserId);
     if (!current) {
       throw new ProjectTeamMutationError('member-not-found');
     }
     if (args.platformAdmin || args.actorUserId !== args.subjectUserId) {
-      await requireLockedMembersCapability(txDb, project, args.actorUserId, args.platformAdmin);
+      await requireLockedMembersCapability(tx, project, args.actorUserId, args.platformAdmin);
     } else {
-      await requireLockedProjectOwnerActive(txDb, project);
+      await requireLockedProjectOwnerActive(tx, project);
     }
-    const [member] = await txDb
+    const [member] = await tx
       .delete(projectMembers)
       .where(
         and(
@@ -845,7 +841,7 @@ export async function removeProjectMember(
     if (!member) {
       throw new ProjectTeamMutationError('member-not-found');
     }
-    await createProjectAccessEvent(txDb, {
+    await createProjectAccessEvent(tx, {
       projectId: args.projectId,
       actorUserId: args.actorUserId,
       subjectUserId: args.subjectUserId,
@@ -854,7 +850,7 @@ export async function removeProjectMember(
       previousRole: member.role,
     });
     const cancelledBuilds = await invalidateGitHubConnectionAuthorizedBy(
-      txDb,
+      tx,
       args.projectId,
       args.subjectUserId,
       'github connection authorizer removed from project',
@@ -970,9 +966,8 @@ export async function createOrRefreshProjectInvitation(
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
   return db.transaction(async (tx) => {
-    const txDb = tx as unknown as Db;
-    const project = await lockProject(txDb, args.projectId);
-    const lockedUsers = await txDb
+    const project = await lockProject(tx, args.projectId);
+    const lockedUsers = await tx
       .select()
       .from(users)
       .where(inArray(users.id, [...new Set([project.user_id, target.id])].sort()))
@@ -988,7 +983,7 @@ export async function createOrRefreshProjectInvitation(
       throw new ProjectTeamMutationError('owner-suspended');
     }
     if (!args.platformAdmin && project.user_id !== args.actorUserId) {
-      const actorMember = await getProjectMember(txDb, project.id, args.actorUserId);
+      const actorMember = await getProjectMember(tx, project.id, args.actorUserId);
       if (actorMember?.role !== 'admin') {
         throw new ProjectTeamMutationError('forbidden');
       }
@@ -996,10 +991,10 @@ export async function createOrRefreshProjectInvitation(
     if (project.user_id === target.id) {
       throw new ProjectTeamMutationError('owner-conflict');
     }
-    if (await getProjectMember(txDb, args.projectId, target.id)) {
+    if (await getProjectMember(tx, args.projectId, target.id)) {
       throw new ProjectTeamMutationError('member-conflict');
     }
-    const [pending] = await txDb
+    const [pending] = await tx
       .select()
       .from(projectInvitations)
       .where(
@@ -1012,11 +1007,11 @@ export async function createOrRefreshProjectInvitation(
       .for('update')
       .limit(1);
 
-    await requireLockedProjectInvitationCapacity(txDb, args.projectId, pending?.id);
+    await requireLockedProjectInvitationCapacity(tx, args.projectId, pending?.id);
 
     let invitation: ProjectInvitation;
     if (pending) {
-      [invitation] = await txDb
+      [invitation] = await tx
         .update(projectInvitations)
         .set({
           role: args.role,
@@ -1027,7 +1022,7 @@ export async function createOrRefreshProjectInvitation(
         .where(eq(projectInvitations.id, pending.id))
         .returning();
     } else {
-      [invitation] = await txDb
+      [invitation] = await tx
         .insert(projectInvitations)
         .values({
           id: generateId('pinv'),
@@ -1040,7 +1035,7 @@ export async function createOrRefreshProjectInvitation(
         })
         .returning();
     }
-    await createProjectAccessEvent(txDb, {
+    await createProjectAccessEvent(tx, {
       projectId: args.projectId,
       actorUserId: args.actorUserId,
       subjectUserId: target.id,
@@ -1059,10 +1054,9 @@ export async function resendProjectInvitation(
 ): Promise<Readonly<{ invitation: ProjectInvitation; target: User }>> {
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   return db.transaction(async (tx) => {
-    const txDb = tx as unknown as Db;
-    const project = await lockProject(txDb, args.projectId);
-    await requireLockedMembersCapability(txDb, project, args.actorUserId);
-    const [invitation] = await txDb
+    const project = await lockProject(tx, args.projectId);
+    await requireLockedMembersCapability(tx, project, args.actorUserId);
+    const [invitation] = await tx
       .select()
       .from(projectInvitations)
       .where(
@@ -1079,7 +1073,7 @@ export async function resendProjectInvitation(
     if (invitation.status !== 'pending') {
       throw new ProjectTeamMutationError('invitation-not-pending');
     }
-    const [target] = await txDb
+    const [target] = await tx
       .select()
       .from(users)
       .where(eq(users.id, invitation.target_user_id))
@@ -1088,14 +1082,14 @@ export async function resendProjectInvitation(
     if (!target?.email) {
       throw new ProjectTeamMutationError('target-user-not-found');
     }
-    await requireLockedProjectInvitationCapacity(txDb, args.projectId, invitation.id);
+    await requireLockedProjectInvitationCapacity(tx, args.projectId, invitation.id);
     const normalizedEmail = target.email.trim().toLowerCase();
-    const [updated] = await txDb
+    const [updated] = await tx
       .update(projectInvitations)
       .set({ target_email_snapshot: normalizedEmail, expires_at: expiresAt })
       .where(eq(projectInvitations.id, invitation.id))
       .returning();
-    await createProjectAccessEvent(txDb, {
+    await createProjectAccessEvent(tx, {
       projectId: args.projectId,
       actorUserId: args.actorUserId,
       subjectUserId: target.id,
@@ -1112,10 +1106,9 @@ export async function revokeProjectInvitation(
   args: { projectId: string; invitationId: string; actorUserId: string; platformAdmin?: boolean },
 ): Promise<void> {
   await db.transaction(async (tx) => {
-    const txDb = tx as unknown as Db;
-    const project = await lockProject(txDb, args.projectId);
-    await requireLockedMembersCapability(txDb, project, args.actorUserId, args.platformAdmin);
-    const [invitation] = await txDb
+    const project = await lockProject(tx, args.projectId);
+    await requireLockedMembersCapability(tx, project, args.actorUserId, args.platformAdmin);
+    const [invitation] = await tx
       .select()
       .from(projectInvitations)
       .where(
@@ -1132,7 +1125,7 @@ export async function revokeProjectInvitation(
     if (invitation.status !== 'pending') {
       throw new ProjectTeamMutationError('invitation-not-pending');
     }
-    await txDb
+    await tx
       .update(projectInvitations)
       .set({
         status: 'revoked',
@@ -1140,7 +1133,7 @@ export async function revokeProjectInvitation(
         revoked_by_user_id: args.actorUserId,
       })
       .where(eq(projectInvitations.id, invitation.id));
-    await createProjectAccessEvent(txDb, {
+    await createProjectAccessEvent(tx, {
       projectId: args.projectId,
       actorUserId: args.actorUserId,
       subjectUserId: invitation.target_user_id,
@@ -1161,9 +1154,8 @@ export async function respondToProjectInvitation(
   }
 
   const result = await db.transaction(async (tx) => {
-    const txDb = tx as unknown as Db;
-    const project = await lockProject(txDb, locator.project_id);
-    const [locked] = await txDb
+    const project = await lockProject(tx, locator.project_id);
+    const [locked] = await tx
       .select({
         invitation: projectInvitations,
         expired: sql<boolean>`${projectInvitations.expires_at} <= now()`,
@@ -1186,7 +1178,7 @@ export async function respondToProjectInvitation(
       }
       const member =
         args.response === 'accept'
-          ? await getProjectMember(txDb, project.id, args.actorUserId)
+          ? await getProjectMember(tx, project.id, args.actorUserId)
           : null;
       // Acceptance is idempotent only while the access it created still
       // exists. Once an administrator removes that member, replaying the old
@@ -1201,7 +1193,7 @@ export async function respondToProjectInvitation(
       throw new ProjectTeamMutationError('invitation-not-pending');
     }
     if (locked.expired) {
-      await txDb
+      await tx
         .update(projectInvitations)
         .set({ status: 'expired' })
         .where(eq(projectInvitations.id, invitation.id));
@@ -1212,11 +1204,11 @@ export async function respondToProjectInvitation(
       if (project.user_id === args.actorUserId) {
         throw new ProjectTeamMutationError('owner-conflict');
       }
-      if (await getProjectMember(txDb, project.id, args.actorUserId)) {
+      if (await getProjectMember(tx, project.id, args.actorUserId)) {
         throw new ProjectTeamMutationError('member-conflict');
       }
-      await requireLockedProjectOwnerActive(txDb, project);
-      [member] = await txDb
+      await requireLockedProjectOwnerActive(tx, project);
+      [member] = await tx
         .insert(projectMembers)
         .values({
           project_id: project.id,
@@ -1226,7 +1218,7 @@ export async function respondToProjectInvitation(
         })
         .returning();
     }
-    await txDb
+    await tx
       .update(projectInvitations)
       .set({
         status: resultingStatus,
@@ -1234,7 +1226,7 @@ export async function respondToProjectInvitation(
         accepted_at: args.response === 'accept' ? sql`now()` : null,
       })
       .where(eq(projectInvitations.id, invitation.id));
-    await createProjectAccessEvent(txDb, {
+    await createProjectAccessEvent(tx, {
       projectId: project.id,
       actorUserId: args.actorUserId,
       subjectUserId: args.actorUserId,
@@ -3001,7 +2993,6 @@ export async function deleteProjectCascade(
   deletedResources: ReadonlyArray<Resource>;
 }> {
   return await db.transaction(async (tx) => {
-    const txDb = tx as unknown as Db;
     // Lock the project row FOR UPDATE — the SAME lock the build-creation paths
     // take FIRST (supersedeAndCreateContainerBuild, createGithubActionsBuildWithinLimit)
     // — so a concurrent push/OIDC can't insert a fresh build BETWEEN the
@@ -3017,7 +3008,7 @@ export async function deleteProjectCascade(
     // project that no longer exists. The caller stops the container DOs after this
     // tx commits; github_actions builds have no DO, so terminalizing (then
     // deleting) their row to revoke the deploy token is all that's possible.
-    const cancelled = await terminateBuildsForProject(txDb, projectId, {
+    const cancelled = await terminateBuildsForProject(tx, projectId, {
       reason: 'project deleted',
     });
     await tx.delete(domains).where(eq(domains.project_id, projectId));
@@ -3032,7 +3023,7 @@ export async function deleteProjectCascade(
     // the same transaction that removes their only durable handles. A failed
     // provider delete after COMMIT can then be retried by the scheduled worker.
     await enqueueProjectCleanupJobs(
-      txDb,
+      tx,
       deletedResources
         .filter((resource) => !processedResourceCfIds.has(resource.cf_id))
         .flatMap((resource) => cleanupJobsForResource(projectId, resource)),
@@ -3145,10 +3136,9 @@ async function withAdminRemovalGuard<T>(
   return db.transaction(async (tx) => {
     // Serialize the check and access change with other removals and bootstrap.
     // A count outside this lock lets two administrators remove each other.
-    const authSettings = await lockAuthSettings(tx as unknown as Db);
+    const authSettings = await lockAuthSettings(tx);
     await tx.execute(sql`LOCK TABLE ${users} IN SHARE ROW EXCLUSIVE MODE`);
-    const transactionDb = tx as unknown as Db;
-    const user = await getUser(transactionDb, id);
+    const user = await getUser(tx, id);
     if (user?.role === 'admin') {
       let others = await tx
         .select({ suspended_reason: users.suspended_reason })
@@ -3178,7 +3168,7 @@ async function withAdminRemovalGuard<T>(
         throw new LastAdminError();
       }
     }
-    return change(transactionDb, user);
+    return change(tx, user);
   });
 }
 
@@ -4498,7 +4488,7 @@ export async function supersedeAndCreateContainerBuild(
     // read (under READ COMMITTED) sees their committed status. Fails closed.
     if (
       !(await installationCoversRepoInTx(
-        tx as unknown as Db,
+        tx,
         args.connectionId,
         args.projectId,
         args.installationId,
@@ -4519,7 +4509,7 @@ export async function supersedeAndCreateContainerBuild(
     // commit (so a same-commit redelivery never self-cancels and returns
     // `cancelled: []` when nothing else conflicts); the `branch` filter spares other
     // branches.
-    const cancelled = await terminateBuildsForProject(tx as unknown as Db, args.projectId, {
+    const cancelled = await terminateBuildsForProject(tx, args.projectId, {
       branch: args.branch,
       executor: 'container',
       exceptCommitSha: args.commitSha,
@@ -4962,7 +4952,7 @@ export async function createGithubActionsBuildWithinLimit(
     // status. Fails closed.
     if (
       !(await installationCoversRepoInTx(
-        tx as unknown as Db,
+        tx,
         args.connectionId,
         args.projectId,
         args.installationId,

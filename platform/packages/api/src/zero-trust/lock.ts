@@ -61,17 +61,16 @@ export async function withProjectZeroTrustLock<T>(
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
     await lockZeroTrustConfiguration(tx, 'shared');
-    const lockedDb = tx as unknown as Db;
     const recordErrors: RecordProjectErrors = async (step) => {
       try {
         return await step();
       } catch (error) {
-        await markProjectError(lockedDb, projectId, error);
+        await markProjectError(tx, projectId, error);
         throw new RecordedProjectError(error);
       }
     };
     try {
-      return await work(lockedDb, recordErrors);
+      return await work(tx, recordErrors);
     } catch (error) {
       if (!(error instanceof RecordedProjectError)) {
         throw error;

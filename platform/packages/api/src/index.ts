@@ -1001,15 +1001,14 @@ async function cleanupPendingDomainUnderProjectFence(
     // record the change for Zero Trust retry with the deletion, because the
     // project's custom domain application may already list this hostname.
     await lockZeroTrustConfiguration(tx, 'shared');
-    const txDb = tx as unknown as Db;
-    const current = await getDomain(txDb, domain.id);
+    const current = await getDomain(tx, domain.id);
     if (current?.status !== 'pending') {
       return false;
     }
     await beforeDelete?.();
     await env.ROUTING.delete(`domain:${domain.hostname}`).catch(() => {});
-    await markProjectCustomDomainsChanged(txDb, domain.project_id);
-    await deleteDomain(txDb, domain.id);
+    await markProjectCustomDomainsChanged(tx, domain.project_id);
+    await deleteDomain(tx, domain.id);
     return true;
   });
 }
@@ -1145,15 +1144,14 @@ async function processUserRollover(
     for (const project of userProjects) {
       await db.transaction(async (tx) => {
         await tx.execute(sql`SELECT id FROM projects WHERE id = ${project.id} FOR UPDATE`);
-        const txDb = tx as unknown as Db;
-        const current = await getProject(txDb, project.id);
+        const current = await getProject(tx, project.id);
         if (!current || current.user_id !== user.id || current.status === 'deleting') {
           return;
         }
 
         // Resolve both route keys and values behind the same fence as deploy,
         // protection changes, domain activation, transfer, and deletion.
-        const domainMap = await getDomainsByProjectIds(txDb, [current.id]);
+        const domainMap = await getDomainsByProjectIds(tx, [current.id]);
         const protection = await resolveProjectZeroTrustRoutingForPublication(tx, current.id);
         const keys = [
           current.slug,

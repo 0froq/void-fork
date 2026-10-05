@@ -124,11 +124,10 @@ export async function setOperatorSignup(
     });
   }
   await context.get('db').transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
-    const settings = await lockAuthSettings(tx);
+    const settings = await lockAuthSettings(transaction);
     await context.env.ROUTING.put('signup:enabled', String(enabled));
     if (settings) {
-      await tx
+      await transaction
         .update(platformAuthSettings)
         .set({
           admission: { mode: enabled ? 'restricted' : 'public' },

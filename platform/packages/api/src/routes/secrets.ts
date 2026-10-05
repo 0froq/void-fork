@@ -37,8 +37,7 @@ async function withProjectSecretUpdate(
     // routing. Hold it through live propagation, and reject in-flight work
     // before changing storage: a candidate may already have captured secrets.
     await tx.execute(sql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-    const db = tx as unknown as Db;
-    const access = await requireProjectRouteCapability(context, projectId, 'configure', db);
+    const access = await requireProjectRouteCapability(context, projectId, 'configure', tx);
     if (access instanceof Response) {
       return access;
     }
@@ -46,7 +45,7 @@ async function withProjectSecretUpdate(
     if (project.status === 'deleting') {
       return context.json({ error: 'project is being deleted' }, 410);
     }
-    const pending = await getActiveDeployment(db, projectId);
+    const pending = await getActiveDeployment(tx, projectId);
     if (pending) {
       return context.json(
         {
@@ -56,7 +55,7 @@ async function withProjectSecretUpdate(
         409,
       );
     }
-    return update(db, project);
+    return update(tx, project);
   });
 }
 

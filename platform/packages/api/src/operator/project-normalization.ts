@@ -92,21 +92,20 @@ export async function normalizeOperatorProject(
 ) {
   return context.get('db').transaction(async (tx) => {
     await tx.execute(sql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-    const db = tx as unknown as Db;
-    const project = await getProject(db, projectId);
+    const project = await getProject(tx, projectId);
     if (!project) {
       throw new OperatorError(404, 'Project not found.', 'not_found');
     }
-    if (project.status === 'deleting' || (await getActiveDeployment(db, projectId))) {
+    if (project.status === 'deleting' || (await getActiveDeployment(tx, projectId))) {
       throw new OperatorError(
         409,
         'Wait for project deletion, deployment, or recovery to finish before normalization.',
         'project_busy',
       );
     }
-    const activeDeploymentId = await servingDeployment(context, db, project);
+    const activeDeploymentId = await servingDeployment(context, tx, project);
     const queues: Array<{ resourceId: string; from: string; to: string }> = [];
-    for (const resource of await getProjectResources(db, projectId)) {
+    for (const resource of await getProjectResources(tx, projectId)) {
       if (resource.type !== 'queue' || isQueueId(resource.cf_id)) {
         continue;
       }

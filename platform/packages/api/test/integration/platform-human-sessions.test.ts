@@ -83,7 +83,7 @@ describe('platform human session revocation', () => {
         .update(platformLoginConnections)
         .set({ enabled: false })
         .where(eq(platformLoginConnections.id, 'github'));
-      await revokeConnectionSessions(tx as unknown as Db, 'github');
+      await revokeConnectionSessions(tx, 'github');
     });
     expect((await request('/me', api.token)).status).toBe(401);
     expect((await request('/operator/v1/session', operator.token)).status).toBe(401);

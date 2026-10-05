@@ -416,9 +416,8 @@ app.get('/callback', async (context) => {
     }
     try {
       user = await db.transaction(async (tx) => {
-        const txDb = tx as unknown as typeof db;
         const newUser = await createUserForPlatform(
-          txDb,
+          tx,
           resolvedProvider,
           providerId,
           login,
@@ -429,7 +428,7 @@ app.get('/callback', async (context) => {
             bootstrapGitHubId: context.env.PLATFORM_BOOTSTRAP_GITHUB_ID ?? '',
           },
         );
-        await createOAuthAccount(txDb, newUser.id, resolvedProvider, providerId);
+        await createOAuthAccount(tx, newUser.id, resolvedProvider, providerId);
         return newUser;
       });
     } catch (error) {

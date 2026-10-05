@@ -504,8 +504,7 @@ export async function settleDeploymentForSandboxDrain(
     await tx.execute(
       drizzleSql`SELECT id FROM projects WHERE id = ${initial.project_id} FOR UPDATE`,
     );
-    const txDb = tx as unknown as Db;
-    const deployment = await getDeployment(txDb, deploymentId);
+    const deployment = await getDeployment(tx, deploymentId);
     if (!deployment || TERMINAL_DEPLOYMENT_STATUSES.includes(deployment.status)) {
       return { state: 'terminal' } as const;
     }
@@ -515,7 +514,7 @@ export async function settleDeploymentForSandboxDrain(
     }
     const ageMs = Date.now() - updatedAtMs;
     if (deployment.source === 'rollback-lease') {
-      const project = await getProject(txDb, deployment.project_id);
+      const project = await getProject(tx, deployment.project_id);
       if (!project || project.status === 'deleting' || !deployment.manifest) {
         return { state: 'recovery_incomplete' } as const;
       }
@@ -542,7 +541,7 @@ export async function settleDeploymentForSandboxDrain(
           return { state: 'recovery_incomplete' } as const;
         }
         return {
-          state: (await deleteRollbackLease(txDb, deployment.id, lease.ownerId))
+          state: (await deleteRollbackLease(tx, deployment.id, lease.ownerId))
             ? 'terminal'
             : 'waiting',
         } as const;
@@ -552,20 +551,20 @@ export async function settleDeploymentForSandboxDrain(
       }
 
       try {
-        await requireNormalizedProject(txDb, project);
+        await requireNormalizedProject(tx, project);
       } catch (error) {
         if (error instanceof ProjectRequiresNormalizationError) {
           return { state: 'recovery_incomplete' } as const;
         }
         throw error;
       }
-      const owner = await getUser(txDb, project.user_id);
+      const owner = await getUser(tx, project.user_id);
       if (!owner) {
         return { state: 'recovery_incomplete' } as const;
       }
       const recoveryOwnerId = crypto.randomUUID();
       const adopted = await updateRollbackLeaseState(
-        txDb,
+        tx,
         deployment.id,
         lease.targetDeploymentId,
         'running',
@@ -576,19 +575,19 @@ export async function settleDeploymentForSandboxDrain(
         return { state: 'waiting' } as const;
       }
       const committedActive = project.active_deployment_id
-        ? await getDeployment(txDb, project.active_deployment_id)
+        ? await getDeployment(tx, project.active_deployment_id)
         : null;
       try {
         if (committedActive) {
-          await replayDeploymentCutover(env, txDb, project, committedActive, project.type, {
+          await replayDeploymentCutover(env, tx, project, committedActive, project.type, {
             restoreCommitted: true,
           });
         } else {
-          await clearProjectExternalState(env, txDb, project);
+          await clearProjectExternalState(env, tx, project);
         }
       } catch {
         await updateRollbackLeaseState(
-          txDb,
+          tx,
           deployment.id,
           lease.targetDeploymentId,
           'retryable',
@@ -598,7 +597,7 @@ export async function settleDeploymentForSandboxDrain(
         return { state: 'recovery_incomplete' } as const;
       }
       return {
-        state: (await deleteRollbackLease(txDb, deployment.id, recoveryOwnerId))
+        state: (await deleteRollbackLease(tx, deployment.id, recoveryOwnerId))
           ? 'terminal'
           : 'recovery_incomplete',
       } as const;
@@ -606,17 +605,17 @@ export async function settleDeploymentForSandboxDrain(
 
     if (deployment.status !== 'cutover' && deployment.status !== 'compensating') {
       if (deployment.status !== 'canceling') {
-        const requested = await cancelDeployment(txDb, deployment.id, reason);
+        const requested = await cancelDeployment(tx, deployment.id, reason);
         return { state: requested ? 'cancel_requested' : 'waiting' } as const;
       }
       if (!options.expiredInvocation && ageMs < DEPLOYMENT_CANCEL_STALE_MS) {
         return { state: 'waiting' } as const;
       }
-      await updateDeploymentStatus(txDb, deployment.id, 'canceled', reason, { force: true });
+      await updateDeploymentStatus(tx, deployment.id, 'canceled', reason, { force: true });
       return { state: 'terminal' } as const;
     }
 
-    const project = await getProject(txDb, deployment.project_id);
+    const project = await getProject(tx, deployment.project_id);
     if (!project || project.status === 'deleting') {
       return { state: 'waiting' } as const;
     }
@@ -627,7 +626,7 @@ export async function settleDeploymentForSandboxDrain(
     ]);
     if (compensated === project.id) {
       await updateDeploymentStatus(
-        txDb,
+        tx,
         deployment.id,
         options.expiredInvocation ? 'canceling' : 'failed',
         options.reason ?? 'cutover compensation completed',
@@ -649,7 +648,7 @@ export async function settleDeploymentForSandboxDrain(
     }
 
     try {
-      await requireNormalizedProject(txDb, project);
+      await requireNormalizedProject(tx, project);
     } catch (error) {
       if (error instanceof ProjectRequiresNormalizationError) {
         return { state: 'recovery_incomplete' } as const;
@@ -660,7 +659,7 @@ export async function settleDeploymentForSandboxDrain(
     if (committedActiveDeploymentId === deployment.id) {
       return { state: 'waiting' } as const;
     }
-    const owner = await getUser(txDb, project.user_id);
+    const owner = await getUser(tx, project.user_id);
     if (!owner) {
       return { state: 'recovery_incomplete' } as const;
     }
@@ -676,22 +675,22 @@ export async function settleDeploymentForSandboxDrain(
     await env.ROUTING.put(cutoverIntentKey(deployment.id), JSON.stringify(recoveryMarker));
 
     const committedActive = committedActiveDeploymentId
-      ? await getDeployment(txDb, committedActiveDeploymentId)
+      ? await getDeployment(tx, committedActiveDeploymentId)
       : null;
     try {
       if (committedActive) {
-        await replayDeploymentCutover(env, txDb, project, committedActive, project.type, {
+        await replayDeploymentCutover(env, tx, project, committedActive, project.type, {
           restoreCommitted: true,
         });
       } else {
-        await clearProjectExternalState(env, txDb, project);
+        await clearProjectExternalState(env, tx, project);
       }
       // Persist this before the database transition so a lost COMMIT
       // acknowledgement can be completed safely by the next drain request.
       await env.ROUTING.put(compensatedKey, project.id);
     } catch {
       await updateDeploymentStatus(
-        txDb,
+        tx,
         deployment.id,
         'compensating',
         options.reason ?? 'Sandbox drain cutover compensation incomplete',
@@ -700,7 +699,7 @@ export async function settleDeploymentForSandboxDrain(
       return { state: 'recovery_incomplete' } as const;
     }
     await updateDeploymentStatus(
-      txDb,
+      tx,
       deployment.id,
       options.expiredInvocation ? 'canceling' : 'failed',
       options.reason ?? 'abandoned cutover recovered for managed Sandbox disable',
@@ -1774,16 +1773,15 @@ app.post('/:id/deploy/upload-urls', async (context) => {
     // teardown never waits long for the share lock to release.
     await context.get('db').transaction(async (tx) => {
       await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR SHARE`);
-      const txDb = tx as unknown as Db;
-      const lockedProject = await getProject(txDb, projectId);
+      const lockedProject = await getProject(tx, projectId);
       if (!lockedProject || lockedProject.status === 'deleting') {
         throw new Error(UPLOAD_URLS_PROJECT_DELETING);
       }
       // Derived signing keys are identical within this request. Keep the cache
       // request-local so credentials and derived keys are released with the batch.
       const signingKeyCache = new Map<string, ArrayBuffer>();
-      await requireActiveDeployAccess(txDb, projectId, context.get('user').id);
-      await requireNormalizedProject(txDb, lockedProject);
+      await requireActiveDeployAccess(tx, projectId, context.get('user').id);
+      await requireNormalizedProject(tx, lockedProject);
       await uploadPool(assets, PRESIGN_BATCH_CONCURRENCY, async (asset) => {
         const result = await presignAssetPut(
           {
@@ -2370,22 +2368,21 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         throw new Error('deployment admission closed for platform maintenance');
       }
       await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-      const txDb = tx as unknown as Db;
-      const lockedProject = await getProject(txDb, projectId);
+      const lockedProject = await getProject(tx, projectId);
       if (!lockedProject || lockedProject.status === 'deleting') {
         throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
       }
-      const lockedAccess = await requireActiveDeployAccess(txDb, projectId, actor.id);
+      const lockedAccess = await requireActiveDeployAccess(tx, projectId, actor.id);
       const requestedCpuMs = incomingManifest.limits?.cpuMs;
       const maxCpuMs = (await resolvePlanLimits(tx, lockedAccess.owner.plan)).maxCpuMsPerRequest;
       if (requestedCpuMs !== undefined && maxCpuMs > 0 && requestedCpuMs > maxCpuMs) {
         return { cpuLimit: { requested: requestedCpuMs, maximum: maxCpuMs } } as const;
       }
-      await requireNormalizedProject(txDb, lockedProject);
+      await requireNormalizedProject(tx, lockedProject);
       if (execution) {
-        await assertDeploymentExecutionAuthority(txDb, execution.operation);
-        const operation = await getDeploymentOperation(txDb, execution.operation.id);
-        const deployment = await getDeployment(txDb, execution.operation.id);
+        await assertDeploymentExecutionAuthority(tx, execution.operation);
+        const operation = await getDeploymentOperation(tx, execution.operation.id);
+        const deployment = await getDeployment(tx, execution.operation.id);
         if (
           !operation ||
           operation.owner_id !== execution.operation.owner_id ||
@@ -2398,14 +2395,14 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         return {
           deployment,
           currentLiveDeployment: operation.original_active_id
-            ? await getDeployment(txDb, operation.original_active_id)
+            ? await getDeployment(tx, operation.original_active_id)
             : null,
           project: lockedAccess.project,
           owner: lockedAccess.owner,
         } as const;
       }
       if (stagedInput) {
-        const existing = await findDeploymentOperation(txDb, projectId, actor.id, idempotencyKey);
+        const existing = await findDeploymentOperation(tx, projectId, actor.id, idempotencyKey);
         if (existing) {
           if (
             existing.input_digest !== stagedInput.digest ||
@@ -2416,7 +2413,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           return { receipt: existing.id } as const;
         }
       }
-      const [unfinishedOperation] = await txDb
+      const [unfinishedOperation] = await tx
         .select({ id: deploymentOperations.id })
         .from(deploymentOperations)
         .where(
@@ -2430,9 +2427,9 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         throw new ConcurrentDeployError(unfinishedOperation.id);
       }
       const committedActiveDeploymentId = lockedProject.active_deployment_id;
-      let activeDeploy = await getActiveDeployment(txDb, projectId);
+      let activeDeploy = await getActiveDeployment(tx, projectId);
       if (activeDeploy) {
-        const operation = await getDeploymentOperation(txDb, activeDeploy.id);
+        const operation = await getDeploymentOperation(tx, activeDeploy.id);
         if (operation && operation.status !== 'terminal') {
           throw new ConcurrentDeployError(activeDeploy.id);
         }
@@ -2462,7 +2459,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
 
         if (compensated === projectId) {
           await updateDeploymentStatus(
-            txDb,
+            tx,
             protectedDeployment.id,
             'failed',
             'cutover compensation completed',
@@ -2480,7 +2477,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           let buildIsActive = true;
           if (ready.buildId) {
             try {
-              await assertBoundBuildStillActive(txDb, ready.buildId, projectId);
+              await assertBoundBuildStillActive(tx, ready.buildId, projectId);
             } catch (error) {
               if (error instanceof Error && error.message === SUPERSEDED_BUILD_ERROR_MESSAGE) {
                 buildIsActive = false;
@@ -2503,16 +2500,16 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             }
             if (buildIsActive) {
               const cutoverManifest = JSON.parse(protectedDeployment.manifest!) as DeployManifest;
-              await updateDeploymentStatus(txDb, protectedDeployment.id, 'live', undefined, {
+              await updateDeploymentStatus(tx, protectedDeployment.id, 'live', undefined, {
                 force: true,
               });
               await updateProjectType(
-                txDb,
+                tx,
                 projectId,
                 resolvePersistedDeploymentType(cutoverManifest, protectedDeployment),
               );
-              await setActiveDeployment(txDb, projectId, protectedDeployment.id);
-              await markDeploymentRetained(txDb, protectedDeployment.id, true);
+              await setActiveDeployment(tx, projectId, protectedDeployment.id);
+              await markDeploymentRetained(tx, protectedDeployment.id, true);
               recoveredCutover = { ...protectedDeployment, status: 'live', retained: true };
               reconciledMarkerKeys.push(
                 cutoverIntentKey(protectedDeployment.id),
@@ -2526,7 +2523,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         if (activeDeploy) {
           if (!protectedBuildInactive && intent?.buildId) {
             try {
-              await assertBoundBuildStillActive(txDb, intent.buildId, projectId);
+              await assertBoundBuildStillActive(tx, intent.buildId, projectId);
             } catch (error) {
               if (error instanceof Error && error.message === SUPERSEDED_BUILD_ERROR_MESSAGE) {
                 protectedBuildInactive = true;
@@ -2560,7 +2557,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           );
 
           const committedActive = committedActiveDeploymentId
-            ? await getDeployment(txDb, committedActiveDeploymentId)
+            ? await getDeployment(tx, committedActiveDeploymentId)
             : null;
           const compensateRecovery = async (
             reason: string,
@@ -2570,14 +2567,14 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               if (committedActive) {
                 await replayDeploymentCutover(
                   context.env,
-                  txDb,
+                  tx,
                   lockedProject,
                   committedActive,
                   lockedProject.type,
                   { restoreCommitted: true },
                 );
               } else {
-                await clearProjectExternalState(context.env, txDb, lockedProject);
+                await clearProjectExternalState(context.env, tx, lockedProject);
               }
               // Write the durable marker before the PostgreSQL transition. If
               // COMMIT acknowledgement is lost, the next recovery knows the
@@ -2589,7 +2586,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               );
             } catch (compensationError) {
               await updateDeploymentStatus(
-                txDb,
+                tx,
                 protectedDeployment.id,
                 'compensating',
                 'cutover recovery compensation incomplete',
@@ -2605,7 +2602,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               });
               return false;
             }
-            await updateDeploymentStatus(txDb, protectedDeployment.id, 'failed', reason, {
+            await updateDeploymentStatus(tx, protectedDeployment.id, 'failed', reason, {
               force: true,
             });
             return true;
@@ -2616,7 +2613,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             !protectedAssetsMissing;
           if (replayProtectedDeployment && recoveryMarker.buildId) {
             try {
-              await assertBoundBuildStillActive(txDb, recoveryMarker.buildId, projectId);
+              await assertBoundBuildStillActive(tx, recoveryMarker.buildId, projectId);
             } catch (error) {
               if (error instanceof Error && error.message === SUPERSEDED_BUILD_ERROR_MESSAGE) {
                 replayProtectedDeployment = false;
@@ -2628,7 +2625,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           if (replayProtectedDeployment) {
             let replayError: unknown;
             try {
-              await replayDeploymentCutover(context.env, txDb, lockedProject, protectedDeployment);
+              await replayDeploymentCutover(context.env, tx, lockedProject, protectedDeployment);
               await assertPersistedDeploymentServingAssetsExist(context.env, protectedDeployment);
               await context.env.ROUTING.put(
                 cutoverReadyKey(protectedDeployment.id),
@@ -2639,16 +2636,16 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             }
             if (replayError === undefined) {
               const cutoverManifest = JSON.parse(protectedDeployment.manifest!) as DeployManifest;
-              await updateDeploymentStatus(txDb, protectedDeployment.id, 'live', undefined, {
+              await updateDeploymentStatus(tx, protectedDeployment.id, 'live', undefined, {
                 force: true,
               });
               await updateProjectType(
-                txDb,
+                tx,
                 projectId,
                 resolvePersistedDeploymentType(cutoverManifest, protectedDeployment),
               );
-              await setActiveDeployment(txDb, projectId, protectedDeployment.id);
-              await markDeploymentRetained(txDb, protectedDeployment.id, true);
+              await setActiveDeployment(tx, projectId, protectedDeployment.id);
+              await markDeploymentRetained(tx, protectedDeployment.id, true);
               recoveredCutover = { ...protectedDeployment, status: 'live', retained: true };
             } else {
               await compensateRecovery('cutover replay failed and was compensated', replayError);
@@ -2690,7 +2687,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           to: staleNext,
           reason: 'precheck_reap_timeout',
         });
-        await updateDeploymentStatus(txDb, activeDeploy.id, staleNext, 'timed out', {
+        await updateDeploymentStatus(tx, activeDeploy.id, staleNext, 'timed out', {
           force: true,
         });
         if (staleNext === 'canceling') {
@@ -2699,10 +2696,8 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
       }
       const currentLiveDeployment =
         recoveredCutover ??
-        (committedActiveDeploymentId
-          ? await getDeployment(txDb, committedActiveDeploymentId)
-          : null);
-      const deployment = await createDeployment(txDb, projectId, null, null, null, {
+        (committedActiveDeploymentId ? await getDeployment(tx, committedActiveDeploymentId) : null);
+      const deployment = await createDeployment(tx, projectId, null, null, null, {
         cliVersion,
         // Protect reused objects before the first inventory read. Unlike new
         // PUTs, old objects have no recent-upload grace period. GC acquires this
@@ -2712,7 +2707,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         initiatedByUserId: actor.id,
       });
       if (stagedInput) {
-        await txDb.insert(deploymentOperations).values({
+        await tx.insert(deploymentOperations).values({
           id: deployment.id,
           project_id: projectId,
           actor_id: actor.id,
@@ -2906,16 +2901,15 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     ): Promise<T> => {
       return await context.get('db').transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-        const txDb = tx as unknown as Db;
-        const lockedProject = await getProject(txDb, projectId);
+        const lockedProject = await getProject(tx, projectId);
         if (!lockedProject || lockedProject.status === 'deleting') {
           throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
         }
-        const currentAccess = await requireActiveDeployAccess(txDb, projectId, actor.id);
+        const currentAccess = await requireActiveDeployAccess(tx, projectId, actor.id);
         if (execution) {
-          await assertDeploymentExecutionAuthority(txDb, execution.operation);
+          await assertDeploymentExecutionAuthority(tx, execution.operation);
         }
-        await assertDeploymentNotCanceled(txDb, deploymentId);
+        await assertDeploymentNotCanceled(tx, deploymentId);
         if (cutoverProtected) {
           const intent = parseCutoverMarker(
             await context.env.ROUTING.get(cutoverIntentKey(deploymentId)),
@@ -2924,7 +2918,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             throw new Error(SUPERSEDED_BUILD_ERROR_MESSAGE);
           }
         }
-        return await mutate(txDb, currentAccess.owner);
+        return await mutate(tx, currentAccess.owner);
       });
     };
     // Compensation must serialize with every project cutover, not only
@@ -2939,8 +2933,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     ): Promise<void> => {
       await context.get('db').transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-        const txDb = tx as unknown as Db;
-        const lockedProject = await getProject(txDb, projectId);
+        const lockedProject = await getProject(tx, projectId);
         if (!lockedProject || lockedProject.status === 'deleting') {
           return;
         }
@@ -2948,7 +2941,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           return;
         }
         if (cutoverProtected) {
-          const ownedDeployment = await getDeployment(txDb, currentDeploymentId);
+          const ownedDeployment = await getDeployment(tx, currentDeploymentId);
           if (
             !ownedDeployment ||
             ownedDeployment.status !== 'compensating' ||
@@ -2963,11 +2956,11 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             return;
           }
         }
-        const competingOperation = await getActiveDeployment(txDb, projectId);
+        const competingOperation = await getActiveDeployment(tx, projectId);
         if (competingOperation && competingOperation.id !== currentDeploymentId) {
           return;
         }
-        await restore(txDb);
+        await restore(tx);
       });
     };
     const withProjectAssetGcFence = async <T>(
@@ -2976,8 +2969,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     ): Promise<T | null> => {
       return await context.get('db').transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-        const txDb = tx as unknown as Db;
-        const lockedProject = await getProject(txDb, projectId);
+        const lockedProject = await getProject(tx, projectId);
         if (!lockedProject || lockedProject.status === 'deleting') {
           return null;
         }
@@ -2990,7 +2982,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         const protectedHashes = new Set(knownRetainedHashes);
         // Migrated stored bundles still reference their asset copies even when
         // their historical deployment failed or is no longer retained.
-        const retained = await txDb
+        const retained = await tx
           .select()
           .from(deployments)
           .where(
@@ -3003,7 +2995,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           lockedProject.active_deployment_id &&
           !retained.some((deployment) => deployment.id === lockedProject.active_deployment_id)
         ) {
-          const active = await getDeployment(txDb, lockedProject.active_deployment_id);
+          const active = await getDeployment(tx, lockedProject.active_deployment_id);
           if (active) {
             retained.push(active);
           }
@@ -3012,7 +3004,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         // Once the row has placement-bearing asset_hashes, protect it through
         // every nonterminal state (including canceling/compensating). The
         // recent-upload timestamp guard covers the short pre-persistence gap.
-        for (const inFlight of await getInFlightDeploymentsExcluding(txDb, projectId)) {
+        for (const inFlight of await getInFlightDeploymentsExcluding(tx, projectId)) {
           if (!retained.some((deployment) => deployment.id === inFlight.id)) {
             retained.push(inFlight);
           }
@@ -3419,13 +3411,12 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
       // it to a terminal status via the catch path.
       deployment = await context.get('db').transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-        const txDb = tx as unknown as Db;
-        const lockedProject = await getProject(txDb, projectId);
+        const lockedProject = await getProject(tx, projectId);
         if (!lockedProject || lockedProject.status === 'deleting') {
           throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
         }
         return await updateDeploymentManifest(
-          txDb,
+          tx,
           preDeployment.id,
           finalManifestRaw,
           source,
@@ -3657,12 +3648,11 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             await tx.execute(
               drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
             );
-            const txDb = tx as unknown as Db;
-            const lockedProject = await getProject(txDb, projectId);
+            const lockedProject = await getProject(tx, projectId);
             if (!lockedProject || lockedProject.status === 'deleting') {
               throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
             }
-            await requireActiveDeployAccess(txDb, projectId, actor.id);
+            await requireActiveDeployAccess(tx, projectId, actor.id);
             const [intent, ready] = await Promise.all([
               context.env.ROUTING.get(cutoverIntentKey(deployment.id)).then(parseCutoverMarker),
               context.env.ROUTING.get(cutoverReadyKey(deployment.id)).then(parseCutoverMarker),
@@ -3675,23 +3665,23 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             ) {
               throw new Error(SUPERSEDED_BUILD_ERROR_MESSAGE);
             }
-            await assertDeploymentNotCanceled(txDb, deployment.id);
+            await assertDeploymentNotCanceled(tx, deployment.id);
             // Re-check the bound build under a row lock before going live. The
             // up-front guard can pass and then a newer GitHub Actions run
             // supersede (cancel) this build while we spent minutes building and
             // uploading; without this re-check a superseded runner would still
             // go live with stale code. See `assertBoundBuildStillActive`.
-            await assertBoundBuildStillActive(txDb, deployBuild, projectId);
+            await assertBoundBuildStillActive(tx, deployBuild, projectId);
 
             // Asset GC takes this same project lock and protects hashes from
             // every nonterminal deployment. Once placement-bearing
             // asset_hashes is persisted, no final object-store scan is needed.
-            await updateDeploymentStatus(txDb, deployment.id, 'live', undefined, {
+            await updateDeploymentStatus(tx, deployment.id, 'live', undefined, {
               force: true,
             });
-            await updateProjectType(txDb, projectId, type);
-            await setActiveDeployment(txDb, projectId, deployment.id);
-            await markDeploymentRetained(txDb, deployment.id, true);
+            await updateProjectType(tx, projectId, type);
+            await setActiveDeployment(tx, projectId, deployment.id);
+            await markDeploymentRetained(tx, deployment.id, true);
           });
           cutoverCommitted = true;
           currentStatus = 'live';
@@ -3744,8 +3734,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               await tx.execute(
                 drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
               );
-              const txDb = tx as unknown as Db;
-              const lockedProject = await getProject(txDb, projectId);
+              const lockedProject = await getProject(tx, projectId);
               const evictable: typeof toEvict = [];
               let activeToKeep: (typeof toEvict)[number] | undefined;
               for (const old of toEvict) {
@@ -3753,7 +3742,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                   activeToKeep = old;
                   continue;
                 }
-                await markDeploymentRetained(txDb, old.id, false);
+                await markDeploymentRetained(tx, old.id, false);
                 evictable.push(old);
               }
               return { evictable, activeToKeep };
@@ -4329,8 +4318,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               await tx.execute(
                 drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
               );
-              const txDb = tx as unknown as Db;
-              await requireActiveDeployAccess(txDb, projectId, actor.id);
+              await requireActiveDeployAccess(tx, projectId, actor.id);
               const appResult = await dispatchStableAppMigration(
                 context.env.DISPATCH.get(workerName),
                 proxyTokenBinding?.text ?? '',
@@ -4343,8 +4331,8 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                 ...(appResult.confirmedSkipped ?? []),
               ];
               if (confirmed.length > 0) {
-                await appendProjectMigrations(txDb, projectId, confirmed, deployment.id);
-                await setAppliedMigrations(txDb, deployment.id, confirmed);
+                await appendProjectMigrations(tx, projectId, confirmed, deployment.id);
+                await setAppliedMigrations(tx, deployment.id, confirmed);
               }
               return { confirmed, result: appResult };
             });
@@ -4374,7 +4362,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                 await tx.execute(
                   drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
                 );
-                await requireActiveDeployAccess(tx as unknown as Db, projectId, actor.id);
+                await requireActiveDeployAccess(tx, projectId, actor.id);
               });
               await dispatchStableAuthMigration(
                 context.env.DISPATCH.get(workerName),
@@ -4386,8 +4374,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               await tx.execute(
                 drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
               );
-              const txDb = tx as unknown as Db;
-              await requireActiveDeployAccess(txDb, projectId, actor.id);
+              await requireActiveDeployAccess(tx, projectId, actor.id);
               const externalResult = await retryWithBackoff<UserWorkerMigrationResult>(
                 async (attempt) => {
                   const attemptStart = Date.now();
@@ -4441,8 +4428,8 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                 .filter((migration) => !migration.error)
                 .map((migration) => migration.name);
               if (allApplied.length > 0) {
-                await appendProjectMigrations(txDb, projectId, allApplied, deployment.id);
-                await setAppliedMigrations(txDb, deployment.id, allApplied);
+                await appendProjectMigrations(tx, projectId, allApplied, deployment.id);
+                await setAppliedMigrations(tx, deployment.id, allApplied);
               }
               return externalResult;
             });
@@ -4753,12 +4740,11 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         });
         await context.get('db').transaction(async (tx) => {
           await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-          const txDb = tx as unknown as Db;
-          const lockedProject = await getProject(txDb, projectId);
+          const lockedProject = await getProject(tx, projectId);
           if (!lockedProject || lockedProject.status === 'deleting') {
             throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
           }
-          await requireActiveDeployAccess(txDb, projectId, actor.id);
+          await requireActiveDeployAccess(tx, projectId, actor.id);
           const [intent, ready] = await Promise.all([
             context.env.ROUTING.get(cutoverIntentKey(deployment.id)).then(parseCutoverMarker),
             context.env.ROUTING.get(cutoverReadyKey(deployment.id)).then(parseCutoverMarker),
@@ -4771,26 +4757,26 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           ) {
             throw new Error(SUPERSEDED_BUILD_ERROR_MESSAGE);
           }
-          await assertDeploymentNotCanceled(txDb, deployment.id);
+          await assertDeploymentNotCanceled(tx, deployment.id);
           // Re-check the bound build under a row lock before going live. The
           // up-front guard can pass and then a newer GitHub Actions run
           // supersede (cancel) this build while we spent minutes building and
           // uploading; without this re-check a superseded runner would still
           // go live with stale code. See `assertBoundBuildStillActive`.
-          await assertBoundBuildStillActive(txDb, deployBuild, projectId);
+          await assertBoundBuildStillActive(tx, deployBuild, projectId);
           // Asset GC takes this same project lock and protects hashes from
           // every nonterminal deployment. Serving placement was persisted
           // before cutover began, so no storage scan belongs here.
-          await updateDeploymentStatus(txDb, deployment.id, 'live', undefined, {
+          await updateDeploymentStatus(tx, deployment.id, 'live', undefined, {
             force: true,
           });
           await updateProjectType(
-            txDb,
+            tx,
             projectId,
             manifest.type ?? (manifest.framework ? 'framework' : 'void'),
           );
-          await setActiveDeployment(txDb, projectId, deployment.id);
-          await markDeploymentRetained(txDb, deployment.id, true);
+          await setActiveDeployment(tx, projectId, deployment.id);
+          await markDeploymentRetained(tx, deployment.id, true);
         });
         cutoverCommitted = true;
         currentStatus = 'live';
@@ -4848,8 +4834,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             await tx.execute(
               drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
             );
-            const txDb = tx as unknown as Db;
-            const lockedProject = await getProject(txDb, projectId);
+            const lockedProject = await getProject(tx, projectId);
             const evictable: typeof toEvict = [];
             let activeToKeep: (typeof toEvict)[number] | undefined;
             for (const old of toEvict) {
@@ -4857,7 +4842,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                 activeToKeep = old;
                 continue;
               }
-              await markDeploymentRetained(txDb, old.id, false);
+              await markDeploymentRetained(tx, old.id, false);
               evictable.push(old);
             }
             return { evictable, activeToKeep };
@@ -5183,7 +5168,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               if (intent?.projectId !== projectId || intent.ownerId !== cutoverOwnerId) {
                 return false;
               }
-              return await beginDeploymentCompensation(tx as unknown as Db, failedDeployment.id);
+              return await beginDeploymentCompensation(tx, failedDeployment.id);
             });
             if (!claimed) {
               logger.warn('catch', 'cutover_compensation_claim_lost', {
@@ -5226,26 +5211,25 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               await tx.execute(
                 drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
               );
-              const txDb = tx as unknown as Db;
-              const lockedProject = await getProject(txDb, projectId);
+              const lockedProject = await getProject(tx, projectId);
               if (!lockedProject || lockedProject.status === 'deleting') {
                 return;
               }
               if (compensationErrors.length > 0) {
                 const committedActive = lockedProject.active_deployment_id
-                  ? await getDeployment(txDb, lockedProject.active_deployment_id)
+                  ? await getDeployment(tx, lockedProject.active_deployment_id)
                   : null;
                 if (committedActive) {
                   await replayDeploymentCutover(
                     context.env,
-                    txDb,
+                    tx,
                     lockedProject,
                     committedActive,
                     lockedProject.type,
                     { restoreCommitted: true },
                   );
                 } else {
-                  await clearProjectExternalState(context.env, txDb, lockedProject);
+                  await clearProjectExternalState(context.env, tx, lockedProject);
                 }
               } else {
                 // Exact undo succeeded, but a domain activation may have
@@ -5253,14 +5237,14 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                 // deployment's slug route. Reconcile only domain keys to the
                 // restored route; touching cron/queues here would regress
                 // pre-routing failures that never changed those surfaces.
-                const currentDomains = await getDomainsByProjectId(txDb, projectId);
+                const currentDomains = await getDomainsByProjectId(tx, projectId);
                 const rawRouting = await context.env.ROUTING.get(lockedProject.slug);
                 const restoredRouting =
                   rawRouting === null
                     ? null
                     : withProjectZeroTrustRouting(
                         rawRouting,
-                        await resolveProjectZeroTrustRoutingForPublication(txDb, projectId),
+                        await resolveProjectZeroTrustRoutingForPublication(tx, projectId),
                         projectId,
                       );
                 await reconcileProjectDomainRoutes(context.env, currentDomains, restoredRouting);
@@ -5533,19 +5517,18 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     if (terminalEvent) {
       await context.get('db').transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-        const txDb = tx as unknown as Db;
-        const candidate = await getDeployment(txDb, preDeployment.id);
+        const candidate = await getDeployment(tx, preDeployment.id);
         const event = terminalEvent!;
         if (event.event === 'done') {
-          const completed = await getDeployment(txDb, event.deployment);
+          const completed = await getDeployment(tx, event.deployment);
           if (completed?.status === 'live') {
-            await appendDeploymentEvent(txDb, preDeployment.id, cutoverOwnerId, event);
+            await appendDeploymentEvent(tx, preDeployment.id, cutoverOwnerId, event);
           }
         } else if (
           event.event === 'error' &&
           (!candidate || candidate.status === 'failed' || candidate.status === 'canceled')
         ) {
-          await appendDeploymentEvent(txDb, preDeployment.id, cutoverOwnerId, event);
+          await appendDeploymentEvent(tx, preDeployment.id, cutoverOwnerId, event);
         }
         // An unresolved cutover/compensation is still an owned operation. The
         // Queue outbox reconciles it after the invocation's hard lifetime.
@@ -5659,12 +5642,12 @@ export async function executeQueuedDeployment(
       await tx.execute(
         drizzleSql`SELECT id FROM projects WHERE id = ${operation.project_id} FOR UPDATE`,
       );
-      const candidate = await getDeployment(tx as unknown as Db, operation.id);
+      const candidate = await getDeployment(tx, operation.id);
       if (!candidate || candidate.manifest !== null || candidate.status !== 'pending') {
         throw new Error('Admitted deployment needs reconciliation');
       }
       await updateDeploymentStatus(
-        tx as unknown as Db,
+        tx,
         operation.id,
         'failed',
         'Admitted deployment is no longer authorized or valid',

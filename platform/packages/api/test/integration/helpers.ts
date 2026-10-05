@@ -50,7 +50,7 @@ export const PROJECT_SECRET_KEYS_JSON = JSON.stringify({
 });
 
 export type TestEnv = {
-  db: Db;
+  db: Db & { $client: pg.Pool | PGlite };
   HYPERDRIVE: { connectionString: string };
   ISR_CACHE: KVNamespace;
   ROUTING: KVNamespace;
@@ -465,16 +465,17 @@ export async function setupEnv(): Promise<TestEnv> {
       }
     },
   };
-  let db: Db;
+  let db: TestEnv['db'];
   if (databaseUrl) {
     pgPool = new pg.Pool({ connectionString: databaseUrl });
-    db = drizzlePg(pgPool, { schema, logger }) as unknown as Db;
+    db = drizzlePg(pgPool, { schema, logger });
   } else {
     pglite = new PGlite({
       loadDataDir: await loadPGliteTemplateBundle(),
       relaxedDurability: true,
     });
-    db = drizzle(pglite, { schema, logger }) as unknown as Db;
+    // PGlite uses the same queries but exposes its own driver result type.
+    db = drizzle(pglite, { schema, logger }) as unknown as TestEnv['db'];
   }
   queryCaptures.set(db, queryCapture);
 

@@ -203,12 +203,11 @@ const app = new Hono<ApiEnv>()
     try {
       const lockedResult = await context.get('db').transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-        const txDb = tx as unknown as Db;
         const lockedAccess = await requireProjectRouteCapability(
           context,
           projectId,
           'settings',
-          txDb,
+          tx,
         );
         if (lockedAccess instanceof Response) {
           return lockedAccess;
@@ -219,11 +218,11 @@ const app = new Hono<ApiEnv>()
 
         // Recheck after waiting for the project lock. A prior request for this
         // project may have committed while this request was queued.
-        const lockedExisting = await getDomainByHostname(txDb, hostname);
+        const lockedExisting = await getDomainByHostname(tx, hostname);
         if (lockedExisting) {
           return context.json({ error: 'hostname already in use' }, 409);
         }
-        if (await protectedProjectReachedDomainLimit(txDb, projectId)) {
+        if (await protectedProjectReachedDomainLimit(tx, projectId)) {
           return context.json({ error: DOMAIN_LIMIT_ERROR }, 409);
         }
 
@@ -235,13 +234,7 @@ const app = new Hono<ApiEnv>()
           ownership_verification: cfHostname.ownership_verification,
           ssl_validation_records: cfHostname.ssl.validation_records,
         };
-        const domain = await createDomain(
-          txDb,
-          projectId,
-          hostname,
-          cfHostname.id,
-          verificationData,
-        );
+        const domain = await createDomain(tx, projectId, hostname, cfHostname.id, verificationData);
 
         return context.json({
           ...domain,
@@ -345,13 +338,7 @@ const app = new Hono<ApiEnv>()
         }
         throw error;
       }
-      const txDb = tx as unknown as Db;
-      const lockedAccess = await requireProjectRouteCapability(
-        context,
-        projectId,
-        'settings',
-        txDb,
-      );
+      const lockedAccess = await requireProjectRouteCapability(context, projectId, 'settings', tx);
       if (lockedAccess instanceof Response) {
         return lockedAccess;
       }
@@ -372,8 +359,8 @@ const app = new Hono<ApiEnv>()
       // The project's custom domain application still lists this hostname.
       // Record that with the deletion, so the hostname is never freed while
       // no retry would remove it from that application.
-      await markProjectCustomDomainsChanged(txDb, projectId);
-      await deleteDomain(txDb, domain.id);
+      await markProjectCustomDomainsChanged(tx, projectId);
+      await deleteDomain(tx, domain.id);
       return null;
     });
     if (lockedResponse) {

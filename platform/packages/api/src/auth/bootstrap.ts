@@ -124,9 +124,8 @@ export async function initializeAuthentication(
   const { resetPending: _, ...configuration } = setup;
   const requestHash = await hashLoginProof(JSON.stringify(configuration));
   return db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
-    await lockPlanCatalog(tx);
-    const claim = await tx.execute<{ installation_id: string }>(
+    await lockPlanCatalog(transaction);
+    const claim = await transaction.execute<{ installation_id: string }>(
       sql`SELECT installation_id FROM __void_platform_installation WHERE singleton = true`,
     );
     if (claim.rows[0]?.installation_id !== env.PLATFORM_INSTALLATION_ID) {
@@ -136,10 +135,10 @@ export async function initializeAuthentication(
         403,
       );
     }
-    const settings = await lockAuthSettings(tx);
-    await tx.execute(sql`LOCK TABLE ${users} IN SHARE ROW EXCLUSIVE MODE`);
-    const [existingUser] = await tx.select({ id: users.id }).from(users).limit(1);
-    const [previous] = await tx
+    const settings = await lockAuthSettings(transaction);
+    await transaction.execute(sql`LOCK TABLE ${users} IN SHARE ROW EXCLUSIVE MODE`);
+    const [existingUser] = await transaction.select({ id: users.id }).from(users).limit(1);
+    const [previous] = await transaction
       .select()
       .from(platformAuthBootstrap)
       .where(eq(platformAuthBootstrap.singleton, true));
@@ -164,13 +163,13 @@ export async function initializeAuthentication(
     }
     if (settings) {
       // Explicit owner-authorized reset is only possible before the first user exists.
-      await tx.delete(platformAuthAttempts);
-      await tx.delete(platformAuthBootstrap);
-      await tx.delete(platformLoginRevisions);
-      await tx.delete(platformLoginConnections);
-      await tx.delete(platformAuthSettings);
+      await transaction.delete(platformAuthAttempts);
+      await transaction.delete(platformAuthBootstrap);
+      await transaction.delete(platformLoginRevisions);
+      await transaction.delete(platformLoginConnections);
+      await transaction.delete(platformAuthSettings);
     }
-    await tx.insert(platformAuthSettings).values({
+    await transaction.insert(platformAuthSettings).values({
       admission: setup.admission,
       protection: setup.protection,
       sessions_required: true,
@@ -183,20 +182,22 @@ export async function initializeAuthentication(
         JSON.stringify([id, 1]),
         entry.clientSecret,
       );
-      await tx.insert(platformLoginConnections).values({ id, kind: entry.configuration.kind });
-      await tx
+      await transaction
+        .insert(platformLoginConnections)
+        .values({ id, kind: entry.configuration.kind });
+      await transaction
         .insert(platformLoginRevisions)
         .values({ connection_id: id, revision: 1, configuration: entry.configuration, secret });
     }
     const expiresAt = new Date(Date.now() + SETUP_SECONDS * 1000).toISOString();
-    await tx.insert(platformAuthBootstrap).values({
+    await transaction.insert(platformAuthBootstrap).values({
       installation_id: env.PLATFORM_INSTALLATION_ID!,
       request_hash: requestHash,
       credential_hash: setup.bootstrapCredentialHash,
       connection_id: setup.administratorConnectionId,
       expires_at: expiresAt,
     });
-    await tx.insert(operatorEvents).values({
+    await transaction.insert(operatorEvents).values({
       id: crypto.randomUUID(),
       user_id: `installation:${env.PLATFORM_INSTALLATION_ID}`,
       login: 'Installer',
@@ -245,11 +246,14 @@ export async function stageBootstrapIdentity(
   },
 ): Promise<string> {
   return db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
-    const settings = await lockAuthSettings(tx);
-    const pending = await pendingAuthenticationSetup(tx);
-    const connection = pending ? await readLoginConnection(tx, pending.connection_id) : null;
-    const revision = connection ? await readLoginRevision(tx, connection.id, input.revision) : null;
+    const settings = await lockAuthSettings(transaction);
+    const pending = await pendingAuthenticationSetup(transaction);
+    const connection = pending
+      ? await readLoginConnection(transaction, pending.connection_id)
+      : null;
+    const revision = connection
+      ? await readLoginRevision(transaction, connection.id, input.revision)
+      : null;
     if (
       !settings ||
       !pending ||
@@ -273,7 +277,7 @@ export async function stageBootstrapIdentity(
       );
     }
     const proof = randomLoginProof();
-    await tx
+    await transaction
       .update(platformAuthBootstrap)
       .set({
         claim_hash: await hashLoginProof(proof),
@@ -300,14 +304,15 @@ export async function confirmBootstrapIdentity(
 ) {
   requireUncachedAuthenticationDatabase(env);
   return db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
-    await lockPlanCatalog(tx);
-    const settings = await lockAuthSettings(tx);
-    await tx.execute(sql`LOCK TABLE ${users} IN SHARE ROW EXCLUSIVE MODE`);
-    const pending = await pendingAuthenticationSetup(tx);
+    await lockPlanCatalog(transaction);
+    const settings = await lockAuthSettings(transaction);
+    await transaction.execute(sql`LOCK TABLE ${users} IN SHARE ROW EXCLUSIVE MODE`);
+    const pending = await pendingAuthenticationSetup(transaction);
     const claim = pending?.pending_identity;
-    const connection = pending ? await readLoginConnection(tx, pending.connection_id) : null;
-    const [existing] = await tx.select({ id: users.id }).from(users).limit(1);
+    const connection = pending
+      ? await readLoginConnection(transaction, pending.connection_id)
+      : null;
+    const [existing] = await transaction.select({ id: users.id }).from(users).limit(1);
     if (
       !settings ||
       !pending ||
@@ -337,15 +342,15 @@ export async function confirmBootstrapIdentity(
         ? connection.kind
         : `oidc:${connection.id}`;
     const user = await createUser(
-      tx,
+      transaction,
       provider,
       identity.subject,
       identity.login,
       identity.emailVerified ? identity.email : null,
       'admin',
-      (await getDefaultPlan(tx, 'custom')).id,
+      (await getDefaultPlan(transaction, 'custom')).id,
     );
-    await tx.insert(platformLoginIdentities).values({
+    await transaction.insert(platformLoginIdentities).values({
       id: crypto.randomUUID(),
       user_id: user.id,
       connection_id: connection.id,
@@ -353,20 +358,20 @@ export async function confirmBootstrapIdentity(
       subject: identity.subject,
     });
     if (connection.kind === 'github' || connection.kind === 'google') {
-      await createOAuthAccount(tx, user.id, connection.kind, identity.subject);
+      await createOAuthAccount(transaction, user.id, connection.kind, identity.subject);
     }
     if (companyIdentity) {
-      await bindCompanyIdentity(tx, user.id, companyIdentity);
+      await bindCompanyIdentity(transaction, user.id, companyIdentity);
     }
-    await tx
+    await transaction
       .update(platformLoginConnections)
       .set({ enabled: true, active_revision: claim.revision })
       .where(eq(platformLoginConnections.id, connection.id));
-    await tx
+    await transaction
       .update(platformAuthBootstrap)
       .set({ consumed_at: new Date().toISOString(), claim_hash: null, pending_identity: null })
       .where(eq(platformAuthBootstrap.singleton, true));
-    await tx.insert(operatorEvents).values({
+    await transaction.insert(operatorEvents).values({
       id: crypto.randomUUID(),
       user_id: user.id,
       login: user.login,
@@ -375,7 +380,7 @@ export async function confirmBootstrapIdentity(
       status: 'success',
       http_status: 200,
     });
-    return createHumanSession(tx, env.JWT_SECRET, {
+    return createHumanSession(transaction, env.JWT_SECRET, {
       userId: user.id,
       connectionId: connection.id,
       revision: claim.revision,

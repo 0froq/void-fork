@@ -639,7 +639,6 @@ export async function handleVerifiedGitHubWebhook(
         }
 
         const cancelled = await db.transaction(async (tx) => {
-          const txDb = tx as unknown as Db;
           const conns = await tx
             .select({
               project_id: githubConnections.project_id,
@@ -661,7 +660,7 @@ export async function handleVerifiedGitHubWebhook(
               continue;
             }
             acc.push(
-              ...(await terminateBuildsForProject(txDb, conn.project_id, {
+              ...(await terminateBuildsForProject(tx, conn.project_id, {
                 branch: deletedBranch,
                 reason: 'branch deleted',
                 createdBefore: deleteFenceTs,
@@ -855,7 +854,6 @@ export async function handleVerifiedGitHubWebhook(
       if (action === 'deleted' || action === 'suspend') {
         const reason = action === 'deleted' ? 'github app uninstalled' : 'github app suspended';
         const cancelled = await db.transaction(async (tx) => {
-          const txDb = tx as unknown as Db;
           // Lock the install row FIRST, then the connection rows — the global
           // install-first order (member_removed + the connect gate also lock the
           // install row first) so a concurrent organization/member_removed and
@@ -877,9 +875,9 @@ export async function handleVerifiedGitHubWebhook(
           // `suspend` is guarded so a stale suspend can't walk a `deleted` row
           // back to `suspended` (which would re-arm the unsuspend guard).
           if (action === 'deleted') {
-            await markGitHubInstallationStatus(txDb, String(installationId), 'deleted');
+            await markGitHubInstallationStatus(tx, String(installationId), 'deleted');
           } else {
-            await suspendGitHubInstallation(txDb, String(installationId));
+            await suspendGitHubInstallation(tx, String(installationId));
           }
           const acc: Array<{
             id: string;
@@ -888,7 +886,7 @@ export async function handleVerifiedGitHubWebhook(
             instance_type: string | null;
           }> = [];
           for (const conn of connections) {
-            acc.push(...(await terminateBuildsForProject(txDb, conn.project_id, { reason })));
+            acc.push(...(await terminateBuildsForProject(tx, conn.project_id, { reason })));
           }
           return acc;
         });
@@ -990,7 +988,6 @@ export async function handleVerifiedGitHubWebhook(
         // Sync the cached set under a FOR UPDATE lock on the install row so the
         // write is based on the latest committed repositories (no lost update).
         await db.transaction(async (tx) => {
-          const txDb = tx as unknown as Db;
           const [locked] = await tx
             .select({
               repositories: githubInstallations.repositories,
@@ -1001,7 +998,7 @@ export async function handleVerifiedGitHubWebhook(
             .for('update')
             .limit(1);
           await setGitHubInstallationRepositories(
-            txDb,
+            tx,
             String(installationId),
             computeNext(locked?.repositories ?? []),
             isStaleSelectedDowngrade(locked?.repository_selection) ? 'all' : selection,
@@ -1027,7 +1024,6 @@ export async function handleVerifiedGitHubWebhook(
       // is compared against.
       const removedRepositoryIds = new Set(removed.map((r) => String(r.id)));
       const cancelled = await db.transaction(async (tx) => {
-        const txDb = tx as unknown as Db;
         // Lock + re-read the install row FIRST, then the connection rows —
         // matching member_removed, the connect gate, and the (now install-first)
         // deleted/suspend branch, so a concurrent suspend/delete or
@@ -1059,7 +1055,7 @@ export async function handleVerifiedGitHubWebhook(
         // `all` still covers every "removed" repo, so revocation would be wrong.
         const staleDowngrade = isStaleSelectedDowngrade(locked?.repository_selection);
         await setGitHubInstallationRepositories(
-          txDb,
+          tx,
           String(installationId),
           computeNext(locked?.repositories ?? []),
           staleDowngrade ? 'all' : selection,
@@ -1077,7 +1073,7 @@ export async function handleVerifiedGitHubWebhook(
           if (!removedRepositoryIds.has(conn.repository_id)) {
             continue;
           }
-          acc.push(...(await terminateBuildsForProject(txDb, conn.project_id, { reason })));
+          acc.push(...(await terminateBuildsForProject(tx, conn.project_id, { reason })));
         }
         return acc;
       });
@@ -1393,7 +1389,6 @@ export async function handleVerifiedGitHubWebhook(
       // scope).
       const reason = 'org membership removed';
       const cancelled = await db.transaction(async (tx) => {
-        const txDb = tx as unknown as Db;
         // Lock each org install row FIRST, in a deterministic (sorted) order to
         // avoid deadlock. This is the SAME row the connect gate locks, so a
         // concurrent member connect and this revocation are serialized — closing
@@ -1418,7 +1413,7 @@ export async function handleVerifiedGitHubWebhook(
         // (iat > revoked_at) honored.
         // Written under the install-row lock (F5-serialized against a concurrent
         // join/complete) EVEN when the affected-user set is empty.
-        await recordInstallationRevocations(txDb, orgInstallIds, String(removedGithubUserId));
+        await recordInstallationRevocations(tx, orgInstallIds, String(removedGithubUserId));
         // Resolve the affected Void user for connection/owner severing UNDER the
         // lock (post-tombstone) so an R4-1 redemption that committed while we
         // waited for the install-row lock is now visible and severed. Either
@@ -1428,11 +1423,7 @@ export async function handleVerifiedGitHubWebhook(
         //
         // Connections record the owner/admin whose OAuth proof authorized them,
         // so the removed user's connections are exactly those they authorized.
-        const removedUser = await getUserByOAuthAccount(
-          txDb,
-          'github',
-          String(removedGithubUserId),
-        );
+        const removedUser = await getUserByOAuthAccount(tx, 'github', String(removedGithubUserId));
         const acc: Array<{
           id: string;
           executor: Build['executor'];
@@ -1451,12 +1442,12 @@ export async function handleVerifiedGitHubWebhook(
             )
             .for('update');
           for (const conn of conns) {
-            acc.push(...(await terminateBuildsForProject(txDb, conn.project_id, { reason })));
-            await deleteGitHubConnection(txDb, conn.project_id);
+            acc.push(...(await terminateBuildsForProject(tx, conn.project_id, { reason })));
+            await deleteGitHubConnection(tx, conn.project_id);
           }
           // Clear the removed user's membership cache across every org install
           // (guarded on the user id, so a different bearer is never clobbered).
-          await deleteGitHubInstallationMembers(txDb, orgInstallIds, removedUser.id);
+          await deleteGitHubInstallationMembers(tx, orgInstallIds, removedUser.id);
         }
         // Void the BROWSER-PROOF-X LISTING memberships across every org install,
         // keyed by the GitHub id X (NOT a Void user id) so any bearer's X-keyed
@@ -1468,7 +1459,7 @@ export async function handleVerifiedGitHubWebhook(
         // tombstone is written once above (keyed by X), so a pre-mint replay is
         // caught even for a user that does not exist yet at removal time.
         await deleteGitHubInstallationMembersByGithubAccount(
-          txDb,
+          tx,
           orgInstallIds,
           String(removedGithubUserId),
         );

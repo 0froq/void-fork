@@ -68,13 +68,7 @@ describe('platform authentication management', () => {
   it('rejects legacy signup callbacks that race authentication initialization', async () => {
     await expect(
       env.db.transaction((tx) =>
-        createUserForPlatform(
-          tx as unknown as typeof env.db,
-          'github',
-          'late-legacy-user',
-          'late-user',
-          null,
-        ),
+        createUserForPlatform(tx, 'github', 'late-legacy-user', 'late-user', null),
       ),
     ).rejects.toThrow('signup is restricted');
   });

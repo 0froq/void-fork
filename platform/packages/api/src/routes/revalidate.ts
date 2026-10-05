@@ -21,15 +21,14 @@ app.post('/:id/revalidate', async (context) => {
     // point instead of letting a revoked deploy credential keep mutating
     // externally visible cache state after removal or downgrade.
     await tx.execute(sql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-    const txDb = tx as unknown as Db;
-    const lockedAccess = await requireProjectRouteCapability(context, projectId, 'deploy', txDb);
+    const lockedAccess = await requireProjectRouteCapability(context, projectId, 'deploy', tx);
     if (lockedAccess instanceof Response) {
       return lockedAccess;
     }
     if (lockedAccess.project.status === 'deleting') {
       return context.json({ error: 'Project is being deleted' }, 409);
     }
-    return runRevalidate(context, projectId, lockedAccess.project, body, txDb);
+    return runRevalidate(context, projectId, lockedAccess.project, body, tx);
   });
 });
 

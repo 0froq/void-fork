@@ -842,7 +842,6 @@ export const githubRoutes = new Hono<ApiEnv>()
     const db = context.get('db');
     const user = context.get('user');
     const count = await db.transaction(async (tx) => {
-      const txDb = tx as unknown as Db;
       // Lock the target install rows FIRST (sorted, install-first — the global
       // order shared by member_removed + the connect gate) so a concurrent
       // member_removed is serialized: its delete + tombstone is committed and
@@ -867,7 +866,7 @@ export const githubRoutes = new Hono<ApiEnv>()
       // merely best-effort; the connect route's in-tx recheck remains the deploy
       // gate.
       const revocations = await getInstallationRevocationsForAccount(
-        txDb,
+        tx,
         joinCode.installationIds,
         joinCode.githubAccountId,
       );
@@ -875,7 +874,7 @@ export const githubRoutes = new Hono<ApiEnv>()
       for (const installationId of joinCode.installationIds) {
         // Re-check the install still exists (fail-soft skip if it was removed
         // between callback and complete — a membership row keys on this numeric id).
-        const install = await getGitHubInstallation(txDb, installationId);
+        const install = await getGitHubInstallation(tx, installationId);
         if (install === null) {
           continue;
         }
@@ -894,7 +893,7 @@ export const githubRoutes = new Hono<ApiEnv>()
         // Threat L1: keyed on the AUTHENTICATED bearer-token holder, never on the
         // github account id carried in the join_code (that is stored only as the
         // membership's verified-against metadata).
-        await upsertGitHubInstallationMember(txDb, {
+        await upsertGitHubInstallationMember(tx, {
           installationId,
           userId: user.id,
           githubAccountId: joinCode.githubAccountId,
@@ -1255,7 +1254,6 @@ export const githubRoutes = new Hono<ApiEnv>()
     // member_removed / teardown / the connect gate. The durable variant remains
     // a live-proof-bounded residual (see above).
     const result = await context.get('db').transaction(async (tx) => {
-      const txDb = tx as unknown as Db;
       // Lock the install row FIRST. A fresh installation id locks nothing and
       // proceeds to the personal-owner insert or organization-member insert.
       await tx
@@ -1264,7 +1262,7 @@ export const githubRoutes = new Hono<ApiEnv>()
         .where(eq(githubInstallations.installation_id, installationId))
         .for('update');
 
-      const existing = await getGitHubInstallation(txDb, installationId);
+      const existing = await getGitHubInstallation(tx, installationId);
       // Organization installs have no owner, and installation visibility never
       // confers repository authority. Record every org participant, including
       // the person who completed a fresh installation, as a TTL membership. The
@@ -1275,14 +1273,14 @@ export const githubRoutes = new Hono<ApiEnv>()
           return { kind: 'conflict' as const };
         }
         const revokedAtMs = await getInstallationRevocationAt(
-          txDb,
+          tx,
           installationId,
           authResult.callerAccountId,
         );
         if (revokedAtMs !== null && revokedAtMs >= proofIatMs) {
           return { kind: 'revoked' as const };
         }
-        await upsertGitHubInstallation(txDb, {
+        await upsertGitHubInstallation(tx, {
           installationId,
           userId: null,
           accountLogin: account.login,
@@ -1292,7 +1290,7 @@ export const githubRoutes = new Hono<ApiEnv>()
           repositorySelection,
           refreshMembership: true,
         });
-        await upsertGitHubInstallationMember(txDb, {
+        await upsertGitHubInstallationMember(tx, {
           installationId,
           userId,
           githubAccountId: authResult.callerAccountId,
@@ -1312,14 +1310,14 @@ export const githubRoutes = new Hono<ApiEnv>()
       // owner's proven GitHub id. Organization installs returned above, so this
       // branch cannot turn organization visibility into ownership.
       const ownerRevokedAtMs = await getInstallationRevocationAt(
-        txDb,
+        tx,
         installationId,
         stateGitHubAccountId,
       );
       if (ownerRevokedAtMs !== null && ownerRevokedAtMs >= proofIatMs) {
         return { kind: 'revoked' as const };
       }
-      await upsertGitHubInstallation(txDb, {
+      await upsertGitHubInstallation(tx, {
         installationId,
         userId,
         accountLogin: account.login,
@@ -1602,7 +1600,6 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
     // commits, then a fresh statement snapshot sees its delete/tombstone/status/
     // coverage change.
     const result = await context.get('db').transaction(async (tx) => {
-      const txDb = tx as unknown as Db;
       const [lockedInstall] = await tx
         .select({
           user_id: githubInstallations.user_id,
@@ -1631,12 +1628,7 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
         .where(eq(projects.id, projectId))
         .for('update')
         .limit(1);
-      const lockedAccess = await requireProjectRouteCapability(
-        context,
-        projectId,
-        'settings',
-        txDb,
-      );
+      const lockedAccess = await requireProjectRouteCapability(context, projectId, 'settings', tx);
       if (lockedAccess instanceof Response) {
         return lockedAccess;
       }
@@ -1660,7 +1652,7 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
       // OWNER path skips this recheck (owners are never revoked via membership),
       // but still locks + checks existing + inserts — one code path, harmless lock.
       if (!lockedIsOwner) {
-        if (!(await hasActiveInstallationMembership(txDb, installationId, caller))) {
+        if (!(await hasActiveInstallationMembership(tx, installationId, caller))) {
           return { ok: false as const, status: 404 as const, error: 'installation not found' };
         }
         // Task 19: key the tombstone check on the grant's GitHub account id (X),
@@ -1674,7 +1666,7 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
           return { ok: false as const, status: 403 as const, error: 'invalid connect grant' };
         }
         const revokedAtMs = await getInstallationRevocationAt(
-          txDb,
+          tx,
           installationId,
           memberGrantAccountId,
         );
@@ -1710,11 +1702,11 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
           error: 'repository not accessible by installation',
         };
       }
-      const existing = await getGitHubConnection(txDb, projectId);
+      const existing = await getGitHubConnection(tx, projectId);
       if (existing) {
         return { ok: false as const, status: 409 as const, error: 'project already connected' };
       }
-      const connection = await createGitHubConnection(txDb, {
+      const connection = await createGitHubConnection(tx, {
         projectId,
         installationId,
         repoFullName,
@@ -1797,19 +1789,13 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
     // Only a REAL change invalidates builds — a no-op PATCH (value unchanged, or
     // field omitted) terminalizes nothing.
     const result = await context.get('db').transaction(async (tx) => {
-      const txDb = tx as unknown as Db;
       await tx
         .select({ id: projects.id })
         .from(projects)
         .where(eq(projects.id, projectId))
         .for('update')
         .limit(1);
-      const lockedAccess = await requireProjectRouteCapability(
-        context,
-        projectId,
-        'settings',
-        txDb,
-      );
+      const lockedAccess = await requireProjectRouteCapability(context, projectId, 'settings', tx);
       if (lockedAccess instanceof Response) {
         return lockedAccess;
       }
@@ -1827,7 +1813,7 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
       // between that read and this lock. The locked row is authoritative — both
       // change-detection AND the terminate branch/executor are derived from it,
       // so we never terminalize builds for a stale branch/executor.
-      const current = await getGitHubConnection(txDb, projectId);
+      const current = await getGitHubConnection(tx, projectId);
       if (!current) {
         // The connection was deleted in the race; respond 404 outside the tx.
         return { cancelled: [], updated: null, gone: true };
@@ -1840,7 +1826,7 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
       }> = [];
       if (newBranch !== undefined && newBranch !== current.branch) {
         terminated.push(
-          ...(await terminateBuildsForProject(txDb, projectId, {
+          ...(await terminateBuildsForProject(tx, projectId, {
             branch: current.branch,
             reason: 'branch changed',
           })),
@@ -1848,7 +1834,7 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
       }
       if (newExecutor !== undefined && newExecutor !== current.build_executor) {
         terminated.push(
-          ...(await terminateBuildsForProject(txDb, projectId, {
+          ...(await terminateBuildsForProject(tx, projectId, {
             executor: current.build_executor,
             reason: 'executor changed',
           })),
@@ -1864,19 +1850,19 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
       // re-read in createGithubActionsBuildWithinLimit closes the concurrent race.
       if (newWorkflowPath !== undefined && newWorkflowPath !== current.workflow_path) {
         terminated.push(
-          ...(await terminateBuildsForProject(txDb, projectId, {
+          ...(await terminateBuildsForProject(tx, projectId, {
             executor: 'github_actions',
             reason: 'workflow path changed',
           })),
         );
       }
 
-      await updateGitHubConnection(txDb, projectId, {
+      await updateGitHubConnection(tx, projectId, {
         branch: newBranch,
         buildExecutor: newExecutor,
         workflowPath: newWorkflowPath,
       });
-      const next = await getGitHubConnection(txDb, projectId);
+      const next = await getGitHubConnection(tx, projectId);
       return { cancelled: terminated, updated: next, gone: false };
     });
 
@@ -1914,19 +1900,13 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
     // completion webhook resolves the CURRENT connection — once it's gone the
     // completion is ignored and the build would otherwise stay active forever).
     const result = await context.get('db').transaction(async (tx) => {
-      const txDb = tx as unknown as Db;
       await tx
         .select({ id: projects.id })
         .from(projects)
         .where(eq(projects.id, projectId))
         .for('update')
         .limit(1);
-      const lockedAccess = await requireProjectRouteCapability(
-        context,
-        projectId,
-        'settings',
-        txDb,
-      );
+      const lockedAccess = await requireProjectRouteCapability(context, projectId, 'settings', tx);
       if (lockedAccess instanceof Response) {
         return lockedAccess;
       }
@@ -1942,10 +1922,10 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
         .from(githubConnections)
         .where(eq(githubConnections.project_id, projectId))
         .for('update');
-      const terminated = await terminateBuildsForProject(txDb, projectId, {
+      const terminated = await terminateBuildsForProject(tx, projectId, {
         reason: 'project disconnected',
       });
-      await deleteGitHubConnection(txDb, projectId);
+      await deleteGitHubConnection(tx, projectId);
       return terminated;
     });
 

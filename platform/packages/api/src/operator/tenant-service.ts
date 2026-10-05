@@ -418,8 +418,7 @@ async function commitOwnershipTransfer(
   operatorUserId: string,
 ): Promise<OwnershipTransferCommit> {
   return db.transaction(async (tx) => {
-    const txDb = tx as unknown as Db;
-    const [lockedProject] = await txDb
+    const [lockedProject] = await tx
       .select()
       .from(projects)
       .where(eq(projects.id, projectId))
@@ -429,7 +428,7 @@ async function commitOwnershipTransfer(
       throw new OperatorError(404, 'Project not found');
     }
 
-    const lockedUsers = await txDb
+    const lockedUsers = await tx
       .select()
       .from(users)
       .where(inArray(users.id, [...new Set([lockedProject.user_id, targetUserId])].sort()))
@@ -452,7 +451,7 @@ async function commitOwnershipTransfer(
         { blockers: [{ kind: 'deletion', id: projectId, status: lockedProject.status }] },
       );
     }
-    const [openPeriod] = await txDb
+    const [openPeriod] = await tx
       .select()
       .from(projectOwnershipPeriods)
       .where(
@@ -467,12 +466,12 @@ async function commitOwnershipTransfer(
     // Ownership is implicit. Keep these convergence writes before the
     // idempotent branch so retry also repairs data written by an older API
     // revision that committed the owner change without cleaning target access.
-    await txDb
+    await tx
       .delete(projectMembers)
       .where(
         and(eq(projectMembers.project_id, projectId), eq(projectMembers.user_id, newOwner.id)),
       );
-    await txDb
+    await tx
       .update(projectInvitations)
       .set({
         status: 'revoked',
@@ -488,7 +487,7 @@ async function commitOwnershipTransfer(
       );
 
     if (lockedProject.user_id === targetUserId) {
-      const previousTransfer = await getPreviousOwnershipTransfer(txDb, projectId);
+      const previousTransfer = await getPreviousOwnershipTransfer(tx, projectId);
       return {
         project: lockedProject,
         previousOwner: previousTransfer ? previousTransfer.owner : newOwner,
@@ -503,7 +502,7 @@ async function commitOwnershipTransfer(
       };
     }
 
-    const blockers = await getOwnershipTransferBlockers(txDb, projectId);
+    const blockers = await getOwnershipTransferBlockers(tx, projectId);
     if (blockers.length > 0) {
       throw new OperatorError(
         409,
@@ -520,7 +519,7 @@ async function commitOwnershipTransfer(
         'ownership_state_conflict',
       );
     }
-    const [clock] = await txDb
+    const [clock] = await tx
       .select({
         transferredAt: sql<string>`to_char(date_trunc('milliseconds', clock_timestamp()), 'YYYY-MM-DD HH24:MI:SS.MS')`,
       })
@@ -529,12 +528,12 @@ async function commitOwnershipTransfer(
       .limit(1);
     const transferBoundary = clock!.transferredAt;
     if (openPeriod) {
-      await txDb
+      await tx
         .update(projectOwnershipPeriods)
         .set({ ends_at: transferBoundary })
         .where(eq(projectOwnershipPeriods.id, openPeriod.id));
     } else {
-      await txDb.insert(projectOwnershipPeriods).values({
+      await tx.insert(projectOwnershipPeriods).values({
         id: generateId('pown'),
         project_id: projectId,
         owner_user_id: currentOwner.id,
@@ -542,7 +541,7 @@ async function commitOwnershipTransfer(
         ends_at: transferBoundary,
       });
     }
-    const [newPeriod] = await txDb
+    const [newPeriod] = await tx
       .insert(projectOwnershipPeriods)
       .values({
         id: generateId('pown'),
@@ -553,7 +552,7 @@ async function commitOwnershipTransfer(
       })
       .returning({ startsAt: projectOwnershipPeriods.starts_at });
     const transferredAt = newPeriod!.startsAt;
-    await txDb
+    await tx
       .update(projectDeployCredentials)
       .set({ revoked_at: transferBoundary })
       .where(
@@ -562,12 +561,12 @@ async function commitOwnershipTransfer(
           isNull(projectDeployCredentials.revoked_at),
         ),
       );
-    const [updatedProject] = await txDb
+    const [updatedProject] = await tx
       .update(projects)
       .set({ user_id: newOwner.id })
       .where(eq(projects.id, projectId))
       .returning();
-    await txDb
+    await tx
       .insert(projectMembers)
       .values({
         project_id: projectId,
@@ -642,8 +641,7 @@ async function republishProjectOwnerState(
 ): Promise<User | null> {
   const db = context.get('db');
   return db.transaction(async (tx) => {
-    const txDb = tx as unknown as Db;
-    const [project] = await txDb
+    const [project] = await tx
       .select()
       .from(projects)
       .where(eq(projects.id, projectId))
@@ -653,23 +651,23 @@ async function republishProjectOwnerState(
       return null;
     }
     const [owner, activeDeployment, domains] = await Promise.all([
-      requireUser(txDb, project.user_id),
+      requireUser(tx, project.user_id),
       project.active_deployment_id
-        ? txDb
+        ? tx
             .select({ manifest: deployments.manifest })
             .from(deployments)
             .where(eq(deployments.id, project.active_deployment_id))
             .limit(1)
             .then((rows) => rows[0] ?? null)
         : null,
-      getDomainsByProjectId(txDb, project.id),
+      getDomainsByProjectId(tx, project.id),
     ]);
     let manifest: DeployManifest | null = null;
     if (activeDeployment?.manifest) {
       manifest = JSON.parse(activeDeployment.manifest) as DeployManifest;
     }
     const dispatchLimits = computeDispatchLimits(
-      await resolvePlanLimits(txDb, owner.plan),
+      await resolvePlanLimits(tx, owner.plan),
       manifest?.limits,
     );
     const protection = await resolveProjectZeroTrustRoutingForPublication(tx, project.id);

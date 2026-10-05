@@ -33,9 +33,8 @@ export async function createHumanSession(
   },
 ): Promise<{ token: string; session: PlatformHumanSession }> {
   return db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
-    const settings = await lockAuthSettings(tx);
-    const connection = await readLoginConnection(tx, input.connectionId);
+    const settings = await lockAuthSettings(transaction);
+    const connection = await readLoginConnection(transaction, input.connectionId);
     if (
       !settings ||
       !connection?.enabled ||
@@ -48,8 +47,8 @@ export async function createHumanSession(
         401,
       );
     }
-    const [user] = await tx.select().from(users).where(eq(users.id, input.userId));
-    const [identity] = await tx
+    const [user] = await transaction.select().from(users).where(eq(users.id, input.userId));
+    const [identity] = await transaction
       .select()
       .from(platformLoginIdentities)
       .where(
@@ -82,7 +81,7 @@ export async function createHumanSession(
     }
     const now = Math.floor(Date.now() / 1000);
     const id = crypto.randomUUID();
-    const [session] = await tx
+    const [session] = await transaction
       .insert(platformHumanSessions)
       .values({
         id,

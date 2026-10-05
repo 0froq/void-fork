@@ -112,10 +112,9 @@ export async function tryActivateDomain(
     await reconcileProjectZeroTrustDomains(env, db, project.id, { verifiedDomainId: domain.id });
     await db.transaction(async (tx) => {
       await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${project.id} FOR UPDATE`);
-      const txDb = tx as unknown as Db;
       const [lockedProject, lockedDomain] = await Promise.all([
-        getProject(txDb, project.id),
-        getDomain(txDb, domain.id),
+        getProject(tx, project.id),
+        getDomain(tx, domain.id),
       ]);
       if (
         !lockedProject ||
@@ -133,7 +132,7 @@ export async function tryActivateDomain(
       // project, keeps it pending instead of publishing a route.
       let published;
       try {
-        const protection = await resolveProjectZeroTrustRoutingForPublication(txDb, project.id, {
+        const protection = await resolveProjectZeroTrustRoutingForPublication(tx, project.id, {
           retryable: true,
         });
         published = withProjectZeroTrustRouting(slugRouting, protection, project.id);
@@ -144,7 +143,7 @@ export async function tryActivateDomain(
         throw error;
       }
       await env.ROUTING.put(`domain:${lockedDomain.hostname}`, published);
-      await updateDomainStatus(txDb, lockedDomain.id, 'active');
+      await updateDomainStatus(tx, lockedDomain.id, 'active');
       activated = true;
       domain.status = 'active';
     });

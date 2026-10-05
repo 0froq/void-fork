@@ -721,12 +721,7 @@ async function recheckEmailDestinationSettingsAccess(
 ): Promise<Response | null> {
   return context.get('db').transaction(async (tx) => {
     await tx.execute(sql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-    const access = await requireProjectRouteCapability(
-      context,
-      projectId,
-      'settings',
-      tx as unknown as Db,
-    );
+    const access = await requireProjectRouteCapability(context, projectId, 'settings', tx);
     return access instanceof Response ? access : null;
   });
 }

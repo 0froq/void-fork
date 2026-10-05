@@ -77,34 +77,32 @@ export async function settleExpiredDeployment(
   // retains an in-flight fence rather than allowing another deployment to race.
   await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT id FROM projects WHERE id = ${initial.project_id} FOR UPDATE`);
-    const txDb = tx as unknown as Db;
-    const deployment = await getDeployment(txDb, deploymentId);
+    const deployment = await getDeployment(tx, deploymentId);
     if (
       deployment &&
       !['live', 'failed', 'canceled', 'canceling'].includes(deployment.status) &&
       deployment.source !== 'rollback-lease'
     ) {
-      await cancelDeployment(txDb, deploymentId, INTERRUPTED_MESSAGE);
+      await cancelDeployment(tx, deploymentId, INTERRUPTED_MESSAGE);
     }
   });
 
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT id FROM projects WHERE id = ${initial.project_id} FOR UPDATE`);
-    const txDb = tx as unknown as Db;
-    const deployment = await getDeployment(txDb, deploymentId);
+    const deployment = await getDeployment(tx, deploymentId);
     if (!deployment) {
       return {
         terminal: true,
         event: { event: 'error', message: INTERRUPTED_MESSAGE, step: 'recovery' },
       };
     }
-    const project = await getProject(txDb, deployment.project_id);
+    const project = await getProject(tx, deployment.project_id);
     if (!project || project.status === 'deleting') {
       // Project teardown owns its resources and cleanup jobs.
       return { terminal: false };
     }
     if (deployment.status === 'live') {
-      return { terminal: true, event: await committedEvent(env, txDb, project, deployment) };
+      return { terminal: true, event: await committedEvent(env, tx, project, deployment) };
     }
     if (
       project.active_deployment_id === deployment.id ||
@@ -127,7 +125,7 @@ export async function settleExpiredDeployment(
           deployment.id,
           manifest.sandbox,
           env.SANDBOX_CONCURRENCY_COUNTER,
-          txDb,
+          tx,
         );
       }
       // An upload can land before its acknowledgement or local uploaded flag.
@@ -150,7 +148,7 @@ export async function settleExpiredDeployment(
       }
       await env.ROUTING.delete(`manifest:${deployment.id}`);
       await deleteWorkerBundle(env.STATIC_ASSETS_R2, project.id, deployment.id);
-      await txDb
+      await tx
         .update(deployments)
         .set({ bundle_stored: false })
         .where(eq(deployments.id, deployment.id));
@@ -161,7 +159,7 @@ export async function settleExpiredDeployment(
     const canceled =
       deployment.status === 'canceled' ||
       (deployment.status === 'canceling' && deployment.error_message !== INTERRUPTED_MESSAGE);
-    await updateDeploymentStatus(txDb, deployment.id, canceled ? 'canceled' : 'failed', undefined, {
+    await updateDeploymentStatus(tx, deployment.id, canceled ? 'canceled' : 'failed', undefined, {
       force: true,
     });
     return {

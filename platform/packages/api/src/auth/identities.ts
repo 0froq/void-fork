@@ -72,10 +72,9 @@ export async function resolvePlatformLogin(
   companyIdentity?: CompanyIdentity,
 ): Promise<{ user: User; created: boolean }> {
   const result = await db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
-    await lockPlanCatalog(tx);
-    const settings = await lockAuthSettings(tx);
-    const connection = await readLoginConnection(tx, attempt.connectionId);
+    await lockPlanCatalog(transaction);
+    const settings = await lockAuthSettings(transaction);
+    const connection = await readLoginConnection(transaction, attempt.connectionId);
     if (
       !settings ||
       !connection?.enabled ||
@@ -88,7 +87,7 @@ export async function resolvePlatformLogin(
         401,
       );
     }
-    const revision = await readLoginRevision(tx, connection.id, attempt.revision);
+    const revision = await readLoginRevision(transaction, connection.id, attempt.revision);
     if (
       !revision ||
       identity.issuer !== loginIdentityIssuer(revision.configuration) ||
@@ -110,7 +109,7 @@ export async function resolvePlatformLogin(
         403,
       );
     }
-    const [existing] = await tx
+    const [existing] = await transaction
       .select({ user: users })
       .from(platformLoginIdentities)
       .innerJoin(users, eq(users.id, platformLoginIdentities.user_id))
@@ -129,7 +128,11 @@ export async function resolvePlatformLogin(
         : `oidc:${connection.id}`;
     if (!user) {
       // Matching email is not proof of control of an existing platform account.
-      if (identity.emailVerified && identity.email && (await getUserByEmail(tx, identity.email))) {
+      if (
+        identity.emailVerified &&
+        identity.email &&
+        (await getUserByEmail(transaction, identity.email))
+      ) {
         throw new AuthenticationConfigurationError(
           'Sign in with your existing method to link this login.',
           'identity_link_required',
@@ -158,15 +161,15 @@ export async function resolvePlatformLogin(
         );
       }
       user = await createUser(
-        tx,
+        transaction,
         primaryProvider,
         identity.subject,
         identity.login,
         identity.emailVerified ? identity.email : null,
         'user',
-        (await getDefaultPlan(tx, env.PLATFORM_INSTALLATION_ID ? 'custom' : 'free')).id,
+        (await getDefaultPlan(transaction, env.PLATFORM_INSTALLATION_ID ? 'custom' : 'free')).id,
       );
-      await tx.insert(platformLoginIdentities).values({
+      await transaction.insert(platformLoginIdentities).values({
         id: crypto.randomUUID(),
         user_id: user.id,
         connection_id: connection.id,
@@ -174,7 +177,7 @@ export async function resolvePlatformLogin(
         subject: identity.subject,
       });
       if (connection.kind === 'github' || connection.kind === 'google') {
-        await createOAuthAccount(tx, user.id, connection.kind, identity.subject);
+        await createOAuthAccount(transaction, user.id, connection.kind, identity.subject);
       }
       created = true;
     }
@@ -186,9 +189,9 @@ export async function resolvePlatformLogin(
       );
     }
     if (settings.protection) {
-      await bindCompanyIdentity(tx, user.id, companyIdentity!);
+      await bindCompanyIdentity(transaction, user.id, companyIdentity!);
     }
-    await tx
+    await transaction
       .update(platformLoginIdentities)
       .set({ last_authenticated_at: new Date().toISOString() })
       .where(
@@ -197,7 +200,7 @@ export async function resolvePlatformLogin(
           eq(platformLoginIdentities.connection_id, connection.id),
         ),
       );
-    await tx.insert(platformLoginTests).values({
+    await transaction.insert(platformLoginTests).values({
       id: crypto.randomUUID(),
       user_id: user.id,
       connection_id: connection.id,

@@ -64,15 +64,10 @@ describe('dynamic plan enforcement', () => {
     await writePlanCatalog(env.db, studioCatalog());
     const hosted = await createUser(env.db, 'github', 'one', 'one', null);
     const installed = await env.db.transaction((tx) =>
-      createUserForPlatform(
-        tx as unknown as typeof env.db,
-        'github',
-        'two',
-        'two',
-        null,
-        'installation-test',
-        { additionalSignupAllowed: true, bootstrapGitHubId: 'two' },
-      ),
+      createUserForPlatform(tx, 'github', 'two', 'two', null, 'installation-test', {
+        additionalSignupAllowed: true,
+        bootstrapGitHubId: 'two',
+      }),
     );
     expect(hosted.plan).toBe('studio');
     expect(installed.plan).toBe('studio');

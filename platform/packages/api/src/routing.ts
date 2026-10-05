@@ -22,7 +22,7 @@ async function withLockedProjectOwner(
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
     await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-    const project = await getProject(tx as unknown as Db, projectId);
+    const project = await getProject(tx, projectId);
     if (!project || project.user_id !== expectedOwnerUserId || project.status === 'deleting') {
       return false;
     }
@@ -230,7 +230,7 @@ export async function setProjectsRoutingSuspension(
     await db
       .transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${project.id} FOR UPDATE`);
-        const current = await getProject(tx as unknown as Db, project.id);
+        const current = await getProject(tx, project.id);
         // If ownership changed before this lock, transfer convergence owns the
         // route and this stale fan-out must stand down.
         if (!current || current.user_id !== project.user_id || current.status === 'deleting') {
@@ -240,7 +240,7 @@ export async function setProjectsRoutingSuspension(
         // the same lock before publishing a route, so this read must happen
         // behind it or a domain activated between the eager read and this lock
         // could escape the suspension entirely.
-        const domainMap = await getDomainsByProjectIds(tx as unknown as Db, [project.id]);
+        const domainMap = await getDomainsByProjectIds(tx, [project.id]);
         const protection = await resolveProjectZeroTrustRoutingForPublication(tx, project.id);
         const domainKeys = (domainMap.get(project.id) ?? []).map(
           (domain) => `domain:${domain.hostname}`,

@@ -22,15 +22,10 @@ describe('self-hosted first owner bootstrap', () => {
   it('atomically grants exactly the first self-hosted user admin access', async () => {
     const create = (id: string) =>
       env.db.transaction((tx) =>
-        createUserForPlatform(
-          tx as unknown as typeof env.db,
-          'github',
-          id,
-          `user-${id}`,
-          null,
-          'installation-a1b2c3d4',
-          { additionalSignupAllowed: true, bootstrapGitHubId: id },
-        ),
+        createUserForPlatform(tx, 'github', id, `user-${id}`, null, 'installation-a1b2c3d4', {
+          additionalSignupAllowed: true,
+          bootstrapGitHubId: id,
+        }),
       );
     const users = await Promise.all([create('one'), create('two')]);
     expect(users.filter((user) => user.role === 'admin')).toHaveLength(1);
@@ -41,27 +36,17 @@ describe('self-hosted first owner bootstrap', () => {
   it('allows only the configured GitHub identity to claim an empty installation', async () => {
     await expect(
       env.db.transaction((tx) =>
-        createUserForPlatform(
-          tx as unknown as typeof env.db,
-          'github',
-          'attacker',
-          'attacker',
-          null,
-          'installation-a1b2c3d4',
-          { additionalSignupAllowed: false, bootstrapGitHubId: 'owner-id' },
-        ),
+        createUserForPlatform(tx, 'github', 'attacker', 'attacker', null, 'installation-a1b2c3d4', {
+          additionalSignupAllowed: false,
+          bootstrapGitHubId: 'owner-id',
+        }),
       ),
     ).rejects.toThrow('signup is restricted');
     const owner = await env.db.transaction((tx) =>
-      createUserForPlatform(
-        tx as unknown as typeof env.db,
-        'github',
-        'owner-id',
-        'owner',
-        null,
-        'installation-a1b2c3d4',
-        { additionalSignupAllowed: false, bootstrapGitHubId: 'owner-id' },
-      ),
+      createUserForPlatform(tx, 'github', 'owner-id', 'owner', null, 'installation-a1b2c3d4', {
+        additionalSignupAllowed: false,
+        bootstrapGitHubId: 'owner-id',
+      }),
     );
     expect(owner.role).toBe('admin');
   });
@@ -69,20 +54,15 @@ describe('self-hosted first owner bootstrap', () => {
   it('binds bootstrap ownership to the immutable GitHub account id', async () => {
     await expect(
       env.db.transaction((tx) =>
-        createUserForPlatform(
-          tx as unknown as typeof env.db,
-          'github',
-          'attacker-id',
-          'owner',
-          null,
-          'installation-a1b2c3d4',
-          { additionalSignupAllowed: false, bootstrapGitHubId: 'owner-id' },
-        ),
+        createUserForPlatform(tx, 'github', 'attacker-id', 'owner', null, 'installation-a1b2c3d4', {
+          additionalSignupAllowed: false,
+          bootstrapGitHubId: 'owner-id',
+        }),
       ),
     ).rejects.toThrow('signup is restricted');
     const renamedOwner = await env.db.transaction((tx) =>
       createUserForPlatform(
-        tx as unknown as typeof env.db,
+        tx,
         'github',
         'owner-id',
         'renamed-owner',
@@ -96,13 +76,7 @@ describe('self-hosted first owner bootstrap', () => {
 
   it('preserves Void Cloud user defaults when no installation id is set', async () => {
     const user = await env.db.transaction((tx) =>
-      createUserForPlatform(
-        tx as unknown as typeof env.db,
-        'github',
-        'hosted',
-        'hosted-user',
-        null,
-      ),
+      createUserForPlatform(tx, 'github', 'hosted', 'hosted-user', null),
     );
     expect(user.role).toBe('user');
     expect(user.plan).toBe('free');

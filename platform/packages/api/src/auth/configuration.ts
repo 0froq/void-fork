@@ -154,14 +154,13 @@ export async function importLegacyAuthentication(
   env: AuthEnvironment,
 ): Promise<AuthSettings> {
   return db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
-    await guardAuthenticationLifecycleMutation(tx);
-    await lockAuthSettings(tx);
+    await guardAuthenticationLifecycleMutation(transaction);
+    await lockAuthSettings(transaction);
     const signupFlag = await env.ROUTING.get('signup:enabled');
     const signupOpen =
       signupFlag === 'false' || (!env.PLATFORM_INSTALLATION_ID && signupFlag !== 'true');
     // The insert serializes concurrent first imports; its winner owns the snapshot.
-    const inserted = await tx
+    const inserted = await transaction
       .insert(platformAuthSettings)
       .values({
         singleton: true,
@@ -169,7 +168,7 @@ export async function importLegacyAuthentication(
       })
       .onConflictDoNothing()
       .returning();
-    const settings = await lockAuthSettings(tx);
+    const settings = await lockAuthSettings(transaction);
     if (!settings) {
       throw new AuthenticationConfigurationError('Platform authentication initialization failed.');
     }
@@ -214,18 +213,18 @@ export async function importLegacyAuthentication(
         JSON.stringify([source.id, 1]),
         source.secret,
       );
-      await tx
+      await transaction
         .insert(platformLoginConnections)
         .values({ id: source.id, kind: source.id, active_revision: 1, enabled: true });
-      await tx
+      await transaction
         .insert(platformLoginRevisions)
         .values({ connection_id: source.id, revision: 1, configuration, secret });
-      const identities = await tx
+      const identities = await transaction
         .select()
         .from(oauthAccounts)
         .where(eq(oauthAccounts.provider, source.id));
       for (const identity of identities) {
-        await tx.insert(platformLoginIdentities).values({
+        await transaction.insert(platformLoginIdentities).values({
           id: crypto.randomUUID(),
           user_id: identity.user_id,
           connection_id: source.id,
@@ -257,14 +256,13 @@ export async function stageLoginConfiguration(
     );
   }
   return db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
-    await guardAuthenticationLifecycleMutation(tx);
-    if (!(await lockAuthSettings(tx))) {
+    await guardAuthenticationLifecycleMutation(transaction);
+    if (!(await lockAuthSettings(transaction))) {
       throw new AuthenticationConfigurationError(
         'Initialize platform authentication before configuring a connection.',
       );
     }
-    const existing = await readLoginConnection(tx, configuration.id);
+    const existing = await readLoginConnection(transaction, configuration.id);
     if ((existing?.revision ?? null) !== expectedRevision) {
       throw new AuthenticationConfigurationError(
         'Login settings changed. Reload them before retrying.',
@@ -272,7 +270,7 @@ export async function stageLoginConfiguration(
       );
     }
     if (existing) {
-      const current = await readLoginRevision(tx, existing.id, existing.revision);
+      const current = await readLoginRevision(transaction, existing.id, existing.revision);
       if (
         !current ||
         current.configuration.kind !== configuration.kind ||
@@ -306,19 +304,19 @@ export async function stageLoginConfiguration(
       clientSecret,
     );
     const [connection] = existing
-      ? await tx
+      ? await transaction
           .update(platformLoginConnections)
           .set({ revision })
           .where(eq(platformLoginConnections.id, configuration.id))
           .returning()
-      : await tx
+      : await transaction
           .insert(platformLoginConnections)
           .values({ id: configuration.id, kind: configuration.kind })
           .returning();
-    await tx
+    await transaction
       .insert(platformLoginRevisions)
       .values({ connection_id: configuration.id, revision, configuration, secret });
-    await tx
+    await transaction
       .update(platformAuthSettings)
       .set({ revision: sql`${platformAuthSettings.revision} + 1` })
       .where(eq(platformAuthSettings.singleton, true));

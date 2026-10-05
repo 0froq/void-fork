@@ -444,12 +444,7 @@ async function requireProjectManagedEmailAccess(
     return;
   }
   try {
-    const access = await requireProjectCapability(
-      db as unknown as Db,
-      projectId,
-      actor.userId,
-      'settings',
-    );
+    const access = await requireProjectCapability(db, projectId, actor.userId, 'settings');
     if (access.project.status === 'deleting') {
       throw new EmailOperationError('email domain not available', 404);
     }

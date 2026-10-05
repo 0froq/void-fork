@@ -84,12 +84,11 @@ export async function updatePlatformProtection(
   dryRun = false,
 ): Promise<void> {
   await db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
     if (input.installationId) {
-      await guardAuthenticationLifecycleMutation(tx);
+      await guardAuthenticationLifecycleMutation(transaction);
       // Read a new statement snapshot after acquiring the lock: maintenance may have committed
       // between the advisory-lock statement's snapshot and its successful acquisition.
-      const lifecycle = await tx.execute<{ lifecycle_version: string }>(sql`
+      const lifecycle = await transaction.execute<{ lifecycle_version: string }>(sql`
         SELECT md5(COALESCE((to_jsonb(installation)->'lifecycle_manifest')::text, 'null')) AS lifecycle_version
         FROM __void_platform_installation AS installation
         WHERE singleton = true AND installation_id = ${input.installationId}
@@ -102,7 +101,7 @@ export async function updatePlatformProtection(
         );
       }
     }
-    const settings = await lockAuthSettings(tx);
+    const settings = await lockAuthSettings(transaction);
     if (input.proofExpiresAt && Date.parse(input.proofExpiresAt) <= Date.now()) {
       throw new AuthenticationConfigurationError(
         'Protection verification expired. Verify it again.',
@@ -118,7 +117,7 @@ export async function updatePlatformProtection(
     }
     if (
       !(await validateHumanSession(
-        tx,
+        transaction,
         {
           sub: actor.userId,
           sid: actor.sessionId,
@@ -133,7 +132,7 @@ export async function updatePlatformProtection(
         401,
       );
     }
-    const [user] = await tx.select().from(users).where(eq(users.id, actor.userId));
+    const [user] = await transaction.select().from(users).where(eq(users.id, actor.userId));
     if (!user || user.role !== 'admin' || isAdminSuspended(user.suspended_reason)) {
       throw new AuthenticationConfigurationError(
         'An active administrator is required.',
@@ -177,7 +176,7 @@ export async function updatePlatformProtection(
     try {
       validatePlatformAdmissionPolicy(
         parsePlatformAdmissionPolicy(settings.admission),
-        (await readEnabledLoginConnections(tx)).map((entry) => entry.configuration),
+        (await readEnabledLoginConnections(transaction)).map((entry) => entry.configuration),
         protection,
       );
     } catch {
@@ -191,13 +190,13 @@ export async function updatePlatformProtection(
       return;
     }
     // Revoke rather than silently rebinding older sessions to a new company perimeter.
-    await tx
+    await transaction
       .update(platformHumanSessions)
       .set({ revoked_at: new Date().toISOString() })
       .where(isNull(platformHumanSessions.revoked_at));
-    await tx.delete(operatorSessions);
-    await tx.delete(platformLoginTests);
-    await tx
+    await transaction.delete(operatorSessions);
+    await transaction.delete(platformLoginTests);
+    await transaction
       .update(platformAuthSettings)
       .set({
         protection,

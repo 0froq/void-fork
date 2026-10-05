@@ -539,8 +539,7 @@ async function lockAndMarkDeleting(
 }> | null> {
   return await db.transaction(async (tx) => {
     await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-    const txDb = tx as unknown as Db;
-    const lockedProject = await getProject(txDb, projectId);
+    const lockedProject = await getProject(tx, projectId);
     if (!lockedProject) {
       throw new Error('project disappeared during deletion');
     }
@@ -552,22 +551,22 @@ async function lockAndMarkDeleting(
     // The route precheck can go stale. Authorize again under the same lock as
     // the irreversible status transition. Operator cleanup has no actor here.
     if (actorUserId) {
-      await requireProjectCapability(txDb, projectId, actorUserId, 'delete');
+      await requireProjectCapability(tx, projectId, actorUserId, 'delete');
     }
-    const activeDeployment = await getActiveDeployment(txDb, projectId);
+    const activeDeployment = await getActiveDeployment(tx, projectId);
     if (activeDeployment?.source === 'rollback-lease') {
       throw new ProjectOperationInProgressError();
     }
-    if (await getPendingDeploymentOperation(txDb, projectId)) {
+    if (await getPendingDeploymentOperation(tx, projectId)) {
       throw new ProjectOperationInProgressError(
         'Deployment execution is still settling. Cancel it or wait for its result, then retry project deletion.',
       );
     }
-    const owner = await getUser(txDb, lockedProject.user_id);
+    const owner = await getUser(tx, lockedProject.user_id);
     if (!owner) {
       throw new Error('project owner disappeared during deletion');
     }
-    const [openOwnership] = await txDb
+    const [openOwnership] = await tx
       .select()
       .from(projectOwnershipPeriods)
       .where(
@@ -583,7 +582,7 @@ async function lockAndMarkDeleting(
     }
     const [latestClosedOwnership] = openOwnership
       ? []
-      : await txDb
+      : await tx
           .select()
           .from(projectOwnershipPeriods)
           .where(
@@ -597,7 +596,7 @@ async function lockAndMarkDeleting(
           .limit(1);
     let ownership: ProjectOwnershipPeriod | undefined;
     if (openOwnership) {
-      [ownership] = await txDb
+      [ownership] = await tx
         .update(projectOwnershipPeriods)
         .set({ ends_at: drizzleSql`clock_timestamp()` })
         .where(eq(projectOwnershipPeriods.id, openOwnership.id))
@@ -608,7 +607,7 @@ async function lockAndMarkDeleting(
     ) {
       // A previous teardown attempt may have stopped after detaching usage.
       // Extend its cutoff so the retry reconciles activity through this attempt.
-      [ownership] = await txDb
+      [ownership] = await tx
         .update(projectOwnershipPeriods)
         .set({
           ends_at: drizzleSql`greatest(${projectOwnershipPeriods.ends_at}, clock_timestamp())`,
@@ -616,7 +615,7 @@ async function lockAndMarkDeleting(
         .where(eq(projectOwnershipPeriods.id, latestClosedOwnership.id))
         .returning();
     } else if (!ownership) {
-      [ownership] = await txDb
+      [ownership] = await tx
         .insert(projectOwnershipPeriods)
         .values({
           id: generateId('pown'),
@@ -659,7 +658,7 @@ async function lockAndMarkDeleting(
       ownerBillingCycleStart: owner.billing_cycle_start,
       ownershipStartedAt: ownership!.starts_at,
       ownershipEndedAt: ownership!.ends_at!,
-      cancelledBuilds: await terminateBuildsForProject(txDb, projectId, {
+      cancelledBuilds: await terminateBuildsForProject(tx, projectId, {
         reason: 'project deleted',
       }),
     };

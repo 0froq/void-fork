@@ -47,10 +47,9 @@ export async function updateAuthenticationAdmission(
   dryRun = false,
 ): Promise<void> {
   await db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
-    await guardAuthenticationLifecycleMutation(tx);
-    const settings = await lockAuthSettings(tx);
-    await requireActor(tx, actor, true);
+    await guardAuthenticationLifecycleMutation(transaction);
+    const settings = await lockAuthSettings(transaction);
+    await requireActor(transaction, actor, true);
     if (!settings || settings.revision !== input.revision) {
       throw new AuthenticationConfigurationError(
         'Authentication settings changed. Reload before changing signup.',
@@ -62,7 +61,7 @@ export async function updateAuthenticationAdmission(
       admission = parsePlatformAdmissionPolicy(input.admission);
       validatePlatformAdmissionPolicy(
         admission,
-        (await readEnabledLoginConnections(tx)).map((row) => row.configuration),
+        (await readEnabledLoginConnections(transaction)).map((row) => row.configuration),
         parsePlatformAccessProtection(settings.protection),
       );
     } catch (error) {
@@ -73,7 +72,7 @@ export async function updateAuthenticationAdmission(
       );
     }
     if (!dryRun) {
-      await tx
+      await transaction
         .update(platformAuthSettings)
         .set({ admission, revision: sql`${platformAuthSettings.revision} + 1` })
         .where(eq(platformAuthSettings.singleton, true));
@@ -210,11 +209,10 @@ export async function linkTestedIdentity(
   dryRun = false,
 ): Promise<void> {
   await db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
-    await guardAuthenticationLifecycleMutation(tx);
-    await lockAuthSettings(tx);
-    await requireRecentAuthentication(tx, actor);
-    const connection = await readLoginConnection(tx, input.connectionId);
+    await guardAuthenticationLifecycleMutation(transaction);
+    await lockAuthSettings(transaction);
+    await requireRecentAuthentication(transaction, actor);
+    const connection = await readLoginConnection(transaction, input.connectionId);
     if (
       !connection ||
       (input.activeOnly
@@ -226,8 +224,8 @@ export async function linkTestedIdentity(
         'revision_conflict',
       );
     }
-    const test = await freshTest(tx, actor, input.testId, connection.id, input.revision);
-    const [subjectOwner] = await tx
+    const test = await freshTest(transaction, actor, input.testId, connection.id, input.revision);
+    const [subjectOwner] = await transaction
       .select()
       .from(platformLoginIdentities)
       .where(
@@ -237,7 +235,7 @@ export async function linkTestedIdentity(
           eq(platformLoginIdentities.subject, test.subject),
         ),
       );
-    const [userIdentity] = await tx
+    const [userIdentity] = await transaction
       .select()
       .from(platformLoginIdentities)
       .where(
@@ -258,8 +256,8 @@ export async function linkTestedIdentity(
     }
     if (!subjectOwner) {
       if (connection.kind === 'github' || connection.kind === 'google') {
-        const existing = await getUserByOAuthAccount(tx, connection.kind, test.subject);
-        const [previous] = await tx
+        const existing = await getUserByOAuthAccount(transaction, connection.kind, test.subject);
+        const [previous] = await transaction
           .select()
           .from(oauthAccounts)
           .where(
@@ -278,13 +276,13 @@ export async function linkTestedIdentity(
           );
         }
         if (!existing && !dryRun) {
-          await createOAuthAccount(tx, actor.userId, connection.kind, test.subject);
+          await createOAuthAccount(transaction, actor.userId, connection.kind, test.subject);
         }
       }
       if (dryRun) {
         return;
       }
-      await tx.insert(platformLoginIdentities).values({
+      await transaction.insert(platformLoginIdentities).values({
         id: crypto.randomUUID(),
         user_id: actor.userId,
         connection_id: connection.id,
@@ -306,11 +304,10 @@ export async function enableLoginConnection(
   dryRun = false,
 ): Promise<void> {
   await db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
-    await guardAuthenticationLifecycleMutation(tx);
-    const settings = await lockAuthSettings(tx);
-    await requireActor(tx, actor, true);
-    const connection = await readLoginConnection(tx, input.connectionId);
+    await guardAuthenticationLifecycleMutation(transaction);
+    const settings = await lockAuthSettings(transaction);
+    await requireActor(transaction, actor, true);
+    const connection = await readLoginConnection(transaction, input.connectionId);
     if (!settings || !connection || connection.revision !== input.revision) {
       throw new AuthenticationConfigurationError(
         'Login settings changed. Reload before enabling.',
@@ -320,12 +317,18 @@ export async function enableLoginConnection(
     if (connection.enabled && connection.active_revision === connection.revision) {
       return;
     }
-    const test = await freshTest(tx, actor, input.testId, connection.id, connection.revision);
-    const revision = await readLoginRevision(tx, connection.id, connection.revision);
+    const test = await freshTest(
+      transaction,
+      actor,
+      input.testId,
+      connection.id,
+      connection.revision,
+    );
+    const revision = await readLoginRevision(transaction, connection.id, connection.revision);
     if (!revision) {
       throw new AuthenticationConfigurationError('Missing tested configuration.');
     }
-    const enabled = await readEnabledLoginConnections(tx);
+    const enabled = await readEnabledLoginConnections(transaction);
     const alternative = enabled.filter((row) => row.connection.id !== connection.id);
     if (alternative.length >= 32) {
       throw new AuthenticationConfigurationError(
@@ -333,8 +336,8 @@ export async function enableLoginConnection(
         'login_method_limit',
       );
     }
-    if (connection.enabled && !(await hasVerifiedAlternative(tx, actor, connection.id))) {
-      const [linked] = await tx
+    if (connection.enabled && !(await hasVerifiedAlternative(transaction, actor, connection.id))) {
+      const [linked] = await transaction
         .select()
         .from(platformLoginIdentities)
         .where(
@@ -360,15 +363,15 @@ export async function enableLoginConnection(
     if (dryRun) {
       return;
     }
-    await revokeConnectionSessions(tx, connection.id);
-    await tx
+    await revokeConnectionSessions(transaction, connection.id);
+    await transaction
       .update(platformLoginConnections)
       .set({ enabled: true, active_revision: connection.revision })
       .where(eq(platformLoginConnections.id, connection.id));
-    await tx
+    await transaction
       .update(platformAuthSettings)
       .set({ revision: sql`${platformAuthSettings.revision} + 1`, sessions_required: true });
-    await tx.delete(operatorSessions).where(isNull(operatorSessions.human_session_id));
+    await transaction.delete(operatorSessions).where(isNull(operatorSessions.human_session_id));
   });
 }
 
@@ -382,11 +385,10 @@ export async function disableLoginConnection(
   dryRun = false,
 ): Promise<void> {
   await db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
-    await guardAuthenticationLifecycleMutation(tx);
-    const settings = await lockAuthSettings(tx);
-    await requireActor(tx, actor, true);
-    const connection = await readLoginConnection(tx, input.connectionId);
+    await guardAuthenticationLifecycleMutation(transaction);
+    const settings = await lockAuthSettings(transaction);
+    await requireActor(transaction, actor, true);
+    const connection = await readLoginConnection(transaction, input.connectionId);
     if (!settings || !connection || connection.revision !== input.revision) {
       throw new AuthenticationConfigurationError(
         'Login settings changed. Reload before disabling.',
@@ -396,7 +398,7 @@ export async function disableLoginConnection(
     if (!connection.enabled) {
       return;
     }
-    const remaining = (await readEnabledLoginConnections(tx)).filter(
+    const remaining = (await readEnabledLoginConnections(transaction)).filter(
       (row) => row.connection.id !== connection.id,
     );
     if (remaining.length === 0) {
@@ -405,7 +407,7 @@ export async function disableLoginConnection(
         'last_login_method',
       );
     }
-    if (!(await hasVerifiedAlternative(tx, actor, connection.id))) {
+    if (!(await hasVerifiedAlternative(transaction, actor, connection.id))) {
       throw new AuthenticationConfigurationError(
         'Sign in or test a linked alternative login method before disabling this one.',
         'alternative_login_required',
@@ -419,14 +421,14 @@ export async function disableLoginConnection(
     if (dryRun) {
       return;
     }
-    await tx
+    await transaction
       .update(platformLoginConnections)
       .set({ enabled: false })
       .where(eq(platformLoginConnections.id, connection.id));
-    await revokeConnectionSessions(tx, connection.id);
-    await tx
+    await revokeConnectionSessions(transaction, connection.id);
+    await transaction
       .update(platformAuthSettings)
       .set({ revision: sql`${platformAuthSettings.revision} + 1`, sessions_required: true });
-    await tx.delete(operatorSessions).where(isNull(operatorSessions.human_session_id));
+    await transaction.delete(operatorSessions).where(isNull(operatorSessions.human_session_id));
   });
 }

@@ -308,7 +308,7 @@ async function withZeroTrustOperationLock(
     // The provider write and its checkpoint share the claim lock. A CAS after
     // the provider call alone cannot stop a stale request restoring old policy
     // or deleting the application used by a newer operation.
-    return mutate(tx as unknown as Db);
+    return mutate(tx);
   });
 }
 
@@ -331,7 +331,7 @@ async function completeConfigureOperation(
     }
     // Project mutation/deployment holds the shared lock. Recheck under its exclusive
     // counterpart so the final publication cannot overtake an in-flight reconciliation.
-    if ((await reconciliationCandidates(tx as unknown as Db, saved.operation, 1)).length) {
+    if ((await reconciliationCandidates(tx, saved.operation, 1)).length) {
       return null;
     }
     if (saved.operation.applicationTarget) {
@@ -340,10 +340,10 @@ async function completeConfigureOperation(
       // not cover them (Access asks for sign-in). Keep the domain unpublished,
       // make those projects candidates for the next run, and stop this run
       // failed so only the hourly tier or an operator retries it.
-      const skipped = await skippedProjectIds(tx as unknown as Db, saved.operation, 6);
+      const skipped = await skippedProjectIds(tx, saved.operation, 6);
       if (skipped.length > 0) {
-        await retrySkippedProjects(tx as unknown as Db, saved.operation);
-        return patchConfiguration(tx as unknown as Db, saved, {
+        await retrySkippedProjects(tx, saved.operation);
+        return patchConfiguration(tx, saved, {
           lastError: skippedProjectsError(skipped),
           operation: { ...saved.operation, owner: null, leaseExpiresAt: null },
         });
@@ -352,7 +352,7 @@ async function completeConfigureOperation(
       await setPlatformSetting(tx, PLATFORM_APPLICATION_SETTING, application);
       await env.ROUTING.put(PLATFORM_APPLICATION_KEY, JSON.stringify(application));
     }
-    return patchConfiguration(tx as unknown as Db, saved, {
+    return patchConfiguration(tx, saved, {
       operation: null,
       lastError: null,
     });
