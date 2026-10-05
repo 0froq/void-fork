@@ -12,6 +12,8 @@ Links preserve `?demo=deploy|install|recover&speed=1|1.5|2|0.75`. Add `&capture=
 
 `demos.ts` contains sample values and shortened timings. These are representative, condensed workflows, not claims about actual deployment speed. Installation assumes Cloudflare login, PostgreSQL, OAuth, and credentials were prepared; recovery assumes a linked Void platform project with compatible migration state. Sample `.example` domains and deployment IDs are fictional.
 
+The shell types each command once. Deploy output opens with the resolved project and destination (`blog → Orange Cloud`); installation starts at its first prompt, and logs start at the first request. Keep these opening lines aligned with the CLI rather than repeating command names as headings.
+
 When updating transcripts, compare wording and phases to:
 
 - `packages/void/src/cli/deploy.ts`: `runFullDeploy`, `applyDeployEvent`, and the final note.

@@ -110,3 +110,22 @@ test('status and prompt symbols always have exactly one following space', () => 
     }
   }
 });
+
+test('command output adds destination context without echoing the typed command', () => {
+  for (const demo of terminalDemos) {
+    const output = terminalFrame(demo, demo.duration)
+      .filter((line) => !line.id.endsWith('command'))
+      .map((line) => line.segments.map((segment) => segment.text).join(''));
+    assert.ok(
+      !output.some((line) =>
+        /^void (deploy|platform install|project logs|project rollback)$/.test(line),
+      ),
+    );
+    if (demo.id === 'deploy') {
+      assert.equal(
+        output.find((line) => line.includes('→')),
+        'blog → Orange Cloud',
+      );
+    }
+  }
+});

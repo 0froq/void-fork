@@ -72,7 +72,7 @@ const deploy: TerminalDemo = {
   events: [
     command(0, 'command', 'void deploy'),
     blank(530, 'gap'),
-    write(530, 'intro', s('void deploy', 'blue')),
+    write(530, 'intro', s('blog → ', 'muted'), s('Orange Cloud', 'blue')),
     blank(680, 'intro-gap'),
     write(680, 'build', s('◇ ', 'muted'), s('Building (vp build)...')),
     write(
@@ -128,8 +128,6 @@ const install: TerminalDemo = {
   events: [
     command(0, 'command', 'void platform install'),
     blank(500, 'gap'),
-    write(500, 'intro', s('void platform install', 'blue')),
-    blank(600, 'intro-gap'),
     write(600, 'name', s('› ', 'blue'), s('Installation name:')),
     {
       at: 710,
@@ -222,8 +220,6 @@ const recover: TerminalDemo = {
   events: [
     command(0, 'logs-command', 'void project logs --level error --range 15m'),
     blank(760, 'logs-gap'),
-    write(760, 'logs-intro', s('void project logs', 'blue')),
-    blank(900, 'logs-intro-gap'),
     write(900, 'request', s('14:32:07 ', 'muted'), s('POST /api/comments '), s('500', 'red')),
     write(1060, 'error', s('  [error] ', 'red'), s('Comment could not be saved')),
     write(1220, 'exception', s('  [exception] ', 'red'), s('TypeError: Cannot read properties')),
@@ -233,8 +229,6 @@ const recover: TerminalDemo = {
     blank(1930, 'rollback-gap'),
     command(1930, 'rollback-command', 'void project rollback'),
     blank(2450, 'rollback-intro-gap'),
-    write(2450, 'rollback-intro', s('void project rollback', 'blue')),
-    blank(2630, 'select-gap'),
     write(2630, 'select-title', s('› ', 'blue'), s('Select a deployment to roll back to:')),
     write(2630, 'selected', s('  › dpl_7c42a1 18m ago', 'blue', true), s(': via cli', 'muted')),
     write(2630, 'option', s('    dpl_3b9e80 2h ago', 'muted')),
@@ -256,8 +250,6 @@ const recover: TerminalDemo = {
     blank(5090, 'verify-gap'),
     command(5090, 'verify-command', 'void project logs --range 1m'),
     blank(5780, 'verify-intro-gap'),
-    write(5780, 'verify-intro', s('void project logs', 'blue')),
-    blank(5940, 'verify-request-gap'),
     write(5940, 'verify-request', s('14:33:21 ', 'muted'), s('POST /api/comments 201')),
     write(6180, 'verify-log', s('  [info] ', 'muted'), s('Comment saved')),
     blank(6420, 'verify-outro-gap'),
