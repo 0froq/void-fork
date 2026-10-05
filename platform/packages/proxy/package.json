@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@void/deploy-core": "workspace:*",
     "@void/edge": "workspace:*",
     "@void/platform": "workspace:*",
     "@voidcloud/api": "workspace:*",

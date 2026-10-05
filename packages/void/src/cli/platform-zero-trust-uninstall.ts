@@ -1,3 +1,4 @@
+import { isRecord } from '@void/deploy-core';
 /**
  * Uninstall turns off the platform API, and only that API can remove the
  * Cloudflare Access applications project Zero Trust created. The shared
@@ -51,10 +52,6 @@ type ProjectApplicationRow = Readonly<{
   protected_application_id: string | null;
   protected_application_name: string | null;
 }>;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 function optionalText(value: unknown, label: string): string | null {
   if (value === null || value === undefined) {

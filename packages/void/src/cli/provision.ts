@@ -18,6 +18,7 @@ import { resolve as resolvePosixPath } from 'node:path/posix';
 import { resolve as resolveWindowsPath } from 'node:path/win32';
 import { types as utilTypes } from 'node:util';
 import type { CloudflareOperation } from '@void/deploy-cloudflare';
+import { isRecord } from '@void/deploy-core';
 import { parse, type ParseError } from 'jsonc-parser';
 import { basename, dirname, join, normalize, resolve } from 'pathslash';
 import lockfile from 'proper-lockfile';
@@ -2894,10 +2895,6 @@ function parseJsonArrayStrict(value: unknown): Array<unknown> | undefined {
 }
 function parseJsonObject(value: unknown): Record<string, unknown> | undefined {
   return isRecord(value) ? value : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**

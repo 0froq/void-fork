@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { isRecord } from '@void/deploy-core';
 import { join, relative } from 'pathslash';
 import { analyzeApplicationSync } from '../application-analysis.ts';
 import { VOID_LOCK_FILE } from '../cloudflare-config.ts';
@@ -30,10 +31,6 @@ export type ProjectInfo = {
   resources: Array<PersistentResourceInfo>;
   recordedResources: Array<RecordedResourceInfo>;
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function readRecordedResources(
   root: string,

@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { isRecord } from '@void/deploy-core';
 
 /**
  * `wrangler secret put` creates a fetch-only draft before attaching a first secret to a Worker.
@@ -152,8 +153,4 @@ export function isVoidSecretOnlyDraft(entry: Record<string, unknown>): boolean {
     }
   }
   return true;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

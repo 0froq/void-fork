@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { appendSqliteClassMigration, type DurableObjectMigrationStep } from '@void/deploy-core';
+import {
+  appendSqliteClassMigration,
+  isRecord,
+  type DurableObjectMigrationStep,
+} from '@void/deploy-core';
 import {
   applyEdits,
   createScanner,
@@ -2514,10 +2518,6 @@ function offsetToLineColumn(text: string, offset: number): { line: number; colum
     }
   }
   return { line, column };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function validateDurableObjectMigrations(

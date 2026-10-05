@@ -1005,6 +1005,9 @@ importers:
 
   platform/packages/proxy:
     dependencies:
+      '@void/deploy-core':
+        specifier: workspace:*
+        version: link:../../../packages/deploy-core
       '@void/edge':
         specifier: workspace:*
         version: link:../../../packages/edge

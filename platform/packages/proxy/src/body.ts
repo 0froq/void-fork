@@ -1,15 +1,13 @@
-import type { ProxyBody } from './types.ts';
+import { isRecord } from '@void/deploy-core';
 
-export function isProxyBody(value: unknown): value is ProxyBody {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+export { isRecord as isProxyBody };
 
 export function asString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
 export function asRecord(value: unknown): Record<string, unknown> {
-  return isProxyBody(value) ? value : {};
+  return isRecord(value) ? value : {};
 }
 
 export function isQueryValue(value: unknown): value is string | number | boolean {
