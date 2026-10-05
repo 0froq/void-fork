@@ -4,7 +4,7 @@ outline: deep
 
 # Quickstart
 
-Create an app, call a server route, and deploy it. Use Node.js 24.21.0 or later.
+Create a Void app, run it locally, and deploy it. You can also [add Void to an existing Vite app](#adding-to-an-existing-vite-app).
 
 ## Create an app
 
@@ -86,7 +86,7 @@ npx void deploy --platform cloudflare
 
 Void opens your browser to sign in when needed, builds the app, provisions resources, applies migrations, and prints the deployed URL. Later deploys use the saved target. See [Deployment](./deployment.md) for team platforms, CI, and rollback.
 
-## Add Void to an existing app
+## Adding to an existing Vite app
 
 Install Void and run `void init` with your package manager as shown [above](#create-an-app). Setup adds `voidPlugin()` to your Vite config and creates the remaining project files. If the config needs a manual edit, the CLI shows the change to make.
 
