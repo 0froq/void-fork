@@ -371,7 +371,10 @@ function App({
         layouts: engine.initialLayouts,
       }),
       abort() {},
-      async commit() {},
+      async commit() {
+        engine.commitInitialRender();
+        document.getElementById('app')!.setAttribute('data-hydrated', 'true');
+      },
       dispose() {},
     }),
     [engine, initialPageData],
@@ -626,7 +629,6 @@ export async function startReactPages(config: ReactPagesConfig): Promise<ReactPa
   viewTransitionWaiters.clear();
   pendingVisitSettlers.clear();
   committedResources.clear();
-  committedResources.add(0);
   activePendingNavigationId = null;
 
   const engine = await createPageNavigationEngine({
@@ -679,7 +681,6 @@ export async function startReactPages(config: ReactPagesConfig): Promise<ReactPa
       hydrateRoot(appEl, app);
     }
   });
-  appEl.setAttribute('data-hydrated', 'true');
   engine.start();
 
   return { router };

@@ -355,7 +355,7 @@ function replaceRecord(target, source) {
   Object.assign(target, source || {});
 }
 
-const { router, initialPageData, initialComponent, initialLayouts, start } =
+const { router, initialPageData, initialComponent, initialLayouts, start, commitInitialRender } =
   await createVoidRouter({
     adapter: {
       createDeferred: () => createDeferred(),
@@ -428,5 +428,6 @@ app.mount(appEl);
 appEl.setAttribute("data-hydrated", "true");
 export { reactiveRouter as router };
 start();
+commitInitialRender();
 `;
 }

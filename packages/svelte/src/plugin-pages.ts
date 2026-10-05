@@ -239,7 +239,7 @@ function generateClientEntry(
   staticPageData?: StaticPageDataBuildOptions,
 ): string {
   return `
-import { hydrate, mount } from "svelte";
+import { hydrate, mount, tick } from "svelte";
 import { writable } from "svelte/store";
 import App from "@void/svelte/App.svelte";
 import { setActionRouter } from "@void/svelte";
@@ -259,7 +259,7 @@ let routeParams = {};
 const routeStore = writable(routeUrl);
 const navigationStore = writable(idleNavigationState());
 
-const { router, initialPageData, initialComponent, initialLayouts, start } =
+const { router, initialPageData, initialComponent, initialLayouts, start, commitInitialRender } =
   await createVoidRouter({
     adapter: {
       createDeferred: () => ({ value: null, loading: true, error: null }),
@@ -338,8 +338,10 @@ if (appEl.getAttribute("data-void-ssr") === "false") {
   hydrate(App, appOptions);
 }
 
-appEl.setAttribute("data-hydrated", "true");
 export { reactiveRouter as router };
 start();
+await tick();
+commitInitialRender();
+appEl.setAttribute("data-hydrated", "true");
 `;
 }

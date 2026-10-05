@@ -280,7 +280,7 @@ function replaceShared(next) {
   Object.assign(shared, next || {});
 }
 
-const { router, initialPageData, initialComponent, initialLayouts, start } =
+const { router, initialPageData, initialComponent, initialLayouts, start, commitInitialRender } =
   await createVoidRouter({
     adapter: {
       createDeferred: () => ({ value: null, loading: true, error: null }),
@@ -376,5 +376,6 @@ if (appEl.getAttribute("data-void-ssr") === "false") {
 appEl.setAttribute("data-hydrated", "true");
 export { reactiveRouter as router };
 start();
+commitInitialRender();
 `;
 }

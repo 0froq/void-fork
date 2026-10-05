@@ -388,6 +388,7 @@ export async function createVoidRouter(config: VoidRouterConfig): Promise<{
   initialComponent: unknown;
   initialLayouts: Array<unknown>;
   start(): void;
+  commitInitialRender(): void;
 }> {
   {
     const engine = await createNavigationEngine(config);
@@ -513,6 +514,7 @@ export async function createVoidRouter(config: VoidRouterConfig): Promise<{
       initialComponent: engine.initialComponent,
       initialLayouts: engine.initialLayouts,
       start: engine.start,
+      commitInitialRender: engine.commitInitialRender,
     };
   }
 }

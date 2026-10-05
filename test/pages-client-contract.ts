@@ -8,7 +8,7 @@ type TestWindow = Window & {
   __preventedNavigate?: boolean;
 };
 
-/** Run the full browser contract in preview and a representative navigation in dev. */
+/** Run the full browser contract in preview and navigation/history smoke tests in dev. */
 export function registerSharedClientTests({
   getBase,
   newPage,
@@ -23,6 +23,69 @@ export function registerSharedClientTests({
   let BASE: string;
   beforeAll(() => {
     BASE = getBase();
+  });
+
+  it('restores scroll after browser Back from an ordinary document link', async ({ expect }) => {
+    const page = await newPage();
+    const errors: Array<string> = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+
+    try {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      const ssrResponse = await page.request.get(BASE + '/scroll-restoration');
+      expect(ssrResponse.status()).toBe(200);
+      expect(await ssrResponse.text()).toContain('data-testid="scroll-row-30"');
+      const response = await page.goto(BASE + '/scroll-restoration');
+      expect(response?.status()).toBe(200);
+      await waitForHydration(page);
+
+      const row = page.getByTestId('scroll-row-30');
+      const scrollY = await row.evaluate((element) =>
+        Math.round(element.getBoundingClientRect().top - 100),
+      );
+      await page.mouse.move(400, 400);
+      await page.mouse.wheel(0, scrollY);
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBeCloseTo(scrollY, 0);
+      const before = await row.evaluate((element) => {
+        (window as TestWindow).__SPA_MARKER = true;
+        return {
+          scrollY: window.scrollY,
+          rowTop: element.getBoundingClientRect().top,
+          timeOrigin: performance.timeOrigin,
+        };
+      });
+      expect(before.scrollY).toBeGreaterThan(1000);
+
+      await row.getByRole('link', { name: 'Go to Users' }).click();
+      await page.waitForURL(BASE + '/users');
+      await waitForHydration(page);
+      expect(await page.evaluate(() => (window as TestWindow).__SPA_MARKER)).toBeUndefined();
+
+      // Verify a new document even when the browser serves it from its HTTP cache.
+      const backResponse = await page.goBack();
+      if (backResponse) {
+        expect(backResponse.status()).toBe(200);
+      }
+      expect(page.url()).toBe(BASE + '/scroll-restoration');
+      await waitForHydration(page);
+      const navigation = await page.evaluate(() => ({
+        type: (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming).type,
+        timeOrigin: performance.timeOrigin,
+        marker: (window as TestWindow).__SPA_MARKER,
+      }));
+      expect(navigation.type).toBe('back_forward');
+      expect(navigation.timeOrigin).not.toBe(before.timeOrigin);
+      expect(navigation.marker).toBeUndefined();
+      expect(errors).toEqual([]);
+
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBeCloseTo(before.scrollY, 0);
+      expect(await row.evaluate((element) => element.getBoundingClientRect().top)).toBeCloseTo(
+        before.rowTop,
+        0,
+      );
+    } finally {
+      await page.context().close();
+    }
   });
 
   if (coverage === 'smoke') {
@@ -55,6 +118,47 @@ export function registerSharedClientTests({
     });
     return;
   }
+
+  it('restores document scroll after reload', async ({ expect }) => {
+    const page = await newPage();
+    try {
+      await page.goto(BASE + '/scroll-restoration');
+      await waitForHydration(page);
+      await page.mouse.move(400, 400);
+      await page.mouse.wheel(0, 3500);
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(3500);
+      await page.reload();
+      await waitForHydration(page);
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(3500);
+    } finally {
+      await page.context().close();
+    }
+  });
+
+  it('restores scroll on SPA Back after visiting a shorter page', async ({ expect }) => {
+    const page = await newPage();
+    try {
+      await page.goto(BASE + '/scroll-restoration');
+      await waitForHydration(page);
+      await page.mouse.move(400, 400);
+      await page.mouse.wheel(0, 3500);
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(3500);
+      await page.evaluate(() => {
+        (window as TestWindow).__SPA_MARKER = true;
+      });
+      await page.getByTestId('scroll-row-30').getByRole('link', { name: 'Visit Users' }).click();
+      await page.waitForFunction(() =>
+        document.querySelector('h1')?.textContent?.includes('Users'),
+      );
+      expect(await page.evaluate(() => (window as TestWindow).__SPA_MARKER)).toBe(true);
+      await page.goBack();
+      await page.getByRole('heading', { name: 'Scroll restoration' }).waitFor();
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(3500);
+      expect(await page.evaluate(() => (window as TestWindow).__SPA_MARKER)).toBe(true);
+    } finally {
+      await page.context().close();
+    }
+  });
 
   it('replaces shared data when a page response omits a previous key', async () => {
     const page = await newPage();

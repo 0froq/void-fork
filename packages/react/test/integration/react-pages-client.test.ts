@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import spawn from 'cross-spawn';
-import { chromium, type Browser, type Page } from 'playwright';
+import { type Browser, type Page } from 'playwright';
 import { describe, expect, it, beforeAll, afterAll } from 'vite-plus/test';
 import { waitForIslandsHydrated } from '../../../../test/browser-helpers.ts';
 import {
@@ -11,6 +11,7 @@ import {
   waitForServer,
   killChild,
 } from '../../../../test/integration-helpers.ts';
+import { launchPagesBrowser } from '../../../../test/pages-browser.ts';
 import { registerSharedClientTests } from '../../../../test/pages-client-contract.ts';
 import { defineSharedIslandTests } from '../../../../test/pages-island-contract.ts';
 
@@ -168,7 +169,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 }
 
 beforeAll(async () => {
-  browser = await chromium.launch();
+  browser = await launchPagesBrowser();
 });
 
 afterAll(async () => {

@@ -6,6 +6,7 @@ import type { HeadDescriptor } from './head.ts';
 import { PrefetchCache, parseCacheFor } from './prefetch.ts';
 import type { CacheForInput, CacheForResult } from './prefetch.ts';
 import type { PageObject } from './protocol.ts';
+import { createScrollRestoration } from './scroll-restoration.ts';
 
 export type PageComponentModule = {
   default: unknown;
@@ -95,6 +96,8 @@ export type PageNavigationEngine = {
   flushAll(): void;
   setPopStateHandler(handler: (url: string, options: VisitOptions) => void): void;
   start(): void;
+  /** Called after the adapter commits the initial page DOM. */
+  commitInitialRender(): void;
 };
 
 const PAGE_DATA_SCRIPT_ID = '__VOID_PAGE_DATA__';
@@ -245,6 +248,9 @@ export async function createPageNavigationEngine(
   let _htmlDeferredRegistry: DeferredRegistry | null = null;
   let _currentFetchUrl = window.location.pathname + window.location.search;
   let popStateHandler: ((url: string, options: VisitOptions) => void) | null = null;
+  let initialScrollPosition: { x: number; y: number } | null = null;
+  const initialUrl = window.location.pathname + window.location.search + window.location.hash;
+  const scrollRestoration = createScrollRestoration();
 
   function getPageDataCacheKey(url: string, method = 'GET'): string {
     return `${method}:${url}`;
@@ -561,13 +567,9 @@ export async function createPageNavigationEngine(
   ): void {
     _currentFetchUrl = effectiveFetchUrl;
     if (writeHistory) {
-      if (options.replace) {
-        history.replaceState({}, '', effectiveFetchUrl + hash);
-      } else {
-        history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, '');
-        history.pushState({}, '', effectiveFetchUrl + hash);
-      }
+      scrollRestoration.writeHistory(effectiveFetchUrl + hash, !!options.replace);
     }
+    scrollRestoration.commit();
     if (options._scrollPosition) {
       window.scrollTo(options._scrollPosition.x, options._scrollPosition.y);
       return;
@@ -910,13 +912,9 @@ export async function createPageNavigationEngine(
 
       if (!options.preserveState) {
         const historyUrl = commitTarget.fetchUrl + commitTarget.hash;
-        if (options.replace) {
-          history.replaceState({}, '', historyUrl);
-        } else {
-          history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, '');
-          history.pushState({}, '', historyUrl);
-        }
+        scrollRestoration.writeHistory(historyUrl, !!options.replace);
       }
+      scrollRestoration.commit();
 
       const doScroll = () => {
         if (options.preserveScroll) {
@@ -974,6 +972,10 @@ export async function createPageNavigationEngine(
     initialLayouts,
 
     prepareVisit(url, options = {}) {
+      if (!options._popstate) {
+        // Capture the departing page before an adapter replaces or shrinks its DOM.
+        scrollRestoration.save();
+      }
       const hashIndex = url.indexOf('#');
       const hash = hashIndex !== -1 ? url.slice(hashIndex) : '';
       const fetchUrl = hashIndex !== -1 ? url.slice(0, hashIndex) : url;
@@ -1148,9 +1150,17 @@ export async function createPageNavigationEngine(
       popStateHandler = handler;
     },
 
+    commitInitialRender() {
+      const saved = initialScrollPosition;
+      initialScrollPosition = null;
+      scrollRestoration.commit();
+      if (saved && _nextNavigationId === 0) {
+        window.scrollTo(saved.x, saved.y);
+      }
+    },
+
     start() {
-      history.scrollRestoration = 'manual';
-      history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, '');
+      initialScrollPosition = scrollRestoration.start();
 
       initClientHead(initialPageData.head as HeadDescriptor | undefined);
 
@@ -1166,11 +1176,15 @@ export async function createPageNavigationEngine(
       }
 
       window.addEventListener('popstate', (e) => {
-        const saved = e.state;
         const url = window.location.pathname + window.location.search + window.location.hash;
+        const saved = scrollRestoration.pop(e.state);
+        if (!scrollRestoration.ready && url === initialUrl) {
+          initialScrollPosition = saved;
+          return;
+        }
         const options = {
           preserveState: true,
-          _scrollPosition: saved ? { x: saved.scrollX ?? 0, y: saved.scrollY ?? 0 } : null,
+          _scrollPosition: saved,
           _popstate: true,
         };
         if (popStateHandler) {

@@ -1,8 +1,9 @@
 import { join } from 'node:path';
-import { chromium, type Browser } from 'playwright';
+import { type Browser } from 'playwright';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, expect, it } from 'vite-plus/test';
 import { collectBrowserDiagnostics } from '../../../../test/browser-helpers.ts';
+import { launchPagesBrowser } from '../../../../test/pages-browser.ts';
 
 const FIXTURE = join(import.meta.dirname, '..', 'fixtures', 'navigation-fallback');
 let server: ViteDevServer;
@@ -30,12 +31,53 @@ beforeAll(async () => {
   });
   await server.listen();
   base = server.resolvedUrls!.local[0];
-  browser = await chromium.launch();
+  browser = await launchPagesBrowser();
 });
 
 afterAll(async () => {
   await browser?.close();
   await server?.close();
+});
+
+it('restores document history scroll after the initial Suspense content commits', async () => {
+  const page = await browser.newPage();
+  const releasePage = async () => {
+    await page.waitForFunction(
+      () =>
+        typeof (window as Window & { __resolveScrollPage?: () => void }).__resolveScrollPage ===
+        'function',
+    );
+    // Hold the initial render past the startup frame, then let React commit it.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await page.evaluate(() =>
+      (window as Window & { __resolveScrollPage?: () => void }).__resolveScrollPage!(),
+    );
+    await page.getByRole('heading', { name: 'Delayed scroll page' }).waitFor();
+  };
+  try {
+    await page.goto(new URL('/scroll.html', base).href);
+    await releasePage();
+    await page.mouse.move(400, 400);
+    await page.mouse.wheel(0, 3500);
+    await expect.poll(() => page.evaluate(() => scrollY)).toBe(3500);
+    const timeOrigin = await page.evaluate(() => performance.timeOrigin);
+    await page.locator('[data-row="30"] a').click();
+    await page.getByRole('heading', { name: 'Home' }).waitFor();
+    const response = await page.goBack();
+    if (response) {
+      expect(response.status()).toBe(200);
+    }
+    expect(await page.evaluate(() => performance.timeOrigin)).not.toBe(timeOrigin);
+    await releasePage();
+    await expect.poll(() => page.evaluate(() => scrollY)).toBe(3500);
+  } finally {
+    await page.close();
+  }
 });
 
 it('shows the destination fallback before page data resolves', async () => {

@@ -21,6 +21,7 @@ const cliUnitTests = [
 // core-markdown workers explicitly from this main config process (which has the runner's step env).
 // Absent/unset → empty strings → the suite skips itself as designed.
 const e2eWorkerEnv = {
+  VOID_TEST_BROWSER: process.env.VOID_TEST_BROWSER ?? 'chromium',
   VOID_E2E_CF_TOKEN: process.env.VOID_E2E_CF_TOKEN ?? '',
   VOID_E2E_CF_ACCOUNT_ID: process.env.VOID_E2E_CF_ACCOUNT_ID ?? '',
   VOID_E2E_RUN_ID: process.env.VOID_E2E_RUN_ID ?? '',

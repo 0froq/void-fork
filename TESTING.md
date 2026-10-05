@@ -229,6 +229,14 @@ utility and Bash; it has no Python or native npm dependency.
 
 ## Browser readiness and Windows CI
 
+Pages scroll regressions run in Chromium by default. On a machine with Playwright WebKit support,
+run the same document navigation, reload, SPA navigation, and suspended-render cases in WebKit:
+
+```sh
+vp exec playwright install webkit
+VOID_TEST_BROWSER=webkit vp test run packages/react/test/integration packages/vue/test/integration packages/svelte/test/integration packages/solid/test/integration -t 'restores.*scroll'
+```
+
 Use `waitForIslandsHydrated` from `test/browser-helpers.ts` before asserting island state or
 interacting with islands. Pass the expected minimum count when checking a multi-island fixture.
 Each island imports and hydrates independently, so a selector matching one hydrated island does
@@ -316,7 +324,7 @@ Use the intended test account rather than an account name embedded in a script. 
 - setting `CLOUDFLARE_ACCOUNT_ID` in the current shell.
 
 When a version has no preview URL, also set `CLOUDFLARE_WORKERS_SUBDOMAIN` to the account's
-workers.dev subdomain. For `https://my-worker.my-team.workers.dev`, the value is `my-team`. The
+workers.dev subdomain. For [`https://my-worker.my-team.workers.dev`](https://my-worker.my-team.workers.dev), the value is `my-team`. The
 account name shown in the dashboard is not necessarily the workers.dev subdomain.
 
 Never commit account IDs, resource IDs, API tokens, or Access credentials. CI should receive them

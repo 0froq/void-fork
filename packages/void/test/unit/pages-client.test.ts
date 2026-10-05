@@ -514,7 +514,11 @@ describe('createVoidRouter prefetch', () => {
     await router.visit('#section');
 
     expect(events).toEqual(['loading', 'idle']);
-    expect(history.pushState).toHaveBeenCalledWith({}, '', '/docs?tab=api#section');
+    expect(history.pushState).toHaveBeenCalledWith(
+      expect.objectContaining({ __voidScrollKey: expect.any(String) }),
+      '',
+      '/docs?tab=api#section',
+    );
     expect(window.scrollTo).toHaveBeenCalledWith(0, 0);
     expect(fetch).not.toHaveBeenCalled();
     expect(applyUpdate).not.toHaveBeenCalled();
@@ -848,7 +852,11 @@ describe('createVoidRouter prefetch', () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(applyUpdate).not.toHaveBeenCalled();
-    expect(history.pushState).toHaveBeenCalledWith({}, '', '/#section');
+    expect(history.pushState).toHaveBeenCalledWith(
+      expect.objectContaining({ __voidScrollKey: expect.any(String) }),
+      '',
+      '/#section',
+    );
     expect(window.scrollTo).toHaveBeenCalledWith(0, 0);
   });
 

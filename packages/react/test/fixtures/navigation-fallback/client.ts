@@ -5,6 +5,26 @@ import { startReactPages } from '../../../src/runtime/pages-client.ts';
 let router: VoidRouter;
 let nextLayoutInstance = 0;
 
+const scrollReady = new Promise<void>((resolve) => {
+  (window as Window & { __resolveScrollPage?: () => void }).__resolveScrollPage = resolve;
+});
+
+function ScrollPage() {
+  React.use(scrollReady);
+  return React.createElement(
+    'main',
+    null,
+    React.createElement('h1', null, 'Delayed scroll page'),
+    Array.from({ length: 80 }, (_, row) =>
+      React.createElement(
+        'section',
+        { key: row, 'data-row': row, style: { height: 120 } },
+        React.createElement('a', { href: '/' }, `Leave row ${row}`),
+      ),
+    ),
+  );
+}
+
 function ShellLayout({ children }: { children: React.ReactNode }) {
   const [instance] = React.useState(() => ++nextLayoutInstance);
   return React.createElement('div', { 'data-layout-instance': instance }, children);
@@ -49,11 +69,14 @@ void startReactPages({
     layout: async () => ({ default: ShellLayout }),
     home: async () => ({ default: Home }),
     dashboard: async () => ({ default: Dashboard }),
+    scroll: async () => ({ default: ScrollPage }),
   },
   layoutTree: { home: ['layout'], dashboard: ['layout'] },
   routeMeta: {},
-  matchRoute: (url) =>
-    new URL(url, location.origin).pathname === '/dashboard' ? 'dashboard' : 'home',
+  matchRoute: (url) => {
+    const path = new URL(url, location.origin).pathname;
+    return path === '/dashboard' ? 'dashboard' : path === '/scroll.html' ? 'scroll' : 'home';
+  },
   staticPageData: false,
   staticPageDataFastPath: false,
   viewTransitions: false,
