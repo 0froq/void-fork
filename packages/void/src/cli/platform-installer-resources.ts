@@ -8,6 +8,7 @@ import {
   type InstallationResource,
   type PlatformInstallationManifest,
 } from '@void/platform';
+import { PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY as REMOTE_INSTALLATION_MANIFEST_KEY } from '@void/platform';
 import {
   hyperdriveOriginConfigHash,
   hyperdriveOriginFromConnectionString,
@@ -21,7 +22,6 @@ import {
   type InstallerClient,
   type PlatformDatabaseLifecycleLock,
 } from './platform-installer-types.ts';
-import { REMOTE_INSTALLATION_MANIFEST_KEY } from './platform-installer.ts';
 import {
   platformAdoptionIntentHash,
   platformProvisionIntentHash,

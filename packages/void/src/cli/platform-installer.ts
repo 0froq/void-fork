@@ -4,7 +4,6 @@ import {
   createPlatformWorkerConfigs,
   PLATFORM_DISABLED_KEY,
   PLATFORM_DISABLED_VALUE,
-  PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
   recordInstallationStep,
   setInstallationDesiredState,
   setInstallationEndpoints,
@@ -86,7 +85,7 @@ import { assertPlatformWorkerSecretUpdateAuthority } from './platform-secret-upd
 import { platformManagedWorkerTraffic } from './platform-traffic.ts';
 import { resolvePinnedApiBaseUrl } from './provision.ts';
 
-export const REMOTE_INSTALLATION_MANIFEST_KEY: string = PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY;
+export { PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY as REMOTE_INSTALLATION_MANIFEST_KEY } from '@void/platform';
 
 // Preserve the routing gate first; rollback and manifest failure checkpoints
 // follow while the database lifecycle lock is still held by the caller.
