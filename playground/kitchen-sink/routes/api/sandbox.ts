@@ -1,5 +1,5 @@
 import { defineHandler } from 'void';
-import type { UsageLimit } from 'void/limits';
+import { UsageLimit } from 'void/limits';
 import { getSandbox, type SandboxClient } from 'void/sandbox';
 import { sampleRequests } from '../../lib/sandbox-demo.ts';
 
@@ -46,13 +46,6 @@ export const POST = defineHandler(async (c) => {
     );
   }
 
-  const limited = (limit: UsageLimit) =>
-    limit.response({
-      message:
-        limit.reason === 'concurrency'
-          ? 'All runners are busy. Your code has been kept; try again shortly.'
-          : 'The execution allowance is exhausted. Your code has been kept.',
-    });
   let sandbox: SandboxClient | undefined;
   try {
     // Programs from concurrent callers must never share files or processes.
@@ -60,43 +53,26 @@ export const POST = defineHandler(async (c) => {
       inactivityTimeoutMs: 30_000,
     });
 
-    for (const operation of [
-      sandbox.files.mkdir(WORKDIR, { recursive: true }),
-      sandbox.files.writeFile(
-        `${WORKDIR}/input.json`,
-        JSON.stringify({ requests: sampleRequests }, null, 2),
-      ),
-      sandbox.files.writeFile(`${WORKDIR}/user-code.mjs`, code),
-      sandbox.files.writeFile(`${WORKDIR}/run.mjs`, RUNNER),
-    ]) {
-      const denial = await operation.match({ ok: () => null, limited });
-      if (denial) {
-        return denial;
-      }
-    }
+    await sandbox.files.mkdir(WORKDIR, { recursive: true });
+    await sandbox.files.writeFile(
+      `${WORKDIR}/input.json`,
+      JSON.stringify({ requests: sampleRequests }, null, 2),
+    );
+    await sandbox.files.writeFile(`${WORKDIR}/user-code.mjs`, code);
+    await sandbox.files.writeFile(`${WORKDIR}/run.mjs`, RUNNER);
 
     const started = performance.now();
-    const result = await sandbox
-      .run(['node', 'run.mjs'], {
-        cwd: WORKDIR,
-        signal: AbortSignal.timeout(5_000),
-        env: {
-          NODE_OPTIONS: '--disable-proto=throw',
-        },
-      })
-      .match({ ok: (result) => result, limited });
-    if (result instanceof Response) {
-      return result;
-    }
+    const result = await sandbox.run(['node', 'run.mjs'], {
+      cwd: WORKDIR,
+      signal: AbortSignal.timeout(5_000),
+      env: {
+        NODE_OPTIONS: '--disable-proto=throw',
+      },
+    });
     let output: unknown = null;
     if (result.exitCode === 0) {
-      const file = await sandbox.files
-        .readFile(`${WORKDIR}/output.json`)
-        .match({ ok: (response) => response.text(), limited });
-      if (file instanceof Response) {
-        return file;
-      }
-      output = JSON.parse(file);
+      const file = await sandbox.files.readFile(`${WORKDIR}/output.json`);
+      output = await file.json();
     }
 
     return c.json({
@@ -108,6 +84,14 @@ export const POST = defineHandler(async (c) => {
       duration: performance.now() - started,
     });
   } catch (err) {
+    if (err instanceof UsageLimit) {
+      return err.response({
+        message:
+          err.reason === 'concurrency'
+            ? 'All runners are busy. Your code has been kept; try again shortly.'
+            : 'The execution allowance is exhausted. Your code has been kept.',
+      });
+    }
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ ok: false, error: message }, 500);
   } finally {

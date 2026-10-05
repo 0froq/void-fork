@@ -23,9 +23,9 @@ const bytes = value => new Blob([value]).stream();
 let file = '';
 class Process extends RpcTarget {
   #exit; #resolve;
-  constructor(background) { super(); this.#exit = background ? new Promise(resolve => {this.#resolve = resolve;}) : Promise.resolve(0); }
+  constructor(background, limited) { super(); this.limited = limited; this.#exit = background ? new Promise(resolve => {this.#resolve = resolve;}) : Promise.resolve(0); }
   async invoke(operation, args) {
-    if (operation === 'exitCode') return this.#exit;
+    if (operation === 'exitCode') { if (this.limited) throw new Error('VOID_SANDBOX_runtime_budget'); return this.#exit; }
     if (operation === 'kill') { this.#resolve?.(137); return; }
     if (operation === 'resize') return;
     throw new TypeError('process operation denied');
@@ -37,8 +37,9 @@ class Capability extends RpcTarget {
     if (operation === 'files' && args[0] === 'readFile') return new Response(bytes(file));
     if (operation === 'exec') {
       if (args[0][0] === 'denied') throw new Error('admission failed');
+      if (args[0][0] === 'limited') throw new Error('VOID_SANDBOX_concurrency');
       const background = args[0][0] === 'sleep';
-      const process = new Process(background);
+      const process = new Process(background, args[0][0] === 'budget');
       if (args[1]?.abort) {
         const reader = args[1].abort.getReader();
         reader.read().then(() => process.invoke('kill', []));
@@ -60,27 +61,32 @@ export default class extends WorkerEntrypoint {
       application,
       `
 import { getSandbox } from ${JSON.stringify(join(root, 'packages/void/src/runtime/sandbox.ts'))};
+import { UsageLimit } from ${JSON.stringify(join(root, 'packages/void/src/runtime/limits.ts'))};
 export default { async fetch(request) {
   const sandbox = await getSandbox('default');
   const path = new URL(request.url).pathname;
+  if (path === '/limited' || path === '/budget') {
+    try { await sandbox.run([path === '/limited' ? 'limited' : 'budget']); }
+    catch (error) { if (error instanceof UsageLimit) return error.response(); throw error; }
+  }
   if (path === '/files') {
-    await sandbox.files.writeFile('/file', new Blob(['input stream']).stream()).match({ ok: value => value, limited: limit => { throw limit; } });
-    return await sandbox.files.readFile('/file').match({ ok: value => value, limited: limit => { throw limit; } });
+    await sandbox.files.writeFile('/file', new Blob(['input stream']).stream());
+    return await sandbox.files.readFile('/file');
   }
   if (path === '/blob') {
-    await sandbox.files.writeFile('/file', new Blob(['blob content'])).match({ ok: value => value, limited: limit => { throw limit; } });
-    return await sandbox.files.readFile('/file').match({ ok: value => value, limited: limit => { throw limit; } });
+    await sandbox.files.writeFile('/file', new Blob(['blob content']));
+    return await sandbox.files.readFile('/file');
   }
   if (path === '/process') {
-    const process = await sandbox.exec(['sleep', '10']).match({ ok: value => value, limited: limit => { throw limit; } });
+    const process = await sandbox.exec(['sleep', '10']);
     await process.kill(9);
-    return Response.json({pid: process.pid, exitCode: await process.exitCode.match({ ok: value => value, limited: limit => { throw limit; } })});
+    return Response.json({pid: process.pid, exitCode: await process.exitCode});
   }
   if (path === '/abort') {
     const abort = new AbortController();
-    const process = await sandbox.exec(['sleep', '10'], {signal: abort.signal}).match({ ok: value => value, limited: limit => { throw limit; } });
+    const process = await sandbox.exec(['sleep', '10'], {signal: abort.signal});
     abort.abort();
-    return Response.json({exitCode: await process.exitCode.match({ ok: value => value, limited: limit => { throw limit; } })});
+    return Response.json({exitCode: await process.exitCode});
   }
   if (path === '/rejected') {
     const abort = new AbortController();
@@ -90,17 +96,17 @@ export default { async fetch(request) {
     const remove = signal.removeEventListener.bind(signal);
     signal.addEventListener = (type, listener, options) => { if (type === 'abort') listeners.add(listener); return add(type, listener, options); };
     signal.removeEventListener = (type, listener, options) => { if (type === 'abort') listeners.delete(listener); return remove(type, listener, options); };
-    try { await sandbox.exec(['denied'], {signal}).match({ ok: value => value, limited: limit => { throw limit; } }); } catch {}
+    try { await sandbox.exec(['denied'], {signal}); } catch {}
     return Response.json({listeners: listeners.size});
   }
   if (path === '/stdin') {
-    const process = await sandbox.exec(['cat'], {stdin: 'pipe'}).match({ ok: value => value, limited: limit => { throw limit; } });
+    const process = await sandbox.exec(['cat'], {stdin: 'pipe'});
     const writer = process.stdin.getWriter();
     await writer.write(new TextEncoder().encode('stdin stream')); await writer.close();
-    return await sandbox.files.readFile('/file').match({ ok: value => value, limited: limit => { throw limit; } });
+    return await sandbox.files.readFile('/file');
   }
-  const process = await sandbox.exec(['echo', 'ok']).match({ ok: value => value, limited: limit => { throw limit; } });
-  const result = await process.output().match({ ok: value => value, limited: limit => { throw limit; } });
+  const process = await sandbox.exec(['echo', 'ok']);
+  const result = await process.output();
   return Response.json({output: new TextDecoder().decode(result.stdout), exitCode: result.exitCode});
 } };
 `,
@@ -160,6 +166,18 @@ export default { async fetch(request) {
     expect(await (await runtime.dispatchFetch('http://localhost/output')).json()).toEqual({
       output: 'root stream',
       exitCode: 0,
+    });
+  });
+  it.each([
+    ['limited', 'concurrency'],
+    ['budget', 'runtime_budget'],
+  ])('restores typed %s limits across Workers RPC', async (path, reason) => {
+    const response = await runtime.dispatchFetch(`http://localhost/${path}`);
+    expect(response.status).toBe(429);
+    expect(await response.json()).toMatchObject({
+      code: 'usage_limit',
+      resource: 'sandbox',
+      reason,
     });
   });
   it('transfers streaming file inputs and Response bodies', async () => {

@@ -1,7 +1,7 @@
 import type { Files } from '@cloudflare/sandbox';
 import { getRawRuntimeEnv } from './env-raw.ts';
 import { requireRuntimeBinding } from './env.ts';
-import { UsageLimit, limitOperation, type LimitOperation } from './limits.ts';
+import { UsageLimit } from './limits.ts';
 import {
   SandboxContainer,
   validateSandboxOptions,
@@ -23,21 +23,21 @@ export type SandboxProcess = {
   stdin: WritableStream | null;
   stdout: ReadableStream | null;
   stderr: ReadableStream | null;
-  readonly exitCode: LimitOperation<number>;
-  output(): LimitOperation<ExecOutput>;
+  readonly exitCode: Promise<number>;
+  output(): Promise<ExecOutput>;
   kill(signal?: number): Promise<void>;
   resize(cols: number, rows: number): Promise<void>;
 };
 export type SandboxFiles = {
   [K in keyof Files]: Files[K] extends (...args: infer A) => Promise<infer R>
-    ? (...args: A) => LimitOperation<R>
+    ? (...args: A) => Promise<R>
     : never;
 };
 export type SandboxClient = {
-  exec(argv: Array<string>, options?: SandboxExecOptions): LimitOperation<SandboxProcess>;
-  run(argv: Array<string>, options?: SandboxExecOptions): LimitOperation<ExecOutput>;
+  exec(argv: Array<string>, options?: SandboxExecOptions): Promise<SandboxProcess>;
+  run(argv: Array<string>, options?: SandboxExecOptions): Promise<ExecOutput>;
   files: SandboxFiles;
-  fetch(port: number, request: Request): LimitOperation<Response>;
+  fetch(port: number, request: Request): Promise<Response>;
   running(): Promise<boolean>;
   destroy(): Promise<void>;
 };
@@ -136,7 +136,7 @@ function client(capability: SandboxCapability): SandboxClient {
       }
       return (...args: Array<unknown>) => {
         const index = method === 'writeFile' || method === 'rename' ? 3 : 2;
-        return limitOperation(() => callWithOptions('files', [method, ...args], index));
+        return callWithOptions('files', [method, ...args], index);
       };
     },
   });
@@ -145,8 +145,8 @@ function client(capability: SandboxCapability): SandboxClient {
     options?: SandboxExecOptions,
   ): Promise<SandboxProcess> => {
     const wire = (await callWithOptions('exec', [argv, options], 1)) as SandboxProcessWire;
-    let exitCode: LimitOperation<number> | undefined;
-    let output: LimitOperation<ExecOutput> | undefined;
+    let exitCode: Promise<number> | undefined;
+    let output: Promise<ExecOutput> | undefined;
     const process: SandboxProcess = {
       pid: wire.pid,
       isPty: wire.isPty,
@@ -154,31 +154,26 @@ function client(capability: SandboxCapability): SandboxClient {
       stdout: wire.stdout,
       stderr: wire.stderr,
       get exitCode() {
-        return (exitCode ??= limitOperation(async () => {
+        return (exitCode ??= (async (): Promise<number> => {
           try {
             return (await wire.capability.invoke('exitCode', [])) as number;
           } catch (error) {
             rethrowSandboxError(error);
           }
-        }));
+        })());
       },
       output() {
-        return (output ??= limitOperation(async () => {
+        return (output ??= (async (): Promise<ExecOutput> => {
           try {
             return await Promise.all([
               wire.stdout ? new Response(wire.stdout).arrayBuffer() : new ArrayBuffer(0),
               wire.stderr ? new Response(wire.stderr).arrayBuffer() : new ArrayBuffer(0),
-              process.exitCode.match({
-                ok: (code) => code,
-                limited: (limit) => {
-                  throw limit;
-                },
-              }),
+              process.exitCode,
             ]).then(([stdout, stderr, exitCode]) => ({ stdout, stderr, exitCode }));
           } catch (error) {
             rethrowSandboxError(error);
           }
-        }));
+        })());
       },
       kill: async (signal) => {
         await wire.capability.invoke('kill', [signal]);
@@ -191,19 +186,12 @@ function client(capability: SandboxCapability): SandboxClient {
   };
   return {
     files,
-    exec: (argv, options) => limitOperation(() => execute(argv, options)),
-    run: (argv, options) =>
-      limitOperation(async () => {
-        const process = await execute(argv, options);
-        return process.output().match({
-          ok: (result) => result,
-          limited: (limit) => {
-            throw limit;
-          },
-        });
-      }),
-    fetch: (port, request) =>
-      limitOperation(async () => (await call('fetch', [port, request])) as Response),
+    exec: execute,
+    run: async (argv, options) => {
+      const process = await execute(argv, options);
+      return process.output();
+    },
+    fetch: async (port, request) => (await call('fetch', [port, request])) as Response,
     running: async () => (await call('running', [])) as boolean,
     destroy: async () => {
       await call('destroy', []);

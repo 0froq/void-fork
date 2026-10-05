@@ -27,44 +27,6 @@ export class UsageLimit extends Error {
   }
 }
 
-export type LimitHandlers<T, R, L> = {
-  ok(value: T): R | Promise<R>;
-  limited(limit: UsageLimit): L | Promise<L>;
-};
-export interface LimitOperation<T> {
-  match<R, L>(handlers: LimitHandlers<T, R, L>): Promise<R | L>;
-}
-
-/** Lazy, single-execution operation. Quota callbacks never catch failures from the user's ok handler. */
-export function limitOperation<T>(
-  execute: () => Promise<T>,
-  classify: (error: unknown) => UsageLimit | null = asUsageLimit,
-  prepare?: (value: T, limited: (limit: UsageLimit) => unknown) => T,
-): LimitOperation<T> {
-  let result: Promise<T> | undefined;
-  return Object.freeze({
-    get then(): never {
-      throw new TypeError('Use .match({ ok, limited }) to execute this operation.');
-    },
-    async match<R, L>(handlers: LimitHandlers<T, R, L>): Promise<R | L> {
-      if (typeof handlers?.ok !== 'function' || typeof handlers?.limited !== 'function') {
-        throw new TypeError('Both ok and limited handlers are required.');
-      }
-      let value: T;
-      try {
-        value = await (result ??= Promise.resolve().then(execute));
-      } catch (error) {
-        const limit = classify(error);
-        if (limit) {
-          return handlers.limited(limit);
-        }
-        throw error;
-      }
-      return handlers.ok(prepare ? prepare(value, handlers.limited) : value);
-    },
-  });
-}
-
 export function asUsageLimit(error: unknown): UsageLimit | null {
   if (error instanceof UsageLimit) {
     return error;

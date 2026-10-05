@@ -8,6 +8,7 @@ vi.mock('@cloudflare/sandbox', () => ({
 }));
 vi.mock('cloudflare:workers', () => ({ DurableObject: class {}, RpcTarget: class {} }));
 import { envContext } from '../../src/runtime/env-raw.ts';
+import { UsageLimit } from '../../src/runtime/limits.ts';
 import {
   getSandbox,
   sandbox,
@@ -35,6 +36,24 @@ function capability() {
 }
 
 describe('Sandbox runtime', () => {
+  it('starts operations immediately and shares process completion and output promises', async () => {
+    const c = capability();
+    await envContext.run({ __VOID_SANDBOX: { getSandbox: async () => c } }, async () => {
+      const client = await getSandbox();
+      const execution = client.exec(['work']);
+      expect(execution).toBeInstanceOf(Promise);
+      expect(c.invoke).toHaveBeenCalledOnce();
+      const process = await execution;
+      const output = process.output();
+      expect(process.output()).toBe(output);
+      const completion = process.exitCode;
+      expect(process.exitCode).toBe(completion);
+      const [result, exitCode] = await Promise.all([output, completion]);
+      expect(result.exitCode).toBe(exitCode);
+      expect(new TextDecoder().decode(result.stdout)).toBe('ok');
+      expect(c.processInvoke).toHaveBeenCalledOnce();
+    });
+  });
   it('resolves native containers by normalized name and configures without starting', async () => {
     const c = capability();
     const configure = vi.fn();
@@ -42,18 +61,8 @@ describe('Sandbox runtime', () => {
     await envContext.run({ SANDBOX: { getByName } }, async () => {
       const client = await getSandbox('Workspace', { inactivityTimeoutMs: 1000 });
       expect(c.invoke).not.toHaveBeenCalled();
-      const process = await client.exec(['echo', 'ok']).match({
-        ok: (value) => value,
-        limited: (limit) => {
-          throw limit;
-        },
-      });
-      const result = await process.output().match({
-        ok: (value) => value,
-        limited: (limit) => {
-          throw limit;
-        },
-      });
+      const process = await client.exec(['echo', 'ok']);
+      const result = await process.output();
       expect(new TextDecoder().decode(result.stdout)).toBe('ok');
       expect(result.exitCode).toBe(0);
     });
@@ -76,29 +85,12 @@ describe('Sandbox runtime', () => {
       { __VOID_SANDBOX: { getSandbox: resolve }, __PROJECT_ID: 'project' },
       async () => {
         const client = await getSandbox('Workspace');
-        const process = await client.exec(['node', '--version']).match({
-          ok: (value) => value,
-          limited: (limit) => {
-            throw limit;
-          },
-        });
+        const process = await client.exec(['node', '--version']);
         expect(process.pid).toBe(42);
         await process.kill(9);
         await process.resize(80, 24);
-        expect(
-          await process.exitCode.match({
-            ok: (value) => value,
-            limited: (limit) => {
-              throw limit;
-            },
-          }),
-        ).toBe(0);
-        await client.files.writeFile('/input', bytes('input')).match({
-          ok: (value) => value,
-          limited: (limit) => {
-            throw limit;
-          },
-        });
+        expect(await process.exitCode).toBe(0);
+        await client.files.writeFile('/input', bytes('input'));
       },
     );
     expect(resolve).toHaveBeenCalledWith('workspace', {});
@@ -117,25 +109,13 @@ describe('Sandbox runtime', () => {
     const controller = new AbortController();
     await envContext.run({ __VOID_SANDBOX: { getSandbox: async () => c } }, async () => {
       const client = await getSandbox();
-      await client.exec(['sleep', '10'], { signal: controller.signal }).match({
-        ok: (value) => value,
-        limited: (limit) => {
-          throw limit;
-        },
-      });
+      await client.exec(['sleep', '10'], { signal: controller.signal });
       const encoded = c.invoke.mock.calls[0]![1][1] as { abort: ReadableStream; signal?: unknown };
       expect(encoded.signal).toBeUndefined();
       const reader = encoded.abort.getReader();
       controller.abort();
       expect(await reader.read()).toEqual({ done: true, value: undefined });
-      await expect(
-        client.exec(['true'], { signal: controller.signal }).match({
-          ok: (value) => value,
-          limited: (limit) => {
-            throw limit;
-          },
-        }),
-      ).rejects.toThrow();
+      await expect(client.exec(['true'], { signal: controller.signal })).rejects.toThrow();
     });
   });
   it.each(['exec', 'files'] as const)(
@@ -151,18 +131,8 @@ describe('Sandbox runtime', () => {
           const client = await getSandbox();
           await expect(
             operation === 'exec'
-              ? client.exec(['true'], { signal: controller.signal }).match({
-                  ok: (value) => value,
-                  limited: (limit) => {
-                    throw limit;
-                  },
-                })
-              : client.files.readFile('/file', { signal: controller.signal }).match({
-                  ok: (value) => value,
-                  limited: (limit) => {
-                    throw limit;
-                  },
-                }),
+              ? client.exec(['true'], { signal: controller.signal })
+              : client.files.readFile('/file', { signal: controller.signal }),
           ).rejects.toThrow('admission failed');
           expect(add).toHaveBeenCalledOnce();
           expect(remove).toHaveBeenCalledWith('abort', add.mock.calls[0]![1]);
@@ -181,22 +151,8 @@ describe('Sandbox runtime', () => {
         { __VOID_SANDBOX: { getSandbox: async () => ({ invoke }) } },
         async () => {
           const client = await getSandbox();
-          await expect(
-            client.exec(['true']).match({
-              ok: (value) => value,
-              limited: (limit) => {
-                throw limit;
-              },
-            }),
-          ).rejects.toBeInstanceOf(SandboxLimitError);
-          await expect(
-            client.exec(['true']).match({
-              ok: (value) => value,
-              limited: (limit) => {
-                throw limit;
-              },
-            }),
-          ).rejects.toMatchObject({ reason });
+          await expect(client.exec(['true'])).rejects.toBeInstanceOf(SandboxLimitError);
+          await expect(client.exec(['true'])).rejects.toMatchObject({ reason });
         },
       );
     },
@@ -221,44 +177,23 @@ describe('Sandbox runtime', () => {
     const invoke = vi.fn().mockResolvedValueOnce(response).mockRejectedValueOnce(error);
     await envContext.run({ __VOID_SANDBOX: { getSandbox: async () => ({ invoke }) } }, async () => {
       const client = await getSandbox();
-      expect(
-        await (
-          await client.files.readFile('/file').match({
-            ok: (value) => value,
-            limited: (limit) => {
-              throw limit;
-            },
-          })
-        ).text(),
-      ).toBe('file');
-      await expect(
-        client.files.readFile('/bad').match({
-          ok: (value) => value,
-          limited: (limit) => {
-            throw limit;
-          },
-        }),
-      ).rejects.toBe(error);
+      expect(await (await client.files.readFile('/file')).text()).toBe('file');
+      await expect(client.files.readFile('/bad')).rejects.toBe(error);
     });
   });
 });
 
-describe('mandatory Sandbox outcomes', () => {
+describe('Sandbox usage-limit rejections', () => {
   it('handles a quota on process completion after successful admission', async () => {
     const c = capability();
     c.processInvoke.mockRejectedValue(new Error('VOID_SANDBOX_runtime_budget'));
     await envContext.run({ __VOID_SANDBOX: { getSandbox: async () => c } }, async () => {
       const client = await getSandbox();
       const op = client.run(['work']);
-      expect(c.invoke).not.toHaveBeenCalled();
-      const ok = vi.fn();
-      const response = await op.match({
-        ok,
-        limited: (limit) => limit.response({ message: 'Execution allowance exhausted' }),
-      });
-      expect(ok).not.toHaveBeenCalled();
-      expect(response.status).toBe(429);
-      expect(await response.json()).toMatchObject({
+      expect(op).toBeInstanceOf(Promise);
+      await expect(op).rejects.toBeInstanceOf(UsageLimit);
+      await expect(op).rejects.toBeInstanceOf(SandboxLimitError);
+      await expect(op).rejects.toMatchObject({
         resource: 'sandbox',
         reason: 'runtime_budget',
       });
@@ -268,7 +203,7 @@ describe('mandatory Sandbox outcomes', () => {
     });
   });
   it.each(['exec', 'file', 'fetch'] as const)(
-    'requires a fallback for %s before starting work',
+    'rejects %s admission limits with UsageLimit',
     async (method) => {
       const invoke = vi.fn().mockRejectedValue(new Error('VOID_SANDBOX_concurrency'));
       await envContext.run(
@@ -281,9 +216,9 @@ describe('mandatory Sandbox outcomes', () => {
               : method === 'file'
                 ? client.files.readFile('/data')
                 : client.fetch(8080, new Request('http://sandbox'));
-          const ok = vi.fn();
-          expect(await op.match({ ok, limited: (limit) => limit.reason })).toBe('concurrency');
-          expect(ok).not.toHaveBeenCalled();
+          await expect(op).rejects.toBeInstanceOf(UsageLimit);
+          await expect(op).rejects.toMatchObject({ reason: 'concurrency' });
+          expect(invoke).toHaveBeenCalledOnce();
         },
       );
     },

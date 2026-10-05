@@ -328,10 +328,8 @@ describe('inferBindingsFromSource', () => {
       import { getSandbox } from "void/sandbox";
       export const POST = defineHandler(async () => {
         const sandbox = await getSandbox("session-1");
-        return sandbox.run(["node", "--version"]).match({
-          ok: result => Response.json({ exitCode: result.exitCode }),
-          limited: limit => limit.response(),
-        });
+        const result = await sandbox.run(["node", "--version"]);
+        return Response.json({ exitCode: result.exitCode });
       })
     `;
     const result = inferBindingsFromSource(code, 'test.ts');

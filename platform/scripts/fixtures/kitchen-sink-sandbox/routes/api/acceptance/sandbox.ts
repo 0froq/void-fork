@@ -28,173 +28,68 @@ export const POST = defineHandler(async (c) => {
     assert(!(await sandbox.running()), 'Resolving a fresh Sandbox must not start it');
     checks.push('lazy start');
 
-    await sandbox.files.mkdir(root, { recursive: true }).match({
-      ok: (value) => value,
-      limited: (limit) => {
-        throw limit;
-      },
-    });
-    await sandbox.files.writeFile(`${root}/text.txt`, 'text content').match({
-      ok: (value) => value,
-      limited: (limit) => {
-        throw limit;
-      },
-    });
-    await sandbox.files.writeFile(`${root}/bytes.bin`, new Uint8Array([0, 1, 127, 255])).match({
-      ok: (value) => value,
-      limited: (limit) => {
-        throw limit;
-      },
-    });
-    await sandbox.files.writeFile(`${root}/blob.txt`, new Blob(['blob content'])).match({
-      ok: (value) => value,
-      limited: (limit) => {
-        throw limit;
-      },
-    });
-    await sandbox.files
-      .writeFile(`${root}/stream.txt`, new Blob(['stream content']).stream())
-      .match({
-        ok: (value) => value,
-        limited: (limit) => {
-          throw limit;
-        },
-      });
-    await sandbox.files.writeFile('relative.txt', 'relative content', { cwd: root }).match({
-      ok: (value) => value,
-      limited: (limit) => {
-        throw limit;
-      },
-    });
+    await sandbox.files.mkdir(root, { recursive: true });
+    await sandbox.files.writeFile(`${root}/text.txt`, 'text content');
+    await sandbox.files.writeFile(`${root}/bytes.bin`, new Uint8Array([0, 1, 127, 255]));
+    await sandbox.files.writeFile(`${root}/blob.txt`, new Blob(['blob content']));
+    await sandbox.files.writeFile(`${root}/stream.txt`, new Blob(['stream content']).stream());
+    await sandbox.files.writeFile('relative.txt', 'relative content', { cwd: root });
     assert(await sandbox.running(), 'File operations must start the container');
     assert(
-      (await (
-        await sandbox.files.readFile(`${root}/text.txt`).match({
-          ok: (value) => value,
-          limited: (limit) => {
-            throw limit;
-          },
-        })
-      ).text()) === 'text content',
+      (await (await sandbox.files.readFile(`${root}/text.txt`)).text()) === 'text content',
       'Text round trip failed',
     );
     const bytes = new Uint8Array(
-      await (
-        await sandbox.files.readFile(`${root}/bytes.bin`).match({
-          ok: (value) => value,
-          limited: (limit) => {
-            throw limit;
-          },
-        })
-      ).arrayBuffer(),
+      await (await sandbox.files.readFile(`${root}/bytes.bin`)).arrayBuffer(),
     );
     assert(bytes.join(',') === '0,1,127,255', 'Binary round trip failed');
     assert(
-      (await (
-        await sandbox.files.readFile(`${root}/blob.txt`).match({
-          ok: (value) => value,
-          limited: (limit) => {
-            throw limit;
-          },
-        })
-      ).text()) === 'blob content',
+      (await (await sandbox.files.readFile(`${root}/blob.txt`)).text()) === 'blob content',
       'Blob round trip failed',
     );
     assert(
-      (await (
-        await sandbox.files.readFile(`${root}/stream.txt`).match({
-          ok: (value) => value,
-          limited: (limit) => {
-            throw limit;
-          },
-        })
-      ).text()) === 'stream content',
+      (await (await sandbox.files.readFile(`${root}/stream.txt`)).text()) === 'stream content',
       'Stream round trip failed',
     );
     assert(
-      (await (
-        await sandbox.files.readFile('relative.txt', { cwd: root }).match({
-          ok: (value) => value,
-          limited: (limit) => {
-            throw limit;
-          },
-        })
-      ).text()) === 'relative content',
+      (await (await sandbox.files.readFile('relative.txt', { cwd: root })).text()) ===
+        'relative content',
       'Relative path round trip failed',
     );
     checks.push('text, binary, Blob, stream, relative files');
 
-    const stat = await sandbox.files.stat(`${root}/text.txt`).match({
-      ok: (value) => value,
-      limited: (limit) => {
-        throw limit;
-      },
-    });
+    const stat = await sandbox.files.stat(`${root}/text.txt`);
     assert(
       stat.type === 'file' && stat.size === 12n && stat.modifiedAt instanceof Date,
       'File stat metadata failed',
     );
-    await sandbox.files.rename(`${root}/text.txt`, `${root}/renamed.txt`).match({
-      ok: (value) => value,
-      limited: (limit) => {
-        throw limit;
-      },
-    });
-    const entries = await sandbox.files.readDirectory(root).match({
-      ok: (value) => value,
-      limited: (limit) => {
-        throw limit;
-      },
-    });
+    await sandbox.files.rename(`${root}/text.txt`, `${root}/renamed.txt`);
+    const entries = await sandbox.files.readDirectory(root);
     assert(
       entries.some(({ name }) => name === 'renamed.txt') &&
         !entries.some(({ name }) => name === 'text.txt'),
       'Directory listing or rename failed',
     );
-    await sandbox.files.remove(`${root}/renamed.txt`).match({
-      ok: (value) => value,
-      limited: (limit) => {
-        throw limit;
-      },
-    });
+    await sandbox.files.remove(`${root}/renamed.txt`);
     assert(
-      !(
-        await sandbox.files.readDirectory(root).match({
-          ok: (value) => value,
-          limited: (limit) => {
-            throw limit;
-          },
-        })
-      ).some(({ name }) => name === 'renamed.txt'),
+      !(await sandbox.files.readDirectory(root)).some(({ name }) => name === 'renamed.txt'),
       'File removal failed',
     );
     checks.push('mkdir, stat, rename, list, remove');
 
-    const command = await sandbox
-      .exec(
-        [
-          'node',
-          '-e',
-          'console.log(process.cwd()); console.log(process.env.VOID_ACCEPTANCE); console.error("stderr marker");',
-        ],
-        {
-          cwd: root,
-          env: { VOID_ACCEPTANCE: id },
-          signal: AbortSignal.timeout(10_000),
-        },
-      )
-      .match({
-        ok: (value) => value,
-        limited: (limit) => {
-          throw limit;
-        },
-      });
-    const output = await command.output().match({
-      ok: (value) => value,
-      limited: (limit) => {
-        throw limit;
+    const command = await sandbox.exec(
+      [
+        'node',
+        '-e',
+        'console.log(process.cwd()); console.log(process.env.VOID_ACCEPTANCE); console.error("stderr marker");',
+      ],
+      {
+        cwd: root,
+        env: { VOID_ACCEPTANCE: id },
+        signal: AbortSignal.timeout(10_000),
       },
-    });
+    );
+    const output = await command.output();
     const stdout = new TextDecoder().decode(output.stdout);
     assert(
       output.exitCode === 0 && stdout.includes(root) && stdout.includes(id),
@@ -206,25 +101,13 @@ export const POST = defineHandler(async (c) => {
     );
     checks.push('exec, cwd, env, stdout, stderr, exitCode');
 
-    const pipe = await sandbox
-      .exec(['cat'], {
-        stdin: 'pipe',
-        signal: AbortSignal.timeout(10_000),
-      })
-      .match({
-        ok: (value) => value,
-        limited: (limit) => {
-          throw limit;
-        },
-      });
+    const pipe = await sandbox.exec(['cat'], {
+      stdin: 'pipe',
+      signal: AbortSignal.timeout(10_000),
+    });
     assert(pipe.stdin, 'Piped stdin is missing');
     const writer = pipe.stdin.getWriter();
-    const collected = pipe.output().match({
-      ok: (value) => value,
-      limited: (limit) => {
-        throw limit;
-      },
-    });
+    const collected = pipe.output();
     await writer.write(new TextEncoder().encode('stdin marker'));
     await writer.close();
     const pipedOutput = await collected;
@@ -234,119 +117,53 @@ export const POST = defineHandler(async (c) => {
     );
     checks.push('stdin pipe');
 
-    const long = await sandbox
-      .exec(['node', '-e', 'setTimeout(() => {}, 60000)'], {
-        pty: { cols: 80, rows: 24 },
-      })
-      .match({
-        ok: (value) => value,
-        limited: (limit) => {
-          throw limit;
-        },
-      });
+    const long = await sandbox.exec(['node', '-e', 'setTimeout(() => {}, 60000)'], {
+      pty: { cols: 80, rows: 24 },
+    });
     assert(long.isPty, 'PTY was not created');
     await long.resize(100, 30);
     await long.kill(9);
-    assert(
-      (await long.exitCode.match({
-        ok: (value) => value,
-        limited: (limit) => {
-          throw limit;
-        },
-      })) !== 0,
-      'Killed process returned success',
-    );
+    assert((await long.exitCode) !== 0, 'Killed process returned success');
     checks.push('PTY, resize, kill');
 
     const abort = new AbortController();
-    const cancellable = await sandbox
-      .exec(['node', '-e', 'setTimeout(() => {}, 60000)'], {
-        signal: abort.signal,
-      })
-      .match({
-        ok: (value) => value,
-        limited: (limit) => {
-          throw limit;
-        },
-      });
+    const cancellable = await sandbox.exec(['node', '-e', 'setTimeout(() => {}, 60000)'], {
+      signal: abort.signal,
+    });
     abort.abort();
-    assert(
-      (await cancellable.exitCode.match({
-        ok: (value) => value,
-        limited: (limit) => {
-          throw limit;
-        },
-      })) !== 0,
-      'Aborted process returned success',
-    );
+    assert((await cancellable.exitCode) !== 0, 'Aborted process returned success');
     checks.push('AbortSignal cancellation');
 
-    const server = await sandbox
-      .exec(
-        [
-          'node',
-          '-e',
-          'require("node:http").createServer((req,res) => { res.setHeader("content-type", "text/plain"); res.end(req.url); }).listen(8080, "0.0.0.0", () => console.log("ready"));',
-        ],
-        { signal: AbortSignal.timeout(15_000) },
-      )
-      .match({
-        ok: (value) => value,
-        limited: (limit) => {
-          throw limit;
-        },
-      });
+    const server = await sandbox.exec(
+      [
+        'node',
+        '-e',
+        'require("node:http").createServer((req,res) => { res.setHeader("content-type", "text/plain"); res.end(req.url); }).listen(8080, "0.0.0.0", () => console.log("ready"));',
+      ],
+      { signal: AbortSignal.timeout(15_000) },
+    );
     assert(server.stdout, 'Server stdout is missing');
     const ready = server.stdout.getReader();
     await ready.read();
     ready.releaseLock();
-    const response = await sandbox
-      .fetch(8080, new Request('http://sandbox/acceptance?test=1'))
-      .match({
-        ok: (value) => value,
-        limited: (limit) => {
-          throw limit;
-        },
-      });
+    const response = await sandbox.fetch(8080, new Request('http://sandbox/acceptance?test=1'));
     assert(
       response.status === 200 && (await response.text()) === '/acceptance?test=1',
       'Sandbox port fetch failed',
     );
     await server.kill(9);
-    await server.exitCode.match({
-      ok: (value) => value,
-      limited: (limit) => {
-        throw limit;
-      },
-    });
+    await server.exitCode;
     checks.push('HTTP port fetch');
 
-    const blocked = await sandbox
-      .exec(
-        [
-          'node',
-          '-e',
-          'fetch("https://www.cloudflare.com/cdn-cgi/trace", {signal: AbortSignal.timeout(3000)}).then(() => process.exit(1), () => process.exit(0));',
-        ],
-        { signal: AbortSignal.timeout(5_000) },
-      )
-      .match({
-        ok: (value) => value,
-        limited: (limit) => {
-          throw limit;
-        },
-      });
-    assert(
-      (
-        await blocked.output().match({
-          ok: (value) => value,
-          limited: (limit) => {
-            throw limit;
-          },
-        })
-      ).exitCode === 0,
-      'Internet access was allowed while disabled',
+    const blocked = await sandbox.exec(
+      [
+        'node',
+        '-e',
+        'fetch("https://www.cloudflare.com/cdn-cgi/trace", {signal: AbortSignal.timeout(3000)}).then(() => process.exit(1), () => process.exit(0));',
+      ],
+      { signal: AbortSignal.timeout(5_000) },
     );
+    assert((await blocked.output()).exitCode === 0, 'Internet access was allowed while disabled');
     checks.push('Internet disabled');
 
     const isolated = await getSandbox(`${id}-other`, {
@@ -354,70 +171,29 @@ export const POST = defineHandler(async (c) => {
       enableInternet: true,
     });
     clients.push(isolated);
-    const isolation = await isolated.exec(['sh', '-c', `test ! -e ${root}/bytes.bin`]).match({
-      ok: (value) => value,
-      limited: (limit) => {
-        throw limit;
-      },
-    });
+    const isolation = await isolated.exec(['sh', '-c', `test ! -e ${root}/bytes.bin`]);
     assert(
-      (
-        await isolation.output().match({
-          ok: (value) => value,
-          limited: (limit) => {
-            throw limit;
-          },
-        })
-      ).exitCode === 0,
+      (await isolation.output()).exitCode === 0,
       'A second Sandbox can see the first Sandbox files',
     );
     checks.push('separate ID isolation');
-    const internet = await isolated
-      .exec(
-        [
-          'node',
-          '-e',
-          'fetch("https://www.cloudflare.com/cdn-cgi/trace", {signal: AbortSignal.timeout(10000)}).then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1));',
-        ],
-        { signal: AbortSignal.timeout(15_000) },
-      )
-      .match({
-        ok: (value) => value,
-        limited: (limit) => {
-          throw limit;
-        },
-      });
-    assert(
-      (
-        await internet.output().match({
-          ok: (value) => value,
-          limited: (limit) => {
-            throw limit;
-          },
-        })
-      ).exitCode === 0,
-      'Internet access failed while enabled',
+    const internet = await isolated.exec(
+      [
+        'node',
+        '-e',
+        'fetch("https://www.cloudflare.com/cdn-cgi/trace", {signal: AbortSignal.timeout(10000)}).then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1));',
+      ],
+      { signal: AbortSignal.timeout(15_000) },
     );
+    assert((await internet.output()).exitCode === 0, 'Internet access failed while enabled');
     checks.push('Internet enabled');
     await isolated.destroy();
 
     await sandbox.destroy();
     assert(!(await sandbox.running()), 'Destroy did not stop the container');
-    const restarted = await sandbox.exec(['sh', '-c', `test ! -e ${root}/bytes.bin`]).match({
-      ok: (value) => value,
-      limited: (limit) => {
-        throw limit;
-      },
-    });
+    const restarted = await sandbox.exec(['sh', '-c', `test ! -e ${root}/bytes.bin`]);
     assert(
-      (
-        await restarted.output().match({
-          ok: (value) => value,
-          limited: (limit) => {
-            throw limit;
-          },
-        })
-      ).exitCode === 0,
+      (await restarted.output()).exitCode === 0,
       'Container files survived a destroy and restart',
     );
     checks.push('destroy, restart, ephemeral files');

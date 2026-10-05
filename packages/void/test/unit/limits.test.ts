@@ -1,47 +1,24 @@
-import { describe, expect, it, vi } from 'vite-plus/test';
-import { limitOperation, UsageLimit, limitFromResponse } from '../../src/runtime/limits.ts';
+import { describe, expect, it } from 'vite-plus/test';
+import { UsageLimit, asUsageLimit, limitFromResponse } from '../../src/runtime/limits.ts';
 
-describe('mandatory limit handling', () => {
-  it('does not execute until both handlers are supplied, and executes only once', async () => {
-    const execute = vi.fn(async () => 42);
-    const op = limitOperation(execute);
-    expect(execute).not.toHaveBeenCalled();
-    await expect(op.match({ ok: String } as never)).rejects.toThrow('Both');
-    expect(execute).not.toHaveBeenCalled();
-    const handlers = { ok: String, limited: () => 'unavailable' };
-    expect(await op.match(handlers)).toBe('42');
-    expect(await op.match(handlers)).toBe('42');
-    expect(execute).toHaveBeenCalledOnce();
-    await expect(async () => {
-      await op;
-    }).rejects.toThrow('Use .match');
-  });
-  it('routes quota failures only, without swallowing failures from the success handler', async () => {
+describe('usage limits', () => {
+  it('preserves the error type and identity when restoring structured limits', () => {
     const limit = new UsageLimit({
       resource: 'ai',
       reason: 'monthly_quota',
       message: 'No allowance',
     });
+    expect(limit).toBeInstanceOf(Error);
+    expect(asUsageLimit(limit)).toBe(limit);
     expect(
-      await limitOperation(async () => {
-        throw limit;
-      }).match({ ok: String, limited: (l) => l.message }),
-    ).toBe('No allowance');
-    const limited = vi.fn();
-    await expect(
-      limitOperation(async () => 1).match({
-        ok: () => {
-          throw limit;
-        },
-        limited,
+      asUsageLimit({
+        code: 'usage_limit',
+        resource: 'ai',
+        reason: 'rate_limit',
+        message: 'Try later',
       }),
-    ).rejects.toBe(limit);
-    expect(limited).not.toHaveBeenCalled();
-    await expect(
-      limitOperation(async () => {
-        throw new Error('network');
-      }).match({ ok: String, limited }),
-    ).rejects.toThrow('network');
+    ).toBeInstanceOf(UsageLimit);
+    expect(asUsageLimit(new Error('network'))).toBeNull();
   });
   it('preserves structured limits and retry metadata in public responses', async () => {
     const limit = new UsageLimit({
@@ -58,5 +35,6 @@ describe('mandatory limit handling', () => {
       message: 'Try again next month',
       retryAt: limit.retryAt,
     });
+    expect(await limit.getResponse().json()).toMatchObject({ message: 'No allowance' });
   });
 });
