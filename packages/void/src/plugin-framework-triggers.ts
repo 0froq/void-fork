@@ -230,17 +230,15 @@ async function __dispatchQueue(request, env) {
       for (const m of messages) m.retry(opts);
     },
   };
+  let ok = true;
   try {
     await q.handler(batch, env);
   } catch (err) {
+    ok = false;
     console.error("[void] queue handler threw:", err);
-    // CF queues retry the entire batch when a consumer throws, regardless
-    // of any ack/retry calls made before the throw — drop partial decisions
-    // so dev-mode response semantics match prod.
-    return __json({ ok: false });
   }
   return __json({
-    ok: true,
+    ok,
     ...(decisions.size > 0 ? { decisions: Object.fromEntries(decisions) } : {}),
   });
 }

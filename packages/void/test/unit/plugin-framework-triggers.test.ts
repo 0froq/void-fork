@@ -21,6 +21,7 @@ import {
   frameworkTriggersPlugin,
   nitroDevTriggerInjectPlugin,
 } from '../../src/plugin-framework-triggers.ts';
+import type { QueueBatch } from '../../src/runtime/handler.ts';
 
 const tempDirs: Array<string> = [];
 
@@ -221,6 +222,90 @@ export default (controller, env) => env.run();`,
     expect(response?.status).toBe(404);
     expect(await response?.json()).toEqual({ error: 'No cron handler matches "30 * * * *"' });
     expect(env.run).not.toHaveBeenCalled();
+  });
+
+  it.each(['success', 'throw', 'reject'] as const)(
+    'preserves first queue decisions when the consumer can %s',
+    async (outcome) => {
+      const root = createTempRoot();
+      mkdirSync(join(root, 'queues'));
+      writeFileSync(
+        join(root, 'queues', 'emails.mjs'),
+        'export default (batch, env) => env.consume(batch);',
+      );
+      const handle = await loadDevTrigger(root);
+      const failure = new Error('after message decisions');
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const env = {
+        consume: vi.fn((batch: QueueBatch) => {
+          expect(batch.queue).toBe('emails');
+          expect(batch.messages).toHaveLength(3);
+          expect(batch.messages[0]).toMatchObject({
+            id: 'one',
+            timestamp: new Date('2026-01-01T00:00:00Z'),
+            body: { value: 'one' },
+            attempts: 2,
+          });
+          batch.messages[0].ack();
+          batch.messages[0].retry({ delaySeconds: 1 });
+          batch.messages[1].retry({ delaySeconds: 9 });
+          batch.messages[1].ack();
+          if (outcome === 'throw') {
+            throw failure;
+          }
+          if (outcome === 'reject') {
+            return Promise.reject(failure);
+          }
+          batch.ackAll();
+        }),
+      };
+      const response = await handle(
+        triggerRequest('queue', {
+          queue: 'emails',
+          messages: ['one', 'two', 'three'].map((id) => ({
+            id,
+            timestamp: '2026-01-01T00:00:00Z',
+            body: { value: id },
+            attempts: 2,
+          })),
+        }),
+        env,
+      );
+      expect(response?.status).toBe(200);
+      expect(await response?.json()).toEqual({
+        ok: outcome === 'success',
+        decisions: {
+          one: { action: 'ack' },
+          two: { action: 'retry', delaySeconds: 9 },
+          ...(outcome === 'success' ? { three: { action: 'ack' } } : {}),
+        },
+      });
+      expect(env.consume).toHaveBeenCalledOnce();
+      if (outcome === 'success') {
+        expect(errorLog).not.toHaveBeenCalled();
+      } else {
+        expect(errorLog).toHaveBeenCalledExactlyOnceWith('[void] queue handler threw:', failure);
+      }
+    },
+  );
+
+  it('reports a failed queue consumer without adding decisions it never made', async () => {
+    const root = createTempRoot();
+    mkdirSync(join(root, 'queues'));
+    writeFileSync(
+      join(root, 'queues', 'emails.mjs'),
+      'export default () => { throw new Error("before any decisions"); };',
+    );
+    const handle = await loadDevTrigger(root);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const response = await handle(
+      triggerRequest('queue', {
+        queue: 'emails',
+        messages: [{ id: 'one', timestamp: '2026-01-01T00:00:00Z', body: {}, attempts: 1 }],
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({ ok: false });
   });
 
   it('writes a dispatch module that imports each cron and queue handler', () => {
