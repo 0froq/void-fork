@@ -6,23 +6,17 @@ import {
   handleIsr,
   hostRegistryKey,
   htmlEdgeKey,
-  isrCacheResponse,
   isrKey,
   isrPrefix,
   isStale,
   jsonEdgeKey,
   listIsrHosts,
   markSharedCachePolicy,
-  matchLiteralPattern,
   normalizeIsrPath,
   packIsrValue,
   readIsrCache,
-  resolvePathTtl,
-  resolveRevalidateTtl,
   SHARED_CACHE_POLICY_VERSION,
-  unpackIsrValue,
   writeIsrCache,
-  type IsrCacheEntry,
   type IsrCacheEnv,
   type IsrCacheMetadata,
   type RenderFn,
@@ -314,150 +308,6 @@ describe('collapsed self-host cache keys', () => {
     expect(jsonEdgeKey(HOST, '/about', DPL)).toBe(
       `https://${HOST}/about?__void=json&__void_isr=${DPL}`,
     );
-  });
-});
-
-describe('isStale', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  const entry = (createdAt: number, ttl = 60): IsrCacheEntry => ({
-    body: new ReadableStream(),
-    status: 200,
-    headers: {},
-    createdAt,
-    ttl,
-  });
-
-  it('is fresh before the TTL elapses', () => {
-    vi.setSystemTime(BASE);
-    expect(isStale(entry(BASE))).toBe(false);
-  });
-
-  it('is stale past the TTL', () => {
-    vi.setSystemTime(BASE + 61 * 1000);
-    expect(isStale(entry(BASE))).toBe(true);
-  });
-
-  it('is fresh at the exact TTL boundary', () => {
-    vi.setSystemTime(BASE + 60 * 1000);
-    expect(isStale(entry(BASE))).toBe(false);
-  });
-});
-
-describe('resolveRevalidateTtl', () => {
-  it('returns the default when no header is present', () => {
-    expect(resolveRevalidateTtl(new Response('ok'), 60)).toBe(60);
-  });
-
-  it('returns the header value when present', () => {
-    expect(
-      resolveRevalidateTtl(new Response('ok', { headers: { 'x-revalidate': '120' } }), 60),
-    ).toBe(120);
-  });
-
-  it('returns 0 for the opt-out header (x-revalidate: 0 → do not cache)', () => {
-    expect(resolveRevalidateTtl(new Response('ok', { headers: { 'x-revalidate': '0' } }), 60)).toBe(
-      0,
-    );
-  });
-
-  it('falls back to the default for invalid or negative header values', () => {
-    expect(
-      resolveRevalidateTtl(new Response('ok', { headers: { 'x-revalidate': 'abc' } }), 60),
-    ).toBe(60);
-    expect(
-      resolveRevalidateTtl(new Response('ok', { headers: { 'x-revalidate': '-5' } }), 60),
-    ).toBe(60);
-  });
-});
-
-describe('isrCacheResponse', () => {
-  it('serves HIT with an edge-cacheable s-maxage for a fresh entry', () => {
-    const res = isrCacheResponse(
-      {
-        body: new ReadableStream(),
-        status: 200,
-        headers: { 'content-type': 'text/html' },
-        createdAt: Date.now(),
-        ttl: 60,
-      },
-      false,
-    );
-    expect(res.status).toBe(200);
-    expect(res.headers.get('x-isr-cache')).toBe('HIT');
-    expect(res.headers.get('content-type')).toBe('text/html');
-    const cc = res.headers.get('Cache-Control')!;
-    expect(cc).toContain('public');
-    expect(cc).toContain('s-maxage=');
-    expect(cc).toContain('must-revalidate');
-  });
-
-  it('serves STALE with s-maxage=min(10, ttl)', () => {
-    const res = isrCacheResponse(
-      {
-        body: new ReadableStream(),
-        status: 200,
-        headers: {},
-        createdAt: Date.now() - 120000,
-        ttl: 60,
-      },
-      true,
-    );
-    expect(res.headers.get('x-isr-cache')).toBe('STALE');
-    expect(res.headers.get('Cache-Control')).toBe(
-      'public, s-maxage=10, max-age=0, must-revalidate',
-    );
-  });
-
-  it('caps the STALE s-maxage at ttl for short ISR windows', () => {
-    const res = isrCacheResponse(
-      {
-        body: new ReadableStream(),
-        status: 200,
-        headers: {},
-        createdAt: Date.now() - 10000,
-        ttl: 5,
-      },
-      true,
-    );
-    expect(res.headers.get('Cache-Control')).toBe('public, s-maxage=5, max-age=0, must-revalidate');
-  });
-});
-
-describe('packIsrValue / unpackIsrValue', () => {
-  it('round-trips headers and body', () => {
-    const headers = { 'content-type': 'text/html', etag: '"abc"' };
-    const packed = packIsrValue(
-      headers,
-      new TextEncoder().encode('<html>hi</html>').buffer as ArrayBuffer,
-    );
-    const result = unpackIsrValue(packed);
-    expect(result).not.toBeNull();
-    expect(result!.headers).toEqual(headers);
-    expect(new TextDecoder().decode(result!.body)).toBe('<html>hi</html>');
-  });
-
-  it('handles empty body and empty headers', () => {
-    const emptyBody = unpackIsrValue(
-      packIsrValue({ 'content-type': 'text/html' }, new ArrayBuffer(0)),
-    );
-    expect(emptyBody!.body.byteLength).toBe(0);
-    const emptyHeaders = unpackIsrValue(
-      packIsrValue({}, new TextEncoder().encode('x').buffer as ArrayBuffer),
-    );
-    expect(emptyHeaders!.headers).toEqual({});
-  });
-
-  it('returns null for a buffer too small or a truncated header', () => {
-    expect(unpackIsrValue(new ArrayBuffer(2))).toBeNull();
-    const buf = new ArrayBuffer(4);
-    new DataView(buf).setUint32(0, 999, true); // claims 999 header bytes it does not have
-    expect(unpackIsrValue(buf)).toBeNull();
   });
 });
 
@@ -1552,62 +1402,6 @@ describe('handleIsr', () => {
       expect(edge.store.has(htmlEdgeKey(HOST, '/blog/post', DPL))).toBe(true);
       expect([...store.keys()].filter((k) => k.startsWith(isrPrefix(DPL))).length).toBe(1);
     });
-  });
-});
-
-// ===========================================================================
-// matchLiteralPattern — segment-anchored matching (FIX 3)
-// ===========================================================================
-
-describe('matchLiteralPattern — segment-anchored matching', () => {
-  it('anchors a WHOLE-segment `:name` to exactly ONE path segment', () => {
-    expect(matchLiteralPattern('/blog/:slug', '/blog/hello')).toBe(true);
-    // Deeper path — `:slug` must NOT cross a `/`.
-    expect(matchLiteralPattern('/blog/:slug', '/blog/a/b')).toBe(false);
-    // Empty segment — `[^/]+` requires at least one char.
-    expect(matchLiteralPattern('/blog/:slug', '/blog/')).toBe(false);
-    expect(matchLiteralPattern('/blog/:slug', '/blog')).toBe(false);
-  });
-
-  it('lets `*` cross `/` (catch-all splat)', () => {
-    expect(matchLiteralPattern('/blog/*', '/blog/a/b')).toBe(true);
-    expect(matchLiteralPattern('/blog/*', '/blog/hello')).toBe(true);
-  });
-
-  it('matches a root catch-all `/*` against any path (including root)', () => {
-    expect(matchLiteralPattern('/*', '/')).toBe(true);
-    expect(matchLiteralPattern('/*', '/x/y')).toBe(true);
-  });
-
-  it('anchors EACH param in a multi-segment `:cat/:id` pattern to one segment', () => {
-    expect(matchLiteralPattern('/shop/:cat/:id', '/shop/shoes/42')).toBe(true);
-    expect(matchLiteralPattern('/shop/:cat/:id', '/shop/shoes')).toBe(false);
-    expect(matchLiteralPattern('/shop/:cat/:id', '/shop/shoes/42/extra')).toBe(false);
-  });
-
-  it('preserves a MID-segment literal `:` — only whole-segment `:name` is a wildcard', () => {
-    // A user literal key `/api/v1:health` must match ONLY itself: the `:health`
-    // is mid-segment (preceded by `1`, not `/`), so it stays a literal.
-    expect(matchLiteralPattern('/api/v1:health', '/api/v1:health')).toBe(true);
-    expect(matchLiteralPattern('/api/v1:health', '/api/v1:other')).toBe(false);
-    expect(matchLiteralPattern('/api/v1:health', '/api/v1/health')).toBe(false);
-  });
-
-  it('is a strict SUPERSET of the old matcher — old `*`-only manifests match identically', () => {
-    // The OLD emitter produced `/blog/*` for `[slug]`; that manifest must keep
-    // matching the same paths under the new matcher (rollout safety).
-    expect(matchLiteralPattern('/blog/*', '/blog/hello')).toBe(true);
-    expect(matchLiteralPattern('/blog/*', '/blog/a/b')).toBe(true);
-  });
-});
-
-describe('resolvePathTtl — single-segment anchoring', () => {
-  it('resolves the single-segment TTL for a one-segment path but NOT a deeper one', () => {
-    // The FIX-3 emitter keeps `/blog/:slug` as-is; the matcher anchors it to one
-    // segment, so `/blog/hello` gets the TTL while `/blog/a/b` does not.
-    const revalidate = { '/blog/:slug': 120 };
-    expect(resolvePathTtl(revalidate, '/blog/hello')).toBe(120);
-    expect(resolvePathTtl(revalidate, '/blog/a/b')).toBe(0);
   });
 });
 

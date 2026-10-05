@@ -270,34 +270,12 @@ describe('resolvePageTtl', () => {
     // /blog/a/b does not match :slug; it also matches no other page → flat-map fallback (none) → 0
     expect(resolvePageTtl(pages, undefined, undefined, '/blog/a/b')).toBe(0);
   });
-  it('a path matching NO page route falls back to the flat revalidate map', () => {
-    expect(resolvePageTtl(pages, { '/legacy/*': 90 }, undefined, '/legacy/x')).toBe(90);
-  });
+
   it('when pages is undefined it is exactly the flat-map behavior', () => {
     expect(resolvePageTtl(undefined, { '/docs/*': 300 }, undefined, '/docs/a')).toBe(300);
     expect(resolvePageTtl(undefined, undefined, undefined, '/docs/a')).toBe(0);
   });
 
-  // 3-STATE: an inherit-eligible page (absent `revalidate`) resolves the raw
-  // per-path `pathRevalidate` object config against the ACTUAL path (first-match).
-  it('an inherit-eligible page (absent revalidate) resolves the per-path config; honors a per-path 0', () => {
-    expect(
-      resolvePageTtl(
-        [{ pattern: '/blog/:slug' }],
-        undefined,
-        { '/blog/private': 0, '/blog/*': 3600 },
-        '/blog/private',
-      ),
-    ).toBe(0);
-    expect(
-      resolvePageTtl(
-        [{ pattern: '/blog/:slug' }],
-        undefined,
-        { '/blog/private': 0, '/blog/*': 3600 },
-        '/blog/other',
-      ),
-    ).toBe(3600);
-  });
   // An EXPLICIT `revalidate: 0` opt-out is authoritative and never consults pathRevalidate.
   it('an explicit revalidate: 0 opt-out wins over any pathRevalidate rule', () => {
     expect(

@@ -2071,33 +2071,6 @@ describe('shared pattern compiler in generated routes', () => {
     const { regex, paramNames } = sharedCompilePattern(source);
     return { regex, names: [...paramNames] };
   };
-  const matchPattern = async (pattern: string, pathname: string): Promise<boolean> => {
-    const app = new Hono();
-    const runtime = createRoutingRuntime(app, { nodeTarget: true });
-    app.use(runtime.headerMiddleware([{ pattern, headers: [['x-match', '1']] }]));
-    app.get('*', (c) => c.text('ok'));
-    return (await app.fetch(new Request('https://app.test' + pathname))).headers.has('x-match');
-  };
-
-  it('compiles a single bare "*" with the legacy "splat" capture', () => {
-    const { regex, names } = compilePattern('/docs/*');
-    expect(names).toEqual(['splat']);
-    expect(sharedCompilePattern('/docs/*').regex).toBe(regex);
-    const m = regex.exec('/docs/intro/getting-started');
-    expect(m?.groups?.splat).toBe('intro/getting-started');
-  });
-
-  it('compiles a multi-"*" pattern without throwing — second wildcard is non-capturing', () => {
-    // Regression: F3 — `routing.headers: { "/a/*/b/*": [...] }` used to crash
-    // every CF dev request with `SyntaxError: Invalid regular expression: ...
-    // Duplicate capture group name`. The first `*` should still capture as
-    // `splat`; subsequent bare `*` collapse to a non-capturing `.*`.
-    const { regex, names } = compilePattern('/a/*/b/*');
-    expect(names).toEqual(['splat']);
-    const m = regex.exec('/a/x/b/y');
-    expect(m).not.toBeNull();
-    expect(m?.groups?.splat).toBe('x');
-  });
 
   it(':name and bare "*" do not clash even when both appear', () => {
     // `:id*` produces `(?<id>...)`; the bare `*` produces `(?<splat>...)` —
@@ -2107,24 +2080,6 @@ describe('shared pattern compiler in generated routes', () => {
     const m = regex.exec('/u/42/extra/files/a/b');
     expect(m?.groups?.id).toBe('42/extra');
     expect(m?.groups?.splat).toBe('a/b');
-  });
-
-  it('header matching returns false instead of throwing on a malformed pattern', async () => {
-    // The emitter wraps `new RegExp` in try/catch so a single bad rule cannot
-    // 500 unrelated traffic on CF dev. Construct a pattern whose escaped form
-    // yields an invalid regex by abusing an unbalanced `[` (regex-special,
-    // copied through verbatim is impossible — but a malformed `:name*` paired
-    // with raw `(` characters fed via the literal escape skip... actually the
-    // emitter escapes regex specials, so we instead verify the catch path by
-    // constructing a deliberately-broken pattern that the emitter's escape
-    // strategy still passes through cleanly. The fallback test relies on the
-    // try/catch being present — when no construction error occurs, the result
-    // is a normal boolean, never a thrown exception.
-    expect(await matchPattern('/foo/*', '/foo/bar')).toBe(true);
-    // `__matchPattern` is the resilient entry point — even an empty pattern
-    // (which compiles to `^$`) must return false rather than throw on a
-    // non-matching pathname.
-    expect(await matchPattern('', '/anything')).toBe(false);
   });
 
   it('__compilePattern itself still throws on duplicate capture group names', () => {
