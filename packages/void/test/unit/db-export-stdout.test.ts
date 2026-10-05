@@ -79,7 +79,7 @@ describe('void db export → stdout', () => {
     }
   });
 
-  it('streams pure SQL to stdout and routes the banner to stderr', async () => {
+  it('streams pure SQL to stdout without a command banner or stderr noise', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-db-export-'));
     roots.push(root);
     writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: { void: '*' } }));
@@ -109,7 +109,7 @@ describe('void db export → stdout', () => {
     expect(stdout).toBe(EXPECTED_SQL);
     expect(stdout.startsWith('CREATE TABLE')).toBe(true);
     expect(stdout).not.toContain('void db');
-    expect(stderr).toContain('void db');
+    expect(stderr).toBe('');
   });
 
   it('includes indexes, triggers, and views after table data', async () => {

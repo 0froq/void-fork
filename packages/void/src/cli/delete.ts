@@ -1,7 +1,7 @@
-import { intro, outro, note, log, text, isCancel, cancel } from '@voidzero-dev/vite-plus-prompts';
+import { outro, note, log, text, isCancel, cancel } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { PlatformClient } from './client.ts';
-import { cliTitle, createSpinner } from './output.ts';
+import { createSpinner } from './output.ts';
 import { readProjectConfig, removeProjectConfig } from './project.ts';
 import { resolveProjectBySlug } from './resolve-project.ts';
 
@@ -11,7 +11,6 @@ export async function runDeleteCommand(
   options?: { force?: boolean },
 ): Promise<void> {
   console.log();
-  intro(cliTitle('delete'));
 
   const token = getToken(root);
   if (!token) {

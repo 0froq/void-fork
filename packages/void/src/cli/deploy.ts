@@ -46,7 +46,6 @@ import {
 } from '@void/deploy-cloudflare';
 import { createDeployArtifact, createDeployUploadPayload } from '@void/deploy-core';
 import {
-  intro,
   log as clackLog,
   note,
   confirm,
@@ -181,7 +180,7 @@ import {
   formatDeployFailureMessage,
   formatStreamDeployError,
 } from './deploy-errors.ts';
-import { formatDeploySummary, printDeploySuccess } from './deploy-summary.ts';
+import { formatDeploySummary, printDeployContext, printDeploySuccess } from './deploy-summary.ts';
 import { uploadAssetsToR2, type DirectR2PutItem } from './direct-r2-upload.ts';
 import {
   applyEmailSetup,
@@ -228,7 +227,7 @@ import { lintDestinationSplats, lintDuplicateSources, mergeRoutingRules } from '
 import { openDeployLog, type CliLogger } from './log-file.ts';
 import { buildDeployLogSummary } from './log-summary.ts';
 import { promptForLoginToken } from './login.ts';
-import { cliTitle, createSpinner, formatCount, pc } from './output.ts';
+import { createSpinner, formatCount, pc } from './output.ts';
 import {
   collectAndHashAssets,
   buildVoidManifest,
@@ -239,6 +238,7 @@ import {
   getAssetContentType,
   type AssetManifestEntry,
 } from './package.ts';
+import { listPlatformConnections } from './platform-registry.ts';
 import {
   detectPreset,
   FRAMEWORK_PRESETS,
@@ -561,7 +561,6 @@ function assertWorkerMainUploaded(
  */
 export async function runDeploy(root: string, options?: RunDeployOptions): Promise<void> {
   console.log();
-  intro(cliTitle('deploy'));
 
   const cliLog = openDeployLog({
     mirrorToStderr: options?.debug === true || process.env.VOID_DEPLOY_DEBUG === '1',
@@ -4931,6 +4930,7 @@ export async function runCloudflareDeploy(
   // The worker name `wrangler deploy` uploads as: the root's `name`, else derived. Needed by the
   // email step (routing rules are matched to it) and reconciled into the root config at step 5.
   const workerName = readWranglerTopLevelString(rootConfig, 'name') ?? deriveWorkerName(root);
+  printDeployContext(workerName, 'Cloudflare');
 
   // 3b-ii. Mode B email (design doc 0078) — detect, preflight, and with one Enter set up the
   // developer's own mail domain. Slotted AFTER the uploader hash (3b-i) and the account pin (3b), so its credentialed
@@ -6672,6 +6672,8 @@ async function runCloudflareStaticDeploy(
     throw new Error('The pending Cloudflare handoff was not saved before deployment.');
   }
   rootConfig = parseRootWranglerConfig(configPath);
+  const workerName = readWranglerTopLevelString(rootConfig, 'name') ?? deriveWorkerName(root);
+  printDeployContext(workerName, 'Cloudflare');
   const rootConfigBeforeBuild = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : null;
   if (preset.buildCommand && !options.skipBuild) {
     log.step('Building...');
@@ -6728,7 +6730,6 @@ async function runCloudflareStaticDeploy(
   const entryPath = join(root, '.void', 'deploy', 'cloudflare', 'static-edge.mjs');
   mkdirSync(dirname(entryPath), { recursive: true });
 
-  const workerName = readWranglerTopLevelString(rootConfig, 'name') ?? deriveWorkerName(root);
   // Static deployment needs a fetch-only entry and must detach Worker-only
   // bindings/triggers, but those are deployment-artifact concerns. Preserve the
   // user's canonical Wrangler source byte-for-byte so switching back to the
@@ -7060,8 +7061,6 @@ async function runDeployInner(
     );
   }
 
-  const targetLabel = platform === 'cloudflare' ? 'Cloudflare' : 'Void';
-  log.info(`Deployment target: ${targetLabel}`);
   cliLog.info('deploy_target', { target: platform });
 
   try {
@@ -7082,6 +7081,7 @@ async function runManagedDeploy(
   const apiUrl = getApiUrl(root);
   const requestedProjectSlug = getRequestedProjectSlug(options);
   let reauthenticated = false;
+  let displayedProject: string | undefined;
   while (true) {
     try {
       // Project IDs and implicit slugs belong to the platform that issued them.
@@ -7212,6 +7212,13 @@ async function runManagedDeploy(
         projectId: config.projectId,
         slug: config.slug,
       });
+      if (displayedProject !== config.slug) {
+        const destination =
+          listPlatformConnections().find((connection) => connection.apiUrl === apiUrl)
+            ?.displayName ?? new URL(apiUrl).hostname;
+        printDeployContext(config.slug, destination);
+        displayedProject = config.slug;
+      }
 
       if (migrateLegacyVoidConfig(root)) {
         log.success(

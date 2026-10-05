@@ -1,5 +1,11 @@
-import { outro } from '@voidzero-dev/vite-plus-prompts';
-import { formatCount, pc } from './output.ts';
+import { intro, outro } from '@voidzero-dev/vite-plus-prompts';
+import { formatCount, pc, sanitizeTerminalText } from './output.ts';
+
+export function printDeployContext(project: string, destination: string): void {
+  intro(
+    `${pc.dim(sanitizeTerminalText(project))} ${pc.dim('→')} ${pc.blue(sanitizeTerminalText(destination))}`,
+  );
+}
 
 export function printDeploySuccess(published = true): void {
   if (published) {

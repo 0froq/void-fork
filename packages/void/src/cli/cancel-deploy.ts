@@ -1,14 +1,12 @@
-import { intro, outro, log, confirm, isCancel } from '@voidzero-dev/vite-plus-prompts';
+import { outro, log, confirm, isCancel } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { PlatformClient, type DeploymentResponse } from './client.ts';
-import { cliTitle } from './output.ts';
 import { readProjectConfig } from './project.ts';
 
 const ACTIVE_STATUSES = new Set(['pending', 'uploading', 'migrating', 'prerendering']);
 
 export async function runCancelDeployCommand(root: string, deployId?: string): Promise<void> {
   console.log();
-  intro(cliTitle('project cancel'));
 
   const token = getToken(root);
   if (!token) {

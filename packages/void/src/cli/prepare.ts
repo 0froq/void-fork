@@ -1,11 +1,9 @@
-import { intro, log, note, outro } from '@voidzero-dev/vite-plus-prompts';
+import { log, note, outro } from '@voidzero-dev/vite-plus-prompts';
 import { prepareProject } from '../codegen/prepare.ts';
-import { cliTitle } from './output.ts';
 import type { PrepareArgs } from './prepare-args.ts';
 
 export async function runPrepareCommand(root: string, _args: PrepareArgs): Promise<void> {
   console.log();
-  intro(cliTitle('prepare'));
 
   const result = await prepareProject(root);
 

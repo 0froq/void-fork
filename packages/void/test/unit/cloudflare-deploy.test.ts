@@ -2411,6 +2411,10 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(generated.queues).toEqual({ producers: [], consumers: [] });
     expect(generated.workflows).toEqual([]);
     expect(output).toMatch(/[╭+].*https:\/\/preview\.example\.workers\.dev.*[╮+]/);
+    expect(output).toContain('switchable-app → Cloudflare');
+    expect(output.indexOf('switchable-app → Cloudflare')).toBeLessThan(
+      output.indexOf('Preparing deployment'),
+    );
     expect(output).toContain('Worker: switchable-app');
     expect(output).toMatch(/[│|]\s+Static SPA\s+[│|]/);
     expect(output).toContain('✓ Successfully deployed!');
@@ -3232,6 +3236,8 @@ describe('runCloudflareDeploy — resource provisioning', () => {
     expect(trace).toContain('build');
     expect(trace).toContain('wrangler:deploy');
     expect(output).toMatch(/[╭+].*https:\/\/preview\.example\.workers\.dev.*[╮+]/);
+    expect(output).toContain('myapp → Cloudflare');
+    expect(output.startsWith('myapp → Cloudflare\n\n')).toBe(true);
     expect(output).toContain('Worker: myapp');
     expect(output).not.toContain('D1 migrations up to date');
     expect(output).toContain('✓ Successfully deployed!');

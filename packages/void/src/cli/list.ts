@@ -1,13 +1,12 @@
-import { intro, outro, log } from '@voidzero-dev/vite-plus-prompts';
+import { outro, log } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { PlatformClient, type DeploymentResponse } from './client.ts';
-import { cliTitle, dim, ensureUtc, formatCount, pc, tablePrefix } from './output.ts';
+import { dim, ensureUtc, formatCount, pc, tablePrefix } from './output.ts';
 import { readDeploymentPlatform, readProjectConfig } from './project.ts';
 import { resolveProjectBySlug } from './resolve-project.ts';
 
 export async function runListCommand(root: string, slug?: string): Promise<void> {
   console.log();
-  intro(cliTitle('project status'));
 
   const platform = readDeploymentPlatform(root);
   if (platform === 'cloudflare') {

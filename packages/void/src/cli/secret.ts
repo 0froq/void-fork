@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
 import {
-  intro,
   outro,
   log,
   note,
@@ -12,14 +11,13 @@ import {
 import { getToken } from './auth.ts';
 import { PlatformClient } from './client.ts';
 import { validateSecretValues } from './env-validation.ts';
-import { cliTitle, formatCount } from './output.ts';
+import { formatCount } from './output.ts';
 import { readDeploymentPlatform, readProjectConfig } from './project.ts';
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project.ts';
 import type { SecretArgs } from './secret-args.ts';
 
 export async function runSecretCommand(root: string, args: SecretArgs): Promise<void> {
   console.log();
-  intro(cliTitle('secret'));
 
   const platform = readDeploymentPlatform(root);
   if (platform === 'cloudflare') {

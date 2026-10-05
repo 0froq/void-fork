@@ -74,10 +74,6 @@ export function createSpinner(
   };
 }
 
-export function cliTitle(command: string): string {
-  return pc.blue(`void ${command}`);
-}
-
 export function sectionTitle(title: string): string {
   return pc.reset(pc.blue(title));
 }

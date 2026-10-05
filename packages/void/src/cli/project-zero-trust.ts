@@ -1,11 +1,11 @@
-import { intro, log, note, outro } from '@voidzero-dev/vite-plus-prompts';
+import { log, note, outro } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import {
   PlatformClient,
   type ProjectZeroTrustResponse,
   type ProjectZeroTrustUpdateResponse,
 } from './client.ts';
-import { cliTitle, sanitizeTerminalText } from './output.ts';
+import { sanitizeTerminalText } from './output.ts';
 import type { ProjectArgs } from './project-args.ts';
 import { readProjectConfig } from './project.ts';
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project.ts';
@@ -67,7 +67,6 @@ function statusLines(result: ProjectZeroTrustResponse): string {
 
 export async function runProjectZeroTrustCommand(root: string, args: ZeroTrustArgs): Promise<void> {
   console.log();
-  intro(cliTitle(`project zero-trust ${args.action}`));
   const { client, projectId, slug } = await resolveTarget(root, args);
   if (args.action === 'status') {
     note(statusLines(await client.getProjectZeroTrust(projectId)), slug);

@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { intro, outro, log, select, isCancel, cancel } from '@voidzero-dev/vite-plus-prompts';
+import { outro, log, select, isCancel, cancel } from '@voidzero-dev/vite-plus-prompts';
 import { join, dirname, relative } from 'pathslash';
 import { ensureProjectTsconfig } from '../codegen/project-tsconfig.ts';
 import { readConfig, getDatabaseDialect } from '../config.ts';
@@ -17,14 +17,12 @@ import { collectMigrations, readJournal } from '../migrations/collect.ts';
 import { assertJournalCoherence, listDrizzleArtifacts } from '../migrations/validate.ts';
 import { readProjectPaths } from '../project-paths.ts';
 import type { GenArgs } from './gen-args.ts';
-import { cliTitle } from './output.ts';
 import { buildDrizzleKitSpawnEnv } from './yarn-pnp.ts';
 
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
 
 export async function runGenCommand(root: string, args: GenArgs): Promise<void> {
   console.log();
-  intro(cliTitle('gen'));
 
   if (args.subcommand === 'model') {
     await runModel(root, args.name, args.columns);

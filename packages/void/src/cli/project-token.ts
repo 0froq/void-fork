@@ -1,7 +1,7 @@
-import { intro, log, outro } from '@voidzero-dev/vite-plus-prompts';
+import { log, outro } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { PlatformClient } from './client.ts';
-import { cliTitle, dim, tablePrefix } from './output.ts';
+import { dim, tablePrefix } from './output.ts';
 import type { ProjectArgs } from './project-args.ts';
 import { readProjectConfig } from './project.ts';
 import { resolveProjectBySlug } from './resolve-project.ts';
@@ -45,7 +45,6 @@ function printIssued(
 export async function runProjectTokenCommand(root: string, args: TokenArgs): Promise<void> {
   if (!args.json) {
     console.log();
-    intro(cliTitle(`project token ${args.action}`));
   }
   const { client, projectId, slug } = await resolveTarget(root, args);
   if (args.action === 'create') {

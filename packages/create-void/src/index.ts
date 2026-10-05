@@ -10,7 +10,6 @@ const pm = detectPM();
 
 async function main() {
   console.log();
-  p.intro(pc.blue('create-void'));
 
   // 1. Get app name from argv or prompt
   let appName = process.argv[2];

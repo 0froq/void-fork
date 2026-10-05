@@ -1,4 +1,4 @@
-import { intro, log, note, outro } from '@voidzero-dev/vite-plus-prompts';
+import { log, note, outro } from '@voidzero-dev/vite-plus-prompts';
 import { getAccountCredential, getToken } from './auth.ts';
 import {
   PlatformApiError,
@@ -6,7 +6,7 @@ import {
   type ProjectInvitationResponse,
   type ProjectMemberResponse,
 } from './client.ts';
-import { cliTitle, formatCount } from './output.ts';
+import { formatCount } from './output.ts';
 import { parsePlatformErrorBody, platformErrorMessage } from './platform-errors.ts';
 import type { ProjectArgs } from './project-args.ts';
 import { readProjectConfig } from './project.ts';
@@ -103,7 +103,6 @@ function invitationResponseError(error: unknown, apiUrl: string): unknown {
 
 export async function runProjectTeamCommand(root: string, args: ProjectTeamArgs): Promise<void> {
   console.log();
-  intro(cliTitle(`project team ${args.action}`));
 
   const accountScoped =
     args.action === 'pending' || args.action === 'accept' || args.action === 'decline';

@@ -1,9 +1,9 @@
 import { appendFileSync, writeFileSync } from 'node:fs';
-import { intro, log, outro } from '@voidzero-dev/vite-plus-prompts';
+import { log, outro } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import type { BuildArgs } from './build-args.ts';
 import { PlatformApiError, PlatformClient, type BuildLogsResponse } from './client.ts';
-import { cliTitle, dim, pc } from './output.ts';
+import { dim, pc } from './output.ts';
 import { readProjectConfig } from './project.ts';
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project.ts';
 
@@ -114,7 +114,6 @@ async function runBuildLogsCommand(
   args: Extract<BuildArgs, { subcommand: 'logs' }>,
 ): Promise<void> {
   console.log();
-  intro(cliTitle('build logs'));
 
   const token = getToken(root);
   if (!token) {

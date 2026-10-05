@@ -1,7 +1,22 @@
-import { describe, expect, it } from 'vite-plus/test';
-import { formatDeploySummary } from '../../src/cli/deploy-summary.ts';
+import { stripVTControlCharacters } from 'node:util';
+import { describe, expect, it, vi } from 'vite-plus/test';
+import { formatDeploySummary, printDeployContext } from '../../src/cli/deploy-summary.ts';
 
 describe('deployment summaries', () => {
+  it('renders project context without allowing names to inject terminal controls', () => {
+    const chunks: Array<string> = [];
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      chunks.push(String(chunk));
+      return true;
+    });
+    try {
+      printDeployContext('blog\nforged', 'Orange\rCloud\u001b[2J');
+    } finally {
+      write.mockRestore();
+    }
+    expect(stripVTControlCharacters(chunks.join(''))).toBe('blog forged → Orange Cloud [2J\n\n');
+  });
+
   it.each([1, 5])('uses correct nouns for %i deployed resources', (count) => {
     const suffix = count === 1 ? '' : 's';
     expect(

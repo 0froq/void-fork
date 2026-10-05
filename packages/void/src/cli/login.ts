@@ -1,5 +1,5 @@
 import type { PlatformAuthenticationDiscovery } from '@void/platform';
-import { intro, outro, log, select, isCancel, cancel } from '@voidzero-dev/vite-plus-prompts';
+import { outro, log, select, isCancel, cancel } from '@voidzero-dev/vite-plus-prompts';
 import {
   getToken,
   getApiUrl,
@@ -11,7 +11,7 @@ import {
   saveToken,
 } from './auth.ts';
 import { isExpiredTokenError, PlatformClient } from './client.ts';
-import { cliTitle, createSpinner, pc } from './output.ts';
+import { createSpinner, pc } from './output.ts';
 
 export type LoginPlatform = {
   apiUrl: string;
@@ -99,7 +99,6 @@ export async function promptForLoginToken(
 
 export async function runLoginCommand(root: string = process.cwd()): Promise<void> {
   console.log();
-  intro(cliTitle('login'));
 
   const existing = getToken(root);
   let expiredEnvToken = false;

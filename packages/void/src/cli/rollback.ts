@@ -1,20 +1,11 @@
-import {
-  intro,
-  outro,
-  log,
-  select,
-  confirm,
-  isCancel,
-  cancel,
-} from '@voidzero-dev/vite-plus-prompts';
+import { outro, log, select, confirm, isCancel, cancel } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { PlatformClient } from './client.ts';
-import { cliTitle, createSpinner, dim, ensureUtc, formatCount, pc } from './output.ts';
+import { createSpinner, dim, ensureUtc, formatCount, pc } from './output.ts';
 import { readDeploymentPlatform, readProjectConfig } from './project.ts';
 
 export async function runRollbackCommand(root: string, deployId?: string): Promise<void> {
   console.log();
-  intro(cliTitle('project rollback'));
 
   const platform = readDeploymentPlatform(root);
   if (platform === 'cloudflare') {

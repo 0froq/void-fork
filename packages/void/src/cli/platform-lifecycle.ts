@@ -7,7 +7,6 @@ import {
 } from '@void/platform';
 import {
   confirm,
-  intro,
   isCancel,
   log,
   note,
@@ -17,7 +16,7 @@ import {
   text,
 } from '@voidzero-dev/vite-plus-prompts';
 import { resolve } from 'pathslash';
-import { cliCommandName, cliTitle, createSpinner, pc } from './output.ts';
+import { cliCommandName, createSpinner, pc } from './output.ts';
 import {
   selectInstallationAppAccess,
   prepareInstallationAppAccess,
@@ -172,7 +171,6 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
   assertNoninteractivePlatformMutationAcknowledged(args, process.stdin.isTTY === true);
 
   console.log();
-  intro(cliTitle('platform install'));
   let existing = args.resume ? resolveInstallationManifest(args.name) : null;
   let selectedInstall = false;
   let selectedDraft = false;

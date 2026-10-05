@@ -1,11 +1,10 @@
-import { intro, outro, log } from '@voidzero-dev/vite-plus-prompts';
+import { outro, log } from '@voidzero-dev/vite-plus-prompts';
 import { getToken, getSiteDomain } from './auth.ts';
 import { PlatformClient } from './client.ts';
-import { cliTitle, dim, formatCount, pc, tablePrefix } from './output.ts';
+import { dim, formatCount, pc, tablePrefix } from './output.ts';
 
 export async function runProjectsCommand(root: string): Promise<void> {
   console.log();
-  intro(cliTitle('project list'));
 
   const token = getToken(root);
   if (!token) {

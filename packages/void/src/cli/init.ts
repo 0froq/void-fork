@@ -13,7 +13,6 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import type { PlatformDiscoveryDocument } from '@void/platform';
 import {
-  intro,
   outro,
   log,
   confirm,
@@ -40,7 +39,6 @@ import { maybeScaffoldEnvTs } from './env-scaffold.ts';
 import { migrateFrameworkAdapterPaths } from './framework-config-migrate.ts';
 import { initialCommitCommand, setupGit } from './init-git.ts';
 import { migrateLegacyVoidConfig } from './migrate.ts';
-import { cliTitle } from './output.ts';
 import { discoverPlatform, saveDiscoveredPlatform } from './platform-cmd.ts';
 import { formatProjectCommand } from './preset.ts';
 import {
@@ -3031,7 +3029,6 @@ function injectAgentBlock(root: string): void {
 
 export async function runInitCommand(root: string, initArgs?: InitArgs): Promise<void> {
   console.log();
-  intro(cliTitle('init'));
 
   const targeted = Boolean(initArgs && (initArgs.tsconfig || initArgs.github || initArgs.agents));
   if (!targeted) {

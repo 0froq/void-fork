@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { createPlatformDeploymentManifest } from '@void/platform';
-import { CANCEL_SYMBOL } from '@voidzero-dev/vite-plus-prompts';
+import { CANCEL_SYMBOL, intro } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { pc } from '../../src/cli/output.ts';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
@@ -145,6 +145,8 @@ describe('interactive platform installation prompts', () => {
           : 'workers-dev',
     );
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev']));
+
+    expect(intro).not.toHaveBeenCalled();
 
     expect(notesWithoutColors()).toContainEqual([
       expect.stringContaining('Port: configured by Cloudflare Tunnel'),

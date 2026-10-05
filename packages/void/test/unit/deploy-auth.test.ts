@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { intro } from '@voidzero-dev/vite-plus-prompts';
 import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { buildEnv, runDeploy } from '../../src/cli/deploy.ts';
@@ -79,6 +80,7 @@ vi.mock('../../src/cli/login', () => ({
 }));
 
 beforeEach(() => {
+  vi.mocked(intro).mockClear();
   mockError.mockReset();
   mockInfo.mockReset();
   mockStep.mockReset();
@@ -136,20 +138,22 @@ describe('runDeploy auth failures', () => {
     );
   });
 
-  it('prints the resolved Void deployment target before authentication', async () => {
+  it('does not print a deployment heading until the managed project is resolved', async () => {
     await expect(
       runDeploy(process.cwd(), { platform: 'void', projectSlug: 'my-app' }),
     ).rejects.toThrow();
 
-    expect(mockInfo).toHaveBeenCalledWith('Deployment target: Void');
+    expect(intro).not.toHaveBeenCalled();
+    expect(mockInfo).not.toHaveBeenCalledWith('Deployment target: Void');
   });
 
-  it('prints the resolved Cloudflare deployment target before target validation', async () => {
+  it('does not print a deployment heading for an invalid Cloudflare target', async () => {
     await expect(
       runDeploy(process.cwd(), { platform: 'cloudflare', projectSlug: 'my-app' }),
     ).rejects.toThrow('--project is not supported with platform cloudflare');
 
-    expect(mockInfo).toHaveBeenCalledWith('Deployment target: Cloudflare');
+    expect(intro).not.toHaveBeenCalled();
+    expect(mockInfo).not.toHaveBeenCalledWith('Deployment target: Cloudflare');
   });
 
   it('reauthenticates and retries once for expired local auth tokens in interactive mode', async () => {

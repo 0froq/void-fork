@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
+import { intro } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test';
 import { getApiUrl } from '../../src/cli/auth.ts';
 import { runDeploy } from '../../src/cli/deploy.ts';
@@ -71,7 +73,7 @@ beforeEach(() => {
   for (const apiUrl of [alternateOrigin, originalOrigin]) {
     savePlatformConnection({
       apiUrl,
-      displayName: apiUrl,
+      displayName: apiUrl === alternateOrigin ? 'Orange Cloud' : 'Original Cloud',
       applicationDomain: 'apps.example.test',
       proxyUrl: `${apiUrl}/`,
       accountId: null,
@@ -83,6 +85,7 @@ beforeEach(() => {
   failDeploy = false;
   expirePreflight = false;
   requests.length = 0;
+  vi.mocked(intro).mockClear();
   confirm.mockClear();
   select.mockClear();
   text.mockClear();
@@ -180,6 +183,9 @@ it('deploys to another connected platform without sending the original project I
   await deploy();
   expect(readFileSync(projectFile, 'utf8')).toBe(saved);
   expect(
+    vi.mocked(intro).mock.calls.map(([message]) => stripVTControlCharacters(message!)),
+  ).toEqual(['my-app → Orange Cloud']);
+  expect(
     requests.every(
       ({ origin, authorization }) =>
         origin === alternateOrigin && authorization === 'Bearer alternate-token',
@@ -190,6 +196,9 @@ it('deploys to another connected platform without sending the original project I
   vi.stubEnv('VOID_TOKEN', undefined);
   expect(getApiUrl(root)).toBe(originalOrigin);
   await runDeploy(root, { dir: assets, skipBuild: true });
+  expect(
+    vi.mocked(intro).mock.calls.map(([message]) => stripVTControlCharacters(message!)),
+  ).toEqual(['my-app → Orange Cloud', 'my-app → Original Cloud']);
   expect(requests.at(-1)).toMatchObject({
     origin: originalOrigin,
     path: '/projects/project-original/deploy',
@@ -256,6 +265,9 @@ it('reuses a newly established first link when authentication expires during dep
   expirePreflight = true;
   await runDeploy(root, { platform: 'void', dir: assets, skipBuild: true });
   expect(login).toHaveBeenCalledOnce();
+  expect(
+    vi.mocked(intro).mock.calls.map(([message]) => stripVTControlCharacters(message!)),
+  ).toEqual(['my-app → Orange Cloud']);
   expect(select).toHaveBeenCalledOnce();
   expect(
     requests.filter(({ path, method }) => path === '/projects' && method === 'POST'),

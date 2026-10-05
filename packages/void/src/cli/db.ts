@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { confirm, intro, isCancel, outro, log } from '@voidzero-dev/vite-plus-prompts';
+import { confirm, isCancel, outro, log } from '@voidzero-dev/vite-plus-prompts';
 import { basename, extname, join, relative, resolve } from 'pathslash';
 import {
   readConfig,
@@ -44,7 +44,7 @@ import {
   quoteSqlString,
 } from './db-export-sequences.ts';
 import { formatTimestamp } from './gen.ts';
-import { cliTitle, dim, formatCount, pc } from './output.ts';
+import { dim, formatCount, pc } from './output.ts';
 import { readDeploymentPlatform, readProjectConfig } from './project.ts';
 
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
@@ -175,14 +175,10 @@ function validatePendingMigrations(
 }
 
 export async function runDbCommand(root: string, args: DbArgs): Promise<void> {
-  // `db export` streams raw SQL to stdout for piping — keep the banner off it.
-  const exportToStdout = args.action === 'export' && !args.output;
-  if (exportToStdout) {
-    process.stderr.write('\n');
-  } else {
+  // Keep raw SQL exports clean for piping into other tools.
+  if (!(args.action === 'export' && !args.output)) {
     console.log();
   }
-  intro(cliTitle('db'), exportToStdout ? { output: process.stderr } : undefined);
 
   const dialect = getDatabaseDialect(readConfig(root));
 

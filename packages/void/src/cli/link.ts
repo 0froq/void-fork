@@ -1,8 +1,8 @@
-import { intro, outro, log, cancel } from '@voidzero-dev/vite-plus-prompts';
+import { outro, log, cancel } from '@voidzero-dev/vite-plus-prompts';
 import { getToken, getSiteDomain } from './auth.ts';
 import { PlatformClient } from './client.ts';
 import { promptAndCreateProject } from './create-project.ts';
-import { cliTitle, pc } from './output.ts';
+import { pc } from './output.ts';
 import { attachSelectedPlatform, readProjectConfig, writeProjectConfig } from './project.ts';
 import { promptProjectSelection } from './prompt.ts';
 import { resolveProjectBySlug } from './resolve-project.ts';
@@ -19,7 +19,6 @@ function projectLabel(slug: string, root: string, url?: string): string {
 
 export async function runLink(root: string, slug?: string): Promise<void> {
   console.log();
-  intro(cliTitle('project link'));
 
   // Check if already linked
   const existing = readProjectConfig(root);
