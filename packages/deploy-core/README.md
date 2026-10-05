@@ -1,18 +1,7 @@
 # @void/deploy-core
 
-Shared deployment contracts for the Void SDK and hosted Void platform.
+Shared deployment contracts for Void runtimes and deployment adapters. Includes manifests, progress events, routing rules, resource plans, and SQL and Durable Object migration metadata.
 
-This package owns the wire types exchanged by the `void` CLI and the managed
-platform, including deployment manifests, progress events, assets, routing
-rules, queues, append-only Durable Object migration planning and metadata, normalized upload artifacts, runtime
-manifest validation, and provider-neutral resource planning. It has no
-dependency on either deployment target and must remain usable from Node.js and
-Cloudflare Workers.
+This package works in Node.js and Cloudflare Workers. Applications normally use the `void` CLI rather than these contracts directly.
 
-SQL migration tokenization, classification, and canonical hash inputs are shared
-here. Each target supplies its hashing implementation and independently validates
-submitted plans; CLI execution policy stays in the CLI.
-
-The package also defines the adapter boundary implemented by deployment
-targets. Target-specific orchestration belongs in `void` or `platform/`, not
-here.
+See [Deployment](https://void.cloud/guide/deployment) for deploying an app and [Platform Development](https://void.cloud/guide/platform-development) for working on a runtime or adapter.

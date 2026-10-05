@@ -1,8 +1,5 @@
 # @void/edge
 
-Shared edge-runtime primitives for Void deployments.
+Shared routing and static asset helpers for Void's direct Cloudflare deployments and platform dispatch runtime.
 
-The hosted dispatch Worker and direct Cloudflare deployments both consume this
-package for path matching, redirects, rewrites, response headers, and static
-asset resolution. The package contains no hosted-platform identity or routing
-state.
+Configure redirects, rewrites, headers, and asset behavior through `void.config.ts`. See [Static Assets](https://void.cloud/guide/edge/static-assets) and the [configuration reference](https://void.cloud/reference/config#routing).

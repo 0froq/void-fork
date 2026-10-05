@@ -11,7 +11,7 @@ For work on the implementation:
 - [Architecture](./architecture.md) maps the current packages, runtime and data stores.
 - [Operations](./operations.md) covers maintenance and recovery.
 - [Release acceptance](./release-acceptance.md) separates local verification from live provider signoff.
-- [Packaged runtime](../../packages/platform/README.md) explains how to build and upgrade a fork.
+- [Runtime and Source Builds](../../docs/guide/platform/development/runtime.md) explains how to build and deploy a fork.
 - [Design archive](./design-docs/README.md) preserves feature rationale and implementation history.
 
 Archived technical plans and their checkboxes do not define a release promise

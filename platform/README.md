@@ -47,9 +47,7 @@ relative to `platform/` unless they begin with `../`.
 | `vp run --filter @voidcloud/platform dev`    | Start the dashboard development server                    |
 | `vp run build:all`                           | Build all packages, platform apps, and playgrounds        |
 | `vp test run --project 'platform-*'`         | Run platform tests                                        |
-| `vp run lint:platform`                       | Run type-aware platform lint                              |
 | `vp run check`                               | Typecheck the workspace                                   |
-| `vp run test:all`                            | Format check, lint, build, typecheck, and test            |
 | `vp run --filter @voidcloud/platform health` | Check the selected platform using operator authentication |
 
 The workspace `dev` and `build` scripts in `platform/package.json` apply to the
@@ -58,57 +56,7 @@ in that file serve the existing Void Cloud deployment; see [operations](#operati
 
 ## Operator CLI
 
-Sign in as an administrator to inspect users, projects, deployments, and platform
-health:
-
-```sh
-void platform auth login
-void platform user list
-void platform system health
-```
-
-Commands use the selected platform connection. Add `--plan` to preview a change,
-`--yes` to apply it in a script, and `--json` to read structured results. The
-[Platform Administration guide](../docs/guide/platform-administration.md) covers
-the workflows; the [CLI reference](../docs/reference/cli/platform.md#operator-commands)
-lists all commands and options.
-
-The CLI and browser admin UI share the same server operations and record their
-mutations in `operator_events`. The operator API is served at `/operator/v1`. Apply
-`0033_operator_sessions_and_events` before deploying the API; the migration adds
-tables and indexes that remain compatible with existing Workers.
-
-Both interfaces prevent deletion or suspension of the last active administrator.
-Allowed administrator removals revoke access before resource cleanup and preserve
-that revocation if cleanup fails, so concurrent removals cannot lock out the
-remaining administrator.
-
-Administrators can manage installation plans from **Plans** in `/admin/` or
-`void platform config plans`. Both interfaces review changes before applying
-them and let you resume pending account updates. See
-[Plans and Limits](../docs/guide/platform/administration/plans.md).
-
-When upgrading an installation that previously enabled managed Sandbox, run
-`void platform system sandbox-drain --plan`, then apply it and rerun until it
-reports `complete: true`. Preview later bounded pages by passing the returned
-`nextCursor` to `--cursor`. The lifecycle installer keeps application traffic
-closed while this database-backed drain is required. An active deployment is
-first asked to cancel; rerun the drain after 10 minutes if its request was
-abandoned. A protected cutover remains fenced for 90 minutes before the drain
-can compensate it, while an interrupted rollback is adopted through its
-database lease. These retries restore the committed deployment before deleting
-the managed Sandbox container.
-
-Project state upgrades use `0054_project_mode` to normalize the old `worker` mode
-and default to `void`. Before rolling out this runtime, finish any protected
-cutover or rollback recovery whose project has no active deployment pointer on
-the previous compatible runtime. Recovery remains fenced when that identity is
-missing. After rollout, `void platform project normalize <id> --plan` verifies
-the serving route and recorded queue names; `--yes` applies only the previewed
-PostgreSQL repairs. It does not choose the newest historical deployment or write
-routing/provider state. Existing active pointers are preserved. A verified queue
-name that differs from the expected delivery routing name blocks normalization
-until its queue routing is reconciled.
+Use [Platform Administration](../docs/guide/platform-administration.md) for users, projects, plans, logs, and health checks. The [CLI reference](../docs/reference/cli/platform.md#operator-commands) lists administrator commands and options.
 
 ## Local Development
 
@@ -132,58 +80,7 @@ into your own installation.
 
 ## Monorepo structure
 
-Void is one repository with an explicit dependency boundary:
-
-- Repository-level `packages/` — public SDK, CLI, runtime helpers, and framework adapters.
-- `../packages/deploy-core` — target-neutral deployment manifests and wire contracts shared by the SDK and platform.
-- `../packages/platform` — public deployment/installation manifests plus integrity-checked core Worker artifacts used by the platform installer.
-- `platform/packages/` — platform implementation packages for the control plane, routing, proxy, logs, dashboard, and UI.
-- Platform packages may depend on public/shared packages. Public SDK packages must not depend on `platform/`.
-
-### Top-Level Map
-
-| Path                                                           | Purpose                                                                   |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| [`packages/api`](./packages/api/README.md)                     | Control plane API, deploy pipeline, provisioning, administrator UI        |
-| [`packages/dashboard`](./packages/dashboard/README.md)         | User-facing dashboard app                                                 |
-| [`packages/dispatch`](./packages/dispatch/README.md)           | Edge router for installation app domains and custom domains               |
-| [`packages/email-gateway`](./packages/email-gateway/README.md) | Email ingress, bounded tenant delivery, and validated email actions       |
-| [`packages/proxy`](./packages/proxy/README.md)                 | AI proxy, remote D1/KV/R2 proxy, ISR revalidation bridge                  |
-| [`packages/tail`](./packages/tail/README.md)                   | Runtime log ingestion into Analytics Engine                               |
-| [`../packages/void`](../packages/void/AGENTS.md)               | Main `void` package: Vite plugin, CLI, runtime, codegen, deploy packaging |
-| `../packages/{vue,react,svelte,solid}`                         | Pages-mode adapters and runtime helpers                                   |
-| `../packages/create-void`                                      | Scaffolding package                                                       |
-| `../packages/md`                                               | Markdown package                                                          |
-| `../docs`                                                      | Public-facing SDK docs                                                    |
-| `meta/design-docs`                                             | Historical design archive                                                 |
-| `meta/operations.md`                                           | Operations/runbook                                                        |
-
-The dashboard consumes built `void` and `@void/react` workspace packages. Run
-`vp run build` before deploying it from a fresh checkout.
-
-## SDK guidance
-
-Public SDK architecture and adapter guidance live in the
-[root instructions](../AGENTS.md) and
-[core package instructions](../packages/void/AGENTS.md).
-Use the [framework integration guide](../docs/integrations/frameworks/overview.md)
-for the supported framework list.
-
-The package READMEs above describe each component's implementation and tests.
-Use [the architecture guide](./meta/architecture.md) for the runtime and data-flow
-map, and [the development guide](../docs/guide/platform-development.md) for local
-setup and source deployments.
-
-## Tooling
-
-Use the versions declared in `.node-version`, `pnpm-workspace.yaml`, and package
-manifests. Vite+ supplies the build, test, lint, format, and package commands;
-platform Workers run through the checked-in development scripts. PostgreSQL is
-used for platform metadata and reached through Hyperdrive in deployed Workers.
-
-## Testing
-
-Tests run from root with `vp test run`. See each package README for detailed test listings.
+Platform source lives in `platform/packages/`; public SDK packages live in the repository-level `packages/`. Platform packages may depend on SDK packages; SDK packages must not depend on `platform/`. See the [architecture](./meta/architecture.md) for the component map.
 
 ## Operations
 
