@@ -10,6 +10,7 @@ import {
   recordCloudflareCandidate,
 } from '../../src/cli/cloudflare-link.ts';
 import { readDeploymentPlatform } from '../../src/cli/project.ts';
+import { materializeCloudflareConfig } from '../../src/cloudflare-config.ts';
 
 let root: string;
 const config =
@@ -157,6 +158,64 @@ describe('verified existing Worker link', () => {
     expect(readDeploymentPlatform(root)).toBeNull();
     expect(readCloudflareLink(root)).toBeNull();
     expect(readFileSync(deps.configPath, 'utf8')).toBe(config);
+  });
+  it.each([
+    ['legacy', '__VOID_VERSION_METADATA'],
+    ['legacy', 'APP_VERSION'],
+    ['typed', '__VOID_VERSION_METADATA'],
+    ['typed', 'APP_VERSION'],
+  ])('preserves omitted existing metadata %s config / %s binding', async (kind, binding) => {
+    const deps = options();
+    deps.readExistingWorker.mockResolvedValue({
+      ...worker,
+      bindings: [...worker.bindings, { name: binding, type: 'version_metadata' }],
+    });
+    const authored = 'export default { cloudflare: { name: "site", account_id: "personal" } };\n';
+    if (kind === 'typed') {
+      rmSync(deps.configPath);
+      writeFileSync(join(root, 'void.config.ts'), authored);
+      deps.configPath = materializeCloudflareConfig(root);
+    }
+
+    await prepareExistingCloudflareDeploy(deps);
+
+    expect(readFileSync(deps.configPath, 'utf8')).toContain(`"binding": "${binding}"`);
+    expect(readDeploymentPlatform(root)).toBe('cloudflare');
+    expect(readCloudflareLink(root)).toEqual({ accountId: 'personal', workerName: 'site' });
+    if (kind === 'typed') {
+      expect(readFileSync(join(root, 'void.config.ts'), 'utf8')).toBe(authored);
+      expect(existsSync(join(root, 'void.lock.json'))).toBe(true);
+      expect(JSON.parse(readFileSync(materializeCloudflareConfig(root), 'utf8'))).toMatchObject({
+        version_metadata: { binding },
+      });
+    } else {
+      expect(readFileSync(deps.configPath, 'utf8')).toContain('// Existing site');
+    }
+    await prepareExistingCloudflareDeploy({ ...deps, reuse: false });
+  });
+  it.each([
+    { remote: ['APP_VERSION'], authored: 'OTHER_VERSION' },
+    { remote: [], authored: 'APP_VERSION' },
+    { remote: ['APP_VERSION', 'OTHER_VERSION'], authored: undefined },
+  ])('rejects unsafe metadata handoffs %j without writing state', async ({ remote, authored }) => {
+    const deps = options();
+    deps.readExistingWorker.mockResolvedValue({
+      ...worker,
+      bindings: [...worker.bindings, ...remote.map((name) => ({ name, type: 'version_metadata' }))],
+    });
+    if (authored !== undefined) {
+      writeFileSync(
+        deps.configPath,
+        JSON.stringify({ name: 'site', version_metadata: { binding: authored } }),
+      );
+    }
+    const original = readFileSync(deps.configPath, 'utf8');
+
+    await expect(prepareExistingCloudflareDeploy(deps)).rejects.toThrow('version_metadata');
+
+    expect(readFileSync(deps.configPath, 'utf8')).toBe(original);
+    expect(readCloudflareLink(root)).toBeNull();
+    expect(readDeploymentPlatform(root)).toBeNull();
   });
   it('refuses a changed identity on retry before remote calls', async () => {
     const deps = options();

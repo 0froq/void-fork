@@ -155,9 +155,22 @@ export async function prepareExistingCloudflareDeploy(options: {
     configPath: options.configPath,
     workerName: config.name,
   });
+  const patch: Record<string, unknown> = { account_id: options.accountId, keep_vars: true };
+  // Native deploys may add version metadata only to their generated artifact.
+  // Reuse the inspected binding when omitted; authored replacements still fail validation.
+  const metadataBindings = existing.bindings.filter(
+    (binding) => binding.type === 'version_metadata',
+  );
+  if (
+    config.version_metadata === undefined &&
+    metadataBindings.length === 1 &&
+    typeof metadataBindings[0]!.name === 'string'
+  ) {
+    config.version_metadata = { binding: metadataBindings[0]!.name };
+    patch.version_metadata = config.version_metadata;
+  }
   assertExistingCloudflareConfig(existing, config, false, options.approvedKv);
   let updated = text;
-  const patch: Record<string, unknown> = { account_id: options.accountId, keep_vars: true };
   for (const key of ['compatibility_date', 'compatibility_flags', 'limits']) {
     if (config[key] === undefined && existing.runtime[key] !== undefined) {
       patch[key] = existing.runtime[key];
