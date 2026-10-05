@@ -47,10 +47,10 @@ function serializeError(input: unknown): SerializedError {
   const seen = new WeakSet<object>();
   function step(value: unknown, depth: number): SerializedError {
     if (value && typeof value === 'object') {
-      if (seen.has(value as object)) {
+      if (seen.has(value)) {
         return { message: '[circular]' };
       }
-      seen.add(value as object);
+      seen.add(value);
     }
     if (value instanceof Error) {
       const node: SerializedError = {
@@ -58,15 +58,14 @@ function serializeError(input: unknown): SerializedError {
         message: value.message,
         stack: value.stack,
       };
-      const anyVal = value as unknown as { code?: unknown; errno?: unknown; cause?: unknown };
-      if (anyVal.code !== undefined) {
-        node.code = anyVal.code;
+      if ('code' in value && value.code !== undefined) {
+        node.code = value.code;
       }
-      if (anyVal.errno !== undefined) {
-        node.errno = anyVal.errno;
+      if ('errno' in value && value.errno !== undefined) {
+        node.errno = value.errno;
       }
-      if (depth < MAX_CAUSE_DEPTH && anyVal.cause !== undefined) {
-        node.cause = step(anyVal.cause, depth + 1);
+      if (depth < MAX_CAUSE_DEPTH && value.cause !== undefined) {
+        node.cause = step(value.cause, depth + 1);
       }
       return node;
     }

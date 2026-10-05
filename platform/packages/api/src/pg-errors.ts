@@ -17,10 +17,10 @@ export function hasSqlState(err: unknown, code: string): boolean {
     if (typeof cursor !== 'object' || cursor === null) {
       return false;
     }
-    if ((cursor as { code?: unknown }).code === code) {
+    if ('code' in cursor && cursor.code === code) {
       return true;
     }
-    cursor = (cursor as { cause?: unknown }).cause;
+    cursor = 'cause' in cursor ? cursor.cause : undefined;
   }
   return false;
 }
