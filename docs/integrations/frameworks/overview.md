@@ -36,7 +36,7 @@ With `voidPlugin()` added to the framework's Vite config, frameworks get most of
 - **Auth:** Void-managed auth is not supported in framework mode yet. For now, use Better Auth's official integration for your framework.
 - **Cron jobs:** scheduled handlers via the `crons/` directory.
 - **Queue consumers:** typed producers and consumers via the `queues/` directory.
-- **Revalidation and prerendering:** configure them with [`routing.revalidate`](../../guide/edge/revalidation.md) and [`routing.prerender`](../../guide/edge/prerendering.md) in `void.config.ts`. Void apps can also set these per page in component files.
+- **Revalidation and prerendering:** configure them with [`routing.revalidate`](../../guide/edge/revalidation.md) and [`routing.prerender`](../../guide/edge/prerendering.md) in `void.config.ts`. Void apps can also set these per page in companion `.server.ts` files.
 
 For framework apps, Void revalidation caches public HTML document responses with both `void deploy` and `void deploy --platform cloudflare`. Client data requests continue to use the framework's own behavior. A response with `Set-Cookie` or `Cache-Control: private`, `no-store`, or `no-cache` is never shared.
 

@@ -29,13 +29,11 @@ import { ai } from 'void/ai';
 export const POST = defineHandler(async (c) => {
   const { prompt } = await c.req.json();
 
-  const result = await ai
+  return ai
     .run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
       messages: [{ role: 'user', content: prompt }],
     })
-    .match({ ok: (result) => result, limited: (limit) => limit.response() });
-
-  return c.json(result);
+    .match({ ok: (result) => c.json(result), limited: (limit) => limit.response() });
 });
 ```
 
@@ -173,7 +171,7 @@ import { ai } from 'void/ai';
 export const POST = defineHandler(async (c) => {
   const { prompt } = await c.req.json();
 
-  const response = await ai
+  return ai
     .provider('openai')
     .fetch('/chat/completions', {
       body: {
@@ -183,9 +181,6 @@ export const POST = defineHandler(async (c) => {
       },
     })
     .match({ ok: (result) => result, limited: (limit) => limit.response() });
-
-  const result = await response.json();
-  return c.json(result);
 });
 ```
 
