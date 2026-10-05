@@ -284,12 +284,17 @@ interface SinkRegistry {
   sinks: Set<EmailSink>;
 }
 
+// Shared across module instances in the dev server's isolate.
+const inboxGlobal = globalThis as typeof globalThis & {
+  [SINK_KEY]?: SinkRegistry;
+  [BUFFER_KEY]?: DevBuffer;
+};
+
 function registry(): SinkRegistry {
-  const g = globalThis as unknown as Record<string, SinkRegistry | undefined>;
-  let r = g[SINK_KEY];
+  let r = inboxGlobal[SINK_KEY];
   if (!r) {
     r = { sinks: new Set() };
-    g[SINK_KEY] = r;
+    inboxGlobal[SINK_KEY] = r;
   }
   return r;
 }
@@ -324,11 +329,10 @@ export function hasActiveSink(): boolean {
 
 /** Get or create the shared dev-server ring buffer. */
 export function getDevBuffer(limit: number = DEFAULT_BUFFER_LIMIT): DevBuffer {
-  const g = globalThis as unknown as Record<string, DevBuffer | undefined>;
-  let b = g[BUFFER_KEY];
+  let b = inboxGlobal[BUFFER_KEY];
   if (!b) {
     b = { limit, bytes: 0, items: [] };
-    g[BUFFER_KEY] = b;
+    inboxGlobal[BUFFER_KEY] = b;
   }
   return b;
 }
