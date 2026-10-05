@@ -1,6 +1,18 @@
 import { expectTypeOf, it } from 'vite-plus/test';
 import type { ai } from '../../src/runtime/ai.ts';
 
+declare const client: typeof ai;
+const model = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+const result = client.run(model, { messages: [{ role: 'user', content: 'Hello' }] });
+expectTypeOf(result).toEqualTypeOf<Promise<AiModels[typeof model]['postProcessedOutputs']>>();
+expectTypeOf(client.stream(model, {})).toEqualTypeOf<Promise<Response>>();
+expectTypeOf(client.image(model, {})).toEqualTypeOf<Promise<Response>>();
+expectTypeOf(client.provider('openai').fetch('/chat/completions')).toEqualTypeOf<
+  Promise<Response>
+>();
+// @ts-expect-error Operations use the standard Promise API.
+result.match({ ok: (value: unknown) => value, limited: () => null });
+
 it('types provider fetch calls', () => {
   type ProviderMethod = typeof ai.provider;
   const provider = undefined as unknown as ProviderMethod;

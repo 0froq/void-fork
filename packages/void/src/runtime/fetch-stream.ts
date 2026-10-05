@@ -1,5 +1,6 @@
 import { ofetch } from 'ofetch';
 import { FetchError } from './fetch-error.ts';
+import { asUsageLimit, limitFromResponse } from './limits.ts';
 import { interpolateRouteParams } from './route-url.ts';
 export { FetchError as StreamError };
 
@@ -55,15 +56,24 @@ export async function* fetchStream<
 >(path: P, options?: StreamOptions<P, M>): AsyncGenerator<string, void, undefined> {
   const url = interpolateRouteParams(path, options?.params as Record<string, string> | undefined);
 
-  const response = await ofetch.raw(url, {
-    method: (options?.method ?? 'POST') as string,
-    body: options?.body as never,
-    query: options?.query as never,
-    headers: options?.headers,
-    signal: options?.signal,
-    baseURL: options?.baseURL,
-    responseType: 'stream',
-  });
+  const response = await ofetch
+    .raw(url, {
+      method: (options?.method ?? 'POST') as string,
+      body: options?.body as never,
+      query: options?.query as never,
+      headers: options?.headers,
+      signal: options?.signal,
+      baseURL: options?.baseURL,
+      responseType: 'stream',
+    })
+    .catch(async (error: unknown) => {
+      const response =
+        error && typeof error === 'object' && 'response' in error ? error.response : null;
+      if (response instanceof Response) {
+        throw (await limitFromResponse(response, 'ai')) ?? error;
+      }
+      throw error;
+    });
 
   const body = response._data as ReadableStream<Uint8Array> | null;
   if (!body) {
@@ -79,15 +89,19 @@ export async function* fetchStream<
       return;
     }
     let message = 'Generation was interrupted.';
+    let limit = null;
     try {
       const body = JSON.parse(data);
+      if (event === 'void:limit') {
+        limit = asUsageLimit(body);
+      }
       if (typeof body.message === 'string') {
         message = body.message;
       }
     } catch {
       /* Use the default interruption message for malformed events. */
     }
-    throw new FetchError(message);
+    throw limit ?? new FetchError(message);
   };
 
   try {

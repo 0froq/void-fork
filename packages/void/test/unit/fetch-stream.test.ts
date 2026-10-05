@@ -31,6 +31,7 @@ declare module 'void/routes' {
 
 import { ofetch } from 'ofetch';
 import { fetchStream } from '../../src/runtime/fetch-stream.ts';
+import { UsageLimit } from '../../src/runtime/limits.ts';
 
 function makeSSEStream(chunks: Array<string>): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
@@ -191,4 +192,51 @@ it('rejects a terminal interruption instead of displaying it as generated text',
   const stream = fetchStream('/api/stream');
   expect(await stream.next()).toMatchObject({ value: 'partial' });
   await expect(stream.next()).rejects.toThrow('Generation was interrupted.');
+});
+
+it.each([false, true])(
+  'preserves typed terminal limits (unterminated=%s)',
+  async (unterminated) => {
+    const limit = {
+      code: 'usage_limit',
+      resource: 'ai',
+      reason: 'monthly_quota',
+      message: 'Allowance exhausted',
+      retryAt: '2099-01-01T00:00:00.000Z',
+    };
+    vi.mocked(ofetch.raw).mockResolvedValue({
+      _data: makeSSEStream([
+        'data: {"response":"partial"}\n\n',
+        `event: void:limit\ndata: ${JSON.stringify(limit)}${unterminated ? '' : '\n\n'}`,
+      ]),
+    } as never);
+    const stream = fetchStream('/api/stream');
+    expect(await stream.next()).toMatchObject({ value: 'partial' });
+    const next = stream.next();
+    await expect(next).rejects.toBeInstanceOf(UsageLimit);
+    await expect(next).rejects.toMatchObject(limit);
+  },
+);
+
+it('preserves typed HTTP limits before streaming starts', async () => {
+  const limit = new UsageLimit({
+    resource: 'ai',
+    reason: 'rate_limit',
+    message: 'Try later',
+    retryAt: '2099-01-01T00:00:00.000Z',
+  });
+  vi.mocked(ofetch.raw).mockRejectedValue(
+    Object.assign(new Error('429'), { response: limit.response() }),
+  );
+  const next = fetchStream('/api/stream').next();
+  await expect(next).rejects.toBeInstanceOf(UsageLimit);
+  await expect(next).rejects.toMatchObject({ message: 'Try later', retryAt: limit.retryAt });
+});
+
+it('preserves ordinary HTTP errors', async () => {
+  const error = Object.assign(new Error('network failed'), {
+    response: new Response(null, { status: 503 }),
+  });
+  vi.mocked(ofetch.raw).mockRejectedValue(error);
+  await expect(fetchStream('/api/stream').next()).rejects.toBe(error);
 });

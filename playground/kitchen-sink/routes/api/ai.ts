@@ -1,5 +1,6 @@
 import { defineHandler } from 'void';
 import { ai } from 'void/ai';
+import { UsageLimit } from 'void/limits';
 
 function textInputForModel(model: string, prompt: string) {
   if (model.startsWith('google/')) {
@@ -31,19 +32,14 @@ export const POST = defineHandler(async (c) => {
   try {
     const inputs = textInputForModel(model, prompt);
     if (model.startsWith('google/')) {
-      return ai.run(model, inputs).match({
-        ok: (result) => c.json(result),
-        limited: (limit) =>
-          limit.response({
-            message: 'AI is temporarily unavailable. Your prompt has been kept.',
-          }),
-      });
+      return c.json(await ai.run(model, inputs));
     }
 
-    return ai
-      .stream(model, inputs)
-      .match({ ok: (response) => response, limited: (limit) => limit.response() });
+    return await ai.stream(model, inputs);
   } catch (err) {
+    if (err instanceof UsageLimit) {
+      return err.response({ message: 'AI is temporarily unavailable. Your prompt has been kept.' });
+    }
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ error: message }, 400);
   }

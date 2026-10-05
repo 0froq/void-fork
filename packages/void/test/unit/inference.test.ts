@@ -254,7 +254,7 @@ describe('inferBindingsFromSource', () => {
 
   it("detects import { ai } from 'void/ai'", () => {
     const code =
-      '\n      import { ai } from "void/ai";\n      export const POST = defineHandler(async () => {\n        const result = await ai.run("@cf/meta/llama-3.1-8b-instruct", {\n          messages: [{ role: "user", content: "Hello" }],\n        }).match({ ok: result => result, limited: limit => limit.response() });\n        return result;\n      })\n    ';
+      '\n      import { ai } from "void/ai";\n      export const POST = defineHandler(async () => {\n        const result = await ai.run("@cf/meta/llama-3.1-8b-instruct", {\n          messages: [{ role: "user", content: "Hello" }],\n        });\n        return result;\n      })\n    ';
     const result = inferBindingsFromSource(code, 'test.ts');
     expect(result.needsAI).toBe(true);
     expect(result.needsD1).toBe(false);

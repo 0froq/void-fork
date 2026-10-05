@@ -3,7 +3,6 @@ import { join } from 'node:path';
 import { Hono } from 'hono';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { CloudEnv } from 'void/handler';
-import { limitOperation } from '../../../../../packages/void/src/runtime/limits.ts';
 import { prepareKitchenSinkPlatformFixture } from '../../../../scripts/kitchen-sink-platform-fixture.ts';
 
 const mocks = vi.hoisted(() => ({
@@ -127,7 +126,7 @@ describe('acceptance auth with a configured secret', () => {
 
   it('uses a fixed small AI prompt rather than accepting arbitrary model inputs', async () => {
     mocks.env.SECRET_KEY = 'configured-secret';
-    mocks.aiRun.mockImplementation(() => limitOperation(async () => ({ response: 'Hello' })));
+    mocks.aiRun.mockResolvedValue({ response: 'Hello' });
     const response = await app.request('/runtime', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-void-e2e-token': 'configured-secret' },

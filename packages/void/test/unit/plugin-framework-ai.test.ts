@@ -28,7 +28,7 @@ function project(
   );
   writeFileSync(
     join(root, 'src/routes/+page.server.ts'),
-    "import { ai } from 'void/ai'; export const load = async () => ai.run('@cf/meta/llama', {}).match({ ok: result => result, limited: limit => limit.response() });",
+    "import { ai } from 'void/ai'; export const load = async () => ai.run('@cf/meta/llama', {});",
   );
   writeFileSync(
     join(root, 'wrangler.jsonc'),

@@ -6,13 +6,7 @@ import {
   type AiProviderOptions,
 } from './ai-types.ts';
 import { getRawRuntimeEnv, type RuntimeEnv } from './env-raw.ts';
-import {
-  readUsageLimit,
-  UsageLimit,
-  limitOperation,
-  limitFromResponse,
-  type LimitOperation,
-} from './limits.ts';
+import { UsageLimit, limitFromResponse } from './limits.ts';
 
 const VOID_FILE_MARKER = '__voidFile';
 
@@ -687,40 +681,38 @@ function backend(): AiBackend {
  * in a `Response` with SSE headers — ready to return from a route handler.
  */
 export type VoidAi = {
-  models(...args: Parameters<Ai['models']>): LimitOperation<Awaited<ReturnType<Ai['models']>>>;
+  models(...args: Parameters<Ai['models']>): Promise<Awaited<ReturnType<Ai['models']>>>;
   toMarkdown(
     files: Array<Parameters<Ai['toMarkdown']>[0]>,
     options?: Parameters<Ai['toMarkdown']>[1],
-  ): LimitOperation<Array<Awaited<ReturnType<Ai['toMarkdown']>>>>;
-  toMarkdown(
-    ...args: Parameters<Ai['toMarkdown']>
-  ): LimitOperation<Awaited<ReturnType<Ai['toMarkdown']>>>;
+  ): Promise<Array<Awaited<ReturnType<Ai['toMarkdown']>>>>;
+  toMarkdown(...args: Parameters<Ai['toMarkdown']>): Promise<Awaited<ReturnType<Ai['toMarkdown']>>>;
   /** Workers AI inference (existing) */
   run<Name extends keyof AiModels>(
     model: Name,
     inputs: AiModels[Name]['inputs'],
     options?: AiOptions,
-  ): LimitOperation<AiModels[Name]['postProcessedOutputs']>;
+  ): Promise<AiModels[Name]['postProcessedOutputs']>;
 
   /** Cloudflare AI Gateway model inference. Accepts Cloudflare model IDs unchanged. */
-  run(model: string, inputs: unknown, options?: AiOptions): LimitOperation<unknown>;
+  run(model: string, inputs: unknown, options?: AiOptions): Promise<unknown>;
 
   /** Image generation. Returns the proxy response so callers can return or parse it. */
   image<Name extends keyof AiModels>(
     model: Name,
     inputs: AiModels[Name]['inputs'],
     options?: AiOptions,
-  ): LimitOperation<Response>;
+  ): Promise<Response>;
 
   /** Cloudflare AI Gateway model inference returned as a Response. */
-  image(model: string, inputs: unknown, options?: AiOptions): LimitOperation<Response>;
+  image(model: string, inputs: unknown, options?: AiOptions): Promise<Response>;
 
   /** Provider-native AI Gateway requests using a project secret for the provider API key. */
   provider(
     provider: AiProvider,
     options?: AiProviderOptions,
   ): {
-    fetch(path: string, init?: AiProviderFetchInit): LimitOperation<Response>;
+    fetch(path: string, init?: AiProviderFetchInit): Promise<Response>;
   };
 
   /** Stream Workers AI response as SSE */
@@ -728,44 +720,37 @@ export type VoidAi = {
     model: Name,
     inputs: Omit<AiModels[Name]['inputs'], 'stream'>,
     options?: AiOptions,
-  ): LimitOperation<Response>;
+  ): Promise<Response>;
 
   /** Stream any Cloudflare AI Gateway model response as SSE */
-  stream(
-    model: string,
-    inputs: Record<string, unknown>,
-    options?: AiOptions,
-  ): LimitOperation<Response>;
+  stream(model: string, inputs: Record<string, unknown>, options?: AiOptions): Promise<Response>;
 };
 
 /** Normalize provider 429 responses and binding quota failures before they reach callers. */
-function aiOperation<T>(execute: () => Promise<T>, rawStream = false): LimitOperation<T> {
-  return limitOperation(
-    async () => {
-      const value = await execute();
-      if (value instanceof Response) {
-        const limit = await limitFromResponse(value, 'ai');
-        if (limit) {
-          throw limit;
-        }
+async function aiOperation<T>(execute: () => Promise<T>, rawStream = false): Promise<T> {
+  let value: T;
+  try {
+    value = await execute();
+    if (value instanceof Response) {
+      const limit = await limitFromResponse(value, 'ai');
+      if (limit) {
+        throw limit;
       }
-      return value;
-    },
-    classifyAiLimit,
-    (value, limited) => {
-      if (
-        value instanceof Response &&
-        value.body &&
-        value.headers.get('content-type')?.includes('text/event-stream')
-      ) {
-        return new Response(streamResponse(value.body, limited).body, value) as T;
-      }
-      if (rawStream && value instanceof ReadableStream) {
-        return streamResponse(value, limited).body as T;
-      }
-      return value;
-    },
-  );
+    }
+  } catch (error) {
+    throw classifyAiLimit(error) ?? error;
+  }
+  if (
+    value instanceof Response &&
+    value.body &&
+    value.headers.get('content-type')?.includes('text/event-stream')
+  ) {
+    return new Response(streamResponse(value.body).body, value) as T;
+  }
+  if (rawStream && value instanceof ReadableStream) {
+    return streamResponse(value).body as T;
+  }
+  return value;
 }
 
 function classifyAiLimit(error: unknown): UsageLimit | null {
@@ -787,7 +772,7 @@ function classifyAiLimit(error: unknown): UsageLimit | null {
 }
 
 /** Streaming failures after headers are sent end with an explicit terminal SSE event. */
-function streamResponse(body: ReadableStream, limited: (limit: UsageLimit) => unknown): Response {
+function streamResponse(body: ReadableStream): Response {
   const reader = body.getReader();
   return new Response(
     new ReadableStream({
@@ -804,14 +789,6 @@ function streamResponse(body: ReadableStream, limited: (limit: UsageLimit) => un
           let data: unknown = { message: 'Generation was interrupted. Please try again.' };
           if (limit) {
             data = await limit.response().json();
-            try {
-              const fallback = await limited(limit);
-              if (fallback instanceof Response) {
-                data = readUsageLimit(await fallback.json().catch(() => null)) ?? data;
-              }
-            } catch {
-              /* Preserve a terminal event even if application fallback code fails. */
-            }
           }
           controller.enqueue(
             new TextEncoder().encode(

@@ -9,7 +9,7 @@ operation.match({ limited: (limit) => limit.response() });
 expectTypeOf(operation.match({ ok: (value) => value.length, limited: () => null })).toEqualTypeOf<
   Promise<number | null>
 >();
-expectTypeOf<ReturnType<typeof ai.stream>>().toEqualTypeOf<LimitOperation<Response>>();
+expectTypeOf<ReturnType<typeof ai.stream>>().toEqualTypeOf<Promise<Response>>();
 // @ts-expect-error The old Promise API is no longer available.
 operation.then((value) => value);
 import type { SandboxClient } from '../../src/runtime/sandbox.ts';
