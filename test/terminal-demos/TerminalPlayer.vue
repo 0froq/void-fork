@@ -21,6 +21,26 @@ const viewport = ref<HTMLElement | null>(null);
 // A complete, readable poster is available before hydration and with reduced motion.
 const elapsed = ref(props.demo.duration);
 const lines = computed(() => terminalFrame(props.demo, elapsed.value));
+// Draw the box edges across the full terminal cell height. Font glyphs leave
+// gaps at our readable line spacing; the transcript keeps the original glyphs.
+const renderedLines = computed(() =>
+  lines.value.map((line) => {
+    const text = line.segments.map((segment) => segment.text).join('');
+    const box = text.startsWith('╭')
+      ? 'top'
+      : text.startsWith('│')
+        ? 'row'
+        : text.startsWith('╰')
+          ? 'bottom'
+          : undefined;
+    return {
+      ...line,
+      box,
+      columns: Array.from(text).length,
+      segments: box ? line.segments.slice(1, -1) : line.segments,
+    };
+  }),
+);
 const spinnerFrames = ['◒', '◐', '◓', '◑'];
 const spinnerFrame = computed(() => spinnerFrames[Math.floor(elapsed.value / 80) % 4]);
 let clock = new PlaybackClock(props.demo.duration);
@@ -195,17 +215,20 @@ onBeforeUnmount(() => {
     <div ref="viewport" class="void-terminal-viewport" aria-hidden="true">
       <div class="void-terminal-output">
         <div
-          v-for="line in lines"
+          v-for="line in renderedLines"
           :key="line.id"
           class="void-terminal-line"
-          :class="{ 'void-terminal-box-line': /^[╭│╰]/.test(line.segments[0]?.text ?? '') }"
+          :class="line.box && ['void-terminal-box-line', 'void-terminal-box-' + line.box]"
+          :style="line.box ? { '--box-columns': line.columns } : undefined"
         >
           <span v-if="line.spinner" class="tone-blue">{{ spinnerFrame + ' ' }}</span
-          ><span
-            v-for="(segment, index) in line.segments"
-            :key="index"
-            :class="['tone-' + (segment.tone || 'base'), { 'terminal-bold': segment.bold }]"
-            >{{ segment.text }}</span
+          ><span class="void-terminal-content"
+            ><span
+              v-for="(segment, index) in line.segments"
+              :key="index"
+              :class="['tone-' + (segment.tone || 'base'), { 'terminal-bold': segment.bold }]"
+              >{{ segment.text }}</span
+            ></span
           ><span v-if="line.caret" class="void-terminal-caret" />
         </div>
       </div>
@@ -290,7 +313,35 @@ onBeforeUnmount(() => {
   letter-spacing: 0;
 }
 .void-terminal-box-line {
+  position: relative;
+  width: calc(var(--box-columns) * 1ch);
   white-space: pre;
+}
+.void-terminal-box-line::before {
+  content: '';
+  position: absolute;
+  inset: 0 0.5ch;
+  border-left: 1px solid var(--terminal-muted);
+  border-right: 1px solid var(--terminal-muted);
+}
+.void-terminal-box-top::before {
+  top: 50%;
+  border-top: 1px solid var(--terminal-muted);
+  border-radius: 4px 4px 0 0;
+}
+.void-terminal-box-bottom::before {
+  bottom: 50%;
+  border-bottom: 1px solid var(--terminal-muted);
+  border-radius: 0 0 4px 4px;
+}
+.void-terminal-box-line .void-terminal-content {
+  position: relative;
+  margin-left: 3ch;
+}
+.void-terminal-box-top .void-terminal-content {
+  margin-left: 2.5ch;
+  padding: 0 0.5ch;
+  background: #15171d;
 }
 .tone-base {
   color: var(--terminal-base);
