@@ -124,7 +124,7 @@ test('command output adds destination context without echoing the typed command'
     if (demo.id === 'deploy') {
       assert.equal(
         output.find((line) => line.includes('→')),
-        'blog → Orange Cloud',
+        'blog → Cloudflare',
       );
     }
   }
