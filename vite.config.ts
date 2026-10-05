@@ -124,7 +124,7 @@ export default defineConfig({
         specifier: 'eslint-plugin-react-hooks',
       },
     ],
-    plugins: ['typescript', 'import', 'react', 'unicorn', 'vitest', 'node', 'jsdoc'],
+    plugins: ['typescript', 'import', 'react', 'unicorn', 'vitest', 'node', 'jsdoc', 'oxc'],
     ignorePatterns: [
       'packages/prompts/index.mjs',
       'packages/prompts/index.d.mts',
@@ -359,6 +359,7 @@ export default defineConfig({
         },
       ],
       'no-with': 'error',
+      'oxc/no-accumulating-spread': 'error',
       'prefer-const': 'error',
       'react/exhaustive-deps': 'error',
       'react/jsx-key': 'error',
