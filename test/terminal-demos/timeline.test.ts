@@ -77,3 +77,16 @@ test('all demo timelines finish, stay ordered, and render complete aligned boxes
     }
   }
 });
+
+test('status and prompt symbols always have exactly one following space', () => {
+  for (const demo of terminalDemos) {
+    for (const event of demo.events) {
+      if (event.type === 'write') {
+        const text = event.line.segments.map((segment) => segment.text).join('');
+        if (/^\s*[◇●◆✓›]/u.test(text)) {
+          assert.match(text, /^\s*[◇●◆✓›] [^\s]/u, `${demo.id}: ${text}`);
+        }
+      }
+    }
+  }
+});

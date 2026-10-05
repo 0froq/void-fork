@@ -74,7 +74,7 @@ const deploy: TerminalDemo = {
     blank(1100, 'gap'),
     write(1100, 'intro', s('void deploy', 'blue')),
     blank(1400, 'intro-gap'),
-    write(1400, 'build', s('◇  ', 'muted'), s('Building (vp build)...')),
+    write(1400, 'build', s('◇ ', 'muted'), s('Building (vp build)...')),
     write(
       1750,
       'vite',
@@ -89,7 +89,7 @@ const deploy: TerminalDemo = {
       s('  38.42 kB', 'muted'),
     ),
     write(2800, 'built', s('✓ built in 428ms', 'green')),
-    write(3150, 'migrations', s('●  ', 'blue'), s('Found 1 migration')),
+    write(3150, 'migrations', s('● ', 'blue'), s('Found 1 migration')),
     spinner(3550, 'check', 'Checking for changes'),
     done(4400, 'check', 'Checked for changes'),
     spinner(4850, 'deploy', 'Packaging'),
@@ -186,10 +186,10 @@ const install: TerminalDemo = {
     write(
       19700,
       'installed',
-      s('◆  ', 'muted'),
+      s('◆ ', 'muted'),
       s('Kiwi Cloud is installed at https://api.kiwi-company.example/admin.'),
     ),
-    write(20100, 'url', s('●  ', 'blue'), s('API URL: https://api.kiwi-company.example')),
+    write(20100, 'url', s('● ', 'blue'), s('API URL: https://api.kiwi-company.example')),
     blank(20500, 'outro-gap'),
     write(
       20500,
@@ -241,7 +241,7 @@ const recover: TerminalDemo = {
     write(
       10900,
       'rolled-back',
-      s('◆  ', 'muted'),
+      s('◆ ', 'muted'),
       s('Rolled back to '),
       s('dpl_7c42a1', 'base', true),
     ),

@@ -1,14 +1,14 @@
 {
   "package": "@voidzero-dev/vite-plus-prompts",
   "repository": "https://github.com/voidzero-dev/vite-plus",
-  "commit": "c7c8b7f7bbb8f3914f766343ed6a64a575a5bce5",
+  "commit": "96317a040ab4d19729ccc3d589094f6697f3d4d2",
   "pullRequest": "https://github.com/voidzero-dev/vite-plus/pull/2870",
   "directory": "packages/prompts",
   "node": "22.18.0",
   "builder": "tsdown@0.23.0",
-  "command": "node node_modules/tsdown/dist/run.mjs --cwd packages/prompts",
+  "command": "node packages/prompts/node_modules/tsdown/dist/run.mjs --cwd packages/prompts",
   "sha256": {
-    "index.mjs": "b4eeeb50838c7863559f9476318e561ab7c06a10b856167acab66307621f322e",
+    "index.mjs": "d830303836f9026589cc52347ba29f4aa0592b291b58310e106e8ed378cb61da",
     "index.d.mts": "f4f7298d1318c69248e4b430f506b097b5cd528e072757c1a27edca7231d8c90"
   }
 }
