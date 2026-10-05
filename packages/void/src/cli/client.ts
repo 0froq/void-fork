@@ -45,7 +45,7 @@ export function readCliVersion(): string | null {
 const VOID_CLI_VERSION = readCliVersion();
 
 /** The oldest Void platform release this CLI supports. */
-export const MIN_PLATFORM_VERSION = '0.23.0';
+export const MIN_PLATFORM_VERSION = '0.25.0';
 
 const RELEASE_VERSION = /^(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
@@ -595,10 +595,9 @@ const DEPLOY_OBSERVATION_DEADLINE_MS = 30 * 60_000;
 const DEPLOY_OBSERVATION_BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000];
 const DEPLOY_EVENT_MAX_BYTES = 1024 * 1024;
 
-// Heartbeats carry no `seq`. Heartbeat `status` and the observation page
-// `heartbeat` come from commit 21d4ec46, which 0.23.0 does not ship; keep them
-// optional until MIN_PLATFORM_VERSION includes it. `recoveryAt` is optional:
-// it is sent only while an execution lease exists.
+// Heartbeats carry no `seq`. Pipeline streams can omit `status`; observation
+// pages omit `heartbeat` when paging through a completed operation's events.
+// `recoveryAt` is sent only while an execution lease exists.
 type SequencedDeployEvent = DeployEvent & { seq?: number };
 class DeploymentProtocolError extends Error {}
 class DeploymentObservationTimeoutError extends Error {
