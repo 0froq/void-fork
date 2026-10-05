@@ -91,7 +91,7 @@ Runtime helpers include:
   - TanStack Start
   - React Router
   - vinext App Router and Pages Router
-  - SvelteKit
+  - SvelteKit 3 and 2.62+
   - Nuxt
   - Analog
   - Astro

@@ -4,6 +4,8 @@ packages:
   - platform
   - platform/packages/*
   - playground/*
+  # Dependencies for the Kit 2 compatibility test; app source comes from the Kit 3 playground.
+  - test/fixtures/sveltekit-v2
 
 catalogMode: strict
 

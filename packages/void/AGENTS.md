@@ -177,6 +177,8 @@ Agent instructions use versioned markers (`<!--injected-by-void-v0.0.1-->` / `<!
 
 ## Tests
 
+Keep SvelteKit 2.62+ and 3 in the same integration. Dev hook injection supports both generated hook locations and resolves the official adapter's bindings. Kit 3 uses `$app/tsconfig` with `.void/tsconfig.json`; the shared tsconfig hook emits absolute paths for either generated config location. `test/fixtures/sveltekit-v2` supplies only legacy test dependencies; both integration cases copy the main SvelteKit playground, and their generated `$app` configs must stay isolated.
+
 Tests live in `test/unit` and `test/integration`. Run the affected files
 during development, then follow [TESTING.md](../../TESTING.md) for final
 workspace and packed-consumer verification. Keep regression cases against

@@ -52,11 +52,13 @@ export function injectSvelteKitHooks(
   ms.appendLeft(
     returns[0].start,
     `const __origHandle = handle ?? (({ event, resolve }) => resolve(event));\n` +
-      `  handle = ({ event, resolve }) => withRuntimeEnv(event.platform?.env, async () => {\n` +
-      `    const __triggerResp = await handleDevTrigger(event.request, event.platform?.env, undefined);\n` +
+      `  handle = async ({ event, resolve }) => {\n` +
+      `    const __voidEnv = event.platform?.env ?? (await import('cloudflare:workers')).env;\n` +
+      `    return withRuntimeEnv(__voidEnv, async () => {\n` +
+      `    const __triggerResp = await handleDevTrigger(event.request, __voidEnv, undefined);\n` +
       `    if (__triggerResp) return __triggerResp;\n` +
       `    return __origHandle({ event, resolve });\n` +
-      `  });\n  `,
+      `    });\n  };\n  `,
   );
   return { code: ms.toString(), map: ms.generateMap({ hires: true }) };
 }

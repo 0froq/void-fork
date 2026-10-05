@@ -38,7 +38,7 @@ export const integrationTimings: Readonly<Record<string, number>> = {
   'packages/void/test/integration/spa-middleware-auth.test.ts': 26264,
   'packages/void/test/integration/ssr-playground.test.ts': 13008,
   'packages/void/test/integration/static-pages.test.ts': 7034,
-  'packages/void/test/integration/sveltekit.test.ts': 16000,
+  'packages/void/test/integration/sveltekit.test.ts': 32000,
   'packages/void/test/integration/tanstack-start.test.ts': 12000,
   'packages/void/test/integration/vinext-app.test.ts': 12000,
   'packages/void/test/integration/vinext-pages.test.ts': 9000,

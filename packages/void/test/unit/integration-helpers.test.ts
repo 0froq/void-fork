@@ -115,6 +115,8 @@ it('resolves installed dependency links absolutely at the isolated fixture depth
   const source = join(workspace, 'playground', 'app');
   const modules = join(source, 'node_modules');
   mkdirSync(join(modules, '@fixture'), { recursive: true });
+  mkdirSync(join(modules, '$app'), { recursive: true });
+  writeFileSync(join(modules, '$app/tsconfig.json'), '{"files":["original.d.ts"]}');
   writeFileSync(join(source, 'package.json'), JSON.stringify({ name: 'dependency-app' }));
   writeFileSync(
     join(source, 'entry.mjs'),
@@ -137,6 +139,7 @@ it('resolves installed dependency links absolutely at the isolated fixture depth
   }
   const fixture = createIsolatedPlayground(workspace, 'playground/app');
   try {
+    expect(existsSync(join(fixture.root, 'node_modules/$app'))).toBe(false);
     for (const name of ['plain', '@fixture/scoped']) {
       const link = join(fixture.root, 'node_modules', name);
       expect(isAbsolute(readlinkSync(link))).toBe(true);

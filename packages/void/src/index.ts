@@ -1187,7 +1187,8 @@ export function voidPlugin(options?: {
         : undefined;
 
     // SvelteKit hooks injection: transform get_hooks() to wrap `handle` with
-    // withRuntimeEnv(event.platform.env, ...). This stores the env in
+    // withRuntimeEnv(adapter env, ...). Kit 2 passes event.platform.env;
+    // Kit 3 exposes cloudflare:workers. This stores the env in
     // AsyncLocalStorage so void/db resolves it via envContext.getStore(), and
     // intercepts /__void/scheduled and /__void/queue so cron and queue
     // handlers run with the framework adapter's real bindings.
@@ -1199,7 +1200,10 @@ export function voidPlugin(options?: {
         if (detected.class !== 'b') {
           return;
         }
-        if (!id.includes('.svelte-kit/generated/server/internal')) {
+        if (
+          !id.includes('.svelte-kit/generated/server/internal') &&
+          !id.includes('.svelte-kit/generated/dev/server.js')
+        ) {
           return;
         }
         return injectSvelteKitHooks(code, id, frameworkTriggersDispatchPath(root));

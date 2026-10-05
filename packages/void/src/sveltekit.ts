@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'pathslash';
+import { isAbsolute, join, resolve } from 'pathslash';
 
 type Tsconfig = Record<string, unknown>;
 type TsconfigHook = (config: Tsconfig) => Tsconfig | void;
@@ -7,7 +7,7 @@ type TsconfigHook = (config: Tsconfig) => Tsconfig | void;
 export type VoidSvelteKitTsconfigOptions = {
   /** Project root. Defaults to process.cwd(). */
   root?: string;
-  /** SvelteKit output directory. Defaults to ".svelte-kit". */
+  /** @deprecated Generated paths no longer depend on SvelteKit's output directory. */
   outDir?: string;
 };
 
@@ -20,7 +20,7 @@ export function mergeVoidSvelteKitTsconfig(
   config: Tsconfig,
   options: VoidSvelteKitTsconfigOptions = {},
 ): Tsconfig {
-  const root = options.root ?? process.cwd();
+  const root = resolve(options.root ?? process.cwd());
   const voidDir = join(root, '.void');
   const voidTsconfigPath = join(voidDir, 'tsconfig.json');
   if (!existsSync(voidTsconfigPath)) {
@@ -28,7 +28,6 @@ export function mergeVoidSvelteKitTsconfig(
   }
 
   const voidConfig = JSON.parse(readFileSync(voidTsconfigPath, 'utf-8')) as Tsconfig;
-  const outputDir = resolve(root, options.outDir ?? '.svelte-kit');
 
   const voidFiles = Array.isArray(voidConfig.files)
     ? voidConfig.files.filter((entry): entry is string => typeof entry === 'string')
@@ -39,7 +38,7 @@ export function mergeVoidSvelteKitTsconfig(
       : [];
     config.files = uniqueStrings([
       ...files,
-      ...voidFiles.map((entry) => relativeFrom(outputDir, resolveTsconfigEntry(voidDir, entry))),
+      ...voidFiles.map((entry) => resolveTsconfigEntry(voidDir, entry)),
     ]);
   }
 
@@ -48,9 +47,9 @@ export function mergeVoidSvelteKitTsconfig(
     const compilerOptions = ensureObject(config, 'compilerOptions');
     const paths = ensureObject(compilerOptions, 'paths') as Record<string, Array<string>>;
     for (const [key, values] of Object.entries(voidPaths)) {
-      paths[key] = values.map((entry) =>
-        relativeFrom(outputDir, resolveTsconfigEntry(voidDir, entry)),
-      );
+      // Kit 2 writes this config under .svelte-kit; Kit 3 writes it under
+      // node_modules/$app. Absolute paths work from either generated location.
+      paths[key] = values.map((entry) => resolveTsconfigEntry(voidDir, entry));
     }
   }
 
@@ -102,11 +101,6 @@ function readPathMap(value: Record<string, unknown> | null): Record<string, Arra
 
 function resolveTsconfigEntry(baseDir: string, entry: string): string {
   return isAbsolute(entry) ? entry : resolve(baseDir, entry);
-}
-
-function relativeFrom(fromDir: string, target: string): string {
-  const value = relative(fromDir, target);
-  return value.startsWith('.') ? value : `./${value}`;
 }
 
 function uniqueStrings(values: Array<string>): Array<string> {

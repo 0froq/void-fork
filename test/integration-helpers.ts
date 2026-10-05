@@ -100,6 +100,10 @@ export function createIsolatedPlayground(
     // Linking the whole directory leaves pnpm's relative package links behind
     // a Windows junction at a different depth. Pin each package's real target.
     for (const entry of readdirSync(sourceNodeModules, { withFileTypes: true })) {
+      // Kit 3 writes project-specific generated configs here, not package dependencies.
+      if (entry.name === '$app') {
+        continue;
+      }
       if (!entry.isDirectory() && !entry.isSymbolicLink()) {
         continue;
       }

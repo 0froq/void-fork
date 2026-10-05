@@ -40,7 +40,7 @@ With `voidPlugin()` added to the framework's Vite config, frameworks get most of
 
 For framework apps, Void revalidation caches public HTML document responses with both `void deploy` and `void deploy --platform cloudflare`. Client data requests continue to use the framework's own behavior. A response with `Set-Cookie` or `Cache-Control: private`, `no-store`, or `no-cache` is never shared.
 
-Frameworks can also access bindings directly via the framework's own mechanisms (e.g. `platform.env` in SvelteKit, `event.context.cloudflare.env` in Nuxt, `env` from `cloudflare:workers` in Analog, `Astro.locals.runtime.env` in Astro).
+Frameworks can also access bindings directly via the framework's own mechanisms (e.g. `env` from `cloudflare:workers` in SvelteKit 3 and Analog, `platform.env` in SvelteKit 2, `event.context.cloudflare.env` in Nuxt, `Astro.locals.runtime.env` in Astro).
 
 ## Configuration
 
