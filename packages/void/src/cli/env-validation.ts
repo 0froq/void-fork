@@ -27,12 +27,10 @@ import {
 import { readGeneratedWranglerConfigFile } from './generated-wrangler-config.ts';
 import { resolveCloudflareOperationArgv } from './preset.ts';
 
-type EnvPublicModule = {
-  _getRegisteredSchema(): Record<string, StandardSchemaV1<unknown, unknown>> | null;
-  _hasRegisteredSchema(): boolean;
-  _getSchemaDefaults(): Record<string, string>;
-  validateAllEnv(values: Record<string, unknown>): Promise<EnvValidationReport>;
-};
+type EnvPublicModule = Pick<
+  typeof import('../runtime/env-public.ts'),
+  '_getRegisteredSchema' | '_hasRegisteredSchema' | '_getSchemaDefaults' | 'validateAllEnv'
+>;
 
 /**
  * Validate plaintext while it is still available to `void secret put/sync`.
@@ -73,7 +71,7 @@ export async function validateSecretValues(
 /** Load the registered schema by importing the user's env.ts. */
 async function loadSchema(envFile: string): Promise<EnvPublicModule | null> {
   await loadUserEnvFile(envFile);
-  const mod = (await import('../runtime/env-public.ts')) as unknown as EnvPublicModule;
+  const mod = await import('../runtime/env-public.ts');
   if (!mod._hasRegisteredSchema()) {
     return null;
   }

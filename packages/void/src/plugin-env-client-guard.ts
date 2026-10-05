@@ -12,10 +12,10 @@ import {
   type AstProgram,
 } from './shared/ast.ts';
 
-type EnvPublicModule = {
-  _getRegisteredSchema(): Record<string, unknown> | null;
-  _hasRegisteredSchema(): boolean;
-};
+type EnvPublicModule = Pick<
+  typeof import('./runtime/env-public.ts'),
+  '_getRegisteredSchema' | '_hasRegisteredSchema'
+>;
 
 let cachedModule: EnvPublicModule | null = null;
 
@@ -23,7 +23,7 @@ async function loadEnvPublic(): Promise<EnvPublicModule> {
   if (cachedModule) {
     return cachedModule;
   }
-  const mod = (await import('./runtime/env-public.ts')) as unknown as EnvPublicModule;
+  const mod = await import('./runtime/env-public.ts');
   cachedModule = mod;
   return mod;
 }

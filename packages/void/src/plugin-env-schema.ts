@@ -7,19 +7,10 @@ import { loadUserEnvFile } from './host/load-user-env.ts';
 import { voidLog, voidWarn } from './log.ts';
 import { CLIENT_ENV_PREFIX, findLegacyEnvFiles, loadLocalEnv } from './shared/env.ts';
 
-type RegisteredSchemaModule = {
-  _getRegisteredSchema(): Record<
-    string,
-    { '~standard': { validate: (v: unknown) => unknown } }
-  > | null;
-  _hasRegisteredSchema(): boolean;
-  _getSchemaDefaults(): Record<string, string>;
-  validateAllEnv(values: Record<string, unknown>): Promise<{
-    valid: boolean;
-    missing: Array<string>;
-    invalid: Array<{ key: string; messages: Array<string> }>;
-  }>;
-};
+type RegisteredSchemaModule = Pick<
+  typeof import('./runtime/env-public.ts'),
+  '_getRegisteredSchema' | '_hasRegisteredSchema' | '_getSchemaDefaults' | 'validateAllEnv'
+>;
 
 export type EnvSchemaPluginOptions = {
   /**
@@ -42,7 +33,7 @@ async function loadSchemaModule(): Promise<RegisteredSchemaModule> {
   if (cachedSchemaModule) {
     return cachedSchemaModule;
   }
-  const mod = (await import('./runtime/env-public.ts')) as unknown as RegisteredSchemaModule;
+  const mod = await import('./runtime/env-public.ts');
   cachedSchemaModule = mod;
   return mod;
 }
@@ -86,7 +77,7 @@ export function envSchemaPlugin(root: string, options: EnvSchemaPluginOptions = 
     for (const key of serverKeys) {
       const result = schema[key]!['~standard'].validate(undefined);
       const resolved = result instanceof Promise ? await result : result;
-      if (resolved && typeof resolved === 'object' && 'issues' in resolved && resolved.issues) {
+      if (resolved.issues) {
         requiredServerKeys.push(key);
       }
     }
