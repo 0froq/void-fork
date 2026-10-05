@@ -26,6 +26,7 @@ const noopSpinner = {
   start: vi.fn(),
   stop: vi.fn(),
   message: vi.fn(),
+  clear: vi.fn(),
 };
 vi.mock('@voidzero-dev/vite-plus-prompts', async () => {
   const actual = await vi.importActual<typeof import('@voidzero-dev/vite-plus-prompts')>(

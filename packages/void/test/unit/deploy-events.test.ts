@@ -57,6 +57,7 @@ function createMockSpinner() {
     start: [] as Array<unknown>,
     stop: [] as Array<unknown>,
     message: [] as Array<unknown>,
+    clear: [] as Array<unknown>,
   };
   return {
     spinner: {
@@ -68,6 +69,9 @@ function createMockSpinner() {
       },
       message: (m?: unknown) => {
         calls.message.push(m);
+      },
+      clear: () => {
+        calls.clear.push(true);
       },
     } as unknown as SpinnerResult,
     calls,
@@ -133,7 +137,7 @@ describe('applyDeployEvent', () => {
     expect(calls.message[0]).toBe('Waiting for worker to become reachable...');
   });
 
-  it('returns {kind:"done"} for done event and stops the spinner', () => {
+  it('returns {kind:"done"} and clears the spinner before the summary', () => {
     const { spinner, calls } = createMockSpinner();
     const done: Extract<DeployEvent, { event: 'done' }> = {
       event: 'done',
@@ -145,10 +149,11 @@ describe('applyDeployEvent', () => {
     };
     const result = applyDeployEvent(done, spinner);
     expect(result).toEqual({ kind: 'done', event: done });
-    expect(calls.stop[0]).toBe('Deployed!');
+    expect(calls.clear).toHaveLength(1);
+    expect(calls.stop).toHaveLength(0);
   });
 
-  it('keeps the "Deployed!" message when published is true', () => {
+  it('clears the spinner without a duplicate success message when published is true', () => {
     const { spinner, calls } = createMockSpinner();
     const done: DoneEvent = {
       event: 'done',
@@ -161,7 +166,8 @@ describe('applyDeployEvent', () => {
     };
     const result = applyDeployEvent(done, spinner);
     expect(result).toEqual({ kind: 'done', event: done });
-    expect(calls.stop[0]).toBe('Deployed!');
+    expect(calls.clear).toHaveLength(1);
+    expect(calls.stop).toHaveLength(0);
   });
 
   it('degrades the done message when published is false but still resolves as a committed done', () => {

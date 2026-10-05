@@ -2413,7 +2413,11 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(output).toMatch(/[╭+].*https:\/\/preview\.example\.workers\.dev.*[╮+]/);
     expect(output).toContain('Worker: switchable-app');
     expect(output).toMatch(/[│|]\s+Static SPA\s+[│|]/);
-    expect(output).toContain('Done!');
+    expect(output).toContain('✓ Successfully deployed!');
+    expect(output).not.toContain('Done!');
+    expect(output).not.toContain('Deployed!');
+    expect(output.indexOf('✓ Successfully deployed!')).toBeGreaterThan(output.indexOf('╰'));
+    expect(output.match(/Successfully deployed!/g)).toHaveLength(1);
   });
 
   it('passes a complete Access service-token pair to the readiness probe', async () => {
@@ -3230,7 +3234,11 @@ describe('runCloudflareDeploy — resource provisioning', () => {
     expect(output).toMatch(/[╭+].*https:\/\/preview\.example\.workers\.dev.*[╮+]/);
     expect(output).toContain('Worker: myapp');
     expect(output).not.toContain('D1 migrations up to date');
-    expect(output).toContain('Done!');
+    expect(output).toContain('✓ Successfully deployed!');
+    expect(output).not.toContain('Done!');
+    expect(output).not.toContain('Deployed!');
+    expect(output.indexOf('✓ Successfully deployed!')).toBeGreaterThan(output.indexOf('╰'));
+    expect(output.match(/Successfully deployed!/g)).toHaveLength(1);
   });
 
   it('reconciles D1 replication before build, gate, migrations and deploy when fully provisioned', async () => {

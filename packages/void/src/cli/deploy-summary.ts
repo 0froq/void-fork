@@ -1,4 +1,11 @@
-import { formatCount } from './output.ts';
+import { outro } from '@voidzero-dev/vite-plus-prompts';
+import { formatCount, pc } from './output.ts';
+
+export function printDeploySuccess(published = true): void {
+  if (published) {
+    outro(pc.green('✓ Successfully deployed!'));
+  }
+}
 
 /** Only include counts confirmed by the deployment target. */
 export function formatDeploySummary(details: {

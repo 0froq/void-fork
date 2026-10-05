@@ -24,6 +24,7 @@ const noopSpinner = {
   start: vi.fn(),
   stop: vi.fn(),
   message: vi.fn(),
+  clear: vi.fn(),
 };
 vi.mock('@voidzero-dev/vite-plus-prompts', async () => {
   const actual = await vi.importActual<typeof import('@voidzero-dev/vite-plus-prompts')>(
@@ -222,6 +223,37 @@ function openTestLog(): ReturnType<typeof openDeployLog> {
 }
 
 describe('direct-to-R2 deploy flow', () => {
+  it.each([true, undefined, false])(
+    'prints a single success after the box only when routing is published (%s)',
+    async (published) => {
+      const { note, outro } = await import('@voidzero-dev/vite-plus-prompts');
+      const summary = vi.mocked(note).mockClear();
+      const ending = vi.mocked(outro).mockClear();
+      const events = defaultDoneEvents() as Array<Record<string, unknown>>;
+      events.at(-1)!.published = published;
+      installPlatformMocks({ finalizeEvents: events });
+
+      await runStaticDeploy(
+        workdir,
+        { projectId: 'proj_t', slug: 'test' },
+        makeClient(),
+        { buildCommand: null, outputDir: assetsDir, appType: 'spa' },
+        true,
+      );
+
+      expect(summary).toHaveBeenCalledOnce();
+      if (published === false) {
+        expect(ending).not.toHaveBeenCalled();
+      } else {
+        expect(ending).toHaveBeenCalledOnce();
+        expect(ending.mock.calls[0][0]).toContain('✓ Successfully deployed!');
+        expect(ending.mock.invocationCallOrder[0]).toBeGreaterThan(
+          summary.mock.invocationCallOrder[0],
+        );
+      }
+    },
+  );
+
   it('uploads assets directly to R2 then calls finalize JSON endpoint', async () => {
     const state = installPlatformMocks();
     const client = makeClient();

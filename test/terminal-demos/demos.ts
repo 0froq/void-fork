@@ -99,7 +99,7 @@ const deploy: TerminalDemo = {
     spinner(8950, 'deploy', 'Applied migration: 0001_create_posts.sql (43ms)'),
     spinner(9900, 'deploy', 'Uploading worker'),
     spinner(10900, 'deploy', 'Prerendering 8 pages'),
-    done(12100, 'deploy', 'Deployed!'),
+    remove(12100, 'deploy'),
     blank(12400, 'summary-gap'),
     boxTop(12400, 'box-top', 'https://blog.kiwi-company.example', 44, 'blue'),
     boxRow(12600, 'box-gap', 44),
@@ -109,7 +109,7 @@ const deploy: TerminalDemo = {
     boxRow(13400, 'summary4', 44, s('SSR enabled')),
     boxBottom(13600, 'box-bottom', 44),
     blank(13900, 'outro-gap'),
-    write(13900, 'outro', s('Done!')),
+    write(13900, 'outro', s('✓ Successfully deployed!', 'green')),
   ],
 };
 

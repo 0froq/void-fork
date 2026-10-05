@@ -47,7 +47,6 @@ import {
 import { createDeployArtifact, createDeployUploadPayload } from '@void/deploy-core';
 import {
   intro,
-  outro,
   log as clackLog,
   note,
   confirm,
@@ -182,7 +181,7 @@ import {
   formatDeployFailureMessage,
   formatStreamDeployError,
 } from './deploy-errors.ts';
-import { formatDeploySummary } from './deploy-summary.ts';
+import { formatDeploySummary, printDeploySuccess } from './deploy-summary.ts';
 import { uploadAssetsToR2, type DirectR2PutItem } from './direct-r2-upload.ts';
 import {
   applyEmailSetup,
@@ -6188,7 +6187,7 @@ export async function runCloudflareDeploy(
   if (emailMap) {
     log.message(renderAddressMap(emailMap));
   }
-  outro('Done!');
+  printDeploySuccess();
 }
 
 /**
@@ -6227,7 +6226,7 @@ async function activateCloudflareVersionWithProgress(
       onProgress: (message) => progress.message(message),
     });
     if (result.ok) {
-      progress.stop('Worker version is ready.');
+      progress.clear();
     } else {
       progress.error('Worker deployment stopped.');
     }
@@ -6950,7 +6949,7 @@ async function runCloudflareStaticDeploy(
     }),
     execution.previewUrl,
   );
-  outro('Done!');
+  printDeploySuccess();
 }
 
 type RunDeployTargetAdapter = DeployTargetAdapter<RunDeployOptions, CliLogger>;
@@ -7624,7 +7623,7 @@ export function applyDeployEvent(event: DeployEvent, s: SpinnerResult): ApplyDep
           'Deployed, but routing was not published — the project may be unreachable or still serving the previous deploy. Re-run `void deploy` to publish routing.',
         );
       } else {
-        s.stop('Deployed!');
+        s.clear();
       }
       return { kind: 'done', event };
     case 'error':
@@ -8080,7 +8079,7 @@ export async function runStaticDeploy(
   );
 
   warnUnpublishedRouting(result);
-  outro('Done!');
+  printDeploySuccess(result.published !== false);
 }
 
 /**
@@ -8463,7 +8462,7 @@ async function runFrameworkDeploy(
   cleanupWrapper(root);
 
   warnUnpublishedRouting(result);
-  outro('Done!');
+  printDeploySuccess(result.published !== false);
 }
 
 export function assertManagedDurableStateSupported(root: string): void {
@@ -8993,7 +8992,7 @@ async function runFullDeploy(
   );
 
   warnUnpublishedRouting(result);
-  outro('Done!');
+  printDeploySuccess(result.published !== false);
 }
 
 async function createProjectFromSlug(
