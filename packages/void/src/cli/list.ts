@@ -1,7 +1,7 @@
 import { intro, outro, log } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { PlatformClient, type DeploymentResponse } from './client.ts';
-import { cliTitle, dim, ensureUtc, pc, tablePrefix } from './output.ts';
+import { cliTitle, dim, ensureUtc, formatCount, pc, tablePrefix } from './output.ts';
 import { readDeploymentPlatform, readProjectConfig } from './project.ts';
 import { resolveProjectBySlug } from './resolve-project.ts';
 
@@ -83,7 +83,7 @@ async function showCloudflareDeployments(root: string, slug?: string): Promise<v
       `${prefix}${row.id.padEnd(idWidth)}  ${renderedStatus}${''.padEnd(statusWidth - row.status.length)}  ${row.migrations.padEnd(10)}  ${row.deployed}`,
     );
   }
-  outro(`${status.workerName} — ${rows.length} version(s)`);
+  outro(`${status.workerName} — ${formatCount(rows.length, 'version')}`);
 }
 
 async function showDeployments(
@@ -125,7 +125,7 @@ async function showDeployments(
   for (const line of lines) {
     console.log(line);
   }
-  outro(`${slug} — ${deployments.length} deployment(s)`);
+  outro(`${slug} — ${formatCount(deployments.length, 'deployment')}`);
 }
 
 type DeploymentRow = {

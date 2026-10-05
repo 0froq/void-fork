@@ -6,7 +6,7 @@ import {
   type ProjectInvitationResponse,
   type ProjectMemberResponse,
 } from './client.ts';
-import { cliTitle } from './output.ts';
+import { cliTitle, formatCount } from './output.ts';
 import { parsePlatformErrorBody, platformErrorMessage } from './platform-errors.ts';
 import type { ProjectArgs } from './project-args.ts';
 import { readProjectConfig } from './project.ts';
@@ -130,7 +130,7 @@ export async function runProjectTeamCommand(root: string, args: ProjectTeamArgs)
       return;
     }
     note(invitationLines(invitations, true), 'Pending Project Invitations');
-    outro(`${invitations.length} invitation(s)`);
+    outro(formatCount(invitations.length, 'invitation'));
     return;
   }
   if (args.action === 'accept' || args.action === 'decline') {
@@ -156,7 +156,7 @@ export async function runProjectTeamCommand(root: string, args: ProjectTeamArgs)
   if (args.action === 'list') {
     const members = await client.listProjectMembers(projectId);
     note(memberLines(members), 'Project Team');
-    outro(`${members.length} member(s)`);
+    outro(formatCount(members.length, 'member'));
     return;
   }
   if (args.action === 'invitations') {
@@ -166,7 +166,7 @@ export async function runProjectTeamCommand(root: string, args: ProjectTeamArgs)
       return;
     }
     note(invitationLines(invitations, false), 'Project Invitations');
-    outro(`${invitations.length} invitation(s)`);
+    outro(formatCount(invitations.length, 'invitation'));
     return;
   }
   if (args.action === 'invite') {

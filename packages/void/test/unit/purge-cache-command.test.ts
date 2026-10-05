@@ -129,7 +129,7 @@ describe('runPurgeCacheCommand', () => {
         redirect: 'manual',
       },
     );
-    expect(out).toContain('5 cached page(s)');
+    expect(out).toContain('5 cached pages');
   });
 
   it('purges cache using --project slug', async () => {
@@ -161,7 +161,7 @@ describe('runPurgeCacheCommand', () => {
       'https://api.example.test/projects/proj_456/revalidate',
       expect.objectContaining({ method: 'POST' }),
     );
-    expect(out).toContain('3 cached page(s)');
+    expect(out).toContain('3 cached pages');
   });
 
   it('exits with error when --project slug not found', async () => {

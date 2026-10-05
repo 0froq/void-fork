@@ -1,7 +1,7 @@
 import { intro, outro, log } from '@voidzero-dev/vite-plus-prompts';
 import { getToken, getSiteDomain } from './auth.ts';
 import { PlatformClient } from './client.ts';
-import { cliTitle, dim, pc, tablePrefix } from './output.ts';
+import { cliTitle, dim, formatCount, pc, tablePrefix } from './output.ts';
 
 export async function runProjectsCommand(root: string): Promise<void> {
   console.log();
@@ -45,5 +45,5 @@ export async function runProjectsCommand(root: string): Promise<void> {
   for (const line of lines) {
     console.log(line);
   }
-  outro(`${projects.length} project(s)`);
+  outro(formatCount(projects.length, 'project'));
 }

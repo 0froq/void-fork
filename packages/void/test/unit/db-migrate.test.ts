@@ -187,7 +187,7 @@ describe('void db migrate', () => {
       toSlash(join(root, 'db', 'migrations')),
       join(tmpdir(), 'void-db-migrate.sqlite'),
     );
-    expect(mockLog.success).toHaveBeenCalledWith('Applied 1 migration(s).');
+    expect(mockLog.success).toHaveBeenCalledWith('Applied 1 migration.');
   });
 
   it('does not block reruns because of already applied destructive history', async () => {
@@ -236,7 +236,7 @@ describe('void db migrate', () => {
       toSlash(join(root, 'db', 'migrations')),
       process.env.DATABASE_URL,
     );
-    expect(mockLog.success).toHaveBeenCalledWith('Applied 1 migration(s) to remote database.');
+    expect(mockLog.success).toHaveBeenCalledWith('Applied 1 migration to remote database.');
   });
 
   it('applies pending MySQL migrations directly for a Cloudflare target', async () => {
@@ -254,7 +254,7 @@ describe('void db migrate', () => {
       toSlash(join(root, 'db', 'migrations')),
       process.env.DATABASE_URL,
     );
-    expect(mockLog.success).toHaveBeenCalledWith('Applied 1 migration(s) to remote database.');
+    expect(mockLog.success).toHaveBeenCalledWith('Applied 1 migration to remote database.');
   });
 
   it('reads direct Cloudflare PostgreSQL migration status from DATABASE_URL', async () => {

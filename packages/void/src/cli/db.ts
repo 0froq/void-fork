@@ -44,7 +44,7 @@ import {
   quoteSqlString,
 } from './db-export-sequences.ts';
 import { formatTimestamp } from './gen.ts';
-import { cliTitle, dim, pc } from './output.ts';
+import { cliTitle, dim, formatCount, pc } from './output.ts';
 import { readDeploymentPlatform, readProjectConfig } from './project.ts';
 
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
@@ -541,7 +541,7 @@ async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> 
   log.info(lines.join('\n'));
 
   const localPending = allMigrations.length - localSet.size;
-  const parts = [`${allMigrations.length} migration(s)`];
+  const parts = [formatCount(allMigrations.length, 'migration')];
   if (localPending > 0) {
     parts.push(`${localPending} pending locally`);
   }
@@ -638,7 +638,7 @@ async function resetDatabase(root: string, dialect: DatabaseDialect): Promise<nu
 
 async function runReset(root: string, dialect: DatabaseDialect): Promise<void> {
   const count = await resetDatabase(root, dialect);
-  log.success(`Database reset. Applied ${count} migration(s).`);
+  log.success(`Database reset. Applied ${formatCount(count, 'migration')}.`);
   if (dialect === 'sqlite') {
     log.info(dim("Restart your dev server if it's running."));
   }
@@ -652,7 +652,7 @@ async function runSeed(
 ): Promise<void> {
   // Reset first (drop + re-run migrations)
   const migrationCount = await resetDatabase(root, dialect);
-  log.step(`Reset database. Applied ${migrationCount} migration(s).`);
+  log.step(`Reset database. Applied ${formatCount(migrationCount, 'migration')}.`);
 
   const seed = resolveSeedTarget(root, file);
 
@@ -1126,7 +1126,7 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
         for (const migration of applied) {
           log.step(migration);
         }
-        log.success(`Applied ${applied.length} migration(s) to remote database.`);
+        log.success(`Applied ${formatCount(applied.length, 'migration')} to remote database.`);
         outro('Done.');
         return;
       } catch (error) {
@@ -1187,7 +1187,7 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
       for (const migration of pending) {
         log.step(migration.name);
       }
-      log.success(`Applied ${pending.length} migration(s) to remote database.`);
+      log.success(`Applied ${formatCount(pending.length, 'migration')} to remote database.`);
       outro('Done.');
       return;
     }
@@ -1257,7 +1257,7 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
       for (const name of result.applied) {
         log.step(name);
       }
-      log.success(`Applied ${result.applied.length} migration(s) to remote database.`);
+      log.success(`Applied ${formatCount(result.applied.length, 'migration')} to remote database.`);
     }
     for (const warning of result.warnings ?? []) {
       log.warn(warning);
@@ -1293,7 +1293,7 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
       for (const name of applied) {
         log.step(name);
       }
-      log.success(`Applied ${applied.length} migration(s).`);
+      log.success(`Applied ${formatCount(applied.length, 'migration')}.`);
     }
     outro('Done.');
     return;
@@ -1327,7 +1327,7 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
       for (const name of applied) {
         log.step(name);
       }
-      log.success(`Applied ${applied.length} migration(s).`);
+      log.success(`Applied ${formatCount(applied.length, 'migration')}.`);
     }
     outro('Done.');
     return;
@@ -1351,7 +1351,7 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
     for (const name of applied) {
       log.step(name);
     }
-    log.success(`Applied ${applied.length} migration(s).`);
+    log.success(`Applied ${formatCount(applied.length, 'migration')}.`);
     log.info(dim("Restart your dev server if it's running."));
   }
   outro('Done.');
@@ -1912,7 +1912,7 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
     }
   }
 
-  log.success(`Renamed ${renames.length} migration(s) to timestamp format.`);
+  log.success(`Renamed ${formatCount(renames.length, 'migration')} to timestamp format.`);
   outro('Done.');
 }
 
