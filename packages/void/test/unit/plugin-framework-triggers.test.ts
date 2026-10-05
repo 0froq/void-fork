@@ -10,7 +10,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { toSlash } from 'pathslash';
+import { build } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   analogDevTriggerInjectPlugin,
@@ -36,6 +38,39 @@ function callConfigResolved(plugin: ReturnType<typeof frameworkTriggersPlugin>) 
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (fn as any)({} as never);
+}
+
+type DevTrigger = (
+  request: Request,
+  env?: Record<string, unknown>,
+  ctx?: unknown,
+) => Promise<Response | null>;
+
+async function loadDevTrigger(root: string): Promise<DevTrigger> {
+  callConfigResolved(frameworkTriggersPlugin(root, { devTriggerToken: 'tk' }));
+  const entry = frameworkTriggersDispatchPath(root);
+  const outDir = join(root, '.void', 'test-output');
+  // Bundle the emitted entry so its absolute imports also work under native ESM on Windows.
+  await build({
+    root,
+    configFile: false,
+    logLevel: 'silent',
+    build: {
+      ssr: entry,
+      outDir,
+      minify: false,
+      rollupOptions: { output: { entryFileNames: 'dev-triggers.mjs' } },
+    },
+  });
+  return (await import(pathToFileURL(join(outDir, 'dev-triggers.mjs')).href)).handleDevTrigger;
+}
+
+function triggerRequest(kind: 'scheduled' | 'queue', payload: unknown): Request {
+  return new Request(`http://localhost/__void/${kind}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-void-dev-trigger': 'tk' },
+    body: JSON.stringify(payload),
+  });
 }
 
 function callConfigureServer(
@@ -67,6 +102,127 @@ afterEach(() => {
 });
 
 describe('frameworkTriggersPlugin', () => {
+  it('runs every job sharing a schedule once and skips unrelated jobs', async () => {
+    const root = createTempRoot();
+    mkdirSync(join(root, 'crons'));
+    for (const [name, crons] of [
+      ['first', ['0 * * * *']],
+      ['second', ['0 * * * *', '0 * * * *', '30 * * * *']],
+      ['other', ['*/5 * * * *']],
+    ] as const) {
+      writeFileSync(
+        join(root, 'crons', `${name}.mjs`),
+        `export const cron = ${JSON.stringify(crons)};
+export default (controller, env, ctx) => env.handlers.${name}(controller, env, ctx);`,
+      );
+    }
+    const handle = await loadDevTrigger(root);
+    const env = { handlers: { first: vi.fn(), second: vi.fn(), other: vi.fn() } };
+    const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() };
+    const response = await handle(
+      triggerRequest('scheduled', { cron: '0 * * * *', scheduledTime: 1234 }),
+      env,
+      ctx,
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({ ok: true });
+    for (const handler of [env.handlers.first, env.handlers.second]) {
+      expect(handler).toHaveBeenCalledExactlyOnceWith(
+        { cron: '0 * * * *', scheduledTime: 1234, noRetry: expect.any(Function) },
+        env,
+        ctx,
+      );
+    }
+    expect(env.handlers.other).not.toHaveBeenCalled();
+  });
+
+  it.each(['throw', 'reject'] as const)(
+    'waits for sibling jobs before reporting a handler that can %s',
+    async (failureMode) => {
+      const root = createTempRoot();
+      mkdirSync(join(root, 'crons'));
+      writeFileSync(
+        join(root, 'crons', 'first.mjs'),
+        `export const cron = '0 * * * *';
+export default (controller, env) => env.fail();`,
+      );
+      writeFileSync(
+        join(root, 'crons', 'second.mjs'),
+        `export const cron = '0 * * * *';
+export default (controller, env) => env.sibling();`,
+      );
+      const handle = await loadDevTrigger(root);
+      const failure = new Error('first job failed');
+      let finishSibling: () => void = () => {};
+      let markStarted: () => void = () => {};
+      const pending = new Promise<void>((resolve) => {
+        finishSibling = resolve;
+      });
+      const started = new Promise<void>((resolve) => {
+        markStarted = resolve;
+      });
+      const env = {
+        fail: vi.fn(() => {
+          if (failureMode === 'throw') {
+            throw failure;
+          }
+          return Promise.reject(failure);
+        }),
+        sibling: vi.fn(() => {
+          markStarted();
+          return pending;
+        }),
+      };
+      let settled = false;
+      const outcome = handle(
+        triggerRequest('scheduled', { cron: '0 * * * *', scheduledTime: 0 }),
+        env,
+      ).then(
+        (response) => {
+          settled = true;
+          return response;
+        },
+        (error: unknown) => {
+          settled = true;
+          return error;
+        },
+      );
+      try {
+        await Promise.race([started, outcome]);
+        expect(env.fail).toHaveBeenCalledOnce();
+        expect(env.sibling).toHaveBeenCalledOnce();
+        expect(settled).toBe(false);
+      } finally {
+        finishSibling();
+      }
+      const error = await outcome;
+      expect(error).toBeInstanceOf(AggregateError);
+      if (!(error instanceof AggregateError)) {
+        throw new Error('Expected scheduled job failures');
+      }
+      expect(error.errors).toEqual([failure]);
+    },
+  );
+
+  it('returns 404 when no job matches the requested schedule', async () => {
+    const root = createTempRoot();
+    mkdirSync(join(root, 'crons'));
+    writeFileSync(
+      join(root, 'crons', 'hourly.mjs'),
+      `export const cron = '0 * * * *';
+export default (controller, env) => env.run();`,
+    );
+    const handle = await loadDevTrigger(root);
+    const env = { run: vi.fn() };
+    const response = await handle(
+      triggerRequest('scheduled', { cron: '30 * * * *', scheduledTime: 0 }),
+      env,
+    );
+    expect(response?.status).toBe(404);
+    expect(await response?.json()).toEqual({ error: 'No cron handler matches "30 * * * *"' });
+    expect(env.run).not.toHaveBeenCalled();
+  });
+
   it('writes a dispatch module that imports each cron and queue handler', () => {
     const root = createTempRoot();
     mkdirSync(join(root, 'crons'), { recursive: true });

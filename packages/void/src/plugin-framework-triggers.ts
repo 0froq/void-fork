@@ -194,12 +194,17 @@ function __wrapMessage(m, decisions) {
 
 async function __dispatchScheduled(request, env, ctx) {
   const { cron, scheduledTime } = await request.json();
-  const job = __jobs.find((j) => j.crons.includes(cron));
-  if (!job) {
+  const jobs = __jobs.filter((j) => j.crons.includes(cron));
+  if (jobs.length === 0) {
     return __json({ error: \`No cron handler matches "\${cron}"\` }, 404);
   }
   const controller = { cron, scheduledTime, noRetry() {} };
-  await job.handler(controller, env, ctx ?? { waitUntil() {}, passThroughOnException() {} });
+  const executionContext = ctx ?? { waitUntil() {}, passThroughOnException() {} };
+  const results = await Promise.allSettled(jobs.map(async (job) => {
+    await job.handler(controller, env, executionContext);
+  }));
+  const errors = results.filter((result) => result.status === "rejected").map((result) => result.reason);
+  if (errors.length) throw new AggregateError(errors, "Scheduled jobs failed");
   return __json({ ok: true });
 }
 
