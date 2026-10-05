@@ -2806,6 +2806,110 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     });
   });
 
+  it.each(['first deployment', 'update'] as const)(
+    'validates static candidate history through real activation on %s',
+    async (scenario) => {
+      const root = makeProject({
+        'package.json': JSON.stringify({ name: 'static-app' }),
+        'void.json': JSON.stringify({ output: 'static' }),
+        'wrangler.jsonc': JSON.stringify({
+          account_id: 'acc123',
+          workers_dev: true,
+          preview_urls: true,
+          routes: [],
+        }),
+        'pages/index.vue': '<template><div>Static</div></template>',
+      });
+      const current = '11111111-1111-4111-8111-111111111111';
+      const next = '22222222-2222-4222-8222-222222222222';
+      let active: string | null = scenario === 'update' ? current : null;
+      const history = scenario === 'update' ? [{ id: current, number: 1 }] : [];
+      const operations: Array<CloudflareOperation> = [];
+      const runWrangler: DeployWranglerRun = (operation) => {
+        operations.push(operation);
+        if (operation.type === 'auth.whoami') {
+          return { ...cleanExit, data: { loggedIn: true, accounts: [] } };
+        }
+        if (operation.type === 'deployments.status') {
+          return {
+            ...cleanExit,
+            data: { versions: active ? [{ version_id: active, percentage: 100 }] : [] },
+          };
+        }
+        if (operation.type === 'versions.list') {
+          return { ...cleanExit, data: history.map((version) => ({ ...version })) };
+        }
+        if (operation.type === 'versions.view') {
+          return { ...cleanExit, data: { id: operation.versionId, resources: { bindings: [] } } };
+        }
+        if (operation.type === 'versions.upload') {
+          if (scenario === 'first deployment') {
+            return { ...cleanExit, status: 1, failure: 'not-found', errorCode: 10007 };
+          }
+          history.push({ id: next, number: 2 });
+          return {
+            ...cleanExit,
+            data: {
+              versionId: next,
+              previewUrl: `https://${next.slice(0, 8)}-static-app.example.workers.dev`,
+            },
+          };
+        }
+        if (operation.type === 'worker.deploy') {
+          active = next;
+          history.push({ id: next, number: 1 });
+          return {
+            ...cleanExit,
+            data: { versionId: next, workersDevUrl: 'https://static-app.example.workers.dev' },
+          };
+        }
+        if (operation.type === 'versions.deploy') {
+          active = operation.versions[0]!.versionId;
+          return cleanExit;
+        }
+        if (operation.type === 'triggers.deploy' || operation.type === 'triggers.clear-crons') {
+          expect(active).toBe(next);
+          return cleanExit;
+        }
+        throw new Error(`Unexpected Cloudflare operation: ${operation.type}`);
+      };
+      const { deps, exitCalls } = harness({
+        runWrangler,
+        runStaticBuild: () => {
+          mkdirSync(join(root, 'dist/client'), { recursive: true });
+          writeFileSync(join(root, 'dist/client/index.html'), '<h1>Static</h1>');
+        },
+        activateVersion: (options) =>
+          activateCloudflareVersionPrimitive({
+            ...options,
+            fetch: async () => {
+              if (scenario === 'update') {
+                expect(
+                  JSON.parse(readFileSync(join(root, '.void/cloudflare-candidate.json'), 'utf8')),
+                ).toMatchObject({ parentVersionId: current, versionIds: [next] });
+              }
+              return Response.json({ ready: true, versionId: next });
+            },
+          }),
+      });
+
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
+
+      expect(exitCalls).toEqual([]);
+      expect(active).toBe(next);
+      const operationTypes = operations.map((operation) => operation.type);
+      expect(operationTypes.indexOf('versions.list')).toBeLessThan(
+        operationTypes.indexOf('versions.upload'),
+      );
+      if (scenario === 'update') {
+        expect(operationTypes.lastIndexOf('versions.list')).toBeGreaterThan(
+          operationTypes.indexOf('versions.upload'),
+        );
+      }
+      expect(existsSync(join(root, '.void/cloudflare-candidate.json'))).toBe(false);
+    },
+  );
+
   it('keeps an output:"static" app with a dynamic page on the full Worker path', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'hybrid-ssg' }),

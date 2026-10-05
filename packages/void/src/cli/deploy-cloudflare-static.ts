@@ -611,6 +611,7 @@ export async function runCloudflareStaticDeploy(
         ...(existingWorker ? { preserve: true } : {}),
       }),
       assetsDirectoryOverride: stagedAssetsDirectory,
+      verifyInheritedSecrets: true,
       readinessHeaders: cloudflareWorkerReadinessHeaders(),
       workersDevSubdomain,
       readinessHeadersWorkersDevSubdomain: process.env.CLOUDFLARE_WORKERS_SUBDOMAIN?.trim()
