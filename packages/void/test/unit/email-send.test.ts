@@ -900,6 +900,50 @@ describe('sendEmail (proxy round trip)', () => {
     }
   });
 
+  it.each([{}, { code: 123, message: false }])(
+    'keeps the upstream fallback for incomplete error fields: %j',
+    async (error) => {
+      const { proxy } = fakeProxy(() => ({ status: 500, body: { ok: false, error } }));
+      const result = await withRuntimeEnv({ __VOID_PROXY: proxy, ...PROXY_ENV_KEYS }, () =>
+        sendEmail({
+          from: 'a@x.dev',
+          to: 'b@y.dev',
+          subject: 's',
+          text: 't',
+          sendInDev: true,
+        }),
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: 'UPSTREAM_ERROR', message: 'email: upstream send failed' },
+      });
+    },
+  );
+
+  it('preserves recipient outcomes when a failure also includes a top-level error', async () => {
+    const { proxy } = fakeProxy(() => ({
+      status: 500,
+      body: {
+        ok: false,
+        error: { code: 'UPSTREAM_ERROR', message: 'partial send' },
+        deliveries: [{ recipient: 'b@y.dev', ok: true, messageId: 'cf-b' }],
+      },
+    }));
+    const result = await withRuntimeEnv({ __VOID_PROXY: proxy, ...PROXY_ENV_KEYS }, () =>
+      sendEmail({
+        from: 'a@x.dev',
+        to: 'b@y.dev',
+        subject: 's',
+        text: 't',
+        sendInDev: true,
+      }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      deliveries: [{ recipient: 'b@y.dev', ok: true, messageId: 'cf-b' }],
+    });
+  });
+
   it.each([
     ['null body', null],
     ['empty object', {}],

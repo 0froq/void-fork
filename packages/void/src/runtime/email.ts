@@ -17,6 +17,7 @@
 // workerd, so the capture is an explicit HTTP hop over the dev assets
 // binding — see `resolveDevInbox` below and `plugin-email-dev-inbox.ts`.
 
+import { isRecord } from '@void/deploy-core';
 import {
   captureMessage,
   DEV_INBOX_ACK_HEADER,
@@ -426,27 +427,11 @@ interface ProxySendBody {
   idempotencyKey?: string;
 }
 
-interface ProxyOkResponse {
-  ok: true;
-  ids: Array<SendEmailDelivery>;
-  operationId?: string;
-}
-interface ProxyPreflightFailure {
-  ok: false;
-  error: { code: SendEmailErrorCode | string; message: string };
-  operationId?: string;
-}
-interface ProxyMidBatchFailure {
-  ok: false;
-  operationId?: string;
-  deliveries: Array<{
-    recipient: string;
-    ok: boolean;
-    messageId?: string;
-    error?: { code: SendEmailErrorCode | string; message: string };
-  }>;
-}
-type ProxyResponse = ProxyOkResponse | ProxyPreflightFailure | ProxyMidBatchFailure;
+type ProxyResponse = { operationId: unknown } & (
+  | { ok: true; ids: Array<unknown> }
+  | { ok: false; error: { code: unknown; message: unknown } }
+  | { ok: false; deliveries: Array<unknown> }
+);
 
 function coerceErrorCode(code: unknown): SendEmailErrorCode {
   const known: Array<SendEmailErrorCode> = [
@@ -460,9 +445,7 @@ function coerceErrorCode(code: unknown): SendEmailErrorCode {
     'OUTCOME_UNKNOWN',
     'UPSTREAM_ERROR',
   ];
-  return known.includes(code as SendEmailErrorCode)
-    ? (code as SendEmailErrorCode)
-    : 'UPSTREAM_ERROR';
+  return known.find((knownCode) => knownCode === code) ?? 'UPSTREAM_ERROR';
 }
 
 /**
@@ -484,21 +467,32 @@ function readProxyRefusal(body: unknown): string | null {
 }
 
 // A malformed response leaves the provider outcome unknown.
-function isValidProxyResponse(b: unknown): b is ProxyResponse {
-  if (typeof b !== 'object' || b === null) {
-    return false;
+function readProxyResponse(value: unknown): ProxyResponse | null {
+  if (!isRecord(value)) {
+    return null;
   }
-  const r = b as Record<string, unknown>;
-  if (r.ok === true && Array.isArray(r.ids)) {
-    return true;
+  const operationId = value.operationId;
+  if (value.ok === true && Array.isArray(value.ids)) {
+    return { ok: true, ids: value.ids, operationId };
   }
-  if (r.ok === false && typeof r.error === 'object' && r.error !== null) {
-    return true;
+  if (value.ok !== false) {
+    return null;
   }
-  if (r.ok === false && Array.isArray(r.deliveries)) {
-    return true;
+  if (Array.isArray(value.deliveries)) {
+    return { ok: false, deliveries: value.deliveries, operationId };
   }
-  return false;
+  const error = value.error;
+  if (typeof error === 'object' && error !== null) {
+    return {
+      ok: false,
+      error: {
+        code: 'code' in error ? error.code : undefined,
+        message: 'message' in error ? error.message : undefined,
+      },
+      operationId,
+    };
+  }
+  return null;
 }
 
 type RecipientListRead<T> = { ok: true; entries: Array<T> } | { ok: false; reason: string };
@@ -724,7 +718,8 @@ async function readResponseAsResult(
         `email: could not establish the send outcome (status ${res.status}); check email logs or repeat the same idempotency key`,
       );
     }
-    if (!isValidProxyResponse(body)) {
+    const response = readProxyResponse(body);
+    if (response === null) {
       // The proxy's own middleware — auth, platform lifecycle, capability
       // gates — answers ahead of the email handler with a flat
       // `{ error: string, message?: string }` and a non-2xx status. That
@@ -744,8 +739,8 @@ async function readResponseAsResult(
       );
     }
     // Both list-bearing shapes are validated as a whole against the
-    // recipients this send asked for (`ids` / `deliveries` are `unknown[]`
-    // from the typeguard's perspective).
+    // recipients this send asked for; their entries remain unknown until
+    // the whole list passes validation.
     const malformedList = (reason: string): SendEmailResult =>
       err(
         'OUTCOME_UNKNOWN',
@@ -753,24 +748,20 @@ async function readResponseAsResult(
         body,
       );
     const operation =
-      typeof body.operationId === 'string' && body.operationId.length <= 128
-        ? { operationId: body.operationId }
+      typeof response.operationId === 'string' && response.operationId.length <= 128
+        ? { operationId: response.operationId }
         : {};
-    if (body.ok === true) {
-      const list = readDeliveryList(body.ids as Array<unknown>, recipients, fallbackId);
+    if (response.ok === true) {
+      const list = readDeliveryList(response.ids, recipients, fallbackId);
       return list.ok ? { ok: true, ids: list.entries, ...operation } : malformedList(list.reason);
     }
-    // Treat the body as a flat record from here — the discriminated
-    // union narrowing fights the `unknown`-derived branches and adds
-    // little value once we've validated the shape via isValidProxyResponse.
-    const failure = body as unknown as Record<string, unknown>;
-    if (Array.isArray(failure.deliveries)) {
-      const list = readFailureDeliveries(failure.deliveries, recipients, fallbackId);
+    if ('deliveries' in response) {
+      const list = readFailureDeliveries(response.deliveries, recipients, fallbackId);
       return list.ok
         ? { ok: false, deliveries: list.entries, ...operation }
         : malformedList(list.reason);
     }
-    const e = failure.error as { code?: unknown; message?: unknown };
+    const e = response.error;
     return {
       ...err(
         coerceErrorCode(e.code),
