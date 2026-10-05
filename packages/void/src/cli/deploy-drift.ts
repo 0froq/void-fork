@@ -1,0 +1,254 @@
+import { spawnSync } from 'node:child_process';
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, relative } from 'pathslash';
+import { type DatabaseDialect } from '../config.ts';
+import { writeDrizzleConfig } from '../drizzle/config.ts';
+import { discoverSchema } from '../drizzle/discover.ts';
+import { readProjectPaths } from '../project-paths.ts';
+import { buildEnv } from '../shared/untrusted-env.ts';
+import { log, getErrorMessage } from './deploy-helpers.ts';
+import { scrubWranglerAuthCredentials } from './deploy-transport.ts';
+
+const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
+
+const deployDriftCheckDir = join('.void', 'deploy-drift-check');
+
+export function assertDeploySchemaDriftFree(root: string, dialect: DatabaseDialect): void {
+  try {
+    if (!hasDeploySchemaDrift(root, dialect)) {
+      return;
+    }
+  } catch (error: unknown) {
+    log.error(getErrorMessage(error));
+    process.exit(1);
+  }
+
+  log.error(getDeploySchemaDriftMessage());
+  process.exit(1);
+}
+
+export function hasDeploySchemaDrift(root: string, dialect: DatabaseDialect): boolean {
+  const authSchemaPath = join(root, '.void', 'better-auth-schema.ts');
+  if (!discoverSchema(root, readProjectPaths(root)) && !existsSync(authSchemaPath)) {
+    return false;
+  }
+
+  const driftRoot = mkDeployDriftCheckRoot(root);
+  const driftProjectRoot = join(driftRoot, 'project');
+
+  createDeployDriftProject(root, driftProjectRoot);
+
+  try {
+    const migrationsDir = readProjectPaths(driftProjectRoot).migrationsDir;
+    const before = snapshotDir(migrationsDir);
+    const driftAuthSchemaPath = join(driftProjectRoot, '.void', 'better-auth-schema.ts');
+    const driftConfigPath = writeDrizzleConfig(
+      driftProjectRoot,
+      dialect === 'postgresql'
+        ? 'postgresql://dummy'
+        : dialect === 'mysql'
+          ? 'mysql://dummy'
+          : ':memory:',
+      dialect,
+      {
+        additionalSchemas: existsSync(driftAuthSchemaPath) ? [driftAuthSchemaPath] : undefined,
+      },
+    );
+
+    const output = runDrizzleKitGenerate(driftProjectRoot, driftConfigPath);
+    const after = snapshotDir(migrationsDir);
+    const snapshotsEqual = migrationSnapshotsEqual(before, after);
+
+    if (snapshotsEqual && !output.includes('No schema changes, nothing to migrate')) {
+      throw new Error(output || 'drizzle-kit generate finished without reporting schema status.');
+    }
+
+    return !snapshotsEqual;
+  } catch (error) {
+    throw new Error(formatDeploySchemaDriftCheckError(error));
+  } finally {
+    rmSync(driftRoot, { recursive: true, force: true });
+    cleanupDeployDriftCheckRoot(root);
+  }
+}
+
+function runDrizzleKitGenerate(root: string, configPath: string): string {
+  const result = spawnSync(process.execPath, [drizzleKitBin, 'generate', '--config', configPath], {
+    cwd: root,
+    encoding: 'utf-8',
+    // drizzle-kit loads the user's drizzle config + schema (user code); keep the
+    // CF Access service token AND every wrangler-auth credential out of it, matching the
+    // build spawns. Generating migrations needs no Cloudflare credential.
+    env: scrubWranglerAuthCredentials(buildEnv()),
+  });
+  const stderr = bufferToString(result.stderr);
+  const stdout = bufferToString(result.stdout);
+  const output = [stderr, stdout].filter(Boolean).join('\n').trim();
+
+  if (result.error) {
+    throw result.error;
+  }
+  if (stderr) {
+    throw new Error(output);
+  }
+  if (result.status !== 0) {
+    throw new Error(output || `drizzle-kit generate exited with code ${result.status}.`);
+  }
+
+  return output;
+}
+
+export function getDeploySchemaDriftMessage(): string {
+  return [
+    'Schema drift detected between your Drizzle schema and db/migrations/.',
+    'Run `void db generate`, review the generated migration, commit it yourself, then rerun `void deploy`.',
+  ].join('\n');
+}
+
+function formatDeploySchemaDriftCheckError(error: unknown): string {
+  const detail = extractExecErrorOutput(error);
+  return [
+    'Failed to check Drizzle schema drift during deploy.',
+    'Run `void db generate` locally, fix any reported issues, review the generated migration, commit it yourself, then rerun `void deploy`.',
+    ...(detail ? [detail] : []),
+  ].join('\n\n');
+}
+
+function extractExecErrorOutput(error: unknown): string {
+  if (!error || typeof error !== 'object') {
+    return '';
+  }
+
+  const details = [];
+  const stderr = 'stderr' in error ? bufferToString(error.stderr) : '';
+  const stdout = 'stdout' in error ? bufferToString(error.stdout) : '';
+
+  if (stderr) {
+    details.push(stderr);
+  }
+  if (stdout) {
+    details.push(stdout);
+  }
+  const message = 'message' in error ? bufferToString(error.message) : '';
+  if (details.length === 0 && message) {
+    details.push(message);
+  }
+
+  return details.join('\n').trim();
+}
+
+function bufferToString(value: unknown): string {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (value instanceof Buffer) {
+    return value.toString('utf-8').trim();
+  }
+  return '';
+}
+
+function createDeployDriftProject(root: string, driftProjectRoot: string): void {
+  mkdirSync(driftProjectRoot, { recursive: true });
+
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (entry.name === '.git' || entry.name === '.void' || entry.name === 'node_modules') {
+      continue;
+    }
+    if (
+      entry.name === 'dist' ||
+      entry.name === 'build' ||
+      entry.name === '.wrangler' ||
+      entry.name === '.turbo' ||
+      entry.name === '.next' ||
+      entry.name === '.svelte-kit' ||
+      entry.name === '.output'
+    ) {
+      continue;
+    }
+
+    const source = join(root, entry.name);
+    const target = join(driftProjectRoot, entry.name);
+
+    cpSync(source, target, { recursive: true });
+  }
+
+  // The build-generated Better Auth schema participates in `void db generate`, so
+  // it must also participate in the isolated drift check. Copy only this known
+  // generated input; the rest of `.void` remains excluded as before.
+  const authSchemaPath = join(root, '.void', 'better-auth-schema.ts');
+  if (existsSync(authSchemaPath)) {
+    const target = join(driftProjectRoot, '.void', 'better-auth-schema.ts');
+    mkdirSync(dirname(target), { recursive: true });
+    cpSync(authSchemaPath, target);
+  }
+}
+
+function mkDeployDriftCheckRoot(root: string): string {
+  const driftCheckDir = join(root, deployDriftCheckDir);
+  rmSync(driftCheckDir, { recursive: true, force: true });
+  mkdirSync(driftCheckDir, { recursive: true });
+  return mkdtempSync(join(driftCheckDir, 'check-'));
+}
+
+function cleanupDeployDriftCheckRoot(root: string): void {
+  const driftCheckDir = join(root, deployDriftCheckDir);
+  try {
+    if (existsSync(driftCheckDir) && readdirSync(driftCheckDir).length === 0) {
+      rmSync(driftCheckDir, { recursive: true, force: true });
+    }
+  } catch {
+    // Best-effort cleanup only. The deploy drift check must not mask
+    // the original Drizzle Kit error with a cleanup failure.
+  }
+}
+
+function snapshotDir(root: string): Record<string, string> {
+  if (!existsSync(root)) {
+    return {};
+  }
+
+  const snapshot: Record<string, string> = {};
+  collectSnapshotFiles(root, root, snapshot);
+  return snapshot;
+}
+
+function collectSnapshotFiles(
+  current: string,
+  root: string,
+  snapshot: Record<string, string>,
+): void {
+  for (const entry of readdirSync(current, { withFileTypes: true })) {
+    const fullPath = join(current, entry.name);
+    if (entry.isDirectory()) {
+      collectSnapshotFiles(fullPath, root, snapshot);
+      continue;
+    }
+    snapshot[relative(root, fullPath)] = readFileSync(fullPath, 'utf-8');
+  }
+}
+
+function migrationSnapshotsEqual(
+  left: Record<string, string>,
+  right: Record<string, string>,
+): boolean {
+  const leftEntries = Object.entries(left).sort(([a], [b]) => a.localeCompare(b));
+  const rightEntries = Object.entries(right).sort(([a], [b]) => a.localeCompare(b));
+
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+
+  return leftEntries.every(([leftPath, leftContent], index) => {
+    const [rightPath, rightContent] = rightEntries[index] ?? [];
+    return leftPath === rightPath && leftContent === rightContent;
+  });
+}

@@ -1,0 +1,590 @@
+import { execSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { note } from '@voidzero-dev/vite-plus-prompts';
+import { join } from 'pathslash';
+import { analyzeApplication } from '../application-routing.ts';
+import {
+  hasApiRoutes as routeScanHasApiRoutes,
+  hasDocumentRoutes as routeScanHasDocumentRoutes,
+  resolveAssetConfig,
+} from '../asset-routing.ts';
+import { type VoidConfig, isNodeTarget } from '../config.ts';
+import { collectRevalidate } from '../isr-config.ts';
+import { voidWarn } from '../log.ts';
+import { assertJournalCoherence, validateMigrations } from '../migrations/validate.ts';
+import { type DetectedFramework } from '../plugin-inference.ts';
+import {
+  collectPrerenderPaths,
+  collectPrerenderPathsNode,
+  prerenderPages,
+  prerenderPagesNode,
+} from '../prerender.ts';
+import { hasEmailHandlers } from '../router/email.ts';
+import { requiresSandboxPlatformImage, resolveSandboxConfig } from '../sandbox/config.ts';
+import { resolveRemoteMode } from '../shared/env.ts';
+import { buildEnv } from '../shared/untrusted-env.ts';
+import { validateSsrEntry } from '../ssr/entry.ts';
+import { PlatformClient } from './client.ts';
+import { assertDeploySchemaDriftFree } from './deploy-drift.ts';
+import {
+  resolveFullDeployBuildCommand,
+  log,
+  getExitCode,
+  resolveDistDir,
+  resolveWorkerDirName,
+  getErrorMessage,
+  resolveDeployLiveBindingConfig,
+  hasNonPageBackend,
+  hasPrerenderSources,
+  resolveDeployWranglerCompat,
+  resolveDeployWorkerMain,
+  assertEnvSchemaValid,
+  generateDeployWrapperIfNeeded,
+  assertWorkerMainUploaded,
+} from './deploy-helpers.ts';
+import {
+  warnRedundantForceOn3xx,
+  streamDirectR2Deploy,
+  warnUnpublishedRouting,
+} from './deploy-managed-events.ts';
+import { assertManagedDurableStateSupported } from './deploy-managed-framework.ts';
+import { runStaticDeploy, assembleVoidManifest } from './deploy-managed-static.ts';
+import { formatDeploySummary, printDeploySuccess } from './deploy-summary.ts';
+import { MANAGED_DEPLOY_BUILD_ENV } from './deploy-transport.ts';
+import { type ResourceSummary } from './deploy-types.ts';
+import { type GitDeployMetadata } from './git-metadata.ts';
+import { lintDestinationSplats, lintDuplicateSources, mergeRoutingRules } from './headers.ts';
+import { type CliLogger } from './log-file.ts';
+import { createSpinner, formatCount } from './output.ts';
+import {
+  collectAndHashAssets,
+  collectWorkerFiles,
+  detectNonSpaFallbackWarning,
+} from './package.ts';
+import { formatProjectCommand, type FrameworkPreset } from './preset.ts';
+import { type ProjectConfig } from './project.ts';
+import type { AssetConfig } from './types.ts';
+import type { WrapperFeatures } from './wrapper.ts';
+import { needsWrapper } from './wrapper.ts';
+
+export async function runFullDeploy(
+  root: string,
+  config: ProjectConfig,
+  client: PlatformClient,
+  /**
+   * The already-read `void.config.ts`, threaded from `runDeploy` the same way
+   * `runFrameworkDeploy` receives it. The build step reads
+   * `inference.build` from it, so it must be available BEFORE the build —
+   * this used to be read further down as `deployConfig`, after the build had
+   * already run with a hardcoded command.
+   */
+  voidConfig: VoidConfig,
+  fwPreset?: FrameworkPreset,
+  skipBuild?: boolean,
+  gitMetadata?: GitDeployMetadata,
+  detected?: DetectedFramework,
+  cliLog?: CliLogger,
+): Promise<void> {
+  cliLog?.info('deploy_mode', {
+    mode: 'full',
+    framework: detected?.name,
+  });
+
+  assertManagedDurableStateSupported(root);
+
+  // 3. Build (child process to avoid Vite API side effects on bundle output)
+  if (!skipBuild) {
+    const { label: buildCmd, command: buildExec } = resolveFullDeployBuildCommand(
+      root,
+      voidConfig.inference?.build,
+    );
+    log.step(`Building (${buildCmd})...`);
+    cliLog?.info('build_start', { command: buildCmd });
+    const buildStartedAt = Date.now();
+    try {
+      // Pass VOID_DEPLOY_PROJECT_ID so plugin-prerender (running inside this
+      // child vite build) can resolve the Void projectId without relying on
+      // .void/project.json, which may be stale or absent under `--project <slug>`.
+      execSync(buildExec, {
+        cwd: root,
+        stdio: 'inherit',
+        env: buildEnv(
+          { VOID_DEPLOY_PROJECT_ID: config.projectId, ...MANAGED_DEPLOY_BUILD_ENV },
+          { localBinRoot: root },
+        ),
+      });
+      cliLog?.info('build_end', { durationMs: Date.now() - buildStartedAt });
+    } catch (err: unknown) {
+      cliLog?.error('build_failed', err, { durationMs: Date.now() - buildStartedAt });
+      process.exit(getExitCode(err));
+    }
+  } else {
+    cliLog?.info('build_skipped', { reason: 'skipBuild' });
+  }
+
+  // 4. Resolve build output paths from build artifacts (avoids re-resolving
+  // Vite config in the main process — plugins only run once inside the build)
+  const frameworkBuildCmd = fwPreset
+    ? formatProjectCommand(root, fwPreset.buildCommand)
+    : undefined;
+  const distDir = resolveDistDir(root, fwPreset, frameworkBuildCmd);
+  const workerDirName = resolveWorkerDirName(distDir, fwPreset, frameworkBuildCmd);
+
+  // Detect non-default assetsDir from Vite client manifest for _headers generation
+  let assetsPrefix = 'assets';
+  const clientManifestPath = join(distDir, 'client', '.vite', 'manifest.json');
+  if (existsSync(clientManifestPath)) {
+    const manifest: Record<string, { file?: string }> = JSON.parse(
+      readFileSync(clientManifestPath, 'utf-8'),
+    );
+    for (const entry of Object.values(manifest)) {
+      if (entry.file?.includes('/')) {
+        const dir = entry.file.slice(0, entry.file.indexOf('/'));
+        if (dir !== 'assets') {
+          assetsPrefix = dir;
+        }
+        break;
+      }
+    }
+  }
+
+  // 5. Framework mode (Class A — passed from runDeploy)
+  const isFrameworkMode = detected != null;
+
+  // 6. Infer bindings (expanded scan dirs in framework mode, or custom from config)
+  const deployConfig = voidConfig;
+
+  // Managed static prerender is deliberately outside the Vite subprocess. The
+  // build runs arbitrary project plugins with every platform credential
+  // scrubbed; only this trusted parent receives the proxy-only token and
+  // injects it into the built worker's Miniflare bindings.
+  if (deployConfig.output === 'static' && !isFrameworkMode) {
+    const result = isNodeTarget(deployConfig.target)
+      ? await prerenderPagesNode({
+          root,
+          ssrDir: join(distDir, 'ssr'),
+          clientDir: join(distDir, 'client'),
+        })
+      : await prerenderPages({
+          root,
+          workerDir: join(distDir, workerDirName),
+          clientDir: join(distDir, 'client'),
+          persistDir: join(root, '.void'),
+          remoteMode: resolveRemoteMode(deployConfig.remote),
+          projectId: config.projectId,
+          voidToken: await client.createPrerenderToken(config.projectId),
+        });
+
+    if (result.paths.length === 0) {
+      log.info('No pages to prerender');
+    } else if (result.failed.length > 0) {
+      voidWarn(`${formatCount(result.failed.length, 'page')} failed to prerender`);
+    }
+  }
+
+  const analysis = await analyzeApplication(root, { config: deployConfig, environment: 'prod' });
+  const { paths, dialect, bindings, authEnabled, scan: routeScan } = analysis;
+  const effectiveBindings = bindings;
+
+  if (isFrameworkMode && authEnabled) {
+    log.error(
+      "Void-managed Better Auth is only supported in Void apps. Use Better Auth's official integration for this framework instead.",
+    );
+    process.exit(1);
+  }
+
+  if (isFrameworkMode && bindings.needsSandbox) {
+    log.error('deploy: Cloudflare Sandboxes are currently supported in Void apps only.');
+    process.exit(1);
+  }
+  if (isFrameworkMode && bindings.needsLive) {
+    log.error('deploy: void/live is currently supported in Void apps only.');
+    process.exit(1);
+  }
+
+  const sandboxConfig = bindings.needsSandbox
+    ? resolveSandboxConfig(deployConfig, root)
+    : undefined;
+  if (bindings.needsSandbox && requiresSandboxPlatformImage(deployConfig)) {
+    log.error(
+      'deploy: `sandbox.image` points at a local Dockerfile. Add `sandbox.platformImage` with a pushed registry image for `void deploy`, or deploy this sandbox directly with Wrangler.',
+    );
+    process.exit(1);
+  }
+
+  // Merge user/framework `_headers` / `_redirects` in the built client dir with
+  // `void.config.ts` routing rules. See the framework branch above for phase splitting.
+  const clientDir = join(distDir, 'client');
+  const { headerRules, redirectRules, fallbackRules, redundantForceOn3xx } = mergeRoutingRules({
+    dir: clientDir,
+    routing: deployConfig.routing,
+  });
+  warnRedundantForceOn3xx(redundantForceOn3xx);
+
+  // Lint each phase independently — same rationale as the framework branch.
+  lintDuplicateSources(redirectRules, 'redirects/rewrites (pre-asset)');
+  lintDuplicateSources(fallbackRules, 'fallbacks (post-asset)');
+
+  // Warn on destinations containing a literal `*` — splat tokens in
+  // destinations aren't substituted (`:splat` is the correct token).
+  lintDestinationSplats(redirectRules, 'redirects/rewrites (pre-asset)');
+  lintDestinationSplats(fallbackRules, 'fallbacks (post-asset)');
+
+  const migrationsDir = paths.migrationsDir;
+
+  assertDeploySchemaDriftFree(root, dialect);
+
+  // 7. Collect and validate migrations (before Hyperdrive check so migrations can gate provisioning)
+  const rawMigrations = analysis.migrations;
+  let validatedMigrations;
+  try {
+    assertJournalCoherence(migrationsDir, rawMigrations);
+  } catch (err: unknown) {
+    log.error(getErrorMessage(err));
+    process.exit(1);
+  }
+  if (rawMigrations.length > 0) {
+    try {
+      validatedMigrations = validateMigrations(rawMigrations);
+      log.info(`Found ${formatCount(validatedMigrations.length, 'migration')}`);
+    } catch (err: unknown) {
+      log.error(getErrorMessage(err));
+      process.exit(1);
+    }
+  }
+
+  // Pre-deploy: ensure Hyperdrive is provisioned for external SQL projects.
+  // Migrations on disk also gate this — even if inference says needsD1: false,
+  // buildVoidManifest will add the hyperdrive binding when migrations are present.
+  if (dialect !== 'sqlite' && analysis.needsDatabase) {
+    let resources: Array<ResourceSummary> | null = null;
+    try {
+      resources = await client.getResources(config.projectId);
+    } catch {
+      // Resources endpoint not available — Hyperdrive will be checked at deploy time
+    }
+    if (resources) {
+      const hasHyperdrive = resources.some(
+        (resource: ResourceSummary) => resource.type === 'hyperdrive',
+      );
+      if (!hasHyperdrive) {
+        const { text: promptText, isCancel: isCancelPrompt } =
+          await import('@voidzero-dev/vite-plus-prompts');
+        const connectionString = await promptText({
+          message: `Your project uses ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'}. Enter your connection string:`,
+          placeholder:
+            dialect === 'mysql'
+              ? 'mysql://user:pass@host:3306/dbname'
+              : 'postgresql://user:pass@host:5432/dbname',
+          validate(value) {
+            const valid =
+              dialect === 'mysql'
+                ? value?.startsWith('mysql://')
+                : value?.startsWith('postgres://') || value?.startsWith('postgresql://');
+            if (!valid) {
+              return dialect === 'mysql'
+                ? 'Must start with "mysql://"'
+                : 'Must start with "postgres://" or "postgresql://"';
+            }
+          },
+        });
+        if (isCancelPrompt(connectionString)) {
+          log.info('Deploy cancelled.');
+          process.exit(0);
+        }
+        await client.provisionDatabase(config.projectId, connectionString as string);
+        log.success('Hyperdrive provisioned.');
+      }
+    }
+  }
+  const rawJobs = analysis.jobs;
+  const rawQueues = analysis.queues;
+  const schedules = rawJobs.flatMap((job) =>
+    job.crons.map((cron) => ({
+      name: job.name,
+      cron,
+    })),
+  );
+  const webSockets = analysis.websockets;
+  const liveConfig = await resolveDeployLiveBindingConfig(root, client, config.projectId, {
+    isFrameworkMode,
+    needsLive: effectiveBindings.needsLive,
+    webSockets,
+    sandboxClassName: sandboxConfig?.className,
+    cliLog,
+  });
+  const queues = rawQueues.map((q) => ({
+    name: q.name,
+    bindingName: q.bindingName,
+    ...(q.maxBatchSize != null && { maxBatchSize: q.maxBatchSize }),
+    ...(q.maxBatchTimeout != null && { maxBatchTimeout: q.maxBatchTimeout }),
+  }));
+  const hasPages = existsSync(paths.pagesDir);
+  const hasRoutes = routeScan.routes.length > 0;
+  const hasApiRoutes =
+    routeScanHasApiRoutes(routeScan.routes) || routeScanHasApiRoutes(webSockets) || authEnabled;
+  const hasDocumentRoutes = routeScanHasDocumentRoutes(routeScan.routes);
+  const hasMiddleware = routeScan.middleware.length > 0;
+  const hasWebSockets = webSockets.length > 0;
+  // Kept lazy behind `isFrameworkMode` exactly as the inline call was: a Class-A
+  // framework app has no Void SSR entry to validate.
+  const ssrEntry = isFrameworkMode ? null : validateSsrEntry(root, paths);
+  const isSsr = isFrameworkMode
+    ? true
+    : Boolean(ssrEntry) || (hasPages && deployConfig.output !== 'static');
+
+  // Resolve revalidate config from void.config.ts + per-page .server.ts exports.
+  // The page scan is also reused by the fully-static optimization below.
+  const pageScan = hasPages ? routeScan.pages : null;
+  const revalidate = collectRevalidate(deployConfig, pageScan);
+
+  // Fully-static optimization: if output: "static" and all pages are prerendered
+  // with no backend features, deploy as a static site (no worker needed)
+  if (deployConfig.output === 'static' && pageScan && !isSsr) {
+    const allPrerenderable = pageScan.pages.every(
+      (p) =>
+        p.shouldPrerender && ((p.params.length === 0 && !p.catchAll) || p.hasGetPrerenderPaths),
+    );
+    const nonPageBackend = hasNonPageBackend({
+      hasRoutes,
+      hasMiddleware,
+      hasWebSockets,
+      hasEmail: routeScan.email !== undefined && hasEmailHandlers(routeScan.email),
+      authEnabled,
+      hasLive: liveConfig !== undefined,
+    });
+    if (allPrerenderable && !nonPageBackend && schedules.length === 0 && queues.length === 0) {
+      log.info('All pages prerendered — deploying as static site');
+      cliLog?.info('full_to_static_redirect', { reason: 'all_pages_prerendered' });
+      return runStaticDeploy(
+        root,
+        config,
+        client,
+        {
+          buildCommand: null,
+          outputDir: clientDir,
+          appType: 'static',
+        },
+        true,
+        gitMetadata,
+        assetsPrefix,
+        headerRules,
+        redirectRules,
+        fallbackRules,
+        // Rules were already merged above — pass only the notFound override.
+        undefined,
+        cliLog,
+        deployConfig.routing?.notFound,
+      );
+    }
+  }
+
+  // Resolve prerender paths. Skip in three cases:
+  //   - output: "static" — pages are already built as static assets.
+  //   - framework mode (Class A) — the framework's own worker entry has no
+  //     /__void/prerender-paths endpoint (only compileWorkerEntry /
+  //     compileNodeApp emit it for Void apps). Class-A frameworks handle
+  //     prerendering through their own build pipelines.
+  //   - the app has no prerender source at all (no `pages/`, no SSR entry, no
+  //     `routing.prerender`) — the collector provably returns `[]`, so booting
+  //     the worker in Miniflare can only fail, never contribute. See
+  //     `hasPrerenderSources` for why that failure mode matters.
+  const prerenderSourcesPresent = hasPrerenderSources({
+    hasPages,
+    hasSsrEntry: ssrEntry !== null,
+    explicitPrerenderPaths: deployConfig.routing?.prerender,
+  });
+  const uniquePrerenderPaths =
+    deployConfig.routing?.isr === false ||
+    deployConfig.output === 'static' ||
+    isFrameworkMode ||
+    !prerenderSourcesPresent
+      ? []
+      : isNodeTarget(deployConfig.target)
+        ? await collectPrerenderPathsNode({
+            root,
+            ssrDir: join(distDir, 'ssr'),
+            clientDir,
+          })
+        : await collectPrerenderPaths({
+            root,
+            workerDir: join(distDir, workerDirName),
+            clientDir,
+            persistDir: join(root, '.void'),
+            // Match the runtime remote-mode switch so getPrerenderPaths()
+            // reads real D1/KV/R2 during deploy-time path discovery when
+            // the project is in remote mode. Without this the manifest
+            // would be built from local bindings even for remote projects.
+            remoteMode: resolveRemoteMode(deployConfig.remote),
+            projectId: config.projectId,
+            voidToken: await client.createPrerenderToken(config.projectId),
+          });
+
+  // 8. Read wrangler compat settings for Cloudflare targets
+  const wranglerCompat = resolveDeployWranglerCompat(
+    root,
+    deployConfig,
+    join(distDir, workerDirName),
+    {
+      authEnabled,
+      dialect,
+      needsSandbox: effectiveBindings.needsSandbox,
+    },
+  );
+  const workerMain = resolveDeployWorkerMain(deployConfig, join(distDir, workerDirName));
+
+  // Production env values are remote secrets; dotenv is local-only.
+  const envVars: Record<string, string> = {};
+
+  // 9a. Validate against env.ts schema if present.
+  await assertEnvSchemaValid(root, client, config.projectId);
+
+  // 10. Package & Upload
+  const s = createSpinner();
+  const onProgress = (msg: string) => s.message(msg);
+
+  const assetConfig: AssetConfig = resolveAssetConfig({
+    isSsr,
+    hasPages,
+    hasApiRoutes,
+    hasDocumentRoutes,
+    hasMiddleware,
+    hasWebSockets: routeScanHasDocumentRoutes(webSockets),
+    authEnabled,
+    liveEnabled: liveConfig !== undefined,
+    notFound: deployConfig.routing?.notFound,
+  });
+
+  // Preflight: hash assets and check which ones changed.
+  // `assetFiles` carries the in-memory buffer cache through to the upload
+  // step so each asset is read from disk exactly once (Codex Finding #2).
+  s.start('Checking for changes...');
+  cliLog?.info('preflight_start', { dir: clientDir });
+  const { assetManifest, assetFiles } = await collectAndHashAssets(clientDir, onProgress);
+  const { needed, skipped } = await client.preflight(config.projectId, assetManifest, true);
+  s.stop('Checked for changes');
+  cliLog?.info('preflight_end', {
+    total: Object.keys(assetManifest).length,
+    needed: needed.length,
+    skipped,
+  });
+
+  if (skipped > 0) {
+    log.info(`Skipping ${formatCount(skipped, 'unchanged asset')}`);
+  }
+
+  s.start('Packaging...');
+  cliLog?.info('package_start', {
+    mode: 'full',
+    isSsr,
+    hasRoutes,
+    hasMiddleware,
+    hasWebSockets,
+    authEnabled,
+    framework: detected?.name,
+  });
+  const packageStartedAt = Date.now();
+  const neededSet = skipped > 0 ? new Set(needed) : null;
+  const voidPackageOptions = {
+    compatibilityDate: wranglerCompat?.compatibilityDate,
+    compatibilityFlags: wranglerCompat?.compatibilityFlags,
+    cpuMs: deployConfig.worker?.limits?.cpu_ms,
+    ...(workerMain && { workerMain }),
+    ...(sandboxConfig && { sandbox: sandboxConfig }),
+    ...(liveConfig && { live: liveConfig }),
+    revalidateQueryAllowlist: deployConfig.routing?.revalidateQueryAllowlist,
+  };
+
+  // Surface the non-SPA-fallbacks mismatch (if any) before invoking the
+  // I/O-free manifest builder.
+  const fallbackWarning = detectNonSpaFallbackWarning(assetConfig, fallbackRules);
+  if (fallbackWarning) {
+    onProgress?.(fallbackWarning);
+    console.warn(`[void] ${fallbackWarning}`);
+  }
+
+  const manifest = assembleVoidManifest(
+    pageScan,
+    isFrameworkMode,
+    {
+      bindings: liveConfig ? { ...effectiveBindings, needsLive: true } : effectiveBindings,
+      hasEmailHandlers:
+        !isFrameworkMode && routeScan.email !== undefined && hasEmailHandlers(routeScan.email),
+      migrations: validatedMigrations,
+      schedules,
+      ssr: isSsr || hasRoutes || hasMiddleware || hasWebSockets || authEnabled,
+      framework: isFrameworkMode ? detected!.name : undefined,
+      revalidate,
+      vars: envVars,
+      queues,
+      prerender: uniquePrerenderPaths,
+      assetConfig,
+      options: voidPackageOptions,
+      hashedAssetsPrefix: assetsPrefix,
+      headerRules,
+      redirectRules,
+      fallbackRules,
+      dialect,
+      webSockets,
+    },
+    deployConfig.routing?.revalidate,
+    deployConfig.routing?.isr !== false,
+  );
+  const workerDir = join(distDir, workerDirName);
+  if (isFrameworkMode) {
+    const wrapperFeatures: WrapperFeatures = {
+      crons: rawJobs,
+      queues: rawQueues,
+      hasMigrations: validatedMigrations != null && validatedMigrations.length > 0,
+      migrationDialect: dialect,
+    };
+    if (needsWrapper(wrapperFeatures)) {
+      log.step('Generating wrapper...');
+      await generateDeployWrapperIfNeeded(
+        root,
+        workerDir,
+        fwPreset?.workerMain ?? 'index.js',
+        wrapperFeatures,
+      );
+      log.info('Wrapper generated');
+    }
+  }
+  const workerFiles = collectWorkerFiles(workerDir);
+  assertWorkerMainUploaded(workerFiles, workerMain);
+  cliLog?.info('package_end', {
+    mode: 'full',
+    durationMs: Date.now() - packageStartedAt,
+  });
+  const result = await streamDirectR2Deploy(
+    client,
+    config.projectId,
+    manifest,
+    assetManifest,
+    assetFiles,
+    needed,
+    gitMetadata,
+    neededSet !== null,
+    workerFiles,
+    s,
+    cliLog,
+  );
+
+  note(
+    formatDeploySummary({
+      workers: result.workers,
+      assets: result.assets,
+      unchangedAssets: skipped,
+      migrations: result.migrations,
+      cronJobs: schedules.length,
+      queues: queues.length,
+      prerenderedPages: uniquePrerenderPaths.length,
+      ssr: isSsr,
+      revalidate,
+      framework: isFrameworkMode || undefined,
+    }),
+    result.url,
+  );
+
+  warnUnpublishedRouting(result);
+  printDeploySuccess(result.published !== false);
+}

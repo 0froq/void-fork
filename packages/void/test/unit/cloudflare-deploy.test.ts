@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
@@ -6875,7 +6883,10 @@ describe('runCloudflareDeploy — config laundering by a build-adjacent probe', 
 // ---------------------------------------------------------------------------
 
 describe('runCloudflareDeploy — managed path does not import the provision module', () => {
-  const deploySource = readFileSync(join(import.meta.dirname, '../../src/cli/deploy.ts'), 'utf-8');
+  const deploySource = readdirSync(join(import.meta.dirname, '../../src/cli'))
+    .filter((file) => file === 'deploy.ts' || (file.startsWith('deploy-') && file.endsWith('.ts')))
+    .map((file) => readFileSync(join(import.meta.dirname, '../../src/cli', file), 'utf-8'))
+    .join('\n');
 
   it('imports ./provision.ts as TYPE-ONLY at module scope (dynamic import inside the fork)', () => {
     // Every static `... from './provision.ts'` at module scope must be `import type`.
