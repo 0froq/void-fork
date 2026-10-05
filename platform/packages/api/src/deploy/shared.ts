@@ -1,5 +1,13 @@
 import { isCfAssetPlainText } from './migrations.ts';
 
+// Cap on the number of presign requests in a single batch. Presigning is
+// CPU-light (one HMAC chain per call) but unbounded fanout still costs
+// memory and lets a malformed CLI burn server CPU without bound. 5000
+// matches the largest realistic dist/ asset count we've observed (memora
+// repro: 570; design doc 0068's TBD ceiling). Asset manifests on the
+// JSON-mode deploy share the same cap for symmetry.
+export const MAX_UPLOAD_URLS_BATCH = 5000;
+
 export const DEFAULT_DISPATCH_NAMESPACE = 'void-users';
 
 export const DEFAULT_TAIL_SERVICE_NAME = 'void-tail';

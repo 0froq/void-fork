@@ -5,7 +5,11 @@ import { uploadPool } from '../concurrency.ts';
 import { getProject, getUser, getDeployment, updateDeploymentStatus, type Db } from '../db.ts';
 import { handleManifestOnlyDeploy } from '../deploy/execute.ts';
 import { requireActiveDeployAccess } from '../deploy/recovery.ts';
-import { HEX_32_REGEX, type UploadUrlsRequestAsset } from '../deploy/shared.ts';
+import {
+  HEX_32_REGEX,
+  MAX_UPLOAD_URLS_BATCH,
+  type UploadUrlsRequestAsset,
+} from '../deploy/shared.ts';
 import {
   appendDeploymentEvent,
   assertDeploymentExecutionAuthority,
@@ -28,14 +32,6 @@ export {
 } from '@void/deploy-core';
 
 const app = new Hono<ApiEnv>();
-
-// Cap on the number of presign requests in a single batch. Presigning is
-// CPU-light (one HMAC chain per call) but unbounded fanout still costs
-// memory and lets a malformed CLI burn server CPU without bound. 5000
-// matches the largest realistic dist/ asset count we've observed (memora
-// repro: 570; design doc 0068's TBD ceiling). Asset manifests on the
-// JSON-mode deploy share the same cap for symmetry.
-export const MAX_UPLOAD_URLS_BATCH = 5000;
 
 // Body cap for `POST /:id/deploy/upload-urls`. The body is dominated by
 // `assets[]` entries — each entry is ~150 bytes (blake3 + md5 + size +

@@ -40,7 +40,6 @@ import { resolvePlanLimits } from '../plans.ts';
 import { ProjectAccessDeniedError, projectAccessErrorBody } from '../project-access.ts';
 import { ProjectRequiresNormalizationError, requireNormalizedProject } from '../project-state.ts';
 import { assertManagedSandboxEntitlement } from '../provisioning/sandbox-controller.ts';
-import { MAX_UPLOAD_URLS_BATCH } from '../routes/deploy.ts';
 import { requireProjectRouteCapability } from '../routes/project-access.ts';
 import { deploymentOperations } from '../schema.ts';
 import {
@@ -76,6 +75,7 @@ import {
   StaticAssetDisappearedError,
 } from './serving-assets.ts';
 import {
+  MAX_UPLOAD_URLS_BATCH,
   MAX_JSON_DEPLOY_BODY_BYTES,
   HEX_32_REGEX,
   decodeBase64ToBytes,
