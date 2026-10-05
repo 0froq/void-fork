@@ -1477,11 +1477,11 @@ export function writeProvisionedWranglerConfig(
     // malformed member (fail closed) before we mutate the array.
     bindingNamesForField(field, rawList);
     const currentList = Array.isArray(rawList) ? [...rawList] : [];
-    const matches: Array<number> = [];
+    const matches: Array<{ index: number; entry: Record<string, unknown> }> = [];
     for (let i = 0; i < currentList.length; i++) {
       const entry = currentList[i];
       if (isRecord(entry) && entry[identityKey] === binding) {
-        matches.push(i);
+        matches.push({ index: i, entry });
       }
     }
     if (matches.length > 1) {
@@ -1511,8 +1511,7 @@ export function writeProvisionedWranglerConfig(
       );
     }
     if (matches.length === 1) {
-      const index = matches[0];
-      const existing = isRecord(currentList[index]) ? currentList[index] : {};
+      const { index, entry: existing } = matches[0];
       for (const [key, value] of Object.entries(properties)) {
         if (!jsonEqual(existing[key], value)) {
           set([field, index, key], value);
@@ -1695,12 +1694,12 @@ export function writeProvisionedWranglerConfig(
     // through the SAME strict validator the adopt guard uses. Without this, a corrupt
     // list (e.g. `[null]`) would be cloned, its non-record members silently skipped by
     // the match loop below, and a new producer committed beside the corruption.
-    if (section === 'producers') {
-      assertValidQueueProducers(currentQueues?.producers);
-    }
-    const currentList = Array.isArray(currentQueues?.[section])
-      ? [...(currentQueues[section] as Array<Record<string, unknown>>)]
-      : [];
+    const currentList =
+      section === 'producers'
+        ? assertValidQueueProducers(currentQueues?.producers)
+        : Array.isArray(currentQueues?.consumers)
+          ? [...(currentQueues.consumers as Array<Record<string, unknown>>)]
+          : [];
     for (const entry of entries) {
       // Match on the section's identity: producers by `binding`, consumers by
       // `queue`. Keying producers on the queue would rewrite the FIRST of several
@@ -1723,7 +1722,7 @@ export function writeProvisionedWranglerConfig(
         const matches: Array<number> = [];
         for (let i = 0; i < currentList.length; i++) {
           const existing = currentList[i];
-          if (isRecord(existing) && existing.binding === entry.binding) {
+          if (existing.binding === entry.binding) {
             matches.push(i);
           }
         }
@@ -1737,7 +1736,7 @@ export function writeProvisionedWranglerConfig(
         }
         if (matches.length === 1) {
           const existing = currentList[matches[0]];
-          if (isRecord(existing) && existing.queue !== entry.queue) {
+          if (existing.queue !== entry.queue) {
             throw new Error(
               `deploy: cannot update "${configPath}" — queue producer binding ` +
                 `${JSON.stringify(entry.binding)} is already bound to queue ` +
@@ -1791,7 +1790,7 @@ export function writeProvisionedWranglerConfig(
         // (a re-run finds each value already equal and writes nothing). For a
         // producer matched by binding the queue already equals (a mismatch threw
         // above), so this loop is a no-op that preserves the user's entry.
-        const existing = isRecord(currentList[index]) ? currentList[index] : {};
+        const existing = currentList[index];
         for (const [key, value] of Object.entries(entry)) {
           if (value === undefined) {
             continue;

@@ -538,16 +538,17 @@ function hasCustomDomains(routes: ReadonlyArray<unknown> | undefined): boolean {
 /** Select a configured HTTPS route that is guaranteed to cover /__void/ready. */
 function customRouteReadinessUrl(routes: ReadonlyArray<unknown>): string | undefined {
   for (const route of routes) {
+    const record = isRecord(route) ? route : undefined;
     const pattern =
       typeof route === 'string'
         ? route
-        : isRecord(route) && typeof route.pattern === 'string'
-          ? route.pattern
+        : typeof record?.pattern === 'string'
+          ? record.pattern
           : undefined;
     if (!pattern) {
       continue;
     }
-    const customDomain = isRecord(route) && route.custom_domain === true;
+    const customDomain = record?.custom_domain === true;
     const withoutScheme = pattern.replace(/^https?:\/\//i, '');
     const slash = withoutScheme.indexOf('/');
     const hostname = (slash < 0 ? withoutScheme : withoutScheme.slice(0, slash)).trim();
@@ -619,9 +620,6 @@ function stableJson(value: unknown): string {
 }
 
 function parseTriggerConfig(value: unknown): CloudflareTriggerConfig | null {
-  if (value === undefined) {
-    return null;
-  }
   if (!isRecord(value)) {
     return null;
   }
@@ -1874,7 +1872,7 @@ async function readCloudflareVersionInspection(
       const isVoidDraft = isVoidSecretOnlyDraft(draft);
       return {
         metadata: typeof message === 'string' ? parseCloudflareVersionMessage(message) : null,
-        isSecretOnlyDraft: isWranglerSecretOnlyDraft(draft) || isVoidSecretOnlyDraft(draft),
+        isSecretOnlyDraft: isWranglerSecretOnlyDraft(draft) || isVoidDraft,
         isVoidSecretOnlyDraft: isVoidDraft,
         voidDraftSecretNames: isVoidDraft
           ? (draft.bindings as Array<{ name: string }>).map((binding) => binding.name)

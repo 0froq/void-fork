@@ -3104,7 +3104,7 @@ function reconcileD1IdAliases(entry: Record<string, unknown>): D1ReconciledId {
  * exact-match rule so no sibling gap remains.
  */
 function normalizeD1(entry: Record<string, unknown> | undefined, requestedName: string): D1Match {
-  if (!isRecord(entry)) {
+  if (entry === undefined) {
     return { kind: 'other' };
   }
   const names = [entry.name, entry.database_name].filter(
