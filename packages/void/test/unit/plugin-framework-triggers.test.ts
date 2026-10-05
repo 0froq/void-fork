@@ -368,38 +368,131 @@ export default (controller, env) => env.run();`,
     },
   );
 
-  it('emits handleDevTrigger that returns null for non-trigger requests', () => {
+  it('returns null for other methods and paths without reading their bodies', async () => {
     const root = createTempRoot();
     mkdirSync(join(root, 'crons'), { recursive: true });
+    mkdirSync(join(root, 'queues'), { recursive: true });
     writeFileSync(
-      join(root, 'crons', 'a.ts'),
-      'export const cron = "0 * * * *";\nexport default async () => {};\n',
+      join(root, 'crons', 'hourly.mjs'),
+      'export const cron = "0 * * * *"; export default (controller, env) => env.run();',
     );
-
-    const plugin = frameworkTriggersPlugin(root, { devTriggerToken: 'tk' });
-    callConfigResolved(plugin);
-    const code = readFileSync(frameworkTriggersDispatchPath(root), 'utf-8');
-
-    expect(code).toMatch(
-      /url\.pathname !== "\/__void\/scheduled"\s*&&\s*url\.pathname !== "\/__void\/queue"/,
-    );
-    expect(code).toContain('return null');
+    writeFileSync(join(root, 'queues', 'emails.mjs'), 'export default (batch, env) => env.run();');
+    const handle = await loadDevTrigger(root);
+    const env = { run: vi.fn() };
+    for (const [method, path] of [
+      ['GET', '/__void/scheduled'],
+      ['GET', '/__void/queue'],
+      ['POST', '/other'],
+      ['POST', '/__void/scheduled/extra'],
+      ['POST', '/__void/queue/extra'],
+    ]) {
+      const request = new Request(`http://localhost${path}`, {
+        method,
+        headers: { 'x-void-dev-trigger': 'tk' },
+        ...(method === 'POST' ? { body: '{' } : {}),
+      });
+      expect(await handle(request, env)).toBeNull();
+      expect(request.bodyUsed).toBe(false);
+    }
+    expect(env.run).not.toHaveBeenCalled();
   });
 
-  it('rejects requests with no auth headers', () => {
-    const root = createTempRoot();
-    mkdirSync(join(root, 'crons'), { recursive: true });
-    writeFileSync(
-      join(root, 'crons', 'a.ts'),
-      'export const cron = "0 * * * *";\nexport default async () => {};\n',
-    );
+  it.each(['scheduled', 'queue'] as const)(
+    'authenticates %s requests before parsing or invoking handlers',
+    async (kind) => {
+      const root = createTempRoot();
+      mkdirSync(join(root, 'crons'));
+      mkdirSync(join(root, 'queues'));
+      writeFileSync(
+        join(root, 'crons', 'hourly.mjs'),
+        'export const cron = "0 * * * *"; export default (controller, env) => env.run();',
+      );
+      writeFileSync(
+        join(root, 'queues', 'emails.mjs'),
+        'export default (batch, env) => env.run();',
+      );
+      const handle = await loadDevTrigger(root);
+      const run = vi.fn();
+      const cases: Array<{
+        headers: Record<string, string>;
+        proxyToken?: string;
+        authorized: boolean;
+      }> = [
+        { headers: {}, authorized: false },
+        { headers: { 'x-void-dev-trigger': 'wrong' }, authorized: false },
+        { headers: { 'x-void-internal': 'proxy' }, authorized: false },
+        { headers: { 'x-void-dev-trigger': 'tk' }, authorized: true },
+        { headers: { 'x-void-dev-trigger': 'tk' }, proxyToken: 'proxy', authorized: false },
+        {
+          headers: { 'x-void-dev-trigger': 'tk', 'x-void-internal': 'wrong' },
+          proxyToken: 'proxy',
+          authorized: false,
+        },
+        {
+          headers: { 'x-void-dev-trigger': 'wrong', 'x-void-internal': 'proxy' },
+          proxyToken: 'proxy',
+          authorized: true,
+        },
+      ];
+      for (const { headers, proxyToken, authorized } of cases) {
+        run.mockClear();
+        const request = new Request(`http://localhost/__void/${kind}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...headers },
+          body: authorized
+            ? JSON.stringify(
+                kind === 'scheduled'
+                  ? { cron: '0 * * * *', scheduledTime: 0 }
+                  : { queue: 'emails', messages: [] },
+              )
+            : '{',
+        });
+        const response = await handle(request, { run, __VOID_PROXY_TOKEN: proxyToken });
+        expect(response?.status).toBe(authorized ? 200 : 401);
+        expect(await response?.json()).toEqual(
+          authorized ? { ok: true } : { error: 'unauthorized' },
+        );
+        expect(run).toHaveBeenCalledTimes(authorized ? 1 : 0);
+        expect(request.bodyUsed).toBe(authorized);
+      }
+    },
+  );
 
-    const plugin = frameworkTriggersPlugin(root, { devTriggerToken: 'tk' });
-    callConfigResolved(plugin);
-    const code = readFileSync(frameworkTriggersDispatchPath(root), 'utf-8');
-    expect(code).toContain('"unauthorized"');
-    expect(code).toContain('x-void-internal');
-    expect(code).toContain('x-void-dev-trigger');
+  it('matches exact development queue names and preserves decisions across batch retries', async () => {
+    const root = createTempRoot();
+    mkdirSync(join(root, 'queues'));
+    writeFileSync(
+      join(root, 'queues', 'emails.mjs'),
+      'export default (batch, env) => env.consume(batch);',
+    );
+    const handle = await loadDevTrigger(root);
+    const env = {
+      consume: vi.fn((batch: QueueBatch) => {
+        batch.messages[0].ack();
+        batch.retryAll({ delaySeconds: 3 });
+        batch.ackAll();
+        batch.retryAll();
+      }),
+    };
+    const messages = ['one', 'two'].map((id) => ({
+      id,
+      timestamp: '2026-01-01T00:00:00Z',
+      body: {},
+      attempts: 1,
+    }));
+    for (const queue of ['unknown', 'project-emails']) {
+      const response = await handle(triggerRequest('queue', { queue, messages }), env);
+      expect(response?.status).toBe(404);
+      expect(await response?.json()).toEqual({ error: `No queue handler matches "${queue}"` });
+    }
+    expect(env.consume).not.toHaveBeenCalled();
+    const response = await handle(triggerRequest('queue', { queue: 'emails', messages }), env);
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({
+      ok: true,
+      decisions: { one: { action: 'ack' }, two: { action: 'retry', delaySeconds: 3 } },
+    });
+    expect(env.consume).toHaveBeenCalledOnce();
   });
 });
 
