@@ -194,7 +194,7 @@ export default extendConfig(
 
       nav: [
         {
-          text: 'SDK',
+          text: 'Guide',
           link: '/guide/',
           activeMatch:
             '^/guide/(?!platform/|self-hosted-platform|platform-administration|platform-development)',
@@ -223,8 +223,8 @@ export default extendConfig(
             collapsed: false,
             items: [
               { text: 'Introduction', link: '/guide/' },
-              { text: 'Supported App Types', link: '/guide/app-types' },
               { text: 'Quickstart', link: '/guide/quickstart' },
+              { text: 'Supported App Types', link: '/guide/app-types' },
             ],
           },
           {
