@@ -77,7 +77,7 @@ describe('Pages metadata wiring', () => {
     );
   it('emits lazy imports and renderer/action metadata with typed execution calls', () => {
     const code = compile();
-    expect(code).toContain('import * as __voidPagesRenderer from "virtual:void-pages-renderer"');
+    expect(code).toContain('import { renderPage } from "virtual:void-pages-renderer"');
     expect(code).toContain(
       'const _pload_index = __createModuleLoader(() => import("/project/pages/index.server.ts"))',
     );

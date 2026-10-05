@@ -694,6 +694,28 @@ describe('react-pages client (dev)', () => {
     expect(stderr).not.toMatch(/\(void_worker\).*new dependencies optimized: @void-repro/);
   });
 
+  it('dev: client-only shells retain the React preamble and mount loader props', async () => {
+    const response = await fetch(`${DEV_BASE}/client-only`);
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(html).toContain('data-void-ssr="false"');
+    expect(html).toContain('__vite_plugin_react_preamble_installed__ = true');
+    expect(html).not.toContain('client-only page component rendered on the server');
+
+    const context = await browser.newContext();
+    try {
+      const page = await context.newPage();
+      await page.goto(`${DEV_BASE}/client-only`);
+      await page.waitForSelector('#app[data-hydrated="true"]');
+      expect(await page.textContent('[data-testid="client-only-title"]')).toBe('Client-only Route');
+      expect(await page.textContent('[data-testid="client-only-marker"]')).toBe(
+        'loader-props-available',
+      );
+    } finally {
+      await context.close();
+    }
+  });
+
   it('dev: SSR pages, Inertia protocol, form handling, API coexistence', async () => {
     // 1. Initial page load returns SSR HTML with embedded page data
     const rootRes = await fetch(`${DEV_BASE}/`);

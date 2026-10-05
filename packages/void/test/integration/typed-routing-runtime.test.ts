@@ -76,6 +76,19 @@ describe('typed routing in generated Workers', () => {
           renderMode: 'server',
           shouldPrerender: false,
         },
+        {
+          pattern: '/client-only',
+          params: [],
+          catchAll: false,
+          componentPath: 'client-only.tsx',
+          componentId: 'client-only',
+          serverPath: null,
+          methods: [],
+          ssrMode: 'client',
+          prerenderMode: 'disabled',
+          renderMode: 'client',
+          shouldPrerender: false,
+        },
       ];
       const routeTable = join(directory, 'generated-routes.ts');
       const entry = join(directory, 'generated-worker.ts');
@@ -113,6 +126,10 @@ describe('typed routing in generated Workers', () => {
         ),
       );
       writeFileSync(entry, compileWorkerEntry({ runtimeEnvPath: source('env.ts') }));
+      const preambleScript = dev
+        ? '<script type="module">window.__fixturePreamble = true</script>'
+        : '';
+      const undefinedImports: Array<string> = [];
       await build({
         configFile: false,
         logLevel: 'silent',
@@ -134,7 +151,8 @@ describe('typed routing in generated Workers', () => {
             },
             load(id) {
               if (id === '\0virtual:void-pages-renderer') {
-                return `export async function renderPage(page) { return '<html><body>' + page.props.title + '</body></html>'; }`;
+                return `export async function renderPage(page) { return '<html><body>' + page.props.title + '</body></html>'; }
+renderPage.preambleScript = ${JSON.stringify(preambleScript)};`;
               }
               if (id === '\0virtual:void-pages-dev-assets') {
                 return 'export async function getVoidPagesDevCss() { return []; }';
@@ -150,11 +168,18 @@ describe('typed routing in generated Workers', () => {
           ssr: entry,
           target: 'esnext',
           rollupOptions: {
+            onwarn(warning, defaultHandler) {
+              if (warning.code === 'IMPORT_IS_UNDEFINED') {
+                undefinedImports.push(warning.message);
+              }
+              defaultHandler(warning);
+            },
             external: [/^cloudflare:/, /^node:/],
             output: { entryFileNames: 'worker.mjs', codeSplitting: false },
           },
         },
       });
+      expect(undefinedImports).toEqual([]);
       runtime = new Miniflare(
         convertV4MiniflareOptions({
           compatibilityDate: '2026-07-01',
@@ -201,6 +226,11 @@ describe('typed routing in generated Workers', () => {
       }
       const page = await runtime.dispatchFetch('https://app.test/');
       expect(await page.text()).toContain('real page loader');
+      const clientOnlyPage = await runtime.dispatchFetch('https://app.test/client-only');
+      const clientOnlyHtml = await clientOnlyPage.text();
+      expect(clientOnlyPage.status).toBe(200);
+      expect(clientOnlyHtml).toContain('data-void-ssr="false"');
+      expect(clientOnlyHtml.includes('window.__fixturePreamble = true')).toBe(dev);
       const protocol = await runtime.dispatchFetch('https://app.test/', {
         headers: { 'x-voidpages': 'true' },
       });

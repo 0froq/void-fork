@@ -997,7 +997,7 @@ function compilePageRoutes(
   options: CompileOptions,
 ): void {
   // Import protocol helpers and renderer
-  lines.push(`import * as __voidPagesRenderer from "virtual:void-pages-renderer";`);
+  lines.push(`import { renderPage } from "virtual:void-pages-renderer";`);
   if (options.dev) {
     lines.push(`import { getVoidPagesDevCss } from "virtual:void-pages-dev-assets";`);
   }
@@ -1008,12 +1008,6 @@ function compilePageRoutes(
     lines.push(`import { renderIslandPage } from "virtual:void-islands-renderer";`);
   }
   lines.push('');
-  lines.push(`const renderPage = __voidPagesRenderer.renderPage;`);
-  lines.push(`if (typeof __voidPagesRenderer.renderPreambleScript === "string") {`);
-  lines.push(`  renderPage.preambleScript = __voidPagesRenderer.renderPreambleScript;`);
-  lines.push(`}`);
-  lines.push('');
-
   // Emit head config constant from void.json
   lines.push(`const __voidHeadConfig = ${JSON.stringify(pages.headConfig ?? null)};`);
   lines.push('');
