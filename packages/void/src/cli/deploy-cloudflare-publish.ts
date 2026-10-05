@@ -37,13 +37,13 @@ import {
 } from './cloudflare-operations.ts';
 import { rememberCloudflareWorkersDevSubdomain } from './cloudflare-readiness.ts';
 import { runWranglerAuthToken } from './deploy-cloudflare-auth.ts';
-import { prepareCloudflareDeploySource } from './deploy-cloudflare-preflight.ts';
 import {
   activateCloudflareVersionWithProgress,
   cloudflareWorkerReadinessHeaders,
   reportCloudflareActivationFailure,
   formatCloudflareActivationError,
-} from './deploy-cloudflare.ts';
+} from './deploy-cloudflare-helpers.ts';
+import { prepareCloudflareDeploySource } from './deploy-cloudflare-preflight.ts';
 import { log } from './deploy-helpers.ts';
 import { formatCloudflareSandboxUnavailable, BETTER_AUTH_SECRET_NAME } from './deploy-resources.ts';
 import { formatDeploySummary } from './deploy-summary.ts';

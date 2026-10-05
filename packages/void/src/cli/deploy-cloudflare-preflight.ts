@@ -41,7 +41,7 @@ import {
   prepareExistingCloudflareDeployWithAuth,
 } from './deploy-cloudflare-auth.ts';
 import { runCloudflareEmailStep } from './deploy-cloudflare-email.ts';
-import { discoverRootWranglerConfig } from './deploy-cloudflare.ts';
+import { discoverRootWranglerConfig } from './deploy-cloudflare-helpers.ts';
 import { log, getErrorMessage } from './deploy-helpers.ts';
 import {
   resolveWranglerMigrationPattern,

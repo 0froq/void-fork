@@ -74,7 +74,7 @@ import {
   cloudflareWorkerReadinessHeaders,
   reportCloudflareActivationFailure,
   formatCloudflareActivationError,
-} from './deploy-cloudflare.ts';
+} from './deploy-cloudflare-helpers.ts';
 import {
   generateDeployWrapperIfNeeded,
   resolveStaticDeployPreset,
