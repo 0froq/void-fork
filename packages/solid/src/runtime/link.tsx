@@ -309,7 +309,7 @@ export function Link(props: LinkProps): JSX.Element {
   });
 
   const eventHandlers = createMemo(() => {
-    const handlers: Record<string, unknown> = {
+    const handlers = {
       onClick,
       onFocus: local.onFocus,
       onMouseDown: local.onMouseDown,
