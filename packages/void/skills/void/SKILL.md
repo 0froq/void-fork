@@ -87,4 +87,4 @@ If the user invokes this skill without a task, inspect the app's local structure
 configuration, and saved deployment destination, give a brief status, and ask
 what they want to work on.
 
-For AI and Sandbox operations, use `.match({ ok, limited })` and choose a useful quota fallback. In Pages, prefer the adapter’s `Form` with `useForm()` so action failures remain visible and entered data is preserved. See `docs/guide/ai.md`, `docs/guide/sandboxes.md`, and `docs/guide/pages-routing/actions-and-forms.md`.
+Await AI and Sandbox operations normally. Usage limits reject with `UsageLimit` from `void/limits`; Void routes and Pages actions automatically return HTTP 429. Optionally catch with `instanceof UsageLimit` for a fallback or custom response. In Pages, prefer the adapter’s `Form` with `useForm()` so action failures remain visible and entered data is preserved. See `docs/guide/ai.md`, `docs/guide/sandboxes.md`, and `docs/guide/pages-routing/actions-and-forms.md`.
