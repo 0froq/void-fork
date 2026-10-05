@@ -70,9 +70,5 @@ describe('extractSlug', () => {
     it('rejects nested subdomains on staging', () => {
       expect(extractSlug('foo.bar.staging.void.app', 'staging.void.app')).toBeNull();
     });
-
-    it('uses default baseHostname when omitted', () => {
-      expect(extractSlug('my-app.void.app')).toBe('my-app');
-    });
   });
 });

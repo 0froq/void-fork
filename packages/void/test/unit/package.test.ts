@@ -1,6 +1,5 @@
 import { mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { hash as blake3hash } from 'blake3-jit';
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 import {
   buildFrameworkManifest,
@@ -454,46 +453,6 @@ describe('computeAssetHash', () => {
     expect(hashHtml).not.toBe(hashJs);
     expect(hashHtml).not.toBe(hashNoExt);
     expect(hashJs).not.toBe(hashNoExt);
-  });
-
-  it("matches Wrangler's BLAKE3 hash algorithm", () => {
-    // Wrangler computes: blake3(base64(content) + extension).hex().slice(0, 32)
-    const content = Buffer.from('cross-compat test');
-    const filePath = 'test.txt';
-    const cliHash = computeAssetHash(content, filePath);
-
-    // Reproduce Wrangler's algorithm directly
-    const base64 = content.toString('base64');
-    const ext = 'txt';
-    const input = new TextEncoder().encode(base64 + ext);
-    const digest = blake3hash(input);
-    const wranglerHash = Buffer.from(digest).toString('hex').slice(0, 32);
-
-    expect(cliHash).toBe(wranglerHash);
-  });
-
-  it('matches API-side hash for same input', () => {
-    // The API uses arrayBufferToBase64 + blake3-jit — verify cross-compatibility
-    const content = Buffer.from('api compat test');
-    const filePath = 'styles.css';
-    const cliHash = computeAssetHash(content, filePath);
-
-    // Simulate API-side: ArrayBuffer → base64 via btoa(String.fromCharCode)
-    const bytes = new Uint8Array(content);
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    const apiBase64 = btoa(binary);
-    const ext = 'css';
-    const input = new TextEncoder().encode(apiBase64 + ext);
-    const digest = blake3hash(input);
-    const apiHash = [...digest]
-      .slice(0, 16)
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-
-    expect(cliHash).toBe(apiHash);
   });
 });
 

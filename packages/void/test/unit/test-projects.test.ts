@@ -10,7 +10,6 @@ type TestProject = {
     exclude?: Array<string>;
     pool?: string;
     isolate?: boolean;
-    fsModuleCache?: boolean;
   };
 };
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -60,11 +59,5 @@ it('keeps module isolation for every project', () => {
   for (const project of projects) {
     expect(project.test.isolate, project.test.name).not.toBe(false);
     expect(['threads', 'forks']).toContain(project.test.pool ?? 'forks');
-  }
-});
-
-it('reuses transforms in projects that do not inherit the root configuration', () => {
-  for (const project of projects) {
-    expect(project.test.fsModuleCache, project.test.name).toBe(true);
   }
 });

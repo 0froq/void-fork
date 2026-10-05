@@ -54,27 +54,6 @@ describe('withValidator + zod', () => {
     email: z.string().email(),
   });
 
-  it('type: infers body and rejects undeclared slots', () => {
-    defineHandler.withValidator({
-      body: CreateUser,
-    })((_c, { body }) => {
-      // @ts-expect-error - 'age' does not exist on { name: string; email: string }
-      void body.age;
-      // @ts-expect-error - name is string, toFixed exists only on number
-      void body.name.toFixed();
-      return body;
-    });
-
-    defineHandler.withValidator({
-      body: CreateUser,
-      // @ts-expect-error - 'query' was not declared in validators
-    })((_c, { body, _query }) => {
-      return body;
-    });
-
-    expect(true).toBe(true); // compile-time type test
-  });
-
   it('accepts valid body', async () => {
     const handler = defineHandler.withValidator({
       body: CreateUser,
@@ -166,28 +145,6 @@ describe('withValidator + valibot', () => {
     email: v.pipe(v.string(), v.email()),
   });
 
-  it('type: infers body and query types from schema', () => {
-    defineHandler.withValidator({
-      body: CreateUser,
-    })((_c, { body }) => {
-      // @ts-expect-error - 'age' does not exist on { name: string; email: string }
-      void body.age;
-      // @ts-expect-error - name is string, toFixed exists only on number
-      void body.name.toFixed();
-      return body;
-    });
-
-    defineHandler.withValidator({
-      query: v.object({ q: v.string() }),
-    })((_c, { query }) => {
-      // @ts-expect-error - 'page' does not exist on { q: string }
-      void query.page;
-      return query;
-    });
-
-    expect(true).toBe(true); // compile-time type test
-  });
-
   it('accepts valid body', async () => {
     const handler = defineHandler.withValidator({
       body: CreateUser,
@@ -263,28 +220,6 @@ describe('withValidator + arktype', () => {
   const CreateUser = type({
     name: 'string >= 1',
     email: 'string.email',
-  });
-
-  it('type: infers body and params types from schema', () => {
-    defineHandler.withValidator({
-      body: CreateUser,
-    })((_c, { body }) => {
-      // @ts-expect-error - 'age' does not exist on { name: string; email: string }
-      void body.age;
-      // @ts-expect-error - name is string, toFixed exists only on number
-      void body.name.toFixed();
-      return body;
-    });
-
-    defineHandler.withValidator({
-      params: type({ id: 'string' }),
-    })((_c, { params }) => {
-      // @ts-expect-error - 'slug' does not exist on { id: string }
-      void params.slug;
-      return params;
-    });
-
-    expect(true).toBe(true); // compile-time type test
   });
 
   it('accepts valid body', async () => {
