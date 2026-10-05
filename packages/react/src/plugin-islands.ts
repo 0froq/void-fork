@@ -395,8 +395,13 @@ async function hydrateIsland(el, mod, props) {
   const { hydrateRoot } = await import("react-dom/client");
   const React = await import("react");
   const Component = mod.default || mod;
-  hydrateRoot(el, React.createElement(Component, props));
-  el.setAttribute("data-hydrated", "true");
+  function HydratedIsland() {
+    React.useLayoutEffect(() => {
+      el.setAttribute("data-hydrated", "true");
+    }, []);
+    return React.createElement(Component, props);
+  }
+  hydrateRoot(el, React.createElement(HydratedIsland));
 }
 
 initIslands(islands, hydrateIsland);
