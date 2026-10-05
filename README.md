@@ -1,120 +1,39 @@
 # Void
 
-Fullstack SDK for Cloudflare Workers, powered by [Vite](https://vite.dev).
+Full-stack apps with [Vite](https://vite.dev), running on Cloudflare Workers.
 
-Add the Vite plugin to build APIs and server-rendered pages with typed access to databases, storage, and AI. Void detects the resources your code uses and provisions them when you deploy.
+Build APIs and server-rendered pages with typed access to databases, storage, and AI. Void detects the resources your app uses and provisions them when you deploy. Use React, Vue, Svelte, Solid, or a [supported framework](https://void.cloud/integrations/frameworks/overview).
 
-If you run a team platform, `void platform` also lets you give people access,
-manage their projects, and investigate deployments from the terminal. Start with
-[Platform Administration](./docs/guide/platform-administration.md).
+## Getting Started
 
-The platform implementation is included in this repository. To change it or
-deploy a runtime from your own fork, follow
-[Platform Development](./docs/guide/platform-development.md).
-
-```ts
-// vite.config.ts
-import { defineConfig } from 'vite';
-import { voidPlugin } from 'void';
-
-export default defineConfig({
-  plugins: [voidPlugin()],
-});
-```
-
-## Starting a New Project
-
-Use Node.js 24.21.0 or later for the CLI and build tools.
-
-1. Install the Void CLI:
+Use Node.js 24.21.0 or later. In an empty directory, run:
 
 ```sh
-mkdir your-project
-cd your-project
-pnpm add -D void
+npm install -D void
+npx void init
+npm run dev
 ```
 
-In an empty project, `void init` asks which framework and starter you want, then installs the dependencies. It uses Vite+ by default. In an existing app, it adds missing scripts and configures the Vite plugin.
-
-Init offers to initialize Git and suggests an optional initial commit command. Use `--git` or `--no-git` to choose without the Git prompt. Existing repositories are preserved; Void does not commit automatically.
-
-Init also adds brief instructions to `AGENTS.md`, pointing coding agents to the bundled docs at `node_modules/void/skills/void/docs/`. Run `void init --agents` to add or refresh just the agent setup.
-
-Then run:
+Choose your UI framework and starter, then select Cloudflare to deploy to your account:
 
 ```sh
-pnpm void init
-pnpm dev             # local dev with workerd runtime
-pnpm void deploy     # deploy to the saved Cloudflare or Void target
+npx void deploy
 ```
 
-## Adding Void to an Existing Project
-
-To switch Cloudflare users, run `void cloudflare login`. Use `void cloudflare status` to check the signed-in identity and the project's pinned deployment account; signing in leaves the project target unchanged.
-
-Already deploy the same Void app directly to Cloudflare? Run `void deploy`. If your project has a `wrangler.jsonc` or `wrangler.json` and no deployment destination, Void offers to link and deploy using the existing Worker and resources. Accept once, then use `void deploy` for future deployments. See [Deploy an existing Worker](./docs/integrations/cloudflare.md#deploy-an-existing-worker).
-
-1. Install Void:
-
-```sh
-pnpm add -D void
-```
-
-2. Enable the plugin in `vite.config.ts`:
-
-```ts
-import { defineConfig } from 'vite';
-import { voidPlugin } from 'void';
-
-export default defineConfig({
-  plugins: [voidPlugin()],
-});
-```
-
-3. Run the setup flow:
-
-```sh
-pnpm void init
-```
-
-4. Deploy to the target selected during setup:
-
-```sh
-pnpm void deploy
-```
-
-## Features
-
-- **One CLI** — deploy and manage your app on your Cloudflare account or your team's Void platform
-- **Team platforms** — install a shared deployment service in your company's Cloudflare account and connect developers through the same CLI
-- **Automatic provisioning** — use `void/db`, `void/kv`, `void/storage`, or `void/ai`, and Void provisions the resources your app needs
-- **Typed production secrets** — schema-declared server keys are required in remote secret storage and rejected as plaintext Worker vars
-- **File-based routing** — drop a file in `routes/`, get an endpoint with method exports, dynamic params, middleware, and [Standard Schema](https://standardschema.dev/) validation
-- **Full-stack pages** — `pages/` directory for server-rendered UI with co-located data loading, SPA navigation, and typed forms (React, Vue, Svelte, Solid)
-- **Explicit limit handling** — AI and Sandbox operations require success and quota fallbacks; Pages forms display action errors and preserve input
-- **End-to-end type safety** — Drizzle schemas define DB types, route handlers infer return types, typed fetch client checks everything at the call site
-- **Typed durable state** — modules in `durable-objects/` get inferred SQLite-backed bindings and typed RPC methods
-- **Local dev parity** — `vite dev` runs handlers in the real `workerd` runtime with local D1, KV, and R2
-
-Before moving deployed Durable State or WebSocket definitions, run `void info` and pin the displayed `name`. Existing unnamed definitions keep their defaults. See the [Durable State](./docs/guide/durable-state.md#rename-a-file-while-keeping-its-state) and [WebSocket](./docs/guide/websockets.md#move-a-route-while-keeping-its-state) migration guides.
+Void builds the app, provisions resources, applies database migrations, and prints your deployed URL. Follow the [Quickstart](https://void.cloud/guide/quickstart) to explore your app or add Void to an existing Vite project.
 
 ## Documentation
 
-Full docs at [void.cloud](https://void.cloud). Run `vp run dev:docs` in this repo to view the documentation locally.
+- [How Void works](https://void.cloud/guide/)
+- [Server routes](https://void.cloud/guide/server-routing) and [pages](https://void.cloud/guide/pages-routing/overview)
+- [Database](https://void.cloud/guide/database) and [type safety](https://void.cloud/guide/type-safety)
+- [Deployment](https://void.cloud/guide/deployment)
+- [Framework integrations](https://void.cloud/integrations/frameworks/overview)
+- [Coding agents](https://void.cloud/integrations/agents)
 
-Run `void connect` to choose a deployment destination and sign in, `void connect --platform cloudflare` for your own account, or `void connect <url>` for your team's platform. See the [connection reference](./docs/reference/cli/auth.md#connect).
-
-To install a shared company platform, start with [Install a Void Platform](./docs/guide/self-hosted-platform.md). The installation pages cover Cloudflare setup, a domain, PostgreSQL, credentials, and your choice of GitHub, Google, OIDC, or Cloudflare Access sign-in, then preview the installation with `void platform install --plan`. Void creates the core API, routing, proxy, and telemetry resources.
-
-Platform upgrades verify migrations and check the new Workers before completing the rollout. If a rollout fails, Void can restore the previous Workers against the compatible database schema. See the platform guide for recovery and upgrade details.
-
-Administrators can use `void platform config plans` to define account plans, change enforced limits, and choose the default for new accounts. See [Plans and Limits](./docs/guide/platform/administration/plans.md).
-
-For a test platform before your domain is ready, use `void platform install --workers-dev`. Later, `void platform domain set example.com` guides DNS setup and verifies HTTPS while preserving existing app URLs and the platform API connection.
+Teams can [install a Void platform](https://void.cloud/guide/self-hosted-platform) in a shared Cloudflare account. The framework, CLI, and platform source are included in this repository.
 
 ## Contributing
-
-### Setup
 
 ```sh
 git clone https://github.com/voidzero-dev/void.git
@@ -123,76 +42,7 @@ vp install
 vp run build:all
 ```
 
-### Development
-
-```sh
-vp test run            # run tests
-vpr test:all           # format, lint, build, typecheck, and run every SDK/platform test
-vp lint                # oxlint via Vite+
-vp fmt                 # oxfmt via Vite+
-vp run check           # typecheck all packages
-vp run dev:docs        # local docs dev server
-```
-
-See [TESTING.md](./TESTING.md) for targeted verification and the account-neutral, non-destructive
-native Cloudflare live E2E procedure.
-
-Build the public packages and smoke-test their actual tarballs outside the workspace:
-
-```sh
-vp run build
-node .github/scripts/packed-consumer.mjs
-```
-
-The default smoke test uses a React app with npm and pnpm, public Vite, and HTTP
-checks for assets and KV. Set `VOID_PACKED_SUITE=full` for all four native Pages
-adapters, Markdown, production preview, and browser hydration/navigation tests.
-The Prepublish Test workflow selects smoke coverage for routine code changes, full coverage
-for packaging/dependency/adapter changes, and skip expensive jobs for docs-only changes.
-Release CI always runs the full matrix on Linux and macOS.
-The [release acceptance procedure](./platform/meta/release-acceptance.md)
-separates these local checks from the credentialed Cloudflare signoff.
-
-### Project Structure
-
-| Path                         | Purpose                                                           |
-| ---------------------------- | ----------------------------------------------------------------- |
-| `packages/void`              | Core Vite plugin + CLI                                            |
-| `packages/deploy-core`       | Shared deploy contracts, artifacts, planning, and target boundary |
-| `packages/deploy-cloudflare` | Public direct-Cloudflare deployment primitives                    |
-| `packages/platform`          | Platform deployment manifests, naming, and lifecycle contracts    |
-| `packages/edge`              | Shared edge routing and static asset runtime                      |
-| `packages/isr`               | Shared ISR protocol, core, and direct runtime                     |
-| `packages/react`             | React framework adapter                                           |
-| `packages/vue`               | Vue framework adapter                                             |
-| `packages/svelte`            | Svelte 5 framework adapter                                        |
-| `packages/solid`             | SolidJS framework adapter                                         |
-| `platform/packages`          | Hosted Void control plane, routing, proxy, logging, and dashboard |
-| `docs`                       | Documentation (VitePress)                                         |
-| `playground/*`               | Test apps for local development                                   |
-
-Public SDK packages must not import from `platform/`. Hosted platform packages may depend on public or shared workspace packages.
-
-## GitHub Deployment
-
-The documentation site deploys from `main` through the Void GitHub App using the
-`container` executor. The root [`void.config.ts`](./void.config.ts) configures the monorepo
-as a static project that builds `docs` and publishes `docs/.vitepress/dist`.
-There is no documentation deploy workflow or `VOID_TOKEN` repository secret.
-
-Connect the repository once with:
-
-```sh
-void github connect void-docs \
-  --repo voidzero-dev/void \
-  --branch main \
-  --executor container
-```
-
-Release publishing still uses the `Release` GitHub environment with an
-`NPM_TOKEN` secret via `.github/workflows/publish.yml`.
-
-CI (`ci.yml`) runs on PRs to `main` and requires no secrets.
+Use `vp run dev:docs` to preview the docs. See [TESTING.md](./TESTING.md) for verification, [Platform Development](https://void.cloud/guide/platform-development) for platform changes, and [operations](./platform/meta/operations.md) for repository deployments.
 
 ## License
 

@@ -193,3 +193,24 @@ void platform system health --connection https://api.staging.void.cloud
 `vp run --filter @voidcloud/platform health` runs the same operator health command against the selected connection. It requires a built SDK and `void platform auth login` or `VOID_OPERATOR_TOKEN`. The `health:staging` shortcut explicitly selects Void Cloud staging.
 
 The [kitchen-sink smoke checklist](../scripts/kitchen-sink-smoke-test.md) works with a disposable deployment on any platform. Its automated script requires `SMOKE_URL` and resets that app's data. The hosted smoke-test workflow provides the staging URL explicitly.
+
+## Documentation Site
+
+The documentation site deploys from `main` through the Void GitHub App using the
+`container` executor. The root [`void.config.ts`](../../void.config.ts) configures the monorepo
+as a static project that builds `docs` and publishes `docs/.vitepress/dist`.
+There is no documentation deploy workflow or `VOID_TOKEN` repository secret.
+
+Connect the repository once with:
+
+```sh
+void github connect void-docs \
+  --repo voidzero-dev/void \
+  --branch main \
+  --executor container
+```
+
+Release publishing still uses the `Release` GitHub environment with an
+`NPM_TOKEN` secret via `.github/workflows/publish.yml`.
+
+CI (`ci.yml`) runs on PRs to `main` and requires no secrets.
