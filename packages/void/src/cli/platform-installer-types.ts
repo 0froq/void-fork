@@ -11,20 +11,20 @@ import type {
   PlatformRuntimeDatabaseManifest,
   PlatformRuntimeMigration,
 } from '@void/platform/installer';
-import { ensurePlatformAccessHealthChecks } from './platform-access-health.ts';
-import { verifyInstalledPlatformAccessProtection } from './platform-access-preflight.ts';
-import { initializeInstalledAppAccess } from './platform-app-access.ts';
-import { initializeInstalledPlatformAuthentication } from './platform-auth-bootstrap.ts';
+import type { ensurePlatformAccessHealthChecks } from './platform-access-health.ts';
+import type { verifyInstalledPlatformAccessProtection } from './platform-access-preflight.ts';
+import type { initializeInstalledAppAccess } from './platform-app-access.ts';
+import type { initializeInstalledPlatformAuthentication } from './platform-auth-bootstrap.ts';
 import {
   type CloudflareWorkerCustomDomainOrigin,
   type PlatformCloudflareClient,
 } from './platform-cloudflare.ts';
-import {
+import type {
   bootstrapPlatformSharedEmail,
   verifyPlatformHealth,
   verifyPlatformDeploymentExecutionDrain,
 } from './platform-installer-health.ts';
-import { runPlatformWrangler } from './platform-installer-workers.ts';
+import type { runPlatformWrangler } from './platform-installer-workers.ts';
 import { type PlatformInstallPlan, type PlatformInstallPlanAction } from './platform-plan.ts';
 import { type PlatformProjectZeroTrustState } from './platform-zero-trust-uninstall.ts';
 
