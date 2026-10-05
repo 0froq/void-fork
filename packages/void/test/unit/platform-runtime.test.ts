@@ -46,6 +46,21 @@ describe('platform runtime manifest', () => {
     expect(compatibility.rollbackSafeFrom).toEqual(manifest.database.rollbackSafeFrom);
   });
 
+  it('omits build-only source maps and their references from packaged Workers', () => {
+    const runtimeDirectory = getPlatformRuntimeDirectory();
+    const manifest = readPlatformRuntimeManifest();
+
+    expect(
+      readdirSync(runtimeDirectory, { recursive: true, encoding: 'utf8' }).filter((path) =>
+        path.endsWith('.map'),
+      ),
+    ).toEqual([]);
+    for (const artifact of Object.values(manifest.artifacts)) {
+      const contents = readFileSync(join(runtimeDirectory, artifact.path), 'utf8');
+      expect(contents.match(/^\/\/# sourceMappingURL=.*$/gm) ?? []).toEqual([]);
+    }
+  });
+
   it('binds every packaged migration and Worker artifact to the manifest', () => {
     const runtimeDirectory = getPlatformRuntimeDirectory();
     const manifest = readPlatformRuntimeManifest();

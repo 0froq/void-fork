@@ -82,7 +82,7 @@ try {
 
   for (const [name, entrypoint] of workers) {
     const configPath = join(temporaryRoot, `${name}.json`);
-    const outputDirectory = join(runtimeRoot, name);
+    const outputDirectory = join(temporaryRoot, name);
     writeFileSync(
       configPath,
       JSON.stringify({
@@ -108,7 +108,13 @@ try {
       throw new Error(`Failed to build the ${name} platform Worker.`);
     }
     const artifactPath = join(outputDirectory, 'index.js');
-    const contents = readFileSync(artifactPath);
+    // Publish executable artifacts without build-only maps or dangling map references.
+    const contents = Buffer.from(
+      readFileSync(artifactPath, 'utf8').replace(/\n\/\/# sourceMappingURL=[^\r\n]*\s*$/u, '\n'),
+    );
+    const packagedArtifactPath = join(runtimeRoot, name, 'index.js');
+    mkdirSync(dirname(packagedArtifactPath), { recursive: true });
+    writeFileSync(packagedArtifactPath, contents);
     artifacts[name] = {
       path: `${name}/index.js`,
       sha256: createHash('sha256').update(contents).digest('hex'),
