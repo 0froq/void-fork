@@ -113,10 +113,4 @@ Files, running processes, and listening servers last only as long as the contain
 
 Sandboxes require [Workers Paid](https://dash.cloudflare.com/?to=/:account/workers/plans) and Containers access. A managed platform's runtime token needs Account / Containers: Edit and Account / Cloudchamber: Edit.
 
-`void deploy --platform cloudflare` builds native images and deploys the Sandbox alongside the application. `void deploy` on a connected Void Platform applies the platform's Sandbox concurrency and runtime limits. The platform must run version 0.23.0 or newer.
-
-## Moving from Sandbox SDK 0.x
-
-Update string commands to argument arrays, move file calls under `.files`, and consume process output and file responses as shown above. Replace `sleepAfter` and `keepAlive` with `inactivityTimeoutMs`; remove `maxInstances` from configuration. The old `Sandbox` export, sessions, code interpreter, process-list helpers, and preview-URL helpers are no longer part of this API.
-
-Existing native 0.x Sandboxes need a new Worker configuration and namespace. Back up container files and any Durable Object data, choose a fresh `worker.name`, and remove the old Sandbox bindings, containers, and migrations from that new configuration before deploying. The new default class is `SandboxV1`; existing state does not transfer automatically. Retain the old Worker until you have validated the replacement and restored your data, then clean up its resources. See [Cloudflare's scheduling-policy migration guide](https://developers.cloudflare.com/containers/guides/migrate-to-durable-object-scheduling-policy/).
+`void deploy --platform cloudflare` builds native images and deploys the Sandbox alongside the application. `void deploy` on a connected Void Platform applies the platform's Sandbox concurrency and runtime limits.

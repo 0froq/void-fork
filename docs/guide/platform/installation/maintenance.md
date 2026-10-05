@@ -42,11 +42,6 @@ secret manager to an object keyed by each exact API/proxy origin, with
 and stops if the gate still rejects its checks. Account-wide Default-Deny and
 deployed-application policies remain your responsibility.
 
-If **System Status** reports `proxy HTTP 302 (redirect)` on an older Access-protected
-installation, upgrade with `void platform upgrade <id>`. Current installations use
-a private connection for the dashboard's proxy health check. Keep the proxy's
-Access protection enabled.
-
 ### Expired administrator setup code
 
 Resume an unfinished installation with `void platform install --resume --name <id>`.
@@ -68,7 +63,7 @@ Repair recreates missing infrastructure that the installer owns. It does not res
 
 ### Upgrade the platform
 
-Keep the platform runtime current when updating the Void CLI. The CLI requires platform version 0.23.0 or newer. If a developer's CLI reports that the platform is older than that, upgrade the platform before retrying.
+Keep the platform runtime current when updating the Void CLI.
 
 Use the installed CLI's packaged runtime to upgrade:
 
@@ -91,10 +86,6 @@ and complete project-encryption keyring. Keep current credentials in your secret
 manager so they can also restore a missing Worker during repair.
 
 Database migrations only move forward. Void checks compatibility before upgrading and tells you if an intermediate release is needed. If deployment fails, it attempts to restore the previous Workers against the compatible database schema. Retrying does not repeat completed migrations.
-
-Upgrades automatically enable managed Sandboxes. The platform runtime token needs Account / Containers: Edit and Account / Cloudchamber: Edit, and the Cloudflare account must use Workers Paid before its first Sandbox application deploy. The upgrade itself does not probe Containers access, so platforms that do not deploy Sandbox applications need no additional plan or permissions.
-
-When upgrading from a release that used tenant-owned Sandbox containers, the upgrade may first ask you to finish the legacy cleanup. Follow the [`sandbox-drain` instructions](../../../reference/cli/platform-operations.md#operator-system), then rerun the upgrade. Administrator login remains available during that maintenance step.
 
 After a successful upgrade, you can restore a declared-compatible earlier runtime without reversing migrations:
 

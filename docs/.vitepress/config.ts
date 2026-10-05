@@ -285,7 +285,6 @@ export default extendConfig(
               { text: 'Object Storage', link: '/guide/storage' },
               { text: 'Durable State', link: '/guide/durable-state' },
               { text: 'Environment Variables', link: '/guide/env-vars' },
-              { text: 'Environment Migration', link: '/guide/env-migration' },
             ],
           },
           {

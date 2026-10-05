@@ -51,28 +51,6 @@ Following waits for the final logs before stopping, including diagnostics writte
 
 ## Checking the Platform
 
-### Migrating older deployment assets
-
-After upgrading the platform, inspect every page of its asset inventory:
-
-```sh
-void platform system asset-migrations --page 1 --limit 100
-void platform deployment migrate-assets <deployment-id> --plan
-void platform deployment migrate-assets <deployment-id> --yes
-```
-
-Migrate every deployment with a nonzero `needsMigration` count, including retained
-rollback targets and stored Worker bundles. Investigate entries marked `invalid`
-before continuing. The command verifies each copied asset, preserves originals,
-and applies successive batches. If interrupted, inspect the result and resume
-with the last successful `nextCursor` using `--cursor`; restarting without a
-cursor also verifies and reuses completed copies.
-
-Run the inventory again across all pages when finished. Existing applications
-continue serving during this migration, and the provider asset mirror remains.
-Legacy reads remain available while older platform runtimes and cached manifests
-can still reference original assets.
-
 ### Health checks
 
 Use the overview to see recent activity, or run a health check to test the platform's services and database:
