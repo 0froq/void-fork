@@ -1,17 +1,5 @@
-import {
-  chmodSync,
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeSync,
-} from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { cloudflare, type PluginConfig, type WorkerConfig } from '@cloudflare/vite-plugin';
-import { appendSqliteClassMigration } from '@void/deploy-core';
 import { join, resolve } from 'pathslash';
 import pc from 'picocolors';
 import { type Plugin } from 'vite';
@@ -23,25 +11,14 @@ import {
   resolveAssetRoutingPolicy,
   type AssetRoutingPolicy,
 } from './asset-routing.ts';
-import { getApiUrl, getProxyUrl, getToken } from './cli/auth.ts';
-import { ensurePlatformProxyAccess } from './cli/cf-access.ts';
-import { SEND_EMAIL_BINDING } from './cli/email-cloudflare.ts';
 import { mergeRoutingRules } from './cli/headers.ts';
-import { readDeploymentPlatform, readProjectConfig } from './cli/project.ts';
+import { readDeploymentPlatform } from './cli/project.ts';
 import {
-  ensureWranglerCompat,
-  ensureWranglerCompatibilityDate,
-  ensureWranglerNodejsAlsFlag,
-  findBindingNameOwner,
-  hasDurableObjectSqliteMigration,
-  LIVE_MIGRATION_TAG,
   normalizeWranglerCompatibilityFlags,
-  nextDurableObjectMigrationTag,
   readWranglerCompat,
   readWranglerWebSocketTombstones,
   readExistingLiveBindingConfig,
   resolveLiveBindingConfig,
-  syncWranglerBindings,
   syncWranglerDurableObjects,
   syncWranglerWebSockets,
 } from './cli/wrangler.ts';
@@ -50,14 +27,19 @@ import {
   restoreCloudflarePreviewPointer,
   stashCloudflareDeployPointer,
 } from './cloudflare-config.ts';
-import { finalizeDurableObjectPatch } from './cloudflare-durable-patch.ts';
-import { writeFileIfChanged } from './codegen/write-if-changed.ts';
-import { readConfig, isNodeTarget, type NotFoundHandling } from './config.ts';
+import { readConfig, isNodeTarget } from './config.ts';
 import { inferBindingsFromSource } from './inference/walk.ts';
 import { resolveLocalD1Target, writeLocalD1PersistState } from './local-d1.ts';
-import { voidLog, voidWarn, voidError } from './log.ts';
+import { voidLog, voidWarn } from './log.ts';
 import { pagesDevCssAssetsPlugin } from './pages/dev-css-assets.ts';
+import { readVoidDevCredentials, runAiSetupPrompt } from './plugin-ai-setup.ts';
 import { bindingRuntimePlugin } from './plugin-binding-runtime.ts';
+import { createClientStubsPlugin } from './plugin-client-stubs.ts';
+import {
+  warnIfPackageJsonIsNotEsm,
+  isViteBuildOrPreview,
+  getOrCreateDevTriggerToken,
+} from './plugin-dev-config.ts';
 import { devTriggersHintPlugin } from './plugin-dev-triggers-hint.ts';
 import { drizzlePlugin } from './plugin-drizzle.ts';
 import { emailDevInboxPlugin } from './plugin-email-dev-inbox.ts';
@@ -65,689 +47,40 @@ import { envClientFoldPlugin } from './plugin-env-client-fold.ts';
 import { envClientGuardPlugin } from './plugin-env-client-guard.ts';
 import { envSchemaPlugin, type EnvSchemaFacts } from './plugin-env-schema.ts';
 import {
-  analogDevTriggerInjectPlugin,
-  astroDevTriggerInjectPlugin,
-  frameworkTriggersDispatchPath,
-  frameworkTriggersPlugin,
-  nitroDevTriggerInjectPlugin,
-  writeFrameworkTriggersDispatch,
-} from './plugin-framework-triggers.ts';
+  getFrameworkEntry,
+  generateClassATriggerWrapper,
+  getOriginalFrameworkEntry,
+} from './plugin-framework-entry.ts';
+import { frameworkTriggersPlugin } from './plugin-framework-triggers.ts';
+import { createFrameworkPlugins } from './plugin-framework.ts';
 import { DEFAULT_SCAN_DIRS, FRAMEWORK_SCAN_DIRS, type Framework } from './plugin-inference.ts';
 import { migrationPlugin } from './plugin-migration.ts';
 import { nodeTargetPlugin } from './plugin-node-target.ts';
 import { prerenderPlugin } from './plugin-prerender.ts';
 import { restartPlugin } from './plugin-restart.ts';
 import { routingPlugin } from './plugin-routing.ts';
+import { mergeWorkerBindings } from './plugin-worker-bindings.ts';
+import {
+  createServerRuntimeOptimizerPlugin,
+  DEV_ASSET_ROUTING_EXCLUSIONS,
+  createCloudflareBuiltinsExternalPlugin,
+  createWorkerEnvironmentSanitizerPlugin,
+  createWranglerCompatPersistPlugin,
+  createDefaultWorkerEnvironmentPlugin,
+  DEFAULT_WORKER_ENVIRONMENT_NAME,
+  createSandboxSdkResolvePlugin,
+} from './plugin-worker-environment.ts';
 import { assertNoRootSourceConventionConflicts } from './project-paths.ts';
-import { compileAssetFallbackHelper } from './router/compile.ts';
 import { hasEmailHandlers } from './router/email.ts';
 import { isRouteEnabledForEnvironment, type RouteEnvironment } from './router/parse-filename.ts';
-import { DEV_INBOX_ENV_VAR, DEV_INBOX_TOKEN_ENV_VAR } from './runtime/email/dev-inbox.ts';
-import {
-  SANDBOX_MIGRATION_TAG,
-  hasSandboxSqliteMigration,
-  resolveSandboxConfig,
-  sandboxContainerConfig,
-  assertSandboxNamespaceConfig,
-} from './sandbox/config.ts';
-import { scopedAccessCredentials } from './shared/cf-access.ts';
+import { resolveSandboxConfig } from './sandbox/config.ts';
 import {
   CLOUDFLARE_DEPLOY_BUILD_ENV,
   loadLocalEnv,
   resolveRemoteMode,
   stripInternalEnvKeys,
 } from './shared/env.ts';
-import {
-  CLOUDFLARE_PRESERVE_BINDINGS_BUILD_ENV,
-  selectNativeVersionMetadataBinding,
-} from './shared/version-metadata.ts';
 import { validateSsrEntry } from './ssr/entry.ts';
-import { injectSvelteKitHooks } from './sveltekit-hooks-transform.ts';
-
-/**
- * Persist the dev-trigger token at `<root>/.void/dev-trigger-token` so
- * every voidPlugin() invocation against the same project reads the same
- * value. This matters because `@cloudflare/vite-plugin` spawns a
- * worker-environment child Vite that re-imports vite.config.ts and calls
- * voidPlugin() again — without persistence the parent and child would
- * generate different UUIDs, the dispatch file would embed one and the
- * hint plugin would print the other, and curls would land on
- * `unauthorized`.
- *
- * The file persists across dev sessions by design — it lives under `.void/`
- * (gitignored), and `cleanupWrapper` in `void deploy` explicitly preserves
- * it across its own wipe so saved curl scripts keep working between deploys.
- * The token is local to the project and only honored by a worker bound to
- * localhost; treat it like the rest of `.void/` — disposable scratch state,
- * safe to remove manually if desired.
- *
- * The file is owner-only (0600). It is the one credential the dev-inbox
- * routes accept, and loopback is reachable by every account on the host,
- * so a default-umask 0644 file would hand any other local user the raw MIME,
- * the DELETE, and the capture endpoint. A file persisted by an earlier
- * release is tightened in place, never rotated. Windows has no group/other
- * bits — `mode` and `chmod` only toggle write there — so it is left alone.
- */
-/**
- * Best-effort detection of `vite build` (and `vite preview`) so we can skip
- * dev-only side effects — writing the dev-trigger token and the dispatch
- * file — when no dev server will run. Vite's CLI passes the subcommand as
- * `process.argv[2]`; programmatic API users (and `vite` with no subcommand)
- * default to `dev`, which we detect as the absence of a build-shaped first
- * positional. This is intentionally permissive: when in doubt, we behave as
- * if we're in dev so first-request correctness is preserved.
- */
-function isViteBuildOrPreview(): boolean {
-  const subcommand = process.argv[2];
-  return subcommand === 'build' || subcommand === 'preview';
-}
-
-const DEV_TRIGGER_TOKEN_FILE_MODE = 0o600;
-
-function getOrCreateDevTriggerToken(root: string): string {
-  const tokenPath = join(root, '.void', 'dev-trigger-token');
-  const readExisting = (): string | undefined => {
-    try {
-      const existing = readFileSync(tokenPath, 'utf-8').trim();
-      return existing.length > 0 ? existing : undefined;
-    } catch {
-      return undefined;
-    }
-  };
-  // Best-effort: a token we can read but not chmod (foreign owner, read-only
-  // mount) must still start the dev server.
-  const tightenExisting = (): void => {
-    if (process.platform === 'win32') {
-      return;
-    }
-    try {
-      if ((statSync(tokenPath).mode & 0o077) !== 0) {
-        chmodSync(tokenPath, DEV_TRIGGER_TOKEN_FILE_MODE);
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  const existing = readExisting();
-  if (existing) {
-    tightenExisting();
-    return existing;
-  }
-
-  // Atomic create — `wx` fails with EEXIST if the file appeared between the
-  // read above and the write below (parent + child Vite both racing). On
-  // EEXIST we re-read the winner's token and use that, so both processes
-  // converge on the same UUID.
-  mkdirSync(join(root, '.void'), { recursive: true });
-  const fresh = crypto.randomUUID();
-  try {
-    const fd = openSync(tokenPath, 'wx', DEV_TRIGGER_TOKEN_FILE_MODE);
-    try {
-      writeSync(fd, fresh);
-    } finally {
-      closeSync(fd);
-    }
-    return fresh;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
-      throw err;
-    }
-    const winner = readExisting();
-    if (winner) {
-      return winner;
-    }
-    // EEXIST but file is empty — extreme edge case (interrupted writer).
-    // Fall through and accept the fresh UUID; subsequent reads will win.
-    return fresh;
-  }
-}
-
-/**
- * Warn when the project's `package.json` does not declare `"type": "module"`.
- *
- * Vite's default `configLoader: "bundle"` bundles `vite.config.ts`,
- * externalizes deps, and then loads the bundle. When `package.json` is non-ESM
- * the bundle is written as `.js` and loaded via CJS `require()`, which throws
- * `ERR_REQUIRE_ASYNC_MODULE` if any externalized dep's ESM graph contains
- * top-level await. `@cloudflare/vite-plugin` (which voidPlugin pulls in) has
- * exactly such a TLA, so non-ESM consumers hit this on every Vite invocation.
- *
- * Runs once per Vite process (factory time), single sync read.
- */
-function warnIfPackageJsonIsNotEsm(root: string): void {
-  const pkgPath = join(root, 'package.json');
-  if (!existsSync(pkgPath)) {
-    return;
-  }
-  let pkg: { type?: unknown };
-  try {
-    pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-  } catch {
-    return;
-  }
-  if (pkg.type === 'module') {
-    return;
-  }
-  voidWarn(
-    'package.json is missing `"type": "module"`. Vite\'s default config loader ' +
-      'will fail with ERR_REQUIRE_ASYNC_MODULE on transitive top-level await ' +
-      '(e.g. @cloudflare/vite-plugin). Add `"type": "module"` to package.json, ' +
-      'or run vite build with `--configLoader runner`.',
-  );
-}
-
-/**
- * Resolve the server entry module for a Class A framework. We always wrap
- * the framework's own entry with a tiny shim that intercepts
- * `/__void/{scheduled,queue}` in dev so cron and queue handlers run with
- * the worker's full CF bindings. The interception block is gated on
- * `import.meta.env.DEV` and the dispatch module is loaded via dynamic
- * `import()` so the entire dev path (including user cron imports) is
- * dead-code-eliminated in `vite build`. Production deploys go through
- * `cli/wrapper.ts` instead.
- */
-function getFrameworkEntry(
-  framework: Framework,
-  root: string,
-  devTriggerToken: string,
-  notFound?: NotFoundHandling,
-): string {
-  const isBuild = isViteBuildOrPreview();
-  // In dev, eagerly write the dispatch file so the wrapper's dynamic
-  // import resolves on the very first request (the plugin's
-  // `configResolved` hook also rewrites it, but we can't rely on that
-  // having run before the first request hits the worker).
-  //
-  // In `vite build`, we instead emit a dispatch-free wrapper, so the
-  // dispatch file is unreferenced and we don't write it. Rolldown
-  // would otherwise emit it as a separate chunk in the prod bundle —
-  // an `if (import.meta.env.DEV)` guard around `await import()` is
-  // *not* enough to suppress chunk emission, because chunk splitting
-  // runs before constant folding eliminates the dead branch.
-  if (!isBuild) {
-    writeFrameworkTriggersDispatch(root, devTriggerToken);
-  }
-  return generateClassATriggerWrapper(
-    root,
-    framework,
-    getOriginalFrameworkEntry(framework, root),
-    isBuild,
-    undefined,
-    notFound,
-  );
-}
-
-/** The framework's own server entry, before our trigger wrapper. */
-function getOriginalFrameworkEntry(framework: Framework, root: string): string {
-  switch (framework) {
-    case 'tanstack-start':
-      return '@tanstack/react-start/server-entry';
-    case 'react-router':
-      return generateReactRouterEntry(root);
-    case 'vinext-app':
-      return 'vinext/server/app-router-entry';
-    case 'vinext-pages':
-      return generateVinextPagesEntry(root);
-  }
-}
-
-/**
- * Generate `<root>/.void/<framework>-trigger-wrapper.ts`. This file becomes
- * `workerConfig.main` so the dev miniflare/workerd evaluates *our* fetch
- * first, dispatches `/__void/{scheduled,queue}` if it matches, and otherwise
- * delegates to the framework's original entry.
- *
- * We emit two shapes of the wrapper depending on the Vite command:
- *
- * - Serve: dispatch is dynamically imported and gets a chance to handle
- *   `/__void/{scheduled,queue}` before falling through to the framework.
- * - Build: dispatch is omitted entirely. The wrapper just delegates fetch.
- *
- * We can't simply gate the dynamic import on `import.meta.env.DEV` and
- * trust DCE: rolldown emits chunks for dynamic imports during chunk
- * splitting, *before* constant folding removes the dead branch, so the
- * dispatch file (and its transitive user-cron/queue imports + dev token)
- * would still ship in the production bundle.
- */
-function generateClassATriggerWrapper(
-  root: string,
-  framework: Framework,
-  original: string,
-  isBuild: boolean,
-  assetsDir = 'assets',
-  /**
-   * Resolved `assetConfig.not_found_handling`. A Class A app deploys through
-   * `runFullDeploy`, which honors `routing.notFound`, so this wrapper's
-   * `serveWithAssets` has to honor it too or the asset binding's 404 page is
-   * fetched and then thrown away.
-   */
-  notFound?: NotFoundHandling,
-): string {
-  const outDir = join(root, '.void');
-  mkdirSync(outDir, { recursive: true });
-  const wrapperPath = join(outDir, `${framework}-trigger-wrapper.ts`);
-  const body = isBuild
-    ? `// @ts-nocheck — Auto-generated by Void for vite build. Do NOT edit.
-import original from ${JSON.stringify(original)};
-
-export default {
-  ...original,
-  async fetch(request, env, ctx) {
-    return serveWithAssets(request, env, await original.fetch(request, env, ctx));
-  },
-};
-${compileAssetFallbackHelper(assetsDir, false, notFound)}
-`
-    : `// @ts-nocheck — Auto-generated by Void in dev. Do NOT edit.
-import original from ${JSON.stringify(original)};
-
-export default {
-  ...original,
-  async fetch(request, env, ctx) {
-    if (request.method === "POST") {
-      const pathname = new URL(request.url).pathname;
-      if (pathname === "/__void/scheduled" || pathname === "/__void/queue") {
-        const { handleDevTrigger } = await import(${JSON.stringify(frameworkTriggersDispatchPath(root))});
-        const response = await handleDevTrigger(request, env, ctx);
-        if (response) return response;
-      }
-    }
-    return original.fetch(request, env, ctx);
-  },
-};
-`;
-  writeFileIfChanged(wrapperPath, body);
-  return wrapperPath;
-}
-
-/** Generate a worker entry for vinext Pages Router projects. */
-function generateVinextPagesEntry(root: string): string {
-  const outDir = join(root, '.void');
-  mkdirSync(outDir, { recursive: true });
-  const entryPath = join(outDir, 'vinext-pages-entry.ts');
-  writeFileIfChanged(
-    entryPath,
-    `// Auto-generated by Void — vinext Pages Router worker entry
-// @ts-expect-error virtual module resolved by vinext at build time
-import { renderPage, handleApiRoute } from "virtual:vinext-server-entry";
-
-export default {
-  async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-    const pathname = url.pathname;
-    if (pathname.replaceAll("\\\\", "/").startsWith("//")) {
-      return new Response("404 Not Found", { status: 404 });
-    }
-    const urlWithQuery = pathname + url.search;
-    if (pathname.startsWith("/api/") || pathname === "/api") {
-      return await handleApiRoute(request, urlWithQuery);
-    }
-    return await renderPage(request, urlWithQuery, null);
-  },
-};
-`,
-  );
-  return entryPath;
-}
-
-/** Generate a worker entry for React Router v7 projects. */
-function generateReactRouterEntry(root: string): string {
-  const outDir = join(root, '.void');
-  mkdirSync(outDir, { recursive: true });
-  const entryPath = join(outDir, 'react-router-entry.ts');
-  writeFileIfChanged(
-    entryPath,
-    `// Auto-generated by Void — React Router v7 worker entry
-import { createRequestHandler } from "react-router";
-
-const requestHandler = createRequestHandler(
-  // @ts-expect-error virtual module resolved by @react-router/dev at build time
-  () => import("virtual:react-router/server-build"),
-  import.meta.env.MODE,
-);
-
-export default {
-  async fetch(request: Request): Promise<Response> {
-    return requestHandler(request);
-  },
-};
-`,
-  );
-  return entryPath;
-}
-
-/** Check whether a binding name already exists in a resolved bindings array. */
-function hasBinding(list: Array<{ binding: string }> | undefined, name: string): boolean {
-  return Array.isArray(list) && list.some((b) => b.binding === name);
-}
-
-/**
- * Decide whether to inject a Workers AI binding into the built wrangler config.
- *
- * Builds use the production binding. During dev, a project explicitly saved
- * with the direct Cloudflare destination uses Cloudflare's remote binding;
- * managed and unsaved projects keep using the Void HTTPS proxy.
- *
- * `!resolvedAi` is load-bearing: mergeBindings' return is defu-merged over the
- * resolved root-wrangler config and wins, so skipping when the user already
- * declared an `ai` binding avoids clobbering theirs. `!resultAi` is harmless
- * defense-in-depth (nothing else in mergeBindings sets `result.ai`).
- */
-export function shouldBindWorkersAi(
-  command: string,
-  needsAI: boolean,
-  resolvedAi: unknown,
-  resultAi: unknown,
-  directCloudflareDev: boolean = false,
-): boolean {
-  return (
-    needsAI &&
-    (command === 'build' || (command === 'serve' && directCloudflareDev)) &&
-    !resultAi &&
-    !resolvedAi
-  );
-}
-
-/**
- * Decide whether to inject the `void dev` email-inbox loopback var.
- *
- * The dev inbox buffer lives in the Vite dev server's Node process;
- * `sendEmail` runs in workerd and reaches it by fetching the inbox capture
- * endpoint through the worker's assets binding, which
- * `@cloudflare/vite-plugin` wires straight into the dev server's middleware
- * stack. The var carries that binding's NAME (`ASSETS` for a Void app, or
- * whatever a Class A framework's own wrangler config declares) and its
- * presence is what arms the dev path at runtime — so it must never reach a
- * production build's `wrangler.json`, exactly like the `__VOID_TOKEN`
- * credential gate.
- *
- * Gated on `routeEnvironment`, not on `command`: `vite preview` also reports
- * `command: 'serve'`, but it runs the BUILT worker whose assets binding is a
- * real asset directory rather than a dev-server loopback. `routeEnvironment`
- * is the existing `command === 'serve' && !isPreview` distinction.
- *
- * Without an assets binding there is no loopback, so injecting the var would
- * only arm a path that must then fail; gate on it instead.
- */
-export function shouldInjectEmailDevInboxVar(
-  routeEnvironment: RouteEnvironment,
-  needsEmail: boolean | undefined,
-  assetsBinding: string | undefined,
-): boolean {
-  return (
-    routeEnvironment === 'dev' &&
-    !!needsEmail &&
-    typeof assetsBinding === 'string' &&
-    !!assetsBinding
-  );
-}
-
-/** Resolve the runtime Workers AI binding, preserving a root Wrangler declaration. */
-export function resolveWorkersAiBindingName(resolvedAi: unknown, configuredName?: string): string {
-  if (typeof resolvedAi === 'object' && resolvedAi !== null) {
-    const binding = (resolvedAi as { binding?: unknown }).binding;
-    if (typeof binding === 'string') {
-      return binding;
-    }
-  }
-  return configuredName ?? 'AI';
-}
-
-const CLOUDFLARE_BUILTIN_IMPORT = /^cloudflare:/;
-const SANDBOX_SDK_IMPORT = '@cloudflare/sandbox';
-const SANDBOX_SDK_IMPORT_FILTER = /^@cloudflare\/sandbox$/;
-const DEFAULT_WORKER_ENVIRONMENT_NAME = 'void_worker';
-const DEFAULT_WORKER_OUT_DIR = 'dist/ssr';
-const DEV_ASSET_ROUTING_EXCLUSIONS = [
-  '!/@vite/*',
-  '!/@id/*',
-  '!/@fs/*',
-  '!/@react-refresh',
-  '!/@svelte/*',
-  '!/node_modules/*',
-  '!/__uno.css',
-];
-
-function resolveSandboxSdkEntry(): string {
-  return fileURLToPath(import.meta.resolve(SANDBOX_SDK_IMPORT));
-}
-
-function createCloudflareBuiltinsExternalPlugin(): Plugin {
-  return {
-    name: 'void:cloudflare-builtins-external',
-    config(_, env) {
-      if (env.command !== 'build') {
-        return;
-      }
-
-      return {
-        build: {
-          rollupOptions: {
-            external: [CLOUDFLARE_BUILTIN_IMPORT],
-          },
-        },
-      };
-    },
-  };
-}
-
-function createDefaultWorkerEnvironmentPlugin(): Plugin {
-  return {
-    name: 'void:default-worker-environment',
-    config(config) {
-      const currentEnvironment = config.environments?.[DEFAULT_WORKER_ENVIRONMENT_NAME];
-      return {
-        environments: {
-          [DEFAULT_WORKER_ENVIRONMENT_NAME]: {
-            ...currentEnvironment,
-            build: {
-              ...currentEnvironment?.build,
-              outDir: currentEnvironment?.build?.outDir ?? DEFAULT_WORKER_OUT_DIR,
-            },
-          },
-        },
-      };
-    },
-  };
-}
-
-function createWorkerEnvironmentSanitizerPlugin(environmentNames: ReadonlyArray<string>): Plugin {
-  const names = new Set(environmentNames);
-  return {
-    name: 'void:worker-environment-sanitizer',
-    enforce: 'pre',
-    configResolved(config) {
-      for (const name of names) {
-        const resolve = config.environments[name]?.resolve;
-        if (resolve && 'external' in resolve) {
-          // Test runners may seed Node externals into every Vite environment.
-          // Cloudflare Worker environments cannot externalize dependencies, but
-          // Cloudflare's validator expects the normalized array shape to remain.
-          resolve.external = [];
-        }
-      }
-    },
-  };
-}
-
-function createSandboxSdkResolvePlugin(): Plugin {
-  let resolved: string | undefined;
-
-  return {
-    name: 'void:sandbox-sdk-resolve',
-    enforce: 'pre',
-    resolveId: {
-      filter: { id: SANDBOX_SDK_IMPORT_FILTER },
-      handler(id) {
-        if (id !== SANDBOX_SDK_IMPORT) {
-          return;
-        }
-        resolved ??= resolveSandboxSdkEntry();
-        return resolved;
-      },
-    },
-  };
-}
-
-function createWranglerCompatPersistPlugin(
-  root: string,
-  config: ReturnType<typeof readConfig>,
-): Plugin {
-  let persisted = false;
-  const persist = () => {
-    if (persisted || isNodeTarget(config.target)) {
-      return;
-    }
-    persisted = true;
-    ensureWranglerCompat(root, config);
-  };
-
-  return {
-    name: 'void:wrangler-compat-persist',
-    buildStart() {
-      persist();
-    },
-    configureServer() {
-      persist();
-    },
-  };
-}
-
-type CredentialStatus =
-  | {
-      status: 'ok';
-      token: string;
-      projectId: string;
-      proxyUrl: string;
-      accessCredentials?: string;
-    }
-  | { status: 'no-token' }
-  | { status: 'no-project'; apiUrl: string; token: string };
-
-/**
- * Read Void auth credentials for local dev AI proxy access.
- * Returns a discriminated union so callers can distinguish
- * "no token" from "no project" for targeted onboarding guidance.
- */
-function readVoidDevCredentials(root: string): CredentialStatus {
-  const token = getToken(root);
-  if (!token) {
-    return { status: 'no-token' };
-  }
-  const apiUrl = getApiUrl(root);
-
-  const project = readProjectConfig(root);
-  if (!project) {
-    return { status: 'no-project', apiUrl, token };
-  }
-
-  const proxyUrl = getProxyUrl(root);
-  ensurePlatformProxyAccess(apiUrl, proxyUrl);
-  return {
-    status: 'ok',
-    token,
-    projectId: project.projectId,
-    proxyUrl,
-    accessCredentials: scopedAccessCredentials(process.env, proxyUrl),
-  };
-}
-
-/**
- * Interactive AI setup prompt shown during dev server startup when the user
- * has a token but no linked project. Runs as fire-and-forget so it doesn't
- * block the server. On completion, writes project.json and restarts the server.
- */
-async function runAiSetupPrompt(
-  root: string,
-  token: string,
-  apiUrl: string,
-  server: import('vite').ViteDevServer,
-): Promise<void> {
-  const { select, text, isCancel, log } = await import('@voidzero-dev/vite-plus-prompts');
-  const { PlatformClient } = await import('./cli/client.ts');
-  const { attachSelectedPlatform, writeProjectConfig } = await import('./cli/project.ts');
-  const { inferDefaultSlug } = await import('./cli/resolve-project.ts');
-
-  const client = new PlatformClient(token, apiUrl);
-
-  let projects: Array<import('./cli/client.ts').ProjectResponse>;
-  try {
-    projects = await client.listProjects();
-  } catch {
-    voidWarn('Failed to fetch projects. Run `void project link` to link a project manually.');
-    return;
-  }
-
-  const options = [
-    { value: '__create__' as const, label: 'Create new project' },
-    ...projects.map((p: import('./cli/client.ts').ProjectResponse) => ({
-      value: p.id,
-      label: p.slug,
-    })),
-  ];
-
-  console.log();
-  log.info("[void] AI requires a linked project. Let's set one up:");
-
-  const result = await select({ message: 'Select a project:', options });
-  if (isCancel(result)) {
-    return;
-  }
-
-  let projectId: string;
-  let slug: string;
-
-  if (result === '__create__') {
-    const { validateProjectSlug } = await import('./cli/project-slug.ts');
-    const { createProjectWithSlugRetry } = await import('./cli/create-project.ts');
-    let created;
-    try {
-      // Share the slug-retry loop with deploy/link paths so server-side plan
-      // rejections (e.g. free-plan short-slug 403) re-prompt consistently.
-      // The prompt callback returns `undefined` on Ctrl+C so the helper can
-      // exit cleanly instead of calling process.exit().
-      created = await createProjectWithSlugRetry(
-        client,
-        inferDefaultSlug(root),
-        async (defaultSlug) => {
-          const slugResult = await text({
-            message: 'Choose a slug for your new Void project:',
-            placeholder: 'my-app',
-            initialValue: defaultSlug,
-            validate: validateProjectSlug,
-          });
-          if (isCancel(slugResult) || typeof slugResult === 'symbol') {
-            return undefined;
-          }
-          return slugResult.trim();
-        },
-      );
-    } catch (err: unknown) {
-      voidError(
-        `project: Failed to create project: '${err instanceof Error ? err.message : String(err)}'.`,
-      );
-      return;
-    }
-    if (!created) {
-      return;
-    }
-    projectId = created.id;
-    slug = created.slug;
-  } else {
-    const project = projects.find(
-      (p: import('./cli/client.ts').ProjectResponse) => p.id === result,
-    )!;
-    projectId = project.id;
-    slug = project.slug;
-  }
-
-  writeProjectConfig(root, attachSelectedPlatform(root, { projectId, slug }, client.apiUrl));
-  log.success(`Linked to ${pc.blue(slug)}`);
-
-  // Restart the dev server so mergeBindings picks up fresh credentials
-  await server.restart();
-}
 
 /**
  * Void plugin — the main entry point.
@@ -767,6 +100,7 @@ async function runAiSetupPrompt(
  * for deploying directly to Cloudflare without the Void platform.
  */
 const scheduledPointerCleanups = new Set<string>();
+
 const scheduledPreviewPointerCleanups = new Set<string>();
 
 export function voidPlugin(options?: {
@@ -896,119 +230,14 @@ export function voidPlugin(options?: {
   // Server-only void/* imports (db, kv, ai, etc.) must not pull in
   // cloudflare:workers or node: builtins when bundled for the browser.
   // Resolve them to empty stubs in any client environment.
-  const STUB_PREFIX = '\0void-client-stub:';
-  const SERVER_ONLY_STUBS: Record<string, string> = {
-    'void/db': 'export const db = {}; export const createDb = () => ({});',
-    'void/kv': 'export const kv = {}; export const createKV = () => ({});',
-    'void/ai': 'export const ai = {};',
-    'void/queues': 'export const queues = {};',
-    'void/storage': 'export const storage = {}; export const createStorage = () => ({});',
-    'void/isr': 'export const revalidate = async () => {};',
-    // Client stub must mirror the real runtime/sandbox.ts surface so any
-    // client-side `instanceof` check for either runtime error doesn't crash with a
-    // TypeError, and async `await getSandbox(...)` callers don't silently
-    // mis-handle a sync return. Throwing here makes accidental client imports
-    // fail loudly rather than returning a misleading bare `{}`.
-    'void/sandbox': `
-      export class SandboxLimitError extends Error {
-        constructor(reason = 'concurrency', message) {
-          super(message ?? 'Sandbox limit reached: ' + reason);
-          this.name = 'SandboxLimitError';
-          this.reason = reason;
-        }
-      }
-      export class SandboxUnavailableError extends Error {
-        constructor(message = 'Managed Sandbox is unavailable on this Void platform.') {
-          super(message);
-          this.name = 'SandboxUnavailableError';
-        }
-      }
-      export async function getSandbox() {
-        throw new Error('void/sandbox is server-only and cannot be imported by browser code.');
-      }
-      export const sandbox = { get: getSandbox };
-    `,
-    // Server-only for the same reason as the rest: `void/email` reaches
-    // `runtime/env-raw.ts`, whose top-level `node:async_hooks` import and
-    // module-scope `new AsyncLocalStorage()` have no browser equivalent.
-    // Without a stub the client build SUCCEEDS with only an externalization
-    // warning and ships `new (emptyStub).AsyncLocalStorage` — the page then
-    // white-screens on load, which is worse than a build failure.
-    // `void/email/testing` needs its own entry (the filter is anchored) for
-    // a different reason: it pulls `router/email.ts`, dragging node:path,
-    // node:fs and node:module plus ~24 KB of build-time router machinery
-    // into the browser bundle.
-    //
-    // Throwing rather than returning `{}`, following `void/sandbox`: an
-    // accidental client import should fail legibly instead of silently
-    // no-oping a send the caller believes happened.
-    'void/email': `
-      const serverOnly = (name) => () => {
-        throw new Error(name + ' is server-only and cannot be imported by browser code.');
-      };
-      export const sendEmail = serverOnly('sendEmail');
-      export const createEmail = serverOnly('createEmail');
-      export const defineEmail = serverOnly('defineEmail');
-      export const parseEmail = serverOnly('parseEmail');
-      export const replyEmail = serverOnly('replyEmail');
-      export const createMessageProxy = serverOnly('createMessageProxy');
-    `,
-    'void/email/testing': `
-      const serverOnly = (name) => () => {
-        throw new Error(name + ' is server-only and cannot be imported by browser code.');
-      };
-      export const createEmailTestHarness = serverOnly('createEmailTestHarness');
-      export const createInboundTestHarness = serverOnly('createInboundTestHarness');
-    `,
-    'void/live': '',
-    'void/durable': '',
-  };
-  const STUB_RESOLVE_FILTER = new RegExp(
-    `^(${Object.keys(SERVER_ONLY_STUBS).join('|').replaceAll('/', '\\/')})$`,
-  );
-  // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
-  const STUB_LOAD_FILTER = new RegExp(`^\\0void-client-stub:`);
-
-  const clientStubsPlugin: Plugin = {
-    name: 'void:client-stubs',
-    enforce: 'pre',
-    resolveId: {
-      filter: { id: STUB_RESOLVE_FILTER },
-      handler(id) {
-        if (this.environment?.name === 'client') {
-          if (id === 'void/live' || id === 'void/durable') {
-            this.error(
-              id === 'void/live'
-                ? 'void/live is server-only and cannot be imported by browser code. Import void/live/client instead.'
-                : 'void/durable is server-only and cannot be imported by browser code.',
-            );
-          }
-          return STUB_PREFIX + id;
-        }
-      },
-    },
-    load: {
-      filter: { id: STUB_LOAD_FILTER },
-      handler(id) {
-        return SERVER_ONLY_STUBS[id.slice(STUB_PREFIX.length)] ?? 'export default {};';
-      },
-    },
-  };
+  const clientStubsPlugin = createClientStubsPlugin();
 
   // Generated server entries import the env module by its resolved file path.
   // Prebundling a bare `void` runtime subpath creates another package module
   // graph and therefore another envContext, so request bindings disappear for
   // the prebundled copy. Every return path includes this plugin, including
   // framework and Node targets that do not all use bindingRuntimePlugin.
-  const serverRuntimeOptimizerPlugin: Plugin = {
-    name: 'void:server-runtime-optimizer',
-    configEnvironment(name) {
-      if (name !== 'client') {
-        return { optimizeDeps: { exclude: ['void'] } };
-      }
-    },
-  };
-
+  const serverRuntimeOptimizerPlugin = createServerRuntimeOptimizerPlugin();
   // Scan queues/websocket routes early so both framework-mode and default-mode
   // branches can safely close over these bindings.
   const queues = framework ? [] : application.queues;
@@ -1078,173 +307,25 @@ export function voidPlugin(options?: {
   // voidPlugin() only provides DB type codegen, migration management, and
   // wrangler.jsonc binding sync for local dev.
   if (detected && (detected.class === 'b' || detected.class === 'c')) {
-    const frameworkPersistRoot = localD1.persistRoot;
-    const syncFrameworkCompat = (compat: ReturnType<typeof readWranglerCompat>) => {
-      const syncedDate = ensureWranglerCompatibilityDate(root, compat.compatibilityDate);
-      if (syncedDate) {
-        voidLog('Synced compatibility_date to Cloudflare config');
-      }
-    };
-
-    // Ensure required compat flags are written before framework adapters
-    // initialize Cloudflare dev runtime / Miniflare.
-    const wranglerCompatPlugin: Plugin = {
-      name: 'void:wrangler-compat',
-      enforce: 'pre',
-      config(_, env) {
-        if (env.command === 'serve' && directCloudflareDestination && bindings.needsAI) {
-          process.env.CLOUDFLARE_AUTH_USE_KEYRING = 'true';
-        }
-        syncFrameworkCompat(ensureWranglerCompat(root, config));
-        if (env.command !== 'serve') {
-          return;
-        }
-        const synced = ensureWranglerNodejsAlsFlag(root);
-        if (synced) {
-          voidLog('Synced nodejs_als to Cloudflare config');
-        }
-      },
-      buildStart() {
-        syncFrameworkCompat(ensureWranglerCompat(root, config));
-      },
-      configureServer() {
-        syncFrameworkCompat(ensureWranglerCompat(root, config));
-      },
-    };
-
-    // Sync before framework adapters read Wrangler during Vite configuration.
-    // Repeat at configResolved for adapters that create the file later.
-    const syncFrameworkBindings = (command: string): void => {
-      if (command !== 'serve') {
-        return;
-      }
-      const synced = syncWranglerBindings(
-        root,
-        {
-          ...bindings,
-          needsD1: dialect === 'sqlite' && application.needsDatabase,
-        },
-        {
-          bindingNames,
-          ...(directCloudflareDestination && bindings.needsAI
-            ? { directCloudflareAi: { gateway: config.ai?.gateway } }
-            : {}),
-          websockets: websocketRoutes,
-          sandbox: sandboxConfig,
-          live: liveConfig,
-        },
-      );
-      if (synced) {
-        voidLog('Synced bindings to Cloudflare config');
-      }
-    };
-
-    const wranglerSyncPlugin: Plugin = {
-      name: 'void:wrangler-sync',
-      enforce: 'pre',
-      config(_, env) {
-        syncFrameworkBindings(env.command);
-      },
-      configResolved(resolvedConfig) {
-        syncFrameworkCompat(readWranglerCompat(root, config));
-        syncFrameworkBindings(resolvedConfig.command);
-      },
-    };
-
-    // Nuxt's SSR Vite server can inherit the client HTTP server while also
-    // receiving its own HMR port. That attaches two upgrade handlers to the
-    // same socket under current Vite, so keep the SSR transport on its
-    // dedicated port. Update both keys for Vite 7 and Vite 8 compatibility.
-    const nuxtVite8WebSocketCompatPlugin: Plugin | undefined =
-      detected.name === 'nuxt'
-        ? {
-            name: 'void:nuxt-vite8-websocket-compat',
-            enforce: 'post',
-            configResolved(resolvedConfig) {
-              if (!resolvedConfig.build.ssr) {
-                return;
-              }
-              if (
-                typeof resolvedConfig.server.hmr === 'object' &&
-                resolvedConfig.server.hmr.port !== undefined
-              ) {
-                resolvedConfig.server.hmr = {
-                  ...resolvedConfig.server.hmr,
-                  server: undefined,
-                };
-              }
-              if (
-                typeof resolvedConfig.server.ws === 'object' &&
-                resolvedConfig.server.ws.port !== undefined
-              ) {
-                resolvedConfig.server.ws = {
-                  ...resolvedConfig.server.ws,
-                  server: undefined,
-                };
-              }
-            },
-          }
-        : undefined;
-
-    // SvelteKit hooks injection: transform get_hooks() to wrap `handle` with
-    // withRuntimeEnv(adapter env, ...). Kit 2 passes event.platform.env;
-    // Kit 3 exposes cloudflare:workers. This stores the env in
-    // AsyncLocalStorage so void/db resolves it via envContext.getStore(), and
-    // intercepts /__void/scheduled and /__void/queue so cron and queue
-    // handlers run with the framework adapter's real bindings.
-    // Single Miniflare instance (adapter-cloudflare's), no private APIs.
-    const svelteKitHooksInjectPlugin: Plugin = {
-      name: 'void:sveltekit-hooks-inject',
-      apply: 'serve',
-      transform(code, id) {
-        if (detected.class !== 'b') {
-          return;
-        }
-        if (
-          !id.includes('.svelte-kit/generated/server/internal') &&
-          !id.includes('.svelte-kit/generated/dev/server.js')
-        ) {
-          return;
-        }
-        return injectSvelteKitHooks(code, id, frameworkTriggersDispatchPath(root));
-      },
-    };
-
-    return [
-      createCloudflareBuiltinsExternalPlugin(),
-      wranglerCompatPlugin,
-      wranglerSyncPlugin,
-      ...(nuxtVite8WebSocketCompatPlugin ? [nuxtVite8WebSocketCompatPlugin] : []),
-      svelteKitHooksInjectPlugin,
+    return createFrameworkPlugins({
+      localD1,
+      root,
+      directCloudflareDestination,
+      bindings,
+      config,
+      dialect,
+      application,
+      bindingNames,
+      websocketRoutes,
+      sandboxConfig,
+      liveConfig,
+      detected,
       clientStubsPlugin,
       serverRuntimeOptimizerPlugin,
-      bindingRuntimePlugin(bindingNames),
-      // Framework-agnostic env DX: typegen, client leak guard, and build-time
-      // folding all operate on env.ts + the Vite client module graph, so they
-      // apply equally to SvelteKit/Nuxt/Analog/Astro. We intentionally omit
-      // envPlugin itself — it mutates workerConfig.vars for Void's own CF
-      // build, which Class B/C frameworks don't go through.
-      envSchemaPlugin(root),
-      envClientGuardPlugin(root),
-      envClientFoldPlugin(),
-      drizzlePlugin(root, false, dialect, {
-        d1BindingName: bindingNames?.d1,
-        forceVirtualDb: authEnabled || bindingNames?.d1 !== undefined,
-        localD1DatabaseId: localD1.databaseId,
-        localD1PersistRoot: frameworkPersistRoot,
-      }),
-      migrationPlugin(root, dialect, localD1.databaseId, frameworkPersistRoot, {
-        enabled: false,
-      }),
-      devTriggersHintPlugin(root, { framework: true, devTriggerToken }),
-      frameworkTriggersPlugin(root, { devTriggerToken }),
-      ...(detected.name === 'nuxt'
-        ? [nitroDevTriggerInjectPlugin(root, { serverDir: 'server' })]
-        : []),
-      ...(detected.name === 'analog' ? [analogDevTriggerInjectPlugin(root)] : []),
-      ...(detected.name === 'astro' ? [astroDevTriggerInjectPlugin(root)] : []),
+      authEnabled,
+      devTriggerToken,
       implicitDeployGuard,
-    ];
+    });
   }
 
   // Remote mode — use platform proxy for D1/KV/R2 instead of local miniflare.
@@ -1311,530 +392,34 @@ export function voidPlugin(options?: {
   // When no wrangler.json exists, resolved config has empty bindings and
   // all inferred bindings are added — matching the previous behavior.
   function mergeBindings(resolved: WorkerConfig): Partial<WorkerConfig> {
-    const environmentWebsocketRoutes = websocketRoutes.filter((route) =>
-      isRouteEnabledForEnvironment(route, routeEnvironment),
-    );
-    const result: Record<string, unknown> = { ...workerConfig };
-
-    // The Cloudflare plugin defu-merges this patch over resolved, concatenating arrays.
-    // Flags read from the root config therefore occur in both inputs. Emit their union
-    // once and clear only the in-memory fallback so uploads never repeat a flag.
-    result.compatibility_flags = [
-      ...new Set([
-        ...((result.compatibility_flags as Array<string> | undefined) ?? []),
-        ...(resolved.compatibility_flags ?? []),
-      ]),
-    ];
-    resolved.compatibility_flags = [];
-
-    if (envSchemaFacts || (authEnabled && process.env[CLOUDFLARE_DEPLOY_BUILD_ENV] === '1')) {
-      const plaintextVars = {
-        ...((resolved.vars as Record<string, unknown> | undefined) ?? {}),
-        ...((result.vars as Record<string, unknown> | undefined) ?? {}),
-      };
-      const plaintextServerKeys = (envSchemaFacts?.serverKeys ?? []).filter(
-        (key) => key in plaintextVars,
-      );
-      if (viteCommand === 'build' && plaintextServerKeys.length > 0) {
-        throw new Error(
-          `Server env keys cannot be Worker plaintext vars: ${plaintextServerKeys.join(', ')}. ` +
-            'Remove them from worker.vars/wrangler vars and set them with the remote secret store.',
-        );
-      }
-      const configuredRequired = resolved.secrets?.required ?? [];
-      const required = [
-        ...new Set([
-          ...configuredRequired,
-          ...(envSchemaFacts?.requiredServerKeys ?? []),
-          ...(authEnabled && process.env[CLOUDFLARE_DEPLOY_BUILD_ENV] === '1'
-            ? ['BETTER_AUTH_SECRET']
-            : []),
-        ]),
-      ];
-      if (required.length > 0) {
-        result.secrets = { required };
-      }
-    }
-
-    // Void owns the generated asset routing policy. Replace stale root
-    // wrangler settings instead of letting the Cloudflare plugin concatenate
-    // them with generated rules. This preserves static-first behavior for
-    // API-only apps while avoiding asset-served HTML bypassing middleware.
-    if (workerConfig.assets && resolved.assets) {
-      delete (resolved.assets as Record<string, unknown>).not_found_handling;
-      delete (resolved.assets as Record<string, unknown>).run_worker_first;
-    }
-
-    // D1 — auth requires the app DB only for sqlite apps
-    const d1Name = bindingNames?.d1 ?? 'DB';
-    const d1: Array<Record<string, unknown>> = [];
-    if (
-      dialect === 'sqlite' &&
-      application.needsDatabase &&
-      !hasBinding(resolved.d1_databases, d1Name)
-    ) {
-      d1.push({ binding: d1Name, database_name: 'default', database_id: 'local' });
-    }
-    if (d1.length > 0) {
-      result.d1_databases = d1;
-    }
-
-    const kvName = bindingNames?.kv ?? 'KV';
-    const kv: Array<{ binding: string; id: string }> = [];
-    if (bindings.needsKV && !hasBinding(resolved.kv_namespaces, kvName)) {
-      kv.push({ binding: kvName, id: 'local' });
-    }
-    if (kv.length > 0) {
-      result.kv_namespaces = kv;
-    }
-
-    // R2
-    const r2Name = bindingNames?.r2 ?? 'STORAGE';
-    if (bindings.needsR2 && !hasBinding(resolved.r2_buckets, r2Name)) {
-      result.r2_buckets = [{ binding: r2Name, bucket_name: 'default' }];
-    }
-
-    // Workers AI — direct builds use the production binding. A saved direct
-    // Cloudflare destination uses the owner's remote Workers AI binding during
-    // dev because Workers AI has no local simulator. Managed and unsaved dev
-    // projects continue through the Void HTTPS proxy below.
-    // An explicit root binding keeps its name and staging choice. Direct dev
-    // only adds `remote: true`, which is required because there is no local AI
-    // simulator. Builds never override the user's root binding.
-    const resolvedAi = (resolved as { ai?: unknown }).ai;
-    const resultAi = (result as { ai?: unknown }).ai;
-    const aiBindingName = resolveWorkersAiBindingName(resolvedAi, bindingNames?.ai);
-    if (
-      viteCommand === 'serve' &&
-      bindings.needsAI &&
-      directCloudflareDestination &&
-      !resultAi &&
-      typeof resolvedAi === 'object' &&
-      resolvedAi !== null &&
-      'binding' in resolvedAi &&
-      typeof resolvedAi.binding === 'string'
-    ) {
-      // Preserve an explicit binding name and staging choice while selecting
-      // its only supported local mode.
-      (result as Record<string, unknown>).ai = { ...resolvedAi, remote: true };
-    } else if (
-      shouldBindWorkersAi(
-        viteCommand,
-        bindings.needsAI,
-        resolvedAi,
-        resultAi,
-        directCloudflareDestination,
-      )
-    ) {
-      (result as Record<string, unknown>).ai = {
-        binding: aiBindingName,
-        ...(viteCommand === 'serve' && { remote: true }),
-      };
-    }
-
-    // AI binding name / Gateway id → runtime vars (harmless in serve; only read
-    // by the P3 direct backend). The default binding needs no extra variable.
-    if (aiBindingName !== 'AI' || config.ai?.gateway) {
-      const vars = (result.vars as Record<string, string>) ?? {};
-      if (aiBindingName !== 'AI') {
-        vars.__VOID_AI_BINDING = aiBindingName;
-      }
-      if (config.ai?.gateway) {
-        vars.__VOID_AI_GATEWAY = config.ai.gateway;
-      }
-      result.vars = vars;
-    }
-
-    // Email — no send binding is emitted on purpose. Outbound mail routes
-    // through __VOID_PROXY/email/send (the proxy worker holds the
-    // platform-level send_email binding), so `bindings.needsEmail` only gates
-    // the dev-inbox plugin and the deploy manifest flag.
-    //
-    // Dev only: name the assets binding so `sendEmail` can loop back into the
-    // Vite dev server and reach the `/__void/inbox` buffer, which lives in the
-    // Node process rather than in this worker's isolate — and hand it the
-    // dev-trigger token the inbox middleware requires on every route.
-    const emailDevInboxBinding =
-      (workerConfig.assets as { binding?: string } | undefined)?.binding ??
-      (resolved.assets as { binding?: string } | undefined)?.binding;
-    if (shouldInjectEmailDevInboxVar(routeEnvironment, bindings.needsEmail, emailDevInboxBinding)) {
-      const vars = (result.vars as Record<string, string>) ?? {};
-      vars[DEV_INBOX_ENV_VAR] = emailDevInboxBinding as string;
-      vars[DEV_INBOX_TOKEN_ENV_VAR] = devTriggerToken;
-      result.vars = vars;
-    }
-
-    // Serve never carries Void's own `send_email` binding, so the dev inbox
-    // stays the only sink. `void deploy --platform cloudflare` writes
-    // `send_email: [{ name: "SEND_EMAIL" }]` into the root wrangler.jsonc, and
-    // `sendEmail` falls through to `env.SEND_EMAIL` whenever the inbox is not
-    // armed (`sendInDev: true`, or no assets binding to reach the dev server
-    // through) — under miniflare that binding writes .eml files to disk, or
-    // with `remote: true` sends real mail. Only the entry under the reserved
-    // `SEND_EMAIL` name is removed: a user's own `send_email` binding under
-    // another name is theirs — nothing in Void reads it, and the root config
-    // takes precedence — so it reaches miniflare exactly as declared. Gated on
-    // `needsEmail`, the same signal that arms the inbox: without `void/email`
-    // in the app there is no `sendEmail` to guard, and a `SEND_EMAIL` entry is
-    // then either a stale leftover nothing reads or the user's own choice of
-    // name; `void deploy` warns about the former and deploys as-is, and dev
-    // must not be stricter about the root config than deploy is. Mutate
-    // `resolved`, as the assets policy above does: the return value is
-    // defu-merged over it (arrays concatenate, `undefined` is skipped), so
-    // this is the only way to remove an entry. An emptied array drops the key
-    // — the Cloudflare plugin treats `[]` and absent alike. Build passes the
-    // root entries through untouched.
-    if (viteCommand === 'serve' && bindings.needsEmail) {
-      const sendEmail = (resolved as { send_email?: unknown }).send_email;
-      if (Array.isArray(sendEmail)) {
-        const kept = sendEmail.filter(
-          (entry) => (entry as { name?: unknown } | null)?.name !== SEND_EMAIL_BINDING,
-        );
-        if (kept.length > 0) {
-          (resolved as Record<string, unknown>).send_email = kept;
-        } else {
-          delete (resolved as Record<string, unknown>).send_email;
-        }
-      }
-    }
-
-    // Default sender for `sendEmail()` from void.config.ts `email.from`. Serve-only,
-    // the same gate as `__VOID_TOKEN` — not because it is a credential, but
-    // because on a build the root wrangler.jsonc already owns the var:
-    // `void deploy --platform cloudflare` writes the same `__VOID_EMAIL_FROM`
-    // there once the domain's routing or sending is ready, and that entry
-    // reaches `dist/ssr/wrangler.json` through `resolved.vars`. Injecting it on
-    // build too would advertise a sender on an account nothing was set up on.
-    // The managed deploy ignores the generated wrangler config and injects its
-    // own sender.
-    if (viteCommand === 'serve' && config.email?.from) {
-      const vars = (result.vars as Record<string, string>) ?? {};
-      vars.__VOID_EMAIL_FROM = config.email.from;
-      result.vars = vars;
-    }
-
-    // Queues — add producer + consumer bindings for local dev
-    if (queues.length > 0) {
-      (result as Record<string, unknown>).queues = {
-        producers: queues.map((q) => ({ queue: q.name, binding: q.bindingName })),
-        consumers: queues.map((q) => ({
-          queue: q.name,
-          ...(q.maxBatchSize != null && { max_batch_size: q.maxBatchSize }),
-          ...(q.maxBatchTimeout != null && { max_batch_timeout: q.maxBatchTimeout }),
-          ...(q.maxRetries != null && { max_retries: q.maxRetries }),
-          ...(q.retryDelay != null && { retry_delay: q.retryDelay }),
-        })),
-      };
-    }
-
-    if (environmentWebsocketRoutes.length > 0) {
-      type DurableObjectBindingsConfig = {
-        durable_objects?: {
-          bindings?: Array<{ name: string; class_name: string }>;
-        };
-      };
-      const existingDurableObjectBindings =
-        ((resolved as DurableObjectBindingsConfig).durable_objects?.bindings as
-          | Array<{ name: string; class_name: string }>
-          | undefined) ?? [];
-      for (const route of environmentWebsocketRoutes) {
-        const conflict = existingDurableObjectBindings.find(
-          (binding) => binding.name === route.bindingName && binding.class_name !== route.className,
-        );
-        if (conflict) {
-          throw new Error(
-            `websocket: binding '${route.bindingName}' is already configured for class '${conflict.class_name}', but '${route.filePath}' requires '${route.className}'.`,
-          );
-        }
-      }
-      const missingDurableObjectBindings = environmentWebsocketRoutes
-        .filter(
-          (route) =>
-            !existingDurableObjectBindings.some((binding) => binding.name === route.bindingName),
-        )
-        .map((route) => ({
-          name: route.bindingName,
-          class_name: route.className,
-        }));
-
-      if (missingDurableObjectBindings.length > 0) {
-        (result as Record<string, unknown>).durable_objects = {
-          bindings: [...existingDurableObjectBindings, ...missingDurableObjectBindings],
-        };
-      }
-
-      const currentMigrations = (resolved as Record<string, unknown>).migrations;
-      const planned = appendSqliteClassMigration(
-        Array.isArray(currentMigrations) ? currentMigrations : [],
-        environmentWebsocketRoutes.map((route) => route.className),
-        'void-ws-v1',
-        existingDurableObjectBindings.map((binding) => binding.class_name),
-      );
-      if (planned.added) {
-        (result as Record<string, unknown>).migrations = planned.migrations;
-      }
-    }
-
-    if (durableObjects.length > 0) {
-      const currentDurableObjects =
-        ((result as Record<string, unknown>).durable_objects as
-          | { bindings?: Array<{ name: string; class_name: string }> }
-          | undefined) ??
-        ((resolved as Record<string, unknown>).durable_objects as
-          | { bindings?: Array<{ name: string; class_name: string }> }
-          | undefined);
-      const existingBindings = currentDurableObjects?.bindings ?? [];
-      for (const module of durableObjects) {
-        const conflict = existingBindings.find(
-          (binding) =>
-            binding.name === module.bindingName && binding.class_name !== module.className,
-        );
-        if (conflict) {
-          throw new Error(
-            `durable: binding '${module.bindingName}' is already configured for class '${conflict.class_name}', but durable-objects/ requires '${module.className}'.`,
-          );
-        }
-      }
-      const additions = durableObjects
-        .filter(
-          (module) => !existingBindings.some((binding) => binding.name === module.bindingName),
-        )
-        .map((module) => ({ name: module.bindingName, class_name: module.className }));
-      if (additions.length > 0) {
-        (result as Record<string, unknown>).durable_objects = {
-          bindings: [...existingBindings, ...additions],
-        };
-      }
-
-      const currentMigrations =
-        (result as Record<string, unknown>).migrations ??
-        (resolved as Record<string, unknown>).migrations;
-      const existingMigrations = Array.isArray(currentMigrations)
-        ? (currentMigrations as Array<{
-            tag?: string;
-            new_sqlite_classes?: Array<string>;
-          }>)
-        : [];
-      for (const module of durableObjects) {
-        const tagConflict = existingMigrations.find(
-          (migration) =>
-            migration.tag === module.migrationTag &&
-            !migration.new_sqlite_classes?.includes(module.className),
-        );
-        if (tagConflict) {
-          throw new Error(
-            `durable: migration tag '${module.migrationTag}' is already used by another Durable Object migration.`,
-          );
-        }
-      }
-      const migrationAdditions = durableObjects
-        .filter(
-          (module) =>
-            !existingMigrations.some(
-              (migration) =>
-                migration.tag === module.migrationTag ||
-                migration.new_sqlite_classes?.includes(module.className),
-            ),
-        )
-        .map((module) => ({
-          tag: module.migrationTag,
-          new_sqlite_classes: [module.className],
-        }));
-      if (migrationAdditions.length > 0) {
-        (result as Record<string, unknown>).migrations = [
-          ...existingMigrations,
-          ...migrationAdditions,
-        ];
-      }
-    }
-
-    if (bindings.needsSandbox && sandboxConfig) {
-      assertSandboxNamespaceConfig({ ...resolved, ...result }, sandboxConfig);
-      const currentDurableObjects =
-        ((result as Record<string, unknown>).durable_objects as
-          | { bindings?: Array<{ name: string; class_name: string }> }
-          | undefined) ??
-        ((resolved as Record<string, unknown>).durable_objects as
-          | { bindings?: Array<{ name: string; class_name: string }> }
-          | undefined);
-      const existingDurableObjectBindings =
-        (currentDurableObjects?.bindings as
-          | Array<{ name: string; class_name: string }>
-          | undefined) ?? [];
-      if (
-        !existingDurableObjectBindings.some((binding) => binding.name === sandboxConfig.binding)
-      ) {
-        (result as Record<string, unknown>).durable_objects = {
-          bindings: [
-            ...existingDurableObjectBindings,
-            {
-              name: sandboxConfig.binding,
-              class_name: sandboxConfig.className,
-            },
-          ],
-        };
-      }
-
-      const existingContainers =
-        ((result as Record<string, unknown>).containers as
-          | Array<{ class_name?: string }>
-          | undefined) ??
-        ((resolved as Record<string, unknown>).containers as
-          | Array<{ class_name?: string }>
-          | undefined) ??
-        [];
-      (result as Record<string, unknown>).containers = [
-        ...existingContainers.filter(
-          (container) => container.class_name !== sandboxConfig.className,
-        ),
-        sandboxContainerConfig(sandboxConfig),
-      ];
-      // Cloudflare concatenates callback arrays with the resolved config. This
-      // patch already contains every existing Container, so emit the list once.
-      (resolved as Record<string, unknown>).containers = [];
-
-      const currentMigrations =
-        (result as Record<string, unknown>).migrations ??
-        (resolved as Record<string, unknown>).migrations;
-      const existingMigrations = Array.isArray(currentMigrations)
-        ? (currentMigrations as Array<{
-            tag?: string;
-            new_classes?: Array<string>;
-            new_sqlite_classes?: Array<string>;
-          }>)
-        : [];
-      if (!hasSandboxSqliteMigration(existingMigrations, sandboxConfig.className)) {
-        (result as Record<string, unknown>).migrations = [
-          ...existingMigrations,
-          {
-            tag: SANDBOX_MIGRATION_TAG,
-            new_sqlite_classes: [sandboxConfig.className],
-          },
-        ];
-      }
-    }
-
-    if (shouldEmitLive() && liveConfig) {
-      const currentDurableObjects =
-        ((result as Record<string, unknown>).durable_objects as
-          | { bindings?: Array<{ name: string; class_name: string }> }
-          | undefined) ??
-        ((resolved as Record<string, unknown>).durable_objects as
-          | { bindings?: Array<{ name: string; class_name: string }> }
-          | undefined);
-      const existingDurableObjectBindings =
-        (currentDurableObjects?.bindings as
-          | Array<{ name: string; class_name: string }>
-          | undefined) ?? [];
-      if (
-        !existingDurableObjectBindings.some((binding) => binding.name === liveConfig.bindingName)
-      ) {
-        (result as Record<string, unknown>).durable_objects = {
-          bindings: [
-            ...existingDurableObjectBindings,
-            {
-              name: liveConfig.bindingName,
-              class_name: liveConfig.className,
-            },
-          ],
-        };
-      }
-
-      const currentMigrations =
-        (result as Record<string, unknown>).migrations ??
-        (resolved as Record<string, unknown>).migrations;
-      const existingMigrations = Array.isArray(currentMigrations)
-        ? (currentMigrations as Array<{
-            tag?: string;
-            new_classes?: Array<string>;
-            new_sqlite_classes?: Array<string>;
-          }>)
-        : [];
-      if (!hasDurableObjectSqliteMigration(existingMigrations, liveConfig.className)) {
-        (result as Record<string, unknown>).migrations = [
-          ...existingMigrations,
-          {
-            tag: nextDurableObjectMigrationTag(existingMigrations, LIVE_MIGRATION_TAG),
-            new_sqlite_classes: [liveConfig.className],
-          },
-        ];
-      }
-    }
-
-    // AI — in local dev, inject VC credentials for HTTPS proxy path.
-    // In production, the platform adds a __VOID_PROXY service binding instead.
-    if (viteCommand === 'serve' && bindings.needsAI && !directCloudflareDestination) {
-      const credentials = readVoidDevCredentials(root);
-      if (credentials.status === 'ok') {
-        // Prefer HTTPS proxy — inject credentials, skip direct AI binding
-        const vars = (result.vars as Record<string, string>) ?? {};
-        vars.__VOID_TOKEN = credentials.token;
-        vars.__VOID_PROJECT_ID = credentials.projectId;
-        vars.__VOID_PROXY_URL = credentials.proxyUrl;
-        if (credentials.accessCredentials) {
-          vars.__VOID_ACCESS_CREDENTIALS = credentials.accessCredentials;
-        }
-        result.vars = vars;
-      }
-    }
-
-    // Remote bindings — inject proxy credentials when remote mode is enabled.
-    // In remote mode, D1/KV/R2 bindings are replaced with proxy-backed versions
-    // that forward operations to the platform proxy over HTTPS.
-    if (
-      viteCommand === 'serve' &&
-      remoteMode &&
-      (bindings.needsD1 || bindings.needsKV || bindings.needsR2)
-    ) {
-      const credentials = readVoidDevCredentials(root);
-      if (credentials.status === 'ok') {
-        const vars = (result.vars as Record<string, string>) ?? {};
-        vars.__VOID_PROXY_URL = credentials.proxyUrl;
-        if (credentials.accessCredentials) {
-          vars.__VOID_ACCESS_CREDENTIALS = credentials.accessCredentials;
-        }
-        vars.__VOID_TOKEN = credentials.token;
-        vars.__VOID_PROJECT_ID = credentials.projectId;
-        vars.__VOID_REMOTE = '1';
-        result.vars = vars;
-      }
-    }
-
-    versionMetadataBinding = selectNativeVersionMetadataBinding(
-      resolved as Record<string, unknown>,
-      {
-        nativeBuild: viteCommand === 'build' && process.env[CLOUDFLARE_DEPLOY_BUILD_ENV] === '1',
-        preserveBindings: process.env[CLOUDFLARE_PRESERVE_BINDINGS_BUILD_ENV] === '1',
+    return mergeWorkerBindings(resolved, {
+      websocketRoutes,
+      routeEnvironment,
+      workerConfig,
+      envSchemaFacts,
+      authEnabled,
+      viteCommand,
+      bindingNames,
+      dialect,
+      application,
+      bindings,
+      directCloudflareDestination,
+      config,
+      devTriggerToken,
+      queues,
+      durableObjects,
+      sandboxConfig,
+      shouldEmitLive,
+      liveConfig,
+      root,
+      remoteMode,
+      get versionMetadataBinding() {
+        return versionMetadataBinding;
       },
-    );
-    if (versionMetadataBinding) {
-      const owner = findBindingNameOwner(result, 'version_metadata', versionMetadataBinding);
-      if (owner) {
-        throw new Error(
-          `Cloudflare version metadata binding ${versionMetadataBinding} conflicts with ${owner}.`,
-        );
-      }
-      if (!resolved.version_metadata) {
-        result.version_metadata = { binding: versionMetadataBinding };
-      }
-    }
-    finalizeDurableObjectPatch(resolved as Record<string, unknown>, result, [
-      ...environmentWebsocketRoutes.map((route) => ({
-        name: route.bindingName,
-        class_name: route.className,
-      })),
-      ...durableObjects.map((module) => ({
-        name: module.bindingName,
-        class_name: module.className,
-      })),
-      ...(bindings.needsSandbox && sandboxConfig
-        ? [{ name: sandboxConfig.binding, class_name: sandboxConfig.className }]
-        : []),
-      ...(shouldEmitLive() && liveConfig
-        ? [{ name: liveConfig.bindingName, class_name: liveConfig.className }]
-        : []),
-    ]);
-    return result as Partial<WorkerConfig>;
+      set versionMetadataBinding(value: string | undefined) {
+        versionMetadataBinding = value;
+      },
+    });
   }
 
   function applyEnvSchema(facts: EnvSchemaFacts): void {
@@ -2496,6 +1081,7 @@ export {
   defineQueue,
   VoidAssetRewriteError,
 } from './runtime/handler.ts';
+
 export type {
   CloudContext,
   CloudContextVariables,
@@ -2508,9 +1094,19 @@ export type {
   QueueMessage,
   QueueRetryOptions,
 } from './runtime/handler.ts';
+
 export type { ValidatorSlots, HandlerInput } from './runtime/validator.ts';
+
 export type { AuthUser } from './runtime/auth.ts';
+
 export type { QueueMap } from './runtime/queues.ts';
+
 export { defer } from './pages/defer.ts';
+
 export type { Deferred, DeferredState, InferProps } from './pages/defer.ts';
+
 export type { HeadDescriptor } from './pages/head.ts';
+
+export { shouldInjectEmailDevInboxVar } from './plugin-binding-utils.ts';
+
+export { shouldBindWorkersAi, resolveWorkersAiBindingName } from './plugin-ai-setup.ts';
