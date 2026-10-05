@@ -256,7 +256,7 @@ Authentication errors (`401`, `403`), server errors (`500`, `502`), and unexpect
 Actions can throw `ValidationError` for custom validation logic:
 
 ```ts
-import { defineHandler, ValidationError } from 'void';
+import { defineHandler, ValidationError } from 'void/handler';
 
 export const action = defineHandler(async (c) => {
   const body = await c.req.json();
