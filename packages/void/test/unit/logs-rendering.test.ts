@@ -1,5 +1,6 @@
 import { Writable } from 'node:stream';
 import { stripVTControlCharacters } from 'node:util';
+import { outro } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
 import { runLogsCommand } from '../../src/cli/logs.ts';
 
@@ -41,10 +42,15 @@ vi.mock('@voidzero-dev/vite-plus-prompts', async (original) => ({
   intro: vi.fn(),
   outro: vi.fn(),
 }));
-vi.mock('../../src/cli/output.ts', async () => {
+vi.mock('../../src/cli/output.ts', async (original) => {
   const { default: colors } = await import('picocolors');
   const pc = colors.createColors(true);
-  return { pc, dim: pc.dim, cliTitle: (title: string) => title };
+  return {
+    ...(await original<typeof import('../../src/cli/output.ts')>()),
+    pc,
+    dim: pc.dim,
+    cliTitle: (title: string) => title,
+  };
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -61,6 +67,7 @@ it.each([40, 80])('aligns wrapped log messages and exceptions at %i columns', as
   vi.spyOn(process, 'stdout', 'get').mockReturnValue(output as typeof process.stdout);
   const print = vi.spyOn(console, 'log').mockImplementation(() => {});
   await runLogsCommand('/fixture', '', '1h');
+  expect(stripVTControlCharacters(vi.mocked(outro).mock.calls.at(-1)![0]!)).toBe('1 log entry');
   const messages = print.mock.calls.map((args) => String(args[0] ?? ''));
   const warn = messages.find((line) => line.includes('[warn]'))!;
   const error = messages.find((line) => line.includes('[error]'))!;

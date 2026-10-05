@@ -1,7 +1,7 @@
 import { intro, outro, log, wrapTextWithPrefix } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { PlatformClient, type LogEntry } from './client.ts';
-import { cliTitle, dim, pc } from './output.ts';
+import { cliTitle, dim, formatCount, pc } from './output.ts';
 import { readDeploymentPlatform, readProjectConfig } from './project.ts';
 
 export async function runLogsCommand(
@@ -81,7 +81,7 @@ export async function runLogsCommand(
     printEntry(entry);
   }
 
-  outro(dim(`${entries.length} log entries`));
+  outro(dim(formatCount(entries.length, 'log entry', 'log entries')));
 }
 
 function printEntry(entry: LogEntry): void {

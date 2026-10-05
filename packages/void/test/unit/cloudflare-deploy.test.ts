@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { stripVTControlCharacters } from 'node:util';
 import {
   CloudflareWorkerInspectionError,
   parseCloudflareVersionMessage,
@@ -102,19 +103,19 @@ const silentCliLog: CliLogger = {
   close: async () => {},
 };
 
-/** Run a deploy while capturing its user-facing success output. */
-async function captureSuccessMessages(run: () => Promise<void>): Promise<Array<string>> {
-  const messages: Array<string> = [];
-  const restore = log.success;
-  log.success = (message: string) => {
-    messages.push(message);
-  };
+/** Capture the real renderer so successful native deploys must emit an enclosed summary. */
+async function captureDeployOutput(run: () => Promise<void>): Promise<string> {
+  const chunks: Array<string> = [];
+  const write = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+    chunks.push(String(chunk));
+    return true;
+  });
   try {
     await run();
   } finally {
-    log.success = restore;
+    write.mockRestore();
   }
-  return messages;
+  return stripVTControlCharacters(chunks.join(''));
 }
 
 /** Synthetic real ids (shape-valid) for drift/provision fixtures. */
@@ -1952,7 +1953,9 @@ describe('runCloudflareDeploy — PostgreSQL checked-in migrations', () => {
         return ['0000_init.sql'];
       },
     });
-    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
+    const output = await captureDeployOutput(() =>
+      runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
+    );
     expect(exitCalls).toEqual([]);
     expect(applied).toEqual([
       { dir: toSlash(join(root, 'db', 'migrations')), url: 'postgresql://prod.example/app' },
@@ -1960,6 +1963,8 @@ describe('runCloudflareDeploy — PostgreSQL checked-in migrations', () => {
     expect(trace.indexOf('migrate-gate')).toBeLessThan(trace.indexOf('postgres-migrate'));
     expect(trace.indexOf('postgres-migrate')).toBeLessThan(trace.indexOf('wrangler:deploy'));
     expect(wranglerArgs.some((a) => a[0] === 'd1')).toBe(false);
+    expect(output).toMatch(/[│|]\s+1 migration applied\s+[│|]/);
+    expect(output).not.toContain('D1 migrations up to date');
   });
 
   it('still deploys a pg app WITHOUT checked-in migrations (external schema — no false-reject)', async () => {
@@ -2395,7 +2400,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     });
     const { deps, exitCalls } = harness();
 
-    const successMessages = await captureSuccessMessages(() =>
+    const output = await captureDeployOutput(() =>
       runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     );
 
@@ -2405,9 +2410,10 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(generated.durable_objects).toEqual({ bindings: [] });
     expect(generated.queues).toEqual({ producers: [], consumers: [] });
     expect(generated.workflows).toEqual([]);
-    expect(successMessages).toContain(
-      'Deployed "switchable-app" to your Cloudflare account.\nhttps://preview.example.workers.dev',
-    );
+    expect(output).toMatch(/[╭+].*https:\/\/preview\.example\.workers\.dev.*[╮+]/);
+    expect(output).toContain('Worker: switchable-app');
+    expect(output).toMatch(/[│|]\s+Static SPA\s+[│|]/);
+    expect(output).toContain('Done!');
   });
 
   it('passes a complete Access service-token pair to the readiness probe', async () => {
@@ -3213,7 +3219,7 @@ describe('runCloudflareDeploy — resource provisioning', () => {
       }) as CloudflareDeployDeps['provision'],
     });
 
-    const successMessages = await captureSuccessMessages(() =>
+    const output = await captureDeployOutput(() =>
       runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps),
     );
 
@@ -3221,9 +3227,10 @@ describe('runCloudflareDeploy — resource provisioning', () => {
     expect(provisionTrace).toEqual(['provision']);
     expect(trace).toContain('build');
     expect(trace).toContain('wrangler:deploy');
-    expect(successMessages).toContain(
-      'Deployed "myapp" to your Cloudflare account.\nhttps://preview.example.workers.dev',
-    );
+    expect(output).toMatch(/[╭+].*https:\/\/preview\.example\.workers\.dev.*[╮+]/);
+    expect(output).toContain('Worker: myapp');
+    expect(output).not.toContain('D1 migrations up to date');
+    expect(output).toContain('Done!');
   });
 
   it('reconciles D1 replication before build, gate, migrations and deploy when fully provisioned', async () => {
@@ -3235,12 +3242,11 @@ describe('runCloudflareDeploy — resource provisioning', () => {
       'wrangler.jsonc': JSON.stringify(PROVISIONED_D1, null, 2),
     });
     const { deps, trace, wranglerArgs } = harness();
-    await runCloudflareDeploy(
-      root,
-      { platform: 'cloudflare', provision: true },
-      silentCliLog,
-      deps,
+    const output = await captureDeployOutput(() =>
+      runCloudflareDeploy(root, { platform: 'cloudflare', provision: true }, silentCliLog, deps),
     );
+    expect(output).toContain('D1 migrations up to date');
+    expect(output).not.toMatch(/\d+ migrations? applied/);
     // The BUILD runs BEFORE the secret gate (ground-truth validation reads the real emitted
     // artifact); the LOCAL migration gate runs AFTER the build (against the post-build files),
     // and the REMOTE D1 apply runs after that (a failed gate never mutates D1).

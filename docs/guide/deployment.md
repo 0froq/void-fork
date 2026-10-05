@@ -6,6 +6,8 @@ outline: deep
 
 `void deploy` builds your app, provisions resources, applies migrations, and deploys it. Choose your own Cloudflare account or a Void platform run by your team.
 
+After a successful deployment, Void prints your deployment URL in a summary box with the details reported by your deployment target.
+
 ## Deploy to Cloudflare
 
 Choose Cloudflare during `void init`, or connect later:

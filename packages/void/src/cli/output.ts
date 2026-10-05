@@ -10,6 +10,10 @@ import pc from 'picocolors';
 
 export { pc };
 
+export function formatCount(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 /** Keep recovery commands on the same CLI when using the local checkout launcher. */
 export function cliCommandName(): 'void' | 'void-dev' {
   const entryName = process.argv[1]?.split(/[\\/]/).at(-1);

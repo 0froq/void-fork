@@ -182,6 +182,7 @@ import {
   formatDeployFailureMessage,
   formatStreamDeployError,
 } from './deploy-errors.ts';
+import { formatDeploySummary } from './deploy-summary.ts';
 import { uploadAssetsToR2, type DirectR2PutItem } from './direct-r2-upload.ts';
 import {
   applyEmailSetup,
@@ -228,7 +229,7 @@ import { lintDestinationSplats, lintDuplicateSources, mergeRoutingRules } from '
 import { openDeployLog, type CliLogger } from './log-file.ts';
 import { buildDeployLogSummary } from './log-summary.ts';
 import { promptForLoginToken } from './login.ts';
-import { cliTitle, createSpinner, pc } from './output.ts';
+import { cliTitle, createSpinner, formatCount, pc } from './output.ts';
 import {
   collectAndHashAssets,
   buildVoidManifest,
@@ -5884,6 +5885,8 @@ export async function runCloudflareDeploy(
     }
   }
 
+  let appliedMigrations = 0;
+
   // 9. Apply pending PostgreSQL migrations transactionally before the Worker upload. The
   // production URL is intentionally provided by the deploy environment rather than recovered
   // from Hyperdrive (Cloudflare never returns the database password). `runPgMigrations` records
@@ -5899,6 +5902,7 @@ export async function runCloudflareDeploy(
         migrationsDir,
         databaseUrl,
       );
+      appliedMigrations += applied.length;
       cliLog.info('cloudflare_postgres_migrations', { applied: applied.length });
       if (applied.length > 0) {
         log.success(
@@ -5922,6 +5926,7 @@ export async function runCloudflareDeploy(
         migrationsDir,
         databaseUrl,
       );
+      appliedMigrations += applied.length;
       cliLog.info('cloudflare_mysql_migrations', { applied: applied.length });
       if (applied.length > 0) {
         log.success(`Applied ${applied.length} MySQL migration${applied.length === 1 ? '' : 's'}.`);
@@ -6166,12 +6171,24 @@ export async function runCloudflareDeploy(
     worker: workerName,
     versionId: execution.versionId,
   });
-  log.success(`Deployed "${workerName}" to your Cloudflare account.\n${execution.previewUrl}`);
+  note(
+    formatDeploySummary({
+      workerName,
+      migrations: appliedMigrations,
+      d1MigrationsCurrent: d1MigrateToken !== undefined,
+      // Existing Worker handoffs preserve remote triggers rather than publishing source jobs.
+      cronJobs: existingWorker ? undefined : source.analysis.jobs.length,
+      queues: existingWorker ? undefined : desired.queues.length,
+      framework: detectedFramework?.name,
+    }),
+    execution.previewUrl,
+  );
   // The address map — the one thing nobody can find today (0078). Printed whenever the worker
   // shipped with email set up; a run that went without email already said so at 3b-ii.
   if (emailMap) {
     log.message(renderAddressMap(emailMap));
   }
+  outro('Done!');
 }
 
 /**
@@ -6926,7 +6943,14 @@ async function runCloudflareStaticDeploy(
     worker: workerName,
     versionId: execution.versionId,
   });
-  log.success(`Deployed "${workerName}" to your Cloudflare account.\n${execution.previewUrl}`);
+  note(
+    formatDeploySummary({
+      workerName,
+      typeLabel: preset.appType === 'spa' ? 'Static SPA' : 'Static Site',
+    }),
+    execution.previewUrl,
+  );
+  outro('Done!');
 }
 
 type RunDeployTargetAdapter = DeployTargetAdapter<RunDeployOptions, CliLogger>;
@@ -7771,7 +7795,7 @@ async function streamDirectR2Deploy(
       });
     }
 
-    s.message(`Requesting upload URLs for ${needed.length} asset(s)...`);
+    s.message(`Requesting upload URLs for ${formatCount(needed.length, 'asset')}...`);
 
     // Dedupe by content hash: identical files (same blake3) get presigned
     // and PUT once. `assetManifest` still lists every path for the
@@ -7845,7 +7869,7 @@ async function streamDirectR2Deploy(
       };
     });
 
-    s.message(`Uploading ${items.length} asset(s) to R2...`);
+    s.message(`Uploading ${formatCount(items.length, 'asset')} to R2...`);
     // Per-PUT cleanup: once R2 acks the upload, drop the buffer from the
     // CLI-side cache so peak memory under the bounded upload pool stays
     // close to `R2_PUT_CONCURRENCY` × asset size, not the full bundle.
@@ -7899,13 +7923,6 @@ async function streamDirectR2Deploy(
   } finally {
     cliLog?.info('finalize_end', { durationMs: Date.now() - finalizeStartedAt });
   }
-}
-
-function formatKnownAssetSummary(result: DeployDoneEvent, skipped: number): string {
-  const uploaded = result.assets - skipped;
-  return skipped > 0
-    ? `${result.assets} static asset(s) (${skipped} unchanged, ${uploaded} uploaded)`
-    : `${result.assets} static asset(s)`;
 }
 
 /**
@@ -8023,7 +8040,7 @@ export async function runStaticDeploy(
   });
 
   if (skipped > 0) {
-    log.info(`Skipping ${skipped} unchanged asset(s)`);
+    log.info(`Skipping ${formatCount(skipped, 'unchanged asset')}`);
   }
 
   s.start('Packaging...');
@@ -8057,8 +8074,10 @@ export async function runStaticDeploy(
     cliLog,
   );
 
-  const summary = [`${typeLabel} — ${formatKnownAssetSummary(result, skipped)}`];
-  note(summary.join('\n'), result.url);
+  note(
+    formatDeploySummary({ typeLabel, assets: result.assets, unchangedAssets: skipped }),
+    result.url,
+  );
 
   warnUnpublishedRouting(result);
   outro('Done!');
@@ -8228,7 +8247,7 @@ async function runFrameworkDeploy(
   if (rawMigrations.length > 0) {
     try {
       validatedMigrations = validateMigrations(rawMigrations);
-      log.info(`Found ${validatedMigrations.length} migration(s)`);
+      log.info(`Found ${formatCount(validatedMigrations.length, 'migration')}`);
     } catch (err: unknown) {
       log.error(getErrorMessage(err));
       process.exit(1);
@@ -8361,7 +8380,7 @@ async function runFrameworkDeploy(
   });
 
   if (skipped > 0) {
-    log.info(`Skipping ${skipped} unchanged asset(s)`);
+    log.info(`Skipping ${formatCount(skipped, 'unchanged asset')}`);
   }
 
   s.start('Packaging...');
@@ -8425,30 +8444,20 @@ async function runFrameworkDeploy(
     cliLog,
   );
 
-  const summary = [
-    `${result.workers} worker module(s), ${formatKnownAssetSummary(result, skipped)}`,
-  ];
-  if (result.migrations) {
-    summary.push(`${result.migrations} migration(s) applied`);
-  }
-  if (schedules.length > 0) {
-    summary.push(`${schedules.length} cron job(s) scheduled`);
-  }
-  if (queues.length > 0) {
-    summary.push(`${queues.length} queue(s) configured`);
-  }
-  if (prerender && prerender.length > 0) {
-    summary.push(`${prerender.length} page(s) prerendered`);
-  }
-  if (revalidate) {
-    if (typeof revalidate === 'number') {
-      summary.push(`ISR revalidate: ${revalidate}s`);
-    } else {
-      summary.push(`ISR revalidate: ${Object.keys(revalidate).length} path rule(s)`);
-    }
-  }
-  summary.push(`Framework: ${detected.name}`);
-  note(summary.join('\n'), result.url);
+  note(
+    formatDeploySummary({
+      workers: result.workers,
+      assets: result.assets,
+      unchangedAssets: skipped,
+      migrations: result.migrations,
+      cronJobs: schedules.length,
+      queues: queues.length,
+      prerenderedPages: prerender?.length,
+      revalidate,
+      framework: detected.name,
+    }),
+    result.url,
+  );
 
   // Clean up generated wrapper files
   cleanupWrapper(root);
@@ -8576,7 +8585,7 @@ async function runFullDeploy(
     if (result.paths.length === 0) {
       log.info('No pages to prerender');
     } else if (result.failed.length > 0) {
-      voidWarn(`${result.failed.length} page(s) failed to prerender`);
+      voidWarn(`${formatCount(result.failed.length, 'page')} failed to prerender`);
     }
   }
 
@@ -8644,7 +8653,7 @@ async function runFullDeploy(
   if (rawMigrations.length > 0) {
     try {
       validatedMigrations = validateMigrations(rawMigrations);
-      log.info(`Found ${validatedMigrations.length} migration(s)`);
+      log.info(`Found ${formatCount(validatedMigrations.length, 'migration')}`);
     } catch (err: unknown) {
       log.error(getErrorMessage(err));
       process.exit(1);
@@ -8868,7 +8877,7 @@ async function runFullDeploy(
   });
 
   if (skipped > 0) {
-    log.info(`Skipping ${skipped} unchanged asset(s)`);
+    log.info(`Skipping ${formatCount(skipped, 'unchanged asset')}`);
   }
 
   s.start('Packaging...');
@@ -8967,35 +8976,21 @@ async function runFullDeploy(
     cliLog,
   );
 
-  const summary = [
-    `${result.workers} worker module(s), ${formatKnownAssetSummary(result, skipped)}`,
-  ];
-  if (result.migrations) {
-    summary.push(`${result.migrations} migration(s) applied`);
-  }
-  if (schedules.length > 0) {
-    summary.push(`${schedules.length} cron job(s) scheduled`);
-  }
-  if (queues.length > 0) {
-    summary.push(`${queues.length} queue(s) configured`);
-  }
-  if (uniquePrerenderPaths.length > 0) {
-    summary.push(`${uniquePrerenderPaths.length} page(s) prerendered`);
-  }
-  if (isSsr) {
-    summary.push('SSR enabled');
-  }
-  if (revalidate) {
-    if (typeof revalidate === 'number') {
-      summary.push(`ISR revalidate: ${revalidate}s`);
-    } else {
-      summary.push(`ISR revalidate: ${Object.keys(revalidate).length} path rule(s)`);
-    }
-  }
-  if (isFrameworkMode) {
-    summary.push('Framework mode');
-  }
-  note(summary.join('\n'), result.url);
+  note(
+    formatDeploySummary({
+      workers: result.workers,
+      assets: result.assets,
+      unchangedAssets: skipped,
+      migrations: result.migrations,
+      cronJobs: schedules.length,
+      queues: queues.length,
+      prerenderedPages: uniquePrerenderPaths.length,
+      ssr: isSsr,
+      revalidate,
+      framework: isFrameworkMode || undefined,
+    }),
+    result.url,
+  );
 
   warnUnpublishedRouting(result);
   outro('Done!');
