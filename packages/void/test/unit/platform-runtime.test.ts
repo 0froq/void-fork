@@ -227,6 +227,39 @@ describe('platform runtime manifest', () => {
     }
   });
 
+  it.each(['dispatch', 'emailGateway', 'proxy', 'tail'] as const)(
+    'starts the packaged %s Worker in the bundled local runtime',
+    async (name) => {
+      const runtimeDirectory = getPlatformRuntimeDirectory();
+      const runtime = readPlatformRuntimeManifest();
+      const miniflare = new Miniflare(
+        convertV4MiniflareOptions({
+          bindings: {
+            PLATFORM_HEALTH_PROBE_TOKEN: 'probe',
+            PLATFORM_TRAFFIC_STATE: 'staging',
+          },
+          compatibilityDate: '2026-02-24',
+          compatibilityFlags: name === 'proxy' || name === 'emailGateway' ? ['nodejs_compat'] : [],
+          modules: true,
+          scriptPath: join(runtimeDirectory, runtime.artifacts[name]!.path),
+        }),
+      );
+
+      try {
+        await miniflare.ready;
+        if (name !== 'tail') {
+          const response = await miniflare.dispatchFetch('http://localhost/health', {
+            headers: { 'X-Void-Platform-Probe': 'probe' },
+          });
+          expect(response.status).toBe(200);
+          expect(await response.json()).toMatchObject({ ok: true });
+        }
+      } finally {
+        await miniflare.dispose();
+      }
+    },
+  );
+
   it('rejects a custom runtime whose artifacts changed after its manifest was built', () => {
     const temporary = mkdtempSync(join(tmpdir(), 'void-custom-runtime-test-'));
     const runtimeDirectory = join(temporary, 'runtime');

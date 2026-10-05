@@ -95,11 +95,21 @@ try {
         compatibility_date: '2026-02-24',
         compatibility_flags:
           name === 'api' || name === 'proxy' || name === 'emailGateway' ? ['nodejs_compat'] : [],
+        keep_names: true,
       }),
     );
     const result = spawnSync(
       process.execPath,
-      [wrangler, 'deploy', '--dry-run', '--config', configPath, '--outdir', outputDirectory],
+      [
+        wrangler,
+        'deploy',
+        '--dry-run',
+        '--config',
+        configPath,
+        '--outdir',
+        outputDirectory,
+        '--minify',
+      ],
       { cwd: dirname(entrypoint), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
     );
     if (result.status !== 0) {
