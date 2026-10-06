@@ -338,7 +338,7 @@ export function purgeResourcesKeptResources(
 }
 
 function resourceLabel(resource: InstallationResource): string {
-  return `${resource.kind}: ${resource.name} (${resource.id})`;
+  return `${resource.kind}: ${resource.name}${resource.name === resource.id ? '' : ` (${resource.id})`}`;
 }
 
 /** Plan lines for --purge-resources: what is deleted, in order, then what is kept. */

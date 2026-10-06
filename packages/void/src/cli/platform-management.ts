@@ -15,7 +15,7 @@ import {
   type PlatformInstallationManifest,
 } from '@void/platform';
 import { confirm, isCancel, log, outro, select } from '@voidzero-dev/vite-plus-prompts';
-import { createSpinner, note } from './output.ts';
+import { createSpinner, note, pc } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import { platformDatabaseNameFromOwnerUrl } from './platform-auth-database.ts';
 import {
@@ -52,7 +52,6 @@ import {
 } from './platform-plan.ts';
 import {
   acquirePlatformLifecycleLock,
-  installationManifestPath,
   listInstallationManifests,
   readInstallationRecoverySecrets,
   removeInstallationRecoverySecrets,
@@ -73,7 +72,6 @@ import {
   purgeResourcesKeptReason,
   purgeResourcesKeptResources,
   purgeResourcesPermissions,
-  purgeResourcesResumeCommand,
   PURGE_RESOURCES_STEP_PREFIX,
   runPurgeResourcesTeardown,
   type PurgeResourcesClient,
@@ -933,29 +931,27 @@ export async function uninstallPlatform(
   if (purgeResources) {
     await assertNoPlatformProjects(dependencies.readProjects);
   }
-  const dataMessage = retainData
-    ? 'Retain installer-owned Workers, storage, dispatch, AI logs, and Hyperdrive by default.'
-    : args.purgeData
-      ? 'Delete safely identifiable installer-owned data (--purge-data); retain Workers, R2, AI Gateway, and external PostgreSQL for manual cleanup.'
-      : 'Retain installer-owned data; external PostgreSQL is never deleted.';
   const purgeResourcesClient = purgeResources ? requirePurgeResourcesClient(client) : null;
-  note(
-    purgeResources
-      ? purgeResourcesPlanText(manifest)
-      : `Disable all platform traffic through installation-owned routing storage.\nRetain DNS records, routes, and custom domains for explicit dashboard cleanup.\nDelete installer-owned Queues unless a retained Worker still uses them.\n${dataMessage}\n${
-          createdZone
-            ? `Keep zone ${createdZone.name} for explicit manual cleanup.`
-            : 'Never delete the adopted application zone.'
-        }${describeKeptResources(
-          manifest,
-          plannedKeptResources(manifest, retainData, hasRoutingCheckpoint),
-          'Keep for manual cleanup:',
-          'Retain Access resources for deliberate cleanup:',
-        )
-          .map((line) => `\n${line}`)
-          .join('')}`,
-    'Uninstall plan',
-  );
+  if (args.plan || (interactive && !args.yes)) {
+    note(
+      purgeResources
+        ? purgeResourcesPlanText(manifest)
+        : [
+            'Disable platform traffic.',
+            retainData
+              ? 'Keep Workers and data.'
+              : 'Delete eligible data; keep Workers, R2, and AI Gateway.',
+            'Delete unused Queues.',
+            ...describeKeptResources(
+              manifest,
+              plannedKeptResources(manifest, retainData, hasRoutingCheckpoint),
+              'Keep for manual cleanup:',
+              'Keep Access resources:',
+            ),
+          ].join('\n'),
+      pc.bold('Uninstall plan'),
+    );
+  }
   if (purgeResourcesClient) {
     const credentialCheck = checkPurgeResourcesCredentials(
       purgeResourcesClient,
@@ -996,6 +992,8 @@ export async function uninstallPlatform(
       return;
     }
   }
+
+  log.step(`Uninstalling ${manifest.deployment.displayName}...`);
 
   const purgeResourcesKept = new Set(
     purgeResources ? purgeResourcesKeptResources(manifest).map((resource) => resource.key) : [],
@@ -1274,15 +1272,10 @@ export async function uninstallPlatform(
       'Access resources:',
       purgeResources && purgeResourcesHandlesEmailRouting(next),
     );
-    if (purgeResources) {
-      kept.push('Always kept:', ...purgeResourcesAlwaysKept());
-    }
     if (kept.length) {
-      note(kept.join('\n'), 'Kept for manual cleanup');
+      note(kept.join('\n'), pc.bold('Kept resources'));
     }
-    log.success(
-      `${next.deployment.displayName} was uninstalled. The full record is in ${installationManifestPath(next.account.id, next.id)}.`,
-    );
+    log.success(`Uninstalled ${next.deployment.displayName}.`);
   } catch (error) {
     await stopProjectZeroTrustHold().catch(() => {});
     next = transitionInstallation(next, 'failed', new Date().toISOString());
@@ -1434,7 +1427,7 @@ function purgeResourcesPlanText(manifest: PlatformInstallationManifest): string 
     ),
   };
   return [
-    'Disable all platform traffic through installation-owned routing storage.',
+    'Disable platform traffic.',
     ...describePurgeResourcesPlan(manifest),
     ...describeKeptResources(
       keepManifest,
@@ -1450,7 +1443,6 @@ function purgeResourcesPlanText(manifest: PlatformInstallationManifest): string 
           `API token needs: ${permissions.join(', ')}. Browser login cannot delete DNS records or Access resources.`,
         ]
       : []),
-    `If it stops, fix the reported problem and rerun: ${purgeResourcesResumeCommand(manifest)}`,
   ].join('\n');
 }
 
@@ -1498,7 +1490,7 @@ function describeKeptResources(
     return reason === null ? '' : `, kept because ${reason}`;
   };
   const line = (resource: InstallationResource) =>
-    `  ${resource.kind}: ${resource.name} (${resource.id})${why(resource.key)}`;
+    `  ${resource.kind}: ${resource.name}${resource.name === resource.id ? '' : ` (${resource.id})`}${why(resource.key)}`;
   const {
     capabilities,
     emailSenderDomain,

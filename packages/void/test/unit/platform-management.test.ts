@@ -30,7 +30,6 @@ import {
   platformProvisionIntentHash,
 } from '../../src/cli/platform-plan.ts';
 import {
-  installationManifestPath,
   listInstallationManifests,
   promoteInstallationSecrets,
   readInstallationRecoverySecrets,
@@ -45,7 +44,7 @@ import {
 
 vi.mock('@voidzero-dev/vite-plus-prompts', async (original) => {
   const actual = await original<typeof import('@voidzero-dev/vite-plus-prompts')>();
-  return { ...actual, log: { ...actual.log, success: vi.fn() }, note: vi.fn() };
+  return { ...actual, log: { ...actual.log, step: vi.fn(), success: vi.fn() }, note: vi.fn() };
 });
 
 const directories: Array<string> = [];
@@ -1454,7 +1453,7 @@ describe('platform lifecycle management', () => {
 
     await uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies);
 
-    const kept = noteText('Kept for manual cleanup');
+    const kept = noteText('Kept resources');
     expectInOrder(kept, [
       'dns-record: application-dns (application-dns-id)',
       'queue: cron-queue (cron-queue-id)',
@@ -1471,9 +1470,7 @@ describe('platform lifecycle management', () => {
       'zone: zone (zone-id)',
       'created application: login-access (access-app-id, account account)',
     ]);
-    expect(vi.mocked(log.success).mock.calls.at(-1)?.[0]).toBe(
-      `Example was uninstalled. The full record is in ${installationManifestPath('account', manifest.id)}.`,
-    );
+    expect(vi.mocked(log.success).mock.calls.at(-1)?.[0]).toBe('Uninstalled Example.');
   });
 
   it('names the resources a purge plan keeps', async () => {
@@ -1528,7 +1525,7 @@ describe('platform lifecycle management', () => {
     expect(noteText('Uninstall plan')).toContain(emailLine);
 
     await uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies);
-    expect(noteText('Kept for manual cleanup')).toContain(emailLine);
+    expect(noteText('Kept resources')).toContain(emailLine);
   });
 
   it('records an AI Gateway already removed in Cloudflare as deleted', async () => {
@@ -1544,7 +1541,7 @@ describe('platform lifecycle management', () => {
       listInstallationManifests()[0]?.resources.find((resource) => resource.key === 'ai-gateway')
         ?.state,
     ).toBe('deleted');
-    expect(noteText('Kept for manual cleanup')).not.toContain('ai-gateway:');
+    expect(noteText('Kept resources')).not.toContain('ai-gateway:');
   });
 
   it('refuses automatic deletion of an installer-created zone', async () => {

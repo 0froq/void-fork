@@ -38,7 +38,7 @@ vi.mock('@voidzero-dev/vite-plus-prompts', async (original) => {
   const actual = await original<typeof import('@voidzero-dev/vite-plus-prompts')>();
   return {
     ...actual,
-    log: { ...actual.log, success: vi.fn(), warn: vi.fn() },
+    log: { ...actual.log, step: vi.fn(), success: vi.fn(), warn: vi.fn() },
     note: vi.fn(),
     outro: vi.fn(),
   };
@@ -49,6 +49,8 @@ const directories: Array<string> = [];
 beforeEach(() => {
   vi.mocked(note).mockClear();
   vi.mocked(log.warn).mockClear();
+  vi.mocked(log.success).mockClear();
+  vi.mocked(log.step).mockClear();
   process.env.VOID_PLATFORM_RECOVERY_KEY = Buffer.alloc(32, 7).toString('base64');
 });
 
@@ -660,15 +662,15 @@ describe('uninstall --purge-resources', () => {
       `5. worker: ${names.emailGatewayWorker}`,
       `5. worker: ${names.proxyWorker}`,
       `5. worker: ${names.dispatchWorker}`,
-      `5. worker: ${names.apiWorker} (${names.apiWorker}), with its Durable Object data`,
+      `5. worker: ${names.apiWorker}, with its Durable Object data`,
       `6. queue: ${names.cronQueue} (cron-id)`,
       `6. queue: ${names.usageQueue} (usage-id)`,
       `7. dispatch-namespace: ${names.dispatchNamespace} (namespace-uuid), with any application Workers still in it`,
-      `8. worker: ${names.tailWorker} (${names.tailWorker}), the tail Worker, after the others`,
+      `8. worker: ${names.tailWorker}, the tail Worker, after the others`,
       `9. hyperdrive: ${names.hyperdrive} (hyperdrive-id)`,
       `9. kv-namespace: ${names.isrCacheKv} (isr-id)`,
-      `10. r2-bucket: ${names.assetsBucket} (${names.assetsBucket}), emptied first`,
-      `11. ai-gateway: ${names.aiGateway} (${names.aiGateway})`,
+      `10. r2-bucket: ${names.assetsBucket}, emptied first`,
+      `11. ai-gateway: ${names.aiGateway}`,
       `12. kv-namespace: ${names.routingKv} (routing-id), last; it holds uninstall progress`,
       'Keep for manual cleanup:',
       'kv-namespace: customer-kv (customer-kv-id)',
@@ -681,11 +683,33 @@ describe('uninstall --purge-resources', () => {
       'API tokens you created for this platform.',
       'API token needs: Account → Access: Apps and Policies → Edit',
       'Zone → DNS → Edit',
-      `rerun: ${RESUME}`,
     ]);
     expect(plan).not.toContain(`Access application: company-app`);
     expect(changes(fake)).toEqual([]);
     expect(listInstallationManifests()[0]?.status).toBe('installed');
+  });
+
+  it('shows the deletion plan before interactive confirmation and leaves cancellation unchanged', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = cloudflare(manifest);
+    const confirm = vi.fn(async () => {
+      expect(noteText('Uninstall plan')).toContain(`5. worker: ${names.apiWorker}`);
+      return false;
+    });
+
+    await uninstallPlatform(
+      fake,
+      manifest,
+      { ...purgeResourcesArgs, yes: false },
+      dependencies({ interactive: true, confirm }),
+    );
+
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(changes(fake)).toEqual([]);
+    expect(listInstallationManifests()[0]?.status).toBe('installed');
+    expect(log.step).not.toHaveBeenCalled();
+    expect(log.success).not.toHaveBeenCalled();
   });
 
   it('deletes in an order Cloudflare accepts, with the tail Worker after its producers and routing KV last', async () => {
@@ -721,15 +745,17 @@ describe('uninstall --purge-resources', () => {
         .map((resource) => `${resource.key}:${resource.state}`),
     ).toEqual(['customer-kv:retained', 'zone:retained']);
     expect(readInstallationRecoverySecrets(final)).toBeNull();
-    const kept = noteText('Kept for manual cleanup');
+    const kept = noteText('Kept resources');
     expectInOrder(kept, [
       'kv-namespace: customer-kv (customer-kv-id)',
       'zone: example.com (zone-id)',
       'adopted application: company-app',
-      'Always kept:',
-      'The external PostgreSQL database and its data.',
     ]);
     expect(kept).not.toContain('access-app');
+    expect(kept).not.toContain('Always kept:');
+    expect(noteText('Uninstall plan')).toBe('');
+    expect(log.step).toHaveBeenCalledWith('Uninstalling Example...');
+    expect(log.success).toHaveBeenCalledWith('Uninstalled Example.');
   });
 
   it('detaches queue consumers that Cloudflare names by script_name before deleting their Workers', async () => {
@@ -874,7 +900,7 @@ describe('uninstall --purge-resources', () => {
       { id: 'route-2', pattern: '*.apps.example.com', script: 'someone-else' },
     ]);
     expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
-    expect(noteText('Kept for manual cleanup')).toContain(
+    expect(noteText('Kept resources')).toContain(
       'worker-route: *.apps.example.com (route-2), kept because it now sends "*.apps.example.com" to "someone-else"',
     );
   });
@@ -890,7 +916,7 @@ describe('uninstall --purge-resources', () => {
     expect(deletes(fake)).not.toContain('DELETE worker-custom-domain domain-1');
     expect(fake.live.domains).toHaveLength(1);
     expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
-    expect(noteText('Kept for manual cleanup')).toContain(
+    expect(noteText('Kept resources')).toContain(
       'worker-custom-domain: api.example.com (domain-1), kept because it now sends "api.example.com" to "someone-else"',
     );
   });
@@ -913,7 +939,7 @@ describe('uninstall --purge-resources', () => {
     expect(final.resources.find((resource) => resource.key === 'application-dns')?.state).toBe(
       'retained',
     );
-    expect(noteText('Kept for manual cleanup')).toContain(
+    expect(noteText('Kept resources')).toContain(
       'dns-record: *.apps.example.com (dns-id), kept because its configuration changed after installation',
     );
   });
@@ -930,7 +956,7 @@ describe('uninstall --purge-resources', () => {
     expect(deletes(fake)).toContain('DELETE access service-token access-token');
     expect(fake.live.access.get('access-app')?.name).toBe('renamed');
     expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
-    expect(noteText('Kept for manual cleanup')).toContain(
+    expect(noteText('Kept resources')).toContain(
       `created application: void-${INSTALLATION_ID}-login-0123456789abcdef (access-app, account account), kept because its live name "renamed" is not the name this installation recorded`,
     );
   });
@@ -965,7 +991,7 @@ describe('uninstall --purge-resources', () => {
     ]);
     expect(fake.live.emailRules.map((rule) => rule.id)).toEqual(['theirs', 'forward']);
     expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
-    expect(noteText('Kept for manual cleanup')).toContain(
+    expect(noteText('Kept resources')).toContain(
       "Email Routing for mail.example.com (zone mail-zone): its settings and the sender domain's MX, SPF, and DKIM records.",
     );
   });
@@ -1457,9 +1483,7 @@ describe('uninstall --purge-resources', () => {
     expect(final.resources.find((resource) => resource.key === 'ai-gateway')?.state).toBe(
       'retained',
     );
-    expect(noteText('Kept for manual cleanup')).toContain(
-      `ai-gateway: ${names.aiGateway} (${names.aiGateway})`,
-    );
+    expect(noteText('Kept resources')).toContain(`ai-gateway: ${names.aiGateway}`);
   });
 
   it('keeps an AI Gateway whose creation time Cloudflare does not report', async () => {
