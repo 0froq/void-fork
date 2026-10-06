@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { promptForLoginToken, runLoginCommand } from '../../src/cli/login.ts';
+import { pc } from '../../src/cli/output.ts';
 
 const mockWarn = vi.fn();
 const mockError = vi.fn();
@@ -170,8 +171,9 @@ describe('runLoginCommand', () => {
     expect(mockDiscoverPlatform).toHaveBeenCalledWith('https://api.example.test');
     expect(mockRunLogin).toHaveBeenCalledWith(root, 'github', expect.any(Function));
     expect(mockSaveToken).toHaveBeenCalledWith('fresh-token', root);
-    expect(mockOutro).toHaveBeenCalledWith('\n✓ Token saved. Unset `VOID_TOKEN` to use it.', {
-      withGuide: false,
-    });
+    expect(mockOutro).toHaveBeenCalledWith(
+      `\n${pc.green('✓ Token saved. Unset `VOID_TOKEN` to use it.')}`,
+      { withGuide: false },
+    );
   });
 });

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { createDefaultPlanCatalog, PLAN_LIMITS } from '@void/platform/plans';
 import { confirm, outro, select, text } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { pc } from '../../src/cli/output.ts';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
 import { parsePlatformPlansArgs } from '../../src/cli/platform-plans-args.ts';
 import { runPlatformPlansConfig } from '../../src/cli/platform-plans-config.ts';
@@ -351,7 +352,7 @@ describe('platform config plans', () => {
     ]);
     expect(console.log).not.toHaveBeenCalled();
     expect(outro).toHaveBeenCalledExactlyOnceWith(
-      '\n✓ Saved plans.reset free. Account updates complete.',
+      `\n${pc.green('✓ Saved plans.reset free. Account updates complete.')}`,
       { withGuide: false },
     );
   });
