@@ -167,7 +167,7 @@ describe('hasDeploySchemaDrift', { timeout: driftTestTimeout }, () => {
     }
   });
 
-  it('explains how to add Drizzle metadata when SQL migrations have none', () => {
+  it('links to the repair guide when SQL migrations have no Drizzle metadata', () => {
     const root = createTempApp();
     writeSqliteSchema(root);
     mkdirSync(join(root, 'db', 'migrations'), { recursive: true });
@@ -179,11 +179,9 @@ describe('hasDeploySchemaDrift', { timeout: driftTestTimeout }, () => {
     expect(hasDeploySchemaDrift(root, 'sqlite')).toBe(true);
 
     const message = getDeploySchemaDriftMessage(root);
-    expect(message).toContain('db/migrations/ has SQL migrations without Drizzle metadata');
-    expect(message).toContain('`void db generate` cannot fix this');
-    expect(message).toContain('scratch copy');
-    expect(message).toContain('meta/_journal.json');
-    expect(message).not.toContain('Run `void db generate`, review');
+    expect(message).toBe(
+      'Missing Drizzle metadata in db/migrations/.\nSee https://void.cloud/guide/database#hand-written-migrations',
+    );
   });
 
   it('keeps the generate advice when Drizzle metadata exists', () => {

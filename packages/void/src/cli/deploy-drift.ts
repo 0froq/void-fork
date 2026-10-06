@@ -121,14 +121,8 @@ export function getDeploySchemaDriftMessage(root: string): string {
   ) {
     const dir = `${relative(root, migrationsDir)}/`;
     return [
-      `Schema drift detected: ${dir} has SQL migrations without Drizzle metadata (${dir}meta/_journal.json and a schema snapshot).`,
-      '`void db generate` cannot fix this: it would add a migration that creates your existing tables again.',
-      'To add the metadata:',
-      `  1. Make your Drizzle schema match the tables your migrations in ${dir} create.`,
-      `  2. In a scratch copy of the project, delete ${dir} and run \`void db generate\`.`,
-      `  3. Copy its meta/ folder into ${dir}. In meta/_journal.json, list each existing migration file in order (tag = file name without .sql). Rename the snapshot to <prefix>_snapshot.json, where <prefix> is the last tag up to its first "_".`,
-      `If no database has applied these migrations yet, you can instead delete them and run \`void db generate\`.`,
-      'Then commit the changes and rerun `void deploy`.',
+      `Missing Drizzle metadata in ${dir}.`,
+      'See https://void.cloud/guide/database#hand-written-migrations',
     ].join('\n');
   }
 
