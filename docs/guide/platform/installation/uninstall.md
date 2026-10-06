@@ -60,10 +60,11 @@ If the platform sends email, it first deletes the Email Routing rules in the sen
 
 It never removes zones, adopted resources, external PostgreSQL, other Email Routing settings, Analytics Engine datasets, Access policies or identity providers you chose, or API tokens. Revoke the API tokens you created for the platform afterward.
 
-Before it changes anything, `--purge-resources` stops if:
+Before making changes, `--purge-resources` checks that no projects remain and that it can read the resources it plans to delete. Delete any projects with `void project delete <name>` first.
 
-- projects remain. Delete each one with `void project delete <name>` first.
-- the credential cannot make every planned deletion. Browser login cannot delete DNS records or Access resources, so set `CLOUDFLARE_API_TOKEN` to a token with the permissions the plan lists. If you connected Access from a separate identity account, the token also needs the Access permissions in that account. If the platform sends email, it also needs **Zone → Email Routing Rules → Edit** for the sender domain's zone.
+Set `CLOUDFLARE_API_TOKEN` to a token with the Edit permissions listed by `--plan`. Browser login cannot delete DNS records or Access resources. Access resources in a separate identity account need permissions in that account; email-enabled platforms also need **Zone → Email Routing Rules → Edit** for the sender domain's zone.
+
+The read checks cannot verify Edit permissions. If a deletion is denied, uninstall may have already disabled traffic or removed resources. Update the token permissions and rerun the command to resume.
 
 If a route, custom domain, DNS record, or Access resource no longer matches what the installation recorded, for example a route that now sends traffic to another Worker, it is kept and listed with the reason, and uninstall continues. Do not run `--purge-resources` while someone else is changing the platform's Workers, routes, or custom domains: a change made after Void checks a resource and before it deletes it is not detected.
 

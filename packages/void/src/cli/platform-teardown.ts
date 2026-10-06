@@ -460,10 +460,9 @@ function deniedStatus(error: unknown): boolean {
 }
 
 /**
- * Check before the first change that the credential can make every planned
- * deletion. Browser login cannot change DNS or Access, so those need an API
- * token. For a token, read probes catch a missing account or zone grant; a
- * read cannot prove Edit, so the plan names the full permission list too.
+ * Check resource reads before the first change. Browser login cannot change
+ * DNS or Access, so those need an API token. Read probes cannot prove Edit;
+ * the plan lists the required permissions.
  */
 export async function checkPurgeResourcesCredentials(
   client: PurgeResourcesClient,
