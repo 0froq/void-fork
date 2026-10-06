@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
@@ -589,7 +590,7 @@ function noteText(title: string): string {
   return String(
     vi
       .mocked(note)
-      .mock.calls.filter(([, noteTitle]) => noteTitle === title)
+      .mock.calls.filter(([, noteTitle]) => stripVTControlCharacters(noteTitle ?? '') === title)
       .at(-1)?.[0] ?? '',
   );
 }

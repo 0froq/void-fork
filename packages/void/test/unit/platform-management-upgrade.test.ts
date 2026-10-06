@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from 'node:util';
 import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
@@ -763,7 +764,11 @@ describe('installed platform upgrade', () => {
         applications: [],
       });
       await uninstall(true);
-      expect(note).toHaveBeenCalledWith(expect.any(String), 'Uninstall plan');
+      expect(
+        vi
+          .mocked(note)
+          .mock.calls.map(([message, title]) => [message, stripVTControlCharacters(title ?? '')]),
+      ).toContainEqual([expect.any(String), 'Uninstall plan']);
       expect(state.events).toEqual([]);
     });
   });
