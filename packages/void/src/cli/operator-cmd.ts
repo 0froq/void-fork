@@ -11,6 +11,7 @@ import {
   saveOperatorToken,
 } from './operator-auth.ts';
 import { OperatorClient, OperatorClientError } from './operator-client.ts';
+import { printSuccess } from './output.ts';
 
 const MAX_RUNTIME_FOLLOW_ROWS = 10_000;
 export const BUILD_LOG_DRAIN_TIMEOUT_MS: number = 2 * 60_000;
@@ -138,6 +139,30 @@ export function humanLines(value: unknown, indent = ''): Array<string> {
 
 function output(value: unknown, json: boolean): void {
   console.log(json ? JSON.stringify(value) : humanLines(value).join('\n'));
+}
+
+function outputMutation(result: Record<string, unknown>, args: OperatorArgs): void {
+  output(result, args.json);
+  // Some successful HTTP responses checkpoint work rather than complete it.
+  const configuration = result.configuration as { status?: string } | undefined;
+  const project = result.project as { state?: string; last_error?: string | null } | undefined;
+  if (
+    args.json ||
+    result.ok === false ||
+    result.partial === true ||
+    result.complete === false ||
+    result.error ||
+    (result.operationStatus && result.operationStatus !== 'completed') ||
+    (configuration?.status &&
+      configuration.status !== 'ready' &&
+      configuration.status !== 'disabled') ||
+    project?.state === 'reconciling' ||
+    project?.state === 'error' ||
+    project?.last_error
+  ) {
+    return;
+  }
+  printSuccess(`Platform ${args.group} ${args.action} completed.`);
 }
 
 function outputLogs(result: Record<string, unknown>, json: boolean): void {
@@ -338,6 +363,9 @@ async function runAuth(origin: string, args: OperatorArgs): Promise<void> {
     } else {
       saveOperatorToken(origin, token);
       output({ origin, ...identity }, args.json);
+      if (!args.json) {
+        printSuccess('Signed in to platform administration.');
+      }
     }
     return;
   }
@@ -363,6 +391,9 @@ async function runAuth(origin: string, args: OperatorArgs): Promise<void> {
       },
       args.json,
     );
+    if (!args.json) {
+      printSuccess('Signed out of platform administration.');
+    }
   } else {
     const session = await client.request('/session');
     if (args.action === 'token') {
@@ -583,6 +614,9 @@ async function migrateDeploymentAssets(
     // Preserve each successful continuation in stdout if a later batch fails or is interrupted.
     output(result, args.json);
     if (result.complete) {
+      if (!args.json) {
+        printSuccess('Deployment assets migrated.');
+      }
       return;
     }
     const cursor = nextCursor as string;
@@ -668,9 +702,9 @@ export async function runOperatorCommand(args: OperatorArgs): Promise<void> {
         : {}),
       ...recoveryFence,
     };
-    output(
+    outputMutation(
       await client.request(args.path, { method: 'POST', body, timeoutMs: args.timeoutMs }),
-      args.json,
+      args,
     );
   } else if (args.follow) {
     await followOperatorLogs(client, args);

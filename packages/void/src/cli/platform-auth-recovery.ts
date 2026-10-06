@@ -6,6 +6,7 @@ import { platformAuthenticationRecoveryMessage } from '@void/platform';
 import { confirm, isCancel } from '@voidzero-dev/vite-plus-prompts';
 import { openBrowser } from './auth.ts';
 import { resolveOperatorOrigin } from './operator-auth.ts';
+import { printSuccess } from './output.ts';
 import {
   commitAuthenticationRecovery,
   encryptCredential,
@@ -289,7 +290,7 @@ export async function runPlatformAuthRecovery(args: PlatformConfigArgs): Promise
           }
         }
         await commitAuthenticationRecovery(db, { recovery, identity: tested });
-        console.log('Administrator login recovered. Sign in again with this login method.');
+        printSuccess('Administrator login recovered. Sign in again with this login method.');
       } finally {
         await releaseDatabase();
       }

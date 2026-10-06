@@ -86,6 +86,6 @@ export async function connectCloudflare(
     existingConfigPath ? { configPath: existingConfigPath } : undefined,
   );
   log.info(`${basename(written.configPath)} is ready for Cloudflare deployment`);
-  log.success(`Configured Cloudflare account: ${account.name}`);
+  log.step(`Configured Cloudflare account: ${account.name}`);
   return account;
 }

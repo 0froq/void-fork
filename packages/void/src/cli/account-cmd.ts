@@ -4,6 +4,7 @@ import type { AccountArgs } from './account-args.ts';
 import { getToken, removeToken } from './auth.ts';
 import { PlatformClient } from './client.ts';
 import { runLoginCommand } from './login.ts';
+import { printSuccess } from './output.ts';
 
 export async function runAccountCommand(root: string, args: AccountArgs): Promise<void> {
   switch (args.subcommand) {
@@ -15,7 +16,7 @@ export async function runAccountCommand(root: string, args: AccountArgs): Promis
       );
     case 'logout':
       if (removeToken(root)) {
-        log.success('Logged out.');
+        printSuccess('Logged out.');
       } else {
         log.info('Not logged in.');
       }
@@ -49,7 +50,7 @@ export async function runAccountCommand(root: string, args: AccountArgs): Promis
             : 'xclip -selection clipboard';
       try {
         execSync(cmd, { input: token });
-        log.success('Token copied to clipboard.');
+        printSuccess('Token copied to clipboard.');
       } catch {
         log.warn('Could not copy to clipboard. Run `void account token` again.');
       }

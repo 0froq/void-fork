@@ -1,3 +1,7 @@
+vi.mock('../../src/cli/output.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/cli/output.ts')>()),
+  printSuccess: vi.fn(),
+}));
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -19,6 +23,7 @@ import {
 } from '@void/platform';
 import { log, note } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { printSuccess } from '../../src/cli/output.ts';
 import {
   PlatformCloudflareApiError,
   PlatformCloudflareClient,
@@ -50,7 +55,7 @@ const directories: Array<string> = [];
 beforeEach(() => {
   vi.mocked(note).mockClear();
   vi.mocked(log.warn).mockClear();
-  vi.mocked(log.success).mockClear();
+  vi.mocked(printSuccess).mockClear();
   vi.mocked(log.step).mockClear();
   process.env.VOID_PLATFORM_RECOVERY_KEY = Buffer.alloc(32, 7).toString('base64');
 });
@@ -710,7 +715,7 @@ describe('uninstall --purge-resources', () => {
     expect(changes(fake)).toEqual([]);
     expect(listInstallationManifests()[0]?.status).toBe('installed');
     expect(log.step).not.toHaveBeenCalled();
-    expect(log.success).not.toHaveBeenCalled();
+    expect(printSuccess).not.toHaveBeenCalled();
   });
 
   it('deletes in an order Cloudflare accepts, with the tail Worker after its producers and routing KV last', async () => {
@@ -756,7 +761,7 @@ describe('uninstall --purge-resources', () => {
     expect(kept).not.toContain('Always kept:');
     expect(noteText('Uninstall plan')).toBe('');
     expect(log.step).toHaveBeenCalledWith('Uninstalling Example...');
-    expect(log.success).toHaveBeenCalledWith('Uninstalled Example.');
+    expect(printSuccess).toHaveBeenCalledWith('Uninstalled Example.');
   });
 
   it('detaches queue consumers that Cloudflare names by script_name before deleting their Workers', async () => {

@@ -15,7 +15,7 @@ import {
   text,
 } from '@voidzero-dev/vite-plus-prompts';
 import { resolve } from 'pathslash';
-import { cliCommandName, createSpinner, note, pc } from './output.ts';
+import { printSuccess, cliCommandName, createSpinner, note, pc } from './output.ts';
 import {
   selectInstallationAppAccess,
   prepareInstallationAppAccess,
@@ -152,10 +152,13 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       return;
     }
     for (const manifest of recovered) {
-      log.success(
+      log.step(
         `Recovered ${manifest.deployment.displayName} (${manifest.id}) at ${manifest.endpoints.apiUrl}.`,
       );
     }
+    printSuccess(
+      `Recovered ${recovered.length} platform installation${recovered.length === 1 ? '' : 's'}.`,
+    );
     return;
   }
   if (commandArgs.subcommand !== 'install') {
@@ -1261,9 +1264,6 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       outro(`Installation ${result.manifest.id} is safely checkpointed.`);
       return;
     }
-    log.success(
-      `${result.manifest.deployment.displayName} is installed at ${new URL('/admin', plan.apiUrl).href}.`,
-    );
     log.info(`API URL: ${plan.apiUrl}`);
     if (result.emailOperationId) {
       log.info(`Shared email routing ready. Operation: ${result.emailOperationId}.`);
@@ -1281,7 +1281,10 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
         'Apps will use workers.dev addresses. When your domain is ready: void platform domain set <domain>',
       );
     }
-    outro('Run `void account login`, then deploy an app with `void deploy --platform void`.');
+    log.info('Run `void account login`, then deploy an app with `void deploy --platform void`.');
+    printSuccess(
+      `${result.manifest.deployment.displayName} is installed at ${new URL('/admin', plan.apiUrl).href}.`,
+    );
   } catch (error) {
     progress?.error('Platform installation failed.');
     progress = undefined;

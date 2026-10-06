@@ -20,6 +20,7 @@ import {
   resolveEmailDomainTarget,
   type EmailDomainAddDeps,
 } from '../../src/cli/email.ts';
+import * as output from '../../src/cli/output.ts';
 import { withPlatformDiscovery } from '../helpers/platform-discovery.ts';
 
 /**
@@ -49,7 +50,7 @@ let warnSpy: LogSpy;
 let errorSpy: LogSpy;
 
 beforeEach(() => {
-  successSpy = vi.spyOn(log, 'success').mockImplementation(() => {});
+  successSpy = vi.spyOn(output, 'printSuccess').mockImplementation(() => {});
   infoSpy = vi.spyOn(log, 'info').mockImplementation(() => {});
   warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
   errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});
@@ -281,7 +282,7 @@ describe('emailDomainAdd', () => {
     expect(deps.openUrl).toHaveBeenCalledWith(expect.stringContaining('/profile/api-tokens?'));
     expect(deps.confirmScope).toHaveBeenCalledWith('acme.com');
     expect(printed(infoSpy)).toContain('replace All accounts and All zones');
-    expect(printed(successSpy)).toContain('zone connection');
+    expect(printed(infoSpy)).toContain('zone connection');
     expect([printed(infoSpy), printed(successSpy), notedBlocks()].join('')).not.toContain(
       LEGACY_TOKEN,
     );

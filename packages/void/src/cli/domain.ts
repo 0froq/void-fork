@@ -2,7 +2,7 @@ import { log } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { type DomainStatusResponse, PlatformClient } from './client.ts';
 import type { DomainArgs } from './domain-args.ts';
-import { note, pc } from './output.ts';
+import { printSuccess, note, pc } from './output.ts';
 import { readDeploymentPlatform, readProjectConfig } from './project.ts';
 
 export async function runDomainCommand(root: string, args: DomainArgs): Promise<void> {
@@ -65,21 +65,21 @@ async function runCloudflareDomainCommand(root: string, args: DomainArgs): Promi
 
   if (args.subcommand === 'add') {
     const result = await changeCloudflareDomain(root, args.hostname!, 'add');
-    log.success(
-      result.modified
-        ? `Domain ${args.hostname} added and activated on Cloudflare.`
-        : `Domain ${args.hostname} is already configured.`,
-    );
     note(
       'Cloudflare Custom Domains manages the DNS record and TLS certificate in the zone on your account.',
       'Cloudflare Domain',
     );
+    if (result.modified) {
+      printSuccess(`Domain ${args.hostname} added and activated on Cloudflare.`);
+    } else {
+      log.info(`Domain ${args.hostname} is already configured.`);
+    }
     return;
   }
   if (args.subcommand === 'delete') {
     const result = await changeCloudflareDomain(root, args.hostname!, 'delete');
     if (result.modified) {
-      log.success(`Domain ${args.hostname} removed from Cloudflare.`);
+      printSuccess(`Domain ${args.hostname} removed from Cloudflare.`);
     } else {
       log.info(`Domain ${args.hostname} is not configured.`);
     }
@@ -120,7 +120,6 @@ async function domainAdd(
   hostname: string,
 ): Promise<void> {
   const domain = await client.addDomain(projectId, hostname);
-  log.success(`Domain ${hostname} added (status: ${domain.status})`);
 
   // Cert DCV uses HTTP-DCV, so no user-facing SSL-validation records exist.
   const recordSections = [
@@ -133,6 +132,7 @@ async function domainAdd(
     const summary = `Add ${recordWord} to your DNS, then run \`void domain status ${hostname}\` to check progress.`;
     note([...recordSections, summary].join('\n\n'), 'DNS Setup');
   }
+  printSuccess(`Domain ${hostname} added (status: ${domain.status}).`);
 }
 
 async function domainRemove(
@@ -142,7 +142,7 @@ async function domainRemove(
 ): Promise<void> {
   const domain = await findProjectDomain(client, projectId, hostname);
   await client.removeDomain(projectId, domain.id);
-  log.success(`Domain ${hostname} removed.`);
+  printSuccess(`Domain ${hostname} removed.`);
 }
 
 async function domainList(client: PlatformClient, projectId: string): Promise<void> {

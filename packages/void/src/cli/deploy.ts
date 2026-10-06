@@ -178,7 +178,7 @@ const cloudflareDeployTarget: RunDeployTargetAdapter = {
     }
     assertInstalledVoidMatchesCli(root);
     if (migrateLegacyVoidConfig(root)) {
-      log.success(
+      log.step(
         'Migrated project configuration to void.config.ts. Commit void.config.ts and void.lock.json.',
       );
     }
@@ -408,7 +408,7 @@ async function runManagedDeploy(
       }
 
       if (migrateLegacyVoidConfig(root)) {
-        log.success(
+        log.step(
           'Migrated project configuration to void.config.ts. Commit void.config.ts and void.lock.json.',
         );
       }
@@ -535,7 +535,7 @@ async function runManagedDeploy(
         }
         log.warn('Auth token expired. Re-authenticating...');
         await promptForLoginToken(root);
-        log.success('Re-authenticated. Retrying deploy...');
+        log.step('Re-authenticated. Retrying deploy...');
         reauthenticated = true;
         continue;
       }

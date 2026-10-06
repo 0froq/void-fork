@@ -6,7 +6,7 @@ import {
   type ProjectInvitationResponse,
   type ProjectMemberResponse,
 } from './client.ts';
-import { formatCount, note } from './output.ts';
+import { printSuccess, formatCount, note } from './output.ts';
 import { parsePlatformErrorBody, platformErrorMessage } from './platform-errors.ts';
 import type { ProjectArgs } from './project-args.ts';
 import { readProjectConfig } from './project.ts';
@@ -139,7 +139,7 @@ export async function runProjectTeamCommand(root: string, args: ProjectTeamArgs)
         'Open the invited application’s directory and run `void project link` if it is not linked yet. If it is linked to another project, use a separate checkout. Accepting an invitation keeps existing project links.',
       );
     }
-    outro(`Project invitation ${args.action === 'accept' ? 'accepted' : 'declined'}.`);
+    printSuccess(`Project invitation ${args.action === 'accept' ? 'accepted' : 'declined'}.`);
     return;
   }
 
@@ -177,24 +177,26 @@ export async function runProjectTeamCommand(root: string, args: ProjectTeamArgs)
         'Invitation saved; email was not sent',
       );
     }
-    outro(`${action} ${clean(invitationEmail(result.invitation))} as ${args.role}${delivery}.`);
+    printSuccess(
+      `${action} ${clean(invitationEmail(result.invitation))} as ${args.role}${delivery}.`,
+    );
     return;
   }
   if (args.action === 'role') {
     await client.updateProjectMemberRole(projectId, args.userId, args.role);
-    outro(`Changed ${args.userId} to ${args.role}.`);
+    printSuccess(`Changed ${args.userId} to ${args.role}.`);
     return;
   }
   if (args.action === 'remove') {
     await client.removeProjectMember(projectId, args.userId);
-    outro(`Removed ${args.userId} from the project.`);
+    printSuccess(`Removed ${args.userId} from the project.`);
     return;
   }
   if (args.action === 'revoke') {
     await client.revokeProjectInvitation(projectId, args.invitationId);
-    outro(`Revoked invitation ${args.invitationId}.`);
+    printSuccess(`Revoked invitation ${args.invitationId}.`);
     return;
   }
   await client.leaveProject(projectId);
-  outro('Left the project.');
+  printSuccess('Left the project.');
 }

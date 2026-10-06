@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
@@ -62,6 +63,64 @@ function connect(apiUrl: string) {
     proxyUrl: null,
   });
 }
+
+describe('operator mutation completion output', () => {
+  async function runMutation(result: Record<string, unknown>, flags: Array<string> = []) {
+    connect('https://one.example');
+    vi.stubEnv('VOID_API_URL', 'https://one.example');
+    vi.stubEnv('VOID_OPERATOR_TOKEN', 'operator');
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const details = vi.spyOn(console, 'log').mockImplementation(() => {});
+    let terminal = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      terminal += String(chunk);
+      return true;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({ dryRun: true, action: 'user.suspend', target: 'u1' }),
+        )
+        .mockResolvedValueOnce(Response.json(result)),
+    );
+    const operation = runOperatorCommand(
+      parseOperatorArgs(['user', 'suspend', 'u1', '--yes', ...flags]),
+    );
+    if (result.ok === false || result.partial === true) {
+      await expect(operation).rejects.toMatchObject({ code: 'partial_failure' });
+    } else {
+      await operation;
+    }
+    return { terminal: stripVTControlCharacters(terminal), details };
+  }
+
+  it('separates a completed mutation from its detailed result', async () => {
+    const { terminal, details } = await runMutation({ action: 'user.suspend', target: 'u1' });
+    expect(details).toHaveBeenCalledWith(expect.stringContaining('Target: u1'));
+    expect(terminal).toBe('\n✓ Platform user suspend completed.\n\n');
+  });
+
+  it.each([
+    { ok: false, partial: true },
+    { ok: true, complete: false },
+    { operationStatus: 'pending' },
+    { ok: true, configuration: { status: 'configuring' } },
+    { ok: true, project: { state: 'reconciling' } },
+    { ok: true, project: { state: 'error', last_error: 'DNS verification failed' } },
+  ])('does not claim completion for a failed or checkpointed result: %j', async (result) => {
+    const { terminal } = await runMutation(result);
+    expect(terminal).not.toContain('✓');
+  });
+
+  it('keeps successful JSON output free of terminal formatting', async () => {
+    const result = { ok: true, action: 'user.suspend', target: 'u1' };
+    const { terminal, details } = await runMutation(result, ['--json']);
+    expect(details).toHaveBeenCalledExactlyOnceWith(JSON.stringify(result));
+    expect(terminal).toBe('');
+  });
+});
 
 describe('operator argument and help coverage', () => {
   it('has nested help and routable arguments for every operation', () => {

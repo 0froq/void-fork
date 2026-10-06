@@ -1,3 +1,7 @@
+vi.mock('../../src/cli/output.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/cli/output.ts')>()),
+  printSuccess: vi.fn(),
+}));
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,8 +20,9 @@ import {
   type PlatformInstallationManifest,
   type ResourceOwnership,
 } from '@void/platform';
-import { log, note } from '@voidzero-dev/vite-plus-prompts';
+import { note } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { printSuccess } from '../../src/cli/output.ts';
 import {
   disablePlatform,
   resolvePlatformRuntimeTokenToPreflight,
@@ -52,7 +57,7 @@ const directories: Array<string> = [];
 
 beforeEach(() => {
   vi.mocked(note).mockClear();
-  vi.mocked(log.success).mockClear();
+  vi.mocked(printSuccess).mockClear();
   process.env.VOID_PLATFORM_RECOVERY_KEY = Buffer.alloc(32, 7).toString('base64');
 });
 
@@ -1471,7 +1476,7 @@ describe('platform lifecycle management', () => {
       'zone: zone (zone-id)',
       'created application: login-access (access-app-id, account account)',
     ]);
-    expect(vi.mocked(log.success).mock.calls.at(-1)?.[0]).toBe('Uninstalled Example.');
+    expect(vi.mocked(printSuccess).mock.calls.at(-1)?.[0]).toBe('Uninstalled Example.');
   });
 
   it('names the resources a purge plan keeps', async () => {

@@ -2,6 +2,7 @@ import { log } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { PlatformClient } from '../../src/cli/client.ts';
 import { emailAllow } from '../../src/cli/email.ts';
+import * as output from '../../src/cli/output.ts';
 
 /**
  * What `void email allow <address>` prints for each shape the api answers
@@ -41,7 +42,7 @@ let infoSpy: LogSpy;
 let warnSpy: LogSpy;
 
 beforeEach(() => {
-  successSpy = vi.spyOn(log, 'success').mockImplementation(() => {});
+  successSpy = vi.spyOn(output, 'printSuccess').mockImplementation(() => {});
   infoSpy = vi.spyOn(log, 'info').mockImplementation(() => {});
   warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
 });
@@ -120,8 +121,8 @@ describe('void email allow', () => {
       ADDRESS,
     );
 
-    expect(printed(successSpy)).toBe(`${ADDRESS} is already verified.`);
-    expect(infoSpy).not.toHaveBeenCalled();
+    expect(printed(infoSpy)).toBe(`${ADDRESS} is already verified.`);
+    expect(successSpy).not.toHaveBeenCalled();
     expect(warnSpy).not.toHaveBeenCalled();
   });
 });

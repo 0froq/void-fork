@@ -8,6 +8,7 @@ import {
   ensureCloudflareAuthentication,
 } from '../../src/cli/cloudflare-auth.ts';
 import { runCloudflareCommand } from '../../src/cli/cloudflare-cmd.ts';
+import * as terminalOutput from '../../src/cli/output.ts';
 
 const fixture = vi.hoisted(() => ({ cli: '' }));
 vi.mock('../../src/cli/preset.ts', () => ({
@@ -65,6 +66,9 @@ beforeEach(() => {
   Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
   Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: true });
   output = [];
+  vi.spyOn(terminalOutput, 'printSuccess').mockImplementation((message) => {
+    output.push(message);
+  });
   vi.spyOn(console, 'log').mockImplementation((message) => {
     output.push(String(message));
   });
@@ -124,7 +128,7 @@ describe('Cloudflare session switching through the bundled CLI runner', () => {
   it('explicit login replaces the old session without retargeting the project', async () => {
     await runCloudflareCommand(root, { subcommand: 'login' });
     expect(read().session?.email).toBe(newSession.email);
-    expect(output).toEqual(['Successfully logged in.']);
+    expect(output).toEqual(['Successfully logged in to Cloudflare.']);
     expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')).toBe(pin);
     await runCloudflareCommand(root, { subcommand: 'status' });
     expect(output.join('\n')).toContain(newSession.email);

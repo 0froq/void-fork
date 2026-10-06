@@ -12,15 +12,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import type { PlatformDiscoveryDocument } from '@void/platform';
-import {
-  outro,
-  log,
-  confirm,
-  isCancel,
-  cancel,
-  select,
-  text,
-} from '@voidzero-dev/vite-plus-prompts';
+import { log, confirm, isCancel, cancel, select, text } from '@voidzero-dev/vite-plus-prompts';
 import { parse, type ParseError } from 'jsonc-parser';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'pathslash';
 import { materializeCloudflareConfig } from '../cloudflare-config.ts';
@@ -38,7 +30,7 @@ import { maybeScaffoldEnvTs } from './env-scaffold.ts';
 import { migrateFrameworkAdapterPaths } from './framework-config-migrate.ts';
 import { initialCommitCommand, setupGit } from './init-git.ts';
 import { migrateLegacyVoidConfig } from './migrate.ts';
-import { note } from './output.ts';
+import { note, printSuccess } from './output.ts';
 import { discoverPlatform, saveDiscoveredPlatform } from './platform-cmd.ts';
 import { formatProjectCommand } from './preset.ts';
 import {
@@ -1436,7 +1428,7 @@ function setupTsconfig(
         tsconfig.extends = target;
       }
       updated = true;
-      log.success('Updated tsconfig.json — added extends .void/tsconfig.json');
+      log.step('Updated tsconfig.json — added extends .void/tsconfig.json');
     }
 
     // Check types
@@ -1448,7 +1440,7 @@ function setupTsconfig(
     if (!types.includes('void/env')) {
       types.push('void/env');
       updated = true;
-      log.success('Updated tsconfig.json — added void/env to types');
+      log.step('Updated tsconfig.json — added void/env to types');
     }
 
     // Remove @cloudflare/workers-types — void/env includes it
@@ -1456,7 +1448,7 @@ function setupTsconfig(
     if (cfIdx !== -1) {
       types.splice(cfIdx, 1);
       updated = true;
-      log.success('Removed @cloudflare/workers-types from tsconfig types (included in void/env)');
+      log.step('Removed @cloudflare/workers-types from tsconfig types (included in void/env)');
     }
 
     compilerOptions.types = types;
@@ -1467,7 +1459,7 @@ function setupTsconfig(
       if (JSON.stringify(tsconfig.files) !== JSON.stringify(files)) {
         tsconfig.files = files;
         updated = true;
-        log.success('Updated tsconfig.json — merged generated Void type files');
+        log.step('Updated tsconfig.json — merged generated Void type files');
       }
     }
 
@@ -1478,7 +1470,7 @@ function setupTsconfig(
       if (JSON.stringify(existingPaths) !== JSON.stringify(paths)) {
         compilerOptions.paths = paths;
         updated = true;
-        log.success('Updated tsconfig.json — merged generated Void path aliases');
+        log.step('Updated tsconfig.json — merged generated Void path aliases');
       }
     }
 
@@ -1488,7 +1480,7 @@ function setupTsconfig(
       const ordered = { extends: ext, ...rest };
       writeFileSync(tsconfigPath, JSON.stringify(ordered, null, 2) + '\n');
     } else {
-      log.success('tsconfig.json looks good');
+      log.step('tsconfig.json looks good');
     }
 
     // Remove @cloudflare/workers-types from package.json — void/env includes it
@@ -1506,7 +1498,7 @@ function setupTsconfig(
       }
       if (pkgUpdated) {
         writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
-        log.success('Removed @cloudflare/workers-types from package.json (included in void/env)');
+        log.step('Removed @cloudflare/workers-types from package.json (included in void/env)');
         log.info(`Re-run ${state.packageManager} install to update your lockfile`);
       }
     } catch {
@@ -1529,7 +1521,7 @@ function setupTsconfig(
       include: ['src', 'pages', 'routes', 'middleware', 'crons', 'queues', 'db'],
     };
     writeFileSync(tsconfigPath, JSON.stringify(tsconfig, null, 2) + '\n');
-    log.success('Created tsconfig.json');
+    log.step('Created tsconfig.json');
 
     if (!state.hasTypescript) {
       log.info("Don't forget to install typescript");
@@ -1570,13 +1562,13 @@ function setupWranglerConfig(root: string, framework: DetectedFramework): void {
   });
 
   if (result.modified) {
-    log.success(
+    log.step(
       hadConfig
         ? 'Updated Cloudflare config with compatibility_date and nodejs_als'
         : 'Created Cloudflare config with compatibility_date and nodejs_als',
     );
   } else {
-    log.success(`${basename(result.configPath)} looks good`);
+    log.step(`${basename(result.configPath)} looks good`);
   }
 }
 
@@ -1595,7 +1587,7 @@ export function ensureVoidWorkerCompatibilityDate(root: string): void {
   const compatibilityDate = readProjectWranglerCompatDate(root) ?? LATEST_KNOWN_COMPAT_DATE;
   if (!canRewriteVoidProjectConfig(root)) {
     writeProvisionedWranglerConfig(root, { compatibilityDate });
-    log.success('Pinned worker compatibility_date in void.lock.json');
+    log.step('Pinned worker compatibility_date in void.lock.json');
     return;
   }
   config.worker = {
@@ -1603,7 +1595,7 @@ export function ensureVoidWorkerCompatibilityDate(root: string): void {
     compatibility_date: compatibilityDate,
   };
   writeVoidProjectConfig(root, config);
-  log.success('Pinned worker compatibility_date in void.config.ts');
+  log.step('Pinned worker compatibility_date in void.config.ts');
 }
 
 function clearConfiguredDatabase(
@@ -1620,7 +1612,7 @@ function clearConfiguredDatabase(
   delete config.database;
 
   writeVoidProjectConfig(root, config);
-  log.success(messages.updated);
+  log.step(messages.updated);
 }
 
 function applyDatabaseDialect(root: string, dialect: DatabaseDialect): void {
@@ -1634,7 +1626,7 @@ function applyDatabaseDialect(root: string, dialect: DatabaseDialect): void {
 
     config.database = 'pg';
     writeVoidProjectConfig(root, config);
-    log.success('Configured PostgreSQL in void.config.ts');
+    log.step('Configured PostgreSQL in void.config.ts');
     return;
   }
 
@@ -1646,7 +1638,7 @@ function applyDatabaseDialect(root: string, dialect: DatabaseDialect): void {
 
     config.database = 'mysql';
     writeVoidProjectConfig(root, config);
-    log.success('Configured MySQL in void.config.ts');
+    log.step('Configured MySQL in void.config.ts');
     return;
   }
 
@@ -1850,7 +1842,7 @@ export async function ensureVoidPlatformConnection(
   const discovery = await discoverPlatform(selectedApiUrl);
   saveDiscoveredPlatform(discovery);
   if (promptedForPlatform) {
-    log.success(`Connected to ${discovery.displayName} at ${discovery.apiUrl}.`);
+    log.step(`Connected to ${discovery.displayName} at ${discovery.apiUrl}.`);
   }
   return discovery;
 }
@@ -2062,7 +2054,7 @@ function setupGithubActions(
     workflowPath,
     getWorkflowYaml(root, state.packageManager, slug, platform, platformApiUrl),
   );
-  log.success('Created .github/workflows/void-deploy.yml');
+  log.step('Created .github/workflows/void-deploy.yml');
 
   if (platform === 'cloudflare') {
     note(
@@ -2114,7 +2106,7 @@ function patchWorkflowProjectSlug(root: string, slug: string): boolean {
     return false;
   }
   writeFileSync(workflowPath, yaml.replace(placeholderBlock, `  VOID_PROJECT: ${slug}`));
-  log.success(`Set VOID_PROJECT: ${slug} in .github/workflows/void-deploy.yml`);
+  log.step(`Set VOID_PROJECT: ${slug} in .github/workflows/void-deploy.yml`);
   return true;
 }
 
@@ -2125,14 +2117,14 @@ function writeFileIfMissing(root: string, filePath: string, content: string): vo
   }
   mkdirSync(dirname(fullPath), { recursive: true });
   writeFileSync(fullPath, content);
-  log.success(`Created ${filePath}`);
+  log.step(`Created ${filePath}`);
 }
 
 function ensureGitignore(root: string): void {
   const gitignorePath = join(root, '.gitignore');
   if (!existsSync(gitignorePath)) {
     writeFileSync(gitignorePath, SCAFFOLD_GITIGNORE_LINES.join('\n') + '\n');
-    log.success('Created .gitignore');
+    log.step('Created .gitignore');
     return;
   }
 
@@ -2150,7 +2142,7 @@ function ensureGitignore(root: string): void {
 
   const separator = content.endsWith('\n') ? '' : '\n';
   writeFileSync(gitignorePath, content + separator + missing.join('\n') + '\n');
-  log.success('Updated .gitignore with Void defaults');
+  log.step('Updated .gitignore with Void defaults');
 }
 
 function removeTopLevelYamlBlock(yaml: string, key: string): string {
@@ -2234,7 +2226,7 @@ function ensurePnpmAllowBuilds(root: string, pkg: JsonObject): boolean {
   const after = insertPnpmAllowBuilds(withoutLegacy);
   if (after !== before) {
     writeFileSync(workspacePath, after);
-    log.success(
+    log.step(
       configRoot === root
         ? 'Updated pnpm-workspace.yaml with approved builds'
         : `Updated ${relative(root, workspacePath)} with approved builds`,
@@ -2269,7 +2261,7 @@ function installProjectDependencies(
     );
   }
 
-  log.success(`Installed dependencies with ${packageManager}`);
+  log.step(`Installed dependencies with ${packageManager}`);
 }
 
 export function generateStarterMigration(
@@ -2412,7 +2404,7 @@ export function generateStarterMigration(
     );
   }
 
-  log.success('Generated initial Drizzle migration');
+  log.step('Generated initial Drizzle migration');
 }
 
 function scaffoldPagesApp(
@@ -2520,7 +2512,7 @@ function scaffoldPagesApp(
   }
 
   writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n');
-  log.success('Updated package.json with starter scripts and dependencies');
+  log.step('Updated package.json with starter scripts and dependencies');
 
   for (const [filePath, content] of Object.entries(template.files)) {
     writeFileIfMissing(root, filePath, content);
@@ -2628,7 +2620,7 @@ function ensureExistingProjectPackage(
 
   if (changed) {
     writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n');
-    log.success(
+    log.step(
       existedBefore
         ? plainViteSetup
           ? 'Updated package.json with Void dependencies and Vite scripts'
@@ -2725,7 +2717,7 @@ function ensureExistingProjectViteConfig(root: string, framework?: DetectedFrame
   }
 
   writeFileSync(fullPath, updated);
-  log.success(`Added voidPlugin() to ${configPath}`);
+  log.step(`Added voidPlugin() to ${configPath}`);
 }
 
 function setupExistingProject(
@@ -2775,7 +2767,7 @@ export const posts = sqliteTable("posts", {
 });
 `,
   );
-  log.success('Created db/schema.ts');
+  log.step('Created db/schema.ts');
 
   // API route
   mkdirSync(join(paths.routesDir, 'api'), { recursive: true });
@@ -2791,7 +2783,7 @@ export const GET = defineHandler(async () => {
 });
 `,
   );
-  log.success('Created routes/api/posts.ts');
+  log.step('Created routes/api/posts.ts');
   ensureProjectTsconfig(root, undefined, true, true, { paths });
 
   // Frontend demo
@@ -2810,7 +2802,7 @@ console.log(posts);
 // posts[0].nope   ← TypeScript error
 `,
   );
-  log.success('Created src/demo.ts');
+  log.step('Created src/demo.ts');
 
   note(
     'SQL migration → DB types → Route handler → Route types → Typed fetch\n\n' +
@@ -2907,7 +2899,7 @@ export function ensureVoidDependency(root: string): boolean {
 
   if (changed) {
     writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n');
-    log.success(
+    log.step(
       existedBefore
         ? 'Ensured void is in package.json devDependencies'
         : 'Created package.json with void as a devDependency',
@@ -2973,16 +2965,16 @@ async function injectAgentBlock(root: string, newProject: boolean): Promise<void
     if (managedBlock) {
       const updated = existing.replace(MARKER_BLOCK_RE, block);
       writeFileSync(fullPath, updated);
-      log.success(`Updated Void instructions in ${filePath}`);
+      log.step(`Updated Void instructions in ${filePath}`);
     } else {
       // Append block to end of file
       const separator = existing.endsWith('\n') ? '\n' : '\n\n';
       writeFileSync(fullPath, existing + separator + block + '\n');
-      log.success(`Added Void instructions to ${filePath}`);
+      log.step(`Added Void instructions to ${filePath}`);
     }
   } else {
     writeFileSync(fullPath, block + '\n');
-    log.success(`Created ${filePath} with Void instructions`);
+    log.step(`Created ${filePath} with Void instructions`);
   }
 }
 
@@ -2996,7 +2988,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   const newProject = isScaffoldableEmptyProject(root) && !existsSync(join(root, 'AGENTS.md'));
   const hadTypedConfig = existsSync(join(root, TYPED_CONFIG_FILE));
   if (migrateLegacyVoidConfig(root)) {
-    log.success(
+    log.step(
       'Migrated project configuration to void.config.ts. Commit void.config.ts and void.lock.json.',
     );
   }
@@ -3322,9 +3314,9 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     if (scaffoldResult.written) {
       const rel = relative(root, scaffoldResult.written) || 'env.ts';
       if (scaffoldResult.entries.length > 0) {
-        log.success(`Scaffolded ${rel} from .env — review inferred types before running dev.`);
+        log.step(`Scaffolded ${rel} from .env — review inferred types before running dev.`);
       } else {
-        log.success(`Created empty ${rel} — add your env keys with \`defineEnv({...})\`.`);
+        log.step(`Created empty ${rel} — add your env keys with \`defineEnv({...})\`.`);
       }
     }
   }
@@ -3357,15 +3349,19 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   if (workspaceSubpackageSkip) {
     // The workspace install + `void db generate` ordering was already
     // surfaced via `note(..., 'Workspace subpackage')` upstream; the
-    // outro just nudges the user back toward that note instead of
+    // completion nudges the user back toward that note instead of
     // suggesting a dev command they cannot run yet. Static starter mode
     // has no migration step, so omit the `void db generate` half there.
     if (scaffoldedStarterMode) {
-      outro('Run your workspace install, then `void db generate` to finish setup.');
+      printSuccess(
+        'Project initialized. Run your workspace install, then `void db generate` to finish setup.',
+      );
     } else {
-      outro('Run your workspace install to finish setup.');
+      printSuccess('Project initialized. Run your workspace install to finish setup.');
     }
   } else {
-    outro(`Run \`${getDevCommand(root, framework)}\` to start developing`);
+    printSuccess(
+      `Project initialized. Run \`${getDevCommand(root, framework)}\` to start developing.`,
+    );
   }
 }

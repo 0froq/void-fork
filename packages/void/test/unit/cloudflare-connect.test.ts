@@ -10,7 +10,7 @@ vi.mock('../../src/cli/cloudflare-auth.ts', () => ({
   ensureCloudflareAuthentication: mocks.authenticate,
 }));
 vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
-  log: { success: vi.fn(), info: vi.fn() },
+  log: { step: vi.fn(), info: vi.fn() },
   select: mocks.select,
   isCancel: (value: unknown) => typeof value === 'symbol',
 }));

@@ -34,7 +34,8 @@ vi.mock('../../src/cli/client.ts', () => ({
   },
 }));
 vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
-  log: { success: vi.fn(), info: vi.fn() },
+  log: { step: vi.fn(), info: vi.fn() },
+  outro: vi.fn(),
   select: mocks.select,
   text: mocks.text,
   isCancel: (value: unknown) => typeof value === 'symbol',

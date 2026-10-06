@@ -168,9 +168,7 @@ export async function migrateCloudflareWorker(input: {
         applied: applied.length,
       });
       if (applied.length > 0) {
-        log.success(
-          `Applied ${applied.length} ${label} migration${applied.length === 1 ? '' : 's'}.`,
-        );
+        log.step(`Applied ${applied.length} ${label} migration${applied.length === 1 ? '' : 's'}.`);
       }
     } catch (err) {
       log.error(`deploy: ${label} migrations failed — ${getErrorMessage(err)}`);

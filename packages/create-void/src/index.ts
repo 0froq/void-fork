@@ -73,7 +73,7 @@ async function main() {
   p.log.step('Installing starter dependencies...');
   await run(pmInstall(pm), targetDir);
 
-  p.log.success(`Created ${pc.bold(appName)}`);
+  p.outro(`\n${pc.green(`✓ Created ${appName}`)}`, { withGuide: false });
   p.outro(`cd ${appName} && ${pm === 'npm' ? 'npm run' : pm} dev`);
 }
 

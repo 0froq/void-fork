@@ -11,6 +11,7 @@ import {
 import * as gitMetadata from '../../src/cli/git-metadata.ts';
 import type { GithubArgs } from '../../src/cli/github-args.ts';
 import { runConnect } from '../../src/cli/github-cmd.ts';
+import * as output from '../../src/cli/output.ts';
 
 // Mock node:child_process so openBrowser (called by awaitBrowserCallback) never
 // launches a real browser; the localhost callback is driven directly by fetch.
@@ -202,7 +203,7 @@ beforeEach(() => {
   exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
     throw new Error(`process.exit(${code})`);
   }) as never);
-  successSpy = vi.spyOn(log, 'success').mockImplementation(() => {});
+  successSpy = vi.spyOn(output, 'printSuccess').mockImplementation(() => {});
   errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});
   messageSpy = vi.spyOn(log, 'message').mockImplementation(() => {});
   infoSpy = vi.spyOn(log, 'info').mockImplementation(() => {});

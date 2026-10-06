@@ -7,6 +7,7 @@ import {
   type ProjectResponse,
 } from '../../src/cli/client.ts';
 import { runGithubUpdate } from '../../src/cli/github-cmd.ts';
+import * as output from '../../src/cli/output.ts';
 
 const projectId = 'proj_test';
 const slug = 'my-app';
@@ -82,7 +83,7 @@ beforeEach(() => {
   exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
     throw new Error(`process.exit(${code})`);
   }) as never);
-  successSpy = vi.spyOn(log, 'success').mockImplementation(() => {});
+  successSpy = vi.spyOn(output, 'printSuccess').mockImplementation(() => {});
   infoSpy = vi.spyOn(log, 'info').mockImplementation(() => {});
   errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});
 });

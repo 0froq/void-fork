@@ -6,7 +6,7 @@ import {
   ensurePlatformAccessToken,
   isCloudflareAccessChallenge,
 } from './cf-access.ts';
-import { pc } from './output.ts';
+import { printSuccess, pc } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import { PlatformDisabledError, readPlatformDiscoveryResponse } from './platform-discovery.ts';
 import {
@@ -195,7 +195,7 @@ export async function runPlatformCommand(_root: string, args: PlatformArgs): Pro
 
   if (args.subcommand === 'use') {
     const connection = await resolveConnection(args.selector);
-    log.success(`Using ${pc.bold(connection.displayName)} (${connection.apiUrl}).`);
+    printSuccess(`Using ${pc.bold(connection.displayName)} (${connection.apiUrl}).`);
     return;
   }
 
@@ -243,7 +243,7 @@ export async function runPlatformCommand(_root: string, args: PlatformArgs): Pro
       }
       throw error;
     }
-    log.success(`${discovery.displayName} is reachable.`);
+    log.info(`${discovery.displayName} is reachable.`);
     console.log(`API: ${discovery.apiUrl}`);
     console.log(`Proxy: ${discovery.proxyUrl}`);
     if (discovery.applicationRouting?.workersDev && !discovery.applicationRouting.zoneName) {

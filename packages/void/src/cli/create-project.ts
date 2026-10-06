@@ -28,7 +28,7 @@ export async function createProjectWithSlugRetry(
     try {
       log.step(`Creating project ${pc.blue(slug)}...`);
       const project = await client.createProject(slug);
-      log.success(`Project created: ${pc.blue(project.slug)}`);
+      log.step(`Project created: ${pc.blue(project.slug)}`);
       reportProjectCreationWarnings(project);
       return project;
     } catch (error) {

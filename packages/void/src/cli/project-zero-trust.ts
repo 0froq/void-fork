@@ -5,7 +5,7 @@ import {
   type ProjectZeroTrustResponse,
   type ProjectZeroTrustUpdateResponse,
 } from './client.ts';
-import { note, sanitizeTerminalText } from './output.ts';
+import { printSuccess, note, sanitizeTerminalText } from './output.ts';
 import type { ProjectArgs } from './project-args.ts';
 import { readProjectConfig } from './project.ts';
 import { getRequestedProjectSlug, requireProjectBySlug } from './resolve-project.ts';
@@ -83,7 +83,11 @@ export async function runProjectZeroTrustCommand(root: string, args: ZeroTrustAr
     );
     return;
   }
-  outro(
+  if (result.project.last_error || result.project.state === 'error') {
+    outro(`${slug} Zero Trust needs attention (${result.project.state}).`);
+    return;
+  }
+  printSuccess(
     args.action === 'protect'
       ? `${slug} is protected by Zero Trust.`
       : args.action === 'public'

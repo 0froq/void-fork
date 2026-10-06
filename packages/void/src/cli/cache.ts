@@ -1,7 +1,7 @@
-import { outro, log } from '@voidzero-dev/vite-plus-prompts';
+import { log } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { PlatformClient } from './client.ts';
-import { createSpinner, dim, formatCount } from './output.ts';
+import { createSpinner, formatCount, printSuccess } from './output.ts';
 import { readProjectConfig } from './project.ts';
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project.ts';
 
@@ -42,12 +42,11 @@ export async function runPurgeCacheCommand(root: string, projectSlug?: string): 
   try {
     const result = await client.purgeCache(projectId);
     s.stop('Cache purged.');
-    log.success(`Purged ${formatCount(result.purged, 'cached page')}.`);
+    log.info('Edge cache will clear within seconds.');
+    printSuccess(`Purged ${formatCount(result.purged, 'cached page')}.`);
   } catch (err) {
     s.stop('Cache purge failed.');
     log.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
-
-  outro(dim('Edge cache will clear within seconds.'));
 }

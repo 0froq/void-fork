@@ -6,6 +6,7 @@ import {
   type PlatformClient,
 } from '../../src/cli/client.ts';
 import { runGithubDisconnect } from '../../src/cli/github-cmd.ts';
+import * as output from '../../src/cli/output.ts';
 
 // `vi.spyOn(clack, 'confirm')` cannot intercept the handler's named `confirm`
 // import under this project's ESM Vitest config ("Module namespace is not
@@ -85,7 +86,7 @@ beforeEach(() => {
   exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
     throw new Error(`process.exit(${code ?? 0})`);
   }) as never);
-  successSpy = vi.spyOn(log, 'success').mockImplementation(() => {});
+  successSpy = vi.spyOn(output, 'printSuccess').mockImplementation(() => {});
   infoSpy = vi.spyOn(log, 'info').mockImplementation(() => {});
   errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});
 });

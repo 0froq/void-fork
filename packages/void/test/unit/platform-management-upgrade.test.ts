@@ -9,6 +9,7 @@ import {
 } from '@void/platform';
 import { getPlatformRuntimeDirectory, resolvePlatformRuntime } from '@void/platform/installer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { printSuccess } from '../../src/cli/output.ts';
 
 const state = vi.hoisted(() => ({
   createSecrets: vi.fn(),
@@ -32,6 +33,7 @@ const state = vi.hoisted(() => ({
 vi.mock('../../src/cli/output.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/cli/output.ts')>()),
   createSpinner: state.spinner,
+  printSuccess: vi.fn(),
 }));
 
 vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
@@ -465,7 +467,7 @@ describe('installed platform upgrade', () => {
     expect(state.progress.stop).toHaveBeenCalledExactlyOnceWith('Platform upgrade complete.');
     expect(state.progress.error).not.toHaveBeenCalled();
     expect(state.progress.stop.mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(log.success).mock.invocationCallOrder[0]!,
+      vi.mocked(printSuccess).mock.invocationCallOrder[0]!,
     );
   });
 
@@ -591,7 +593,7 @@ describe('installed platform upgrade', () => {
     state.releaseDatabase.mockImplementationOnce(async () => {
       expect(state.progress.message).toHaveBeenLastCalledWith('Finalizing platform changes');
       expect(state.progress.stop).not.toHaveBeenCalled();
-      expect(log.success).not.toHaveBeenCalled();
+      expect(printSuccess).not.toHaveBeenCalled();
     });
     await runInstalledPlatformCommand({
       plan: false,
@@ -616,7 +618,7 @@ describe('installed platform upgrade', () => {
     ).rejects.toThrow('database release failed');
     expect(state.progress.error).toHaveBeenCalledExactlyOnceWith('Platform upgrade failed.');
     expect(state.progress.stop).not.toHaveBeenCalled();
-    expect(log.success).not.toHaveBeenCalled();
+    expect(printSuccess).not.toHaveBeenCalled();
     expect(state.events.at(-1)).toBe('local-release');
   });
 
@@ -641,7 +643,7 @@ describe('installed platform upgrade', () => {
         'Platform operation paused; progress is saved.',
       );
       expect(state.progress.error).not.toHaveBeenCalled();
-      expect(log.success).not.toHaveBeenCalled();
+      expect(printSuccess).not.toHaveBeenCalled();
       expect(state.progress.stop.mock.invocationCallOrder[0]).toBeLessThan(
         vi.mocked(note).mock.invocationCallOrder.at(-1)!,
       );
@@ -687,7 +689,7 @@ describe('installed platform upgrade', () => {
       'Application traffic remains paused. Enable the installation when you are ready.',
     );
     expect(log.info).not.toHaveBeenCalledWith(expect.stringContaining('Traffic is enabled'));
-    expect(log.success).not.toHaveBeenCalledWith(expect.stringContaining('healthy'));
+    expect(printSuccess).not.toHaveBeenCalledWith(expect.stringContaining('healthy'));
   });
 
   it('previews enabling a disabled installation without promising it will stay paused', async () => {

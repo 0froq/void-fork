@@ -10,6 +10,7 @@ import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { ensurePlatformAccessToken } from './cf-access.ts';
 import { readOperatorToken, resolveOperatorOrigin } from './operator-auth.ts';
 import { OperatorClient } from './operator-client.ts';
+import { printSuccess } from './output.ts';
 import {
   checkpointPlatformAccessResources,
   parsePlatformAccessSetupSpec,
@@ -383,8 +384,8 @@ export async function runPlatformProtectionConfig(args: PlatformConfigArgs): Pro
       JSON.stringify({ ...result, protection, retainedAccessApplications: true }, null, 2),
     );
     if (!args.json) {
-      console.log(
-        'Sign in again with void platform auth login. Existing Access applications and policies were retained.',
+      printSuccess(
+        'Platform protection updated. Sign in again with void platform auth login. Existing Access applications and policies were retained.',
       );
     }
   } finally {

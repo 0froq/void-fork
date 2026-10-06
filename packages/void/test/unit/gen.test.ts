@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { outro } from '@voidzero-dev/vite-plus-prompts';
 import { toSlash } from 'pathslash';
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vite-plus/test';
 import { runGenCommand, formatTimestamp } from '../../src/cli/gen.ts';
@@ -2051,6 +2052,17 @@ describe('gen migration', () => {
 // ---------------------------------------------------------------------------
 
 describe('gen route', () => {
+  it('keeps an existing route and prints no creation success when skipped', async () => {
+    const path = join(TMP, 'routes/api/health.ts');
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, '// Keep this route.');
+    vi.mocked(outro).mockClear();
+
+    await runGenCommand(TMP, { subcommand: 'route', path: 'api/health', methods: ['get'] });
+
+    expect(readFileSync(path, 'utf8')).toBe('// Keep this route.');
+    expect(outro).not.toHaveBeenCalled();
+  });
   it('generates route with default GET handler', async () => {
     await runGenCommand(TMP, {
       subcommand: 'route',

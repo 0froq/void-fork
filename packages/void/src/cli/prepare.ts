@@ -1,6 +1,6 @@
-import { log, outro } from '@voidzero-dev/vite-plus-prompts';
+import { log } from '@voidzero-dev/vite-plus-prompts';
 import { prepareProject } from '../codegen/prepare.ts';
-import { note } from './output.ts';
+import { printSuccess, note } from './output.ts';
 import type { PrepareArgs } from './prepare-args.ts';
 
 export async function runPrepareCommand(root: string, _args: PrepareArgs): Promise<void> {
@@ -19,5 +19,5 @@ export async function runPrepareCommand(root: string, _args: PrepareArgs): Promi
     log.info('No generated files changed.');
   }
 
-  outro('Project codegen is ready.');
+  printSuccess('Project codegen is ready.');
 }

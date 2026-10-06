@@ -7,9 +7,9 @@ import {
   type PlatformApplication,
   type PlatformInstallationManifest,
 } from '@void/platform';
-import { confirm, isCancel, log, text } from '@voidzero-dev/vite-plus-prompts';
+import { confirm, isCancel, text } from '@voidzero-dev/vite-plus-prompts';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
-import { note } from './output.ts';
+import { printSuccess, note } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import {
   assertPlatformOperatorCredentialCanApplyPlan,
@@ -410,7 +410,7 @@ export async function runPlatformDomainCommand(args: DomainArgs): Promise<void> 
       kind: 'installed',
       proxyUrl: manifest.endpoints.proxyUrl,
     });
-    log.success(
+    printSuccess(
       `Apps now use *.${domain}. Existing workers.dev URLs remain available; the API connection is unchanged.`,
     );
   };

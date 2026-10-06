@@ -59,7 +59,7 @@ export const log: Record<
   info: (message: string) => clackLog.info(formatCloudflareUserMessage(message)),
   message: (message: string) => clackLog.message(formatCloudflareUserMessage(message)),
   step: (message: string) => clackLog.step(formatCloudflareUserMessage(message)),
-  success: (message: string) => clackLog.success(formatCloudflareUserMessage(message)),
+  success: (message: string) => clackLog.step(formatCloudflareUserMessage(message)),
   warn: (message: string) => clackLog.warn(formatCloudflareUserMessage(message)),
 };
 
@@ -425,7 +425,7 @@ export async function createProjectFromSlug(
   if (shouldLinkDeployProject(root, client.apiUrl)) {
     writeProjectConfig(root, attachSelectedPlatform(root, config, client.apiUrl));
   }
-  log.success(`Project created: ${pc.blue(config.slug)}`);
+  log.step(`Project created: ${pc.blue(config.slug)}`);
   reportProjectCreationWarnings(project);
   cliLog?.info('project_create_success', { projectId: config.projectId, slug: config.slug });
   return config;
@@ -531,7 +531,7 @@ export async function ensureManagedHyperdrive(
     process.exit(0);
   }
   await client.provisionDatabase(projectId, connectionString as string);
-  log.success('Hyperdrive provisioned.');
+  log.step('Hyperdrive provisioned.');
 }
 
 /** Convert scanned cron jobs and queues into deploy-manifest entries. */

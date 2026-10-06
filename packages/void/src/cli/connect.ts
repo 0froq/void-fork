@@ -5,6 +5,7 @@ import { isExpiredTokenError, PlatformClient } from './client.ts';
 import { connectCloudflare } from './cloudflare-connect.ts';
 import type { ConnectArgs } from './connect-args.ts';
 import { promptForLoginToken } from './login.ts';
+import { printSuccess } from './output.ts';
 import { discoverPlatform, promptPlatformUrl, saveDiscoveredPlatform } from './platform-cmd.ts';
 import { listPlatformConnections, normalizePlatformApiUrl } from './platform-registry.ts';
 import {
@@ -58,7 +59,7 @@ export async function authenticateConnection(
         apiUrl: discovery.apiUrl,
         checkPlatformVersion: false,
       }).whoami();
-      log.success(`Authenticated with ${discovery.displayName}.`);
+      log.step(`Authenticated with ${discovery.displayName}.`);
       return;
     } catch (error) {
       if (!isExpiredTokenError(error)) {
@@ -107,7 +108,7 @@ export async function runConnectCommand(
   if (target === 'cloudflare') {
     await connectCloudflare(root, interactive);
     writeDeploymentPlatform(root, 'cloudflare');
-    log.success('Connected to Cloudflare. Run `void deploy` to deploy this project.');
+    printSuccess('Connected to Cloudflare. Run `void deploy` to deploy this project.');
     return;
   }
   const discovery = await discoverPlatform(args.url || (await selectVoidPlatform(interactive)));
@@ -120,7 +121,6 @@ export async function runConnectCommand(
     envUrl && normalizePlatformApiUrl(envUrl) !== discovery.apiUrl,
   );
   const selected = environmentOverrides ? false : writePlatformSelection(root, discovery);
-  log.success(`Connected to ${discovery.displayName} at ${discovery.apiUrl}.`);
   if (!selected) {
     log.info(
       'Saved the connection. The current project link or environment still selects its existing destination.',
@@ -133,4 +133,5 @@ export async function runConnectCommand(
   } else if (selected) {
     log.info('Run `void project link` to select a project, then `void deploy`.');
   }
+  printSuccess(`Connected to ${discovery.displayName} at ${discovery.apiUrl}.`);
 }

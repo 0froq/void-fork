@@ -1,7 +1,7 @@
 import { outro, log, select, confirm, isCancel, cancel } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { PlatformClient } from './client.ts';
-import { createSpinner, dim, ensureUtc, formatCount, pc } from './output.ts';
+import { createSpinner, dim, ensureUtc, formatCount, printSuccess } from './output.ts';
 import { readDeploymentPlatform, readProjectConfig } from './project.ts';
 
 export async function runRollbackCommand(root: string, deployId?: string): Promise<void> {
@@ -93,7 +93,8 @@ export async function runRollbackCommand(root: string, deployId?: string): Promi
     s.stop('Rollback complete.');
 
     if (result.ok) {
-      log.success(`Rolled back to ${pc.bold(targetId)}`);
+      log.info('Traffic is now serving the rolled-back deployment.');
+      printSuccess(`Rolled back to ${targetId}.`);
     } else {
       log.error(result.error ?? 'Rollback failed.');
       process.exit(1);
@@ -103,8 +104,6 @@ export async function runRollbackCommand(root: string, deployId?: string): Promi
     log.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
-
-  outro(dim('Traffic is now serving the rolled-back deployment.'));
 }
 
 async function runCloudflareRollback(root: string, deployId?: string): Promise<void> {
@@ -191,8 +190,8 @@ async function runCloudflareRollback(root: string, deployId?: string): Promise<v
     log.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
-  log.success(`Rolled back to ${pc.bold(target.id)}`);
-  outro(dim('Traffic is now serving the selected Cloudflare Worker Version.'));
+  log.info('Traffic is now serving the selected Cloudflare Worker Version.');
+  printSuccess(`Rolled back to ${target.id}.`);
 }
 
 async function confirmRollbackOrExit(): Promise<void> {

@@ -11,6 +11,7 @@ import {
   type EmailWranglerRunResult,
 } from '../../src/cli/email-cloudflare.ts';
 import { runEmailCloudflareCommand, runEmailCommand } from '../../src/cli/email.ts';
+import * as terminalOutput from '../../src/cli/output.ts';
 
 /**
  * `void email setup|status --platform cloudflare` on the 0078 transcript project:
@@ -146,7 +147,7 @@ function fakeDns(mx: Record<string, Array<string>>): EmailDns {
   };
 }
 
-/** Capture clack's `log.*` lines — the command's final verdict is one of those, not a `print` block. */
+/** Capture progress and the final verdict separately from checklist blocks. */
 function captureLog(): { lines: Array<string>; restore: () => void } {
   const lines: Array<string> = [];
   const spies = (['message', 'info', 'warn', 'error', 'success', 'step'] as const).map((level) =>
@@ -154,9 +155,13 @@ function captureLog(): { lines: Array<string>; restore: () => void } {
       lines.push(args.map(String).join(' '));
     }) as never),
   );
+  const success = vi.spyOn(terminalOutput, 'printSuccess').mockImplementation((message) => {
+    lines.push(message);
+  });
   return {
     lines,
     restore: () => {
+      success.mockRestore();
       for (const spy of spies) {
         spy.mockRestore();
       }

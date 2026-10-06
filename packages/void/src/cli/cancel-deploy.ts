@@ -1,6 +1,7 @@
 import { outro, log, confirm, isCancel } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { PlatformClient, type DeploymentResponse } from './client.ts';
+import { printSuccess } from './output.ts';
 import { readProjectConfig } from './project.ts';
 
 const ACTIVE_STATUSES = new Set(['pending', 'uploading', 'migrating', 'prerendering']);
@@ -55,7 +56,7 @@ export async function runCancelDeployCommand(root: string, deployId?: string): P
   }
 
   await client.cancelDeployment(linked.projectId, target.id);
-  outro(`Cancellation requested for deployment ${target.id}.`);
+  printSuccess(`Cancellation requested for deployment ${target.id}.`);
 }
 
 function formatDeployment(deployment: DeploymentResponse): string {

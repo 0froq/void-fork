@@ -8,6 +8,7 @@ import {
   parseCloudflareAuthSession,
   type CloudflareAuthSession,
 } from './cloudflare-auth.ts';
+import { printSuccess } from './output.ts';
 import { readRootWranglerConfig } from './wrangler.ts';
 
 export async function runCloudflareCommand(root: string, args: CloudflareArgs): Promise<void> {
@@ -15,7 +16,7 @@ export async function runCloudflareCommand(root: string, args: CloudflareArgs): 
   switch (args.subcommand) {
     case 'login': {
       await ensureCloudflareAuthentication({ runWrangler, forceLogin: true });
-      console.log('Successfully logged in.');
+      printSuccess('Successfully logged in to Cloudflare.');
       return;
     }
     case 'status': {
@@ -41,7 +42,7 @@ export async function runCloudflareCommand(root: string, args: CloudflareArgs): 
           `Removed the local Cloudflare browser session. Environment credentials remain active: ${overrides.join(', ')}.`,
         );
       } else {
-        log.success('Signed out of Cloudflare.');
+        printSuccess('Signed out of Cloudflare.');
       }
       return;
     }

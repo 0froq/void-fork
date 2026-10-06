@@ -3,7 +3,7 @@ import { log, outro } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import type { BuildArgs } from './build-args.ts';
 import { PlatformApiError, PlatformClient, type BuildLogsResponse } from './client.ts';
-import { dim, pc } from './output.ts';
+import { dim, pc, printSuccess } from './output.ts';
 import { readProjectConfig } from './project.ts';
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project.ts';
 
@@ -233,5 +233,9 @@ async function runBuildLogsCommand(
     return;
   }
 
-  outro(dim(`Build ${status}.`));
+  if (status === 'complete') {
+    printSuccess('Build succeeded.');
+  } else {
+    outro(dim(`Build ${status}.`));
+  }
 }

@@ -76,7 +76,7 @@ function linkSkills(
     }
 
     symlinkSync(relativeTarget, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
-    log.success(`  ${skill.name} — linked`);
+    log.step(`  ${skill.name} — linked`);
     linked++;
   }
   return linked;

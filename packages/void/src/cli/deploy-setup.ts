@@ -35,7 +35,7 @@ export async function maybeSetupDeployProject(root: string): Promise<ProjectConf
   let token = existingToken;
   if (!token) {
     token = await promptForLoginToken(root);
-    log.success('Token saved.');
+    log.step('Token saved.');
   }
   const client = new PlatformClient(token, { root });
   const projects = await client.listProjects();
@@ -50,7 +50,7 @@ export async function maybeSetupDeployProject(root: string): Promise<ProjectConf
   if (result.action === 'select') {
     const config = { projectId: result.project.id, slug: result.project.slug };
     writeProjectConfig(root, attachSelectedPlatform(root, config, client.apiUrl));
-    log.success(`Linked project: ${config.slug}`);
+    log.step(`Linked project: ${config.slug}`);
     return config;
   }
 

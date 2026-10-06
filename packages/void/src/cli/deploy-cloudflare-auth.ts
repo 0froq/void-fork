@@ -171,7 +171,7 @@ export async function chooseCloudflareDeployAccount(options: {
       { configPath: options.configPath },
     );
   }
-  log.success(`Configured Cloudflare account: ${account.name}`);
+  log.step(`Configured Cloudflare account: ${account.name}`);
   return account.id;
 }
 

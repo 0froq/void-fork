@@ -15,7 +15,7 @@ import {
   type PlatformInstallationManifest,
 } from '@void/platform';
 import { confirm, isCancel, log, outro, select } from '@voidzero-dev/vite-plus-prompts';
-import { createSpinner, note, pc } from './output.ts';
+import { printSuccess, createSpinner, note, pc } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import { platformDatabaseNameFromOwnerUrl } from './platform-auth-database.ts';
 import {
@@ -558,9 +558,6 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
         );
         return;
       }
-      log.success(
-        `${deployment.displayName}: runtime ${runtime!.manifest.platformVersion} ${args.subcommand === 'rollback' ? 'restored' : 'ready'}.`,
-      );
       log.info(
         result.manifest.desiredState === 'disabled'
           ? 'Application traffic remains paused. Enable the installation when you are ready.'
@@ -579,6 +576,9 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
           console.log(`One-time administrator setup code: ${code}`);
         }
       }
+      printSuccess(
+        `${deployment.displayName}: runtime ${runtime!.manifest.platformVersion} ${args.subcommand === 'rollback' ? 'restored' : 'ready'}.`,
+      );
     };
   };
 
@@ -874,7 +874,7 @@ export async function disablePlatform(
     await writeLifecycleCheckpoint(client, next);
     next = transitionInstallation(next, 'disabled', new Date().toISOString());
     await writeLifecycleCheckpoint(client, next);
-    log.success(`${next.deployment.displayName} is disabled. Its data was not changed.`);
+    printSuccess(`${next.deployment.displayName} is disabled. Its data was not changed.`);
   } catch (error) {
     next = transitionInstallation(next, 'failed', new Date().toISOString());
     writeInstallationManifest(next);
@@ -1277,7 +1277,7 @@ export async function uninstallPlatform(
     if (kept.length) {
       note(kept.join('\n'), pc.bold('Kept resources'));
     }
-    log.success(`Uninstalled ${next.deployment.displayName}.`);
+    printSuccess(`Uninstalled ${next.deployment.displayName}.`);
   } catch (error) {
     await stopProjectZeroTrustHold().catch(() => {});
     next = transitionInstallation(next, 'failed', new Date().toISOString());

@@ -16,7 +16,7 @@ import {
 } from './client.ts';
 import { collectGitDeployMetadata } from './git-metadata.ts';
 import type { GithubArgs } from './github-args.ts';
-import { pc } from './output.ts';
+import { printSuccess, pc } from './output.ts';
 import { platformErrorMessage } from './platform-errors.ts';
 import { readProjectConfig } from './project.ts';
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project.ts';
@@ -310,9 +310,9 @@ export async function runGithubLink(client: PlatformClient): Promise<void> {
   }
 
   if (status === 'already_linked') {
-    log.success('GitHub account already linked.');
+    log.info('GitHub account already linked.');
   } else {
-    log.success('GitHub account linked.');
+    printSuccess('GitHub account linked.');
   }
 }
 
@@ -379,8 +379,8 @@ export async function runGithubJoin(client: PlatformClient): Promise<void> {
   if (count === 0) {
     log.info('No new installations to join.');
   } else {
-    log.success(`Joined ${count} installation${count === 1 ? '' : 's'}.`);
     log.message('Run `void github installations` to see them, then `void github connect`.');
+    printSuccess(`Joined ${count} installation${count === 1 ? '' : 's'}.`);
   }
 }
 
@@ -830,7 +830,7 @@ export async function runConnect(
     }
   }
 
-  log.success(`Connected ${repoFullName} (${branch}) → project. Push to ${branch} to deploy.`);
+  printSuccess(`Connected ${repoFullName} (${branch}) → project. Push to ${branch} to deploy.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1010,7 +1010,7 @@ export async function runGithubUpdate(
     throw err;
   }
 
-  log.success(
+  printSuccess(
     `Updated ${updated.repo_full_name} → branch ${updated.branch}, executor ${updated.build_executor}, workflow ${updated.workflow_path}.`,
   );
 }
@@ -1157,5 +1157,5 @@ export async function runGithubDisconnect(
     throw err;
   }
 
-  log.success(`Disconnected ${connection.repo_full_name}.`);
+  printSuccess(`Disconnected ${connection.repo_full_name}.`);
 }

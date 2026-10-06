@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDefaultPlanCatalog, PLAN_LIMITS } from '@void/platform/plans';
-import { confirm, select, text } from '@voidzero-dev/vite-plus-prompts';
+import { confirm, outro, select, text } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
 import { parsePlatformPlansArgs } from '../../src/cli/platform-plans-args.ts';
@@ -13,6 +13,7 @@ vi.mock('../../src/cli/operator-auth.ts', () => ({
   readOperatorToken: () => 'operator-fixture',
 }));
 vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
+  outro: vi.fn(),
   confirm: vi.fn(),
   select: vi.fn(),
   text: vi.fn(),
@@ -28,6 +29,7 @@ beforeEach(async () => {
   revision = 7;
   pending = false;
   vi.mocked(confirm).mockReset();
+  vi.mocked(outro).mockReset();
   vi.mocked(select).mockReset();
   vi.mocked(text).mockReset();
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -347,7 +349,10 @@ describe('platform config plans', () => {
         body: { expectedRevision: 8 },
       },
     ]);
-    expect(console.log).toHaveBeenCalledTimes(1);
-    expect(console.log).toHaveBeenCalledWith('Saved plans.reset free. Account updates complete.');
+    expect(console.log).not.toHaveBeenCalled();
+    expect(outro).toHaveBeenCalledExactlyOnceWith(
+      '\n✓ Saved plans.reset free. Account updates complete.',
+      { withGuide: false },
+    );
   });
 });

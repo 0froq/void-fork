@@ -14,6 +14,7 @@ import { openBrowser } from './auth.ts';
 import { readOperatorToken, resolveOperatorOrigin } from './operator-auth.ts';
 import { OperatorClient } from './operator-client.ts';
 import { humanLines } from './operator-cmd.ts';
+import { printSuccess } from './output.ts';
 import type { PlatformConfigArgs } from './platform-config-args.ts';
 import { platformPromptAnswer } from './platform-setup.ts';
 
@@ -35,6 +36,13 @@ type Listing = {
 
 function print(result: unknown, json: boolean): void {
   console.log(json ? JSON.stringify(result, null, 2) : humanLines(result).join('\n'));
+}
+
+function printApplied(result: Record<string, unknown>, args: PlatformConfigArgs): void {
+  print(result, args.json);
+  if (!args.json && !args.plan) {
+    printSuccess('Platform authentication configuration updated.');
+  }
 }
 
 async function apply(
@@ -260,7 +268,7 @@ export async function runPlatformAuthConfig(args: PlatformConfigArgs): Promise<v
       return;
     }
     if (!listing.initialized) {
-      print(await apply(client, '/config/auth/initialize', {}, args), args.json);
+      printApplied(await apply(client, '/config/auth/initialize', {}, args), args);
       console.log('Run void platform auth login, then return to void platform config auth.');
       return;
     }
@@ -330,7 +338,7 @@ export async function runPlatformAuthConfig(args: PlatformConfigArgs): Promise<v
     return;
   }
   if (args.action === 'initialize') {
-    print(await apply(client, '/config/auth/initialize', {}, args), args.json);
+    printApplied(await apply(client, '/config/auth/initialize', {}, args), args);
     return;
   }
   if (!listing.initialized) {
@@ -393,14 +401,14 @@ export async function runPlatformAuthConfig(args: PlatformConfigArgs): Promise<v
         admission = { mode };
       }
     }
-    print(
+    printApplied(
       await apply(
         client,
         '/config/auth/admission',
         { revision: listing.revision, admission: parsePlatformAdmissionPolicy(admission) },
         args,
       ),
-      args.json,
+      args,
     );
     return;
   }
@@ -413,7 +421,11 @@ export async function runPlatformAuthConfig(args: PlatformConfigArgs): Promise<v
     return;
   }
   if (args.action === 'test') {
-    print(await testMethod(client, args.target, args), args.json);
+    const tested = await testMethod(client, args.target, args);
+    print(tested, args.json);
+    if (!args.json && !args.plan && tested.complete === true) {
+      printSuccess('Platform login verified.');
+    }
     return;
   }
   if (args.action === 'add' || args.action === 'configure') {
@@ -427,7 +439,7 @@ export async function runPlatformAuthConfig(args: PlatformConfigArgs): Promise<v
       { ...input, revision: args.action === 'add' ? null : method!.revision },
       args,
     );
-    print(result, args.json);
+    printApplied(result, args);
     if (!args.plan && !args.json) {
       console.log(
         `Test and enable it with void platform config auth enable ${input.configuration.id}.`,
@@ -463,13 +475,13 @@ export async function runPlatformAuthConfig(args: PlatformConfigArgs): Promise<v
       );
     }
   }
-  print(
+  printApplied(
     await apply(
       client,
       `/config/auth/connections/${encodeURIComponent(args.target)}/${args.action}`,
       { revision: method!.revision, ...(testId ? { testId } : {}) },
       args,
     ),
-    args.json,
+    args,
   );
 }

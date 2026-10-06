@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
-import { log, outro } from '@voidzero-dev/vite-plus-prompts';
+import { log } from '@voidzero-dev/vite-plus-prompts';
 import { parse, parseTree, type Node, type ParseError } from 'jsonc-parser';
 import { join } from 'pathslash';
 import {
@@ -24,6 +24,7 @@ import {
   discoverFrameworkWranglerFiles,
   planFrameworkConfigMigration,
 } from './framework-config-migrate.ts';
+import { printSuccess } from './output.ts';
 import { LATEST_KNOWN_COMPAT_DATE } from './wrangler.ts';
 
 const LEGACY_FILE = 'void.json';
@@ -247,11 +248,11 @@ export function migrateLegacyVoidConfig(root: string): boolean {
 export async function runMigrateCommand(root: string): Promise<void> {
   console.log();
   if (migrateLegacyVoidConfig(root)) {
-    log.success(
+    log.step(
       `Migrated project settings to ${TYPED_CONFIG_FILE}. Commit it and ${VOID_LOCK_FILE} when present.`,
     );
+    printSuccess('Configuration migration complete.');
   } else {
     log.info('No legacy project configuration found.');
   }
-  outro('Configuration migration complete.');
 }

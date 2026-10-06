@@ -1,6 +1,6 @@
-import pc from 'picocolors';
 import { getApiUrl, getProxyUrl, getToken } from './cli/auth.ts';
 import { ensurePlatformProxyAccess } from './cli/cf-access.ts';
+import { printSuccess } from './cli/output.ts';
 import { readProjectConfig } from './cli/project.ts';
 import { voidWarn, voidError } from './log.ts';
 import { scopedAccessCredentials } from './shared/cf-access.ts';
@@ -170,8 +170,7 @@ export async function runAiSetupPrompt(
   }
 
   writeProjectConfig(root, attachSelectedPlatform(root, { projectId, slug }, client.apiUrl));
-  log.success(`Linked to ${pc.blue(slug)}`);
-
   // Restart the dev server so mergeBindings picks up fresh credentials
   await server.restart();
+  printSuccess(`Linked to ${slug}.`);
 }

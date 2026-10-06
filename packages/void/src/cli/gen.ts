@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { outro, log, select, isCancel, cancel } from '@voidzero-dev/vite-plus-prompts';
+import { log, select, isCancel, cancel } from '@voidzero-dev/vite-plus-prompts';
 import { join, dirname, relative } from 'pathslash';
 import { ensureProjectTsconfig } from '../codegen/project-tsconfig.ts';
 import { readConfig, getDatabaseDialect } from '../config.ts';
@@ -17,6 +17,7 @@ import { collectMigrations, readJournal } from '../migrations/collect.ts';
 import { assertJournalCoherence, listDrizzleArtifacts } from '../migrations/validate.ts';
 import { readProjectPaths } from '../project-paths.ts';
 import type { GenArgs } from './gen-args.ts';
+import { printSuccess } from './output.ts';
 import { buildDrizzleKitSpawnEnv } from './yarn-pnp.ts';
 
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
@@ -52,7 +53,7 @@ function writeIfNotExists(filePath: string, content: string): boolean {
   }
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, content);
-  log.success(`Created ${filePath}`);
+  log.step(`Created ${filePath}`);
   return true;
 }
 
@@ -586,8 +587,8 @@ async function runModel(root: string, name: string, columns: Array<ColumnSpec>):
   // 3. Regenerate .void/tsconfig.json and db.d.ts
   ensureProjectTsconfig(root, undefined, true, true, { paths });
 
-  log.success(`Created ${relative(root, modelPath)}`);
-  log.success(`Updated ${relative(root, barrelPath)}`);
+  log.step(`Created ${relative(root, modelPath)}`);
+  log.step(`Updated ${relative(root, barrelPath)}`);
 
   // 4. Routes: routes/api/<name>/index.ts
   const routeIndexPath = join(paths.routesDir, 'api', name, 'index.ts');
@@ -597,7 +598,7 @@ async function runModel(root: string, name: string, columns: Array<ColumnSpec>):
   const routeIdPath = join(paths.routesDir, 'api', name, '[id].ts');
   writeIfNotExists(routeIdPath, generateIdRoute(name, validator));
 
-  outro('Model scaffolding complete. Run `void db push` to apply.');
+  printSuccess('Model scaffolding complete. Run `void db push` to apply.');
 }
 
 function runMigration(root: string, name: string): void {
@@ -885,10 +886,10 @@ function runMigration(root: string, name: string): void {
       .filter((f) => f.endsWith('.sql'))
       .find((f) => !sqlFilesBefore.has(f));
     if (newSqlFile) {
-      log.success(`Created db/migrations/${newSqlFile}`);
+      log.step(`Created db/migrations/${newSqlFile}`);
     }
 
-    outro('Migration created and journal updated.');
+    printSuccess('Migration created and journal updated.');
     return;
   }
 
@@ -915,9 +916,9 @@ function runMigration(root: string, name: string): void {
   const tag = `${timestamp}_${name}`;
   const filePath = join(migrationsDir, `${tag}.sql`);
 
-  writeIfNotExists(filePath, `-- ${name}\n`);
-
-  outro('Migration created.');
+  if (writeIfNotExists(filePath, `-- ${name}\n`)) {
+    printSuccess('Migration created.');
+  }
 }
 
 function runRoute(root: string, routePath: string, methods: Array<string>): void {
@@ -935,9 +936,9 @@ function runRoute(root: string, routePath: string, methods: Array<string>): void
 
 ${exports}
 `;
-  writeIfNotExists(filePath, content);
-
-  outro('Route created.');
+  if (writeIfNotExists(filePath, content)) {
+    printSuccess('Route created.');
+  }
 }
 
 function runMiddleware(root: string, name: string): void {
@@ -953,9 +954,9 @@ export default defineMiddleware(async (c, next) => {
   await next();
 });
 `;
-  writeIfNotExists(filePath, content);
-
-  outro('Middleware created.');
+  if (writeIfNotExists(filePath, content)) {
+    printSuccess('Middleware created.');
+  }
 }
 
 function runCron(root: string, name: string): void {
@@ -968,9 +969,9 @@ export default defineScheduled(async (controller, env) => {
   // TODO: implement ${name}
 });
 `;
-  writeIfNotExists(filePath, content);
-
-  outro('Cron job created.');
+  if (writeIfNotExists(filePath, content)) {
+    printSuccess('Cron job created.');
+  }
 }
 
 function runQueue(root: string, name: string): void {
@@ -988,9 +989,9 @@ export default defineQueue<Message>(async (batch, env) => {
   }
 });
 `;
-  writeIfNotExists(filePath, content);
-
-  outro('Queue consumer created.');
+  if (writeIfNotExists(filePath, content)) {
+    printSuccess('Queue consumer created.');
+  }
 }
 
 function runSsr(root: string, framework?: 'react' | 'vue' | 'svelte' | 'solid'): void {
@@ -1008,7 +1009,7 @@ function runSsr(root: string, framework?: 'react' | 'vue' | 'svelte' | 'solid'):
     writeSolidSsr(root);
   }
 
-  outro('SSR scaffolding complete.');
+  printSuccess('SSR scaffolding complete.');
 }
 
 function detectFramework(root: string): 'react' | 'vue' | 'svelte' | 'solid' {

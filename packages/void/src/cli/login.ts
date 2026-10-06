@@ -11,7 +11,7 @@ import {
   saveToken,
 } from './auth.ts';
 import { isExpiredTokenError, PlatformClient } from './client.ts';
-import { createSpinner, pc } from './output.ts';
+import { printSuccess, createSpinner, pc } from './output.ts';
 
 export type LoginPlatform = {
   apiUrl: string;
@@ -133,8 +133,8 @@ export async function runLoginCommand(root: string = process.cwd()): Promise<voi
 
   await promptForLoginToken(root);
   if (expiredEnvToken) {
-    outro('Token saved. Unset `VOID_TOKEN` to use it.');
+    printSuccess('Token saved. Unset `VOID_TOKEN` to use it.');
     return;
   }
-  outro('Token saved.');
+  printSuccess('Token saved.');
 }

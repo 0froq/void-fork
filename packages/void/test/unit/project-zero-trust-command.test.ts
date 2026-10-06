@@ -75,6 +75,37 @@ describe('project Zero Trust command', () => {
     expect(output.join('')).toContain('still in progress');
     expect(output.join('')).toContain('void project zero-trust reconcile');
     expect(output.join('')).not.toContain('linked-app is public');
+    expect(output.join('')).not.toContain('✓');
+  });
+  it('reports an errored protection change without a success checkmark', async () => {
+    const root = linkedProject();
+    vi.stubEnv('VOID_TOKEN', 'test-token');
+    vi.stubEnv('VOID_API_URL', 'https://api.example.test');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          ok: true,
+          project: {
+            project_id: 'project_1',
+            desired_protected: true,
+            effective_protected: false,
+            state: 'error',
+            last_error: 'DNS verification failed',
+            updated_at: '2026-10-06T00:00:00Z',
+          },
+        }),
+      ),
+    );
+    let output = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      output += String(chunk);
+      return true;
+    });
+    await runProjectCommand(root, { subcommand: 'zero-trust', action: 'protect', projectSlug: '' });
+    expect(output).toContain('needs attention');
+    expect(output).not.toContain('✓');
+    expect(output).not.toContain('is protected');
   });
   it('uses VOID_PROJECT without presenting an uninitialized state as public', async () => {
     const root = linkedProject();

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import * as output from '../../src/cli/output.ts';
 
 const mockIntro = vi.fn();
 const mockOutro = vi.fn();
@@ -138,6 +139,7 @@ describe('void db migrate', () => {
   let runDbCommand: typeof import('../../src/cli/db.ts').runDbCommand;
 
   beforeEach(async () => {
+    vi.spyOn(output, 'printSuccess').mockImplementation(() => {});
     vi.clearAllMocks();
     mockGetMiniflareDatabasePath.mockReturnValue(join(tmpdir(), 'void-db-migrate.sqlite'));
     mockGetAppliedMigrations.mockResolvedValue([]);
@@ -187,7 +189,7 @@ describe('void db migrate', () => {
       toSlash(join(root, 'db', 'migrations')),
       join(tmpdir(), 'void-db-migrate.sqlite'),
     );
-    expect(mockLog.success).toHaveBeenCalledWith('Applied 1 migration.');
+    expect(output.printSuccess).toHaveBeenCalledWith('Applied 1 migration.');
   });
 
   it('does not block reruns because of already applied destructive history', async () => {
@@ -236,7 +238,7 @@ describe('void db migrate', () => {
       toSlash(join(root, 'db', 'migrations')),
       process.env.DATABASE_URL,
     );
-    expect(mockLog.success).toHaveBeenCalledWith('Applied 1 migration to remote database.');
+    expect(output.printSuccess).toHaveBeenCalledWith('Applied 1 migration to remote database.');
   });
 
   it('applies pending MySQL migrations directly for a Cloudflare target', async () => {
@@ -254,7 +256,7 @@ describe('void db migrate', () => {
       toSlash(join(root, 'db', 'migrations')),
       process.env.DATABASE_URL,
     );
-    expect(mockLog.success).toHaveBeenCalledWith('Applied 1 migration to remote database.');
+    expect(output.printSuccess).toHaveBeenCalledWith('Applied 1 migration to remote database.');
   });
 
   it('reads direct Cloudflare PostgreSQL migration status from DATABASE_URL', async () => {

@@ -1,6 +1,7 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import * as output from '../../src/cli/output.ts';
 import { getMiniflareDatabasePath } from '../../src/migrations/runner.ts';
 
 const mockIntro = vi.fn();
@@ -85,6 +86,7 @@ describe('void db seed', () => {
   let runDbCommand: typeof import('../../src/cli/db.ts').runDbCommand;
 
   beforeEach(async () => {
+    vi.spyOn(output, 'printSuccess').mockImplementation(() => {});
     vi.clearAllMocks();
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
@@ -111,7 +113,7 @@ describe('void db seed', () => {
     await runDbCommand(root, { action: 'seed' });
 
     expect(await readMessages(root)).toEqual([{ id: 1, text: 'hello from sql' }]);
-    expect(mockLog.success).toHaveBeenCalledWith('Seeded from db/seed.sql.');
+    expect(output.printSuccess).toHaveBeenCalledWith('Seeded from db/seed.sql.');
   });
 
   it('seeds from db/seed.ts by default and passes the schema context', async () => {
@@ -141,7 +143,7 @@ export const messages = sqliteTable("messages", {
       { id: 1, text: 'alpha' },
       { id: 2, text: 'beta' },
     ]);
-    expect(mockLog.success).toHaveBeenCalledWith('Seeded from db/seed.ts.');
+    expect(output.printSuccess).toHaveBeenCalledWith('Seeded from db/seed.ts.');
   });
 
   it('fails when multiple default seed files exist', async () => {

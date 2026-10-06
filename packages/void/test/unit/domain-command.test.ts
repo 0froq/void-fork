@@ -30,6 +30,7 @@ const mockGetDomainStatus = vi.fn();
 const mockRemoveDomain = vi.fn();
 
 vi.mock('@voidzero-dev/vite-plus-prompts', () => ({
+  outro: vi.fn(),
   log: {
     error: (...args: Array<unknown>) => mockLogError(...args),
     success: (...args: Array<unknown>) => mockLogSuccess(...args),

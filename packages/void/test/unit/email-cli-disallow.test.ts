@@ -1,7 +1,7 @@
-import { log } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { PlatformClient } from '../../src/cli/client.ts';
 import { emailDisallow } from '../../src/cli/email.ts';
+import * as output from '../../src/cli/output.ts';
 
 type Destination = Awaited<ReturnType<PlatformClient['listEmailDestinations']>>[number];
 
@@ -32,7 +32,7 @@ type LogSpy = ReturnType<typeof vi.spyOn>;
 let successSpy: LogSpy;
 
 beforeEach(() => {
-  successSpy = vi.spyOn(log, 'success').mockImplementation(() => {});
+  successSpy = vi.spyOn(output, 'printSuccess').mockImplementation(() => {});
 });
 
 afterEach(() => {

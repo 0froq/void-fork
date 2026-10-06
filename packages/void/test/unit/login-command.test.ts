@@ -170,6 +170,8 @@ describe('runLoginCommand', () => {
     expect(mockDiscoverPlatform).toHaveBeenCalledWith('https://api.example.test');
     expect(mockRunLogin).toHaveBeenCalledWith(root, 'github', expect.any(Function));
     expect(mockSaveToken).toHaveBeenCalledWith('fresh-token', root);
-    expect(mockOutro).toHaveBeenCalledWith('Token saved. Unset `VOID_TOKEN` to use it.');
+    expect(mockOutro).toHaveBeenCalledWith('\n✓ Token saved. Unset `VOID_TOKEN` to use it.', {
+      withGuide: false,
+    });
   });
 });

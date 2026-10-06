@@ -19,6 +19,7 @@ import {
 } from '@voidzero-dev/vite-plus-prompts';
 import { readOperatorToken, resolveOperatorOrigin } from './operator-auth.ts';
 import { OperatorClient, OperatorClientError } from './operator-client.ts';
+import { printSuccess } from './output.ts';
 import type { PlatformPlansArgs } from './platform-plans-args.ts';
 
 type Listing = {
@@ -354,7 +355,7 @@ async function apply(
   if (args.json) {
     print(completed);
   } else {
-    console.log(
+    printSuccess(
       `Saved ${applied.action ?? 'plans.sync'} ${applied.target ?? ''}. Account updates complete.`,
     );
   }

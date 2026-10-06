@@ -1,10 +1,18 @@
 import { stripVTControlCharacters } from 'node:util';
-import { expect, it, vi } from 'vite-plus/test';
+import { afterEach, expect, it, vi } from 'vite-plus/test';
 import { runSecretCommand } from '../../src/cli/secret.ts';
+
+const mutations = vi.hoisted(() => ({ set: vi.fn(), delete: vi.fn() }));
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.resetAllMocks();
+});
 
 vi.mock('../../src/cli/auth.ts', () => ({ getToken: () => 'fixture' }));
 vi.mock('../../src/cli/client.ts', () => ({
   PlatformClient: class {
+    setSecret = mutations.set;
+    deleteSecret = mutations.delete;
     async listSecrets() {
       return [{ name: 'API_KEY' }];
     }
@@ -14,6 +22,42 @@ vi.mock('../../src/cli/project.ts', () => ({
   readDeploymentPlatform: () => 'void',
   readProjectConfig: () => ({ projectId: 'project' }),
 }));
+vi.mock('../../src/cli/env-validation.ts', () => ({ validateSecretValues: vi.fn() }));
+
+it.each(['put', 'delete'] as const)(
+  'prints one completion for secret %s without exposing its value',
+  async (action) => {
+    let output = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      output += String(chunk);
+      return true;
+    });
+    await runSecretCommand(
+      '/fixture',
+      action === 'put'
+        ? { action, name: 'API_KEY', value: 'private-value' }
+        : { action, name: 'API_KEY' },
+    );
+    expect(stripVTControlCharacters(output)).toContain(
+      `\n✓ Secret API_KEY ${action === 'put' ? 'set' : 'deleted'}.\n\n`,
+    );
+    expect(output.match(/✓/g)).toHaveLength(1);
+    expect(output).not.toContain('private-value');
+  },
+);
+
+it('prints no success after a secret mutation fails', async () => {
+  mutations.set.mockRejectedValueOnce(new Error('Permission denied'));
+  let output = '';
+  vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+    output += String(chunk);
+    return true;
+  });
+  await expect(
+    runSecretCommand('/fixture', { action: 'put', name: 'API_KEY', value: 'private-value' }),
+  ).rejects.toThrow('Permission denied');
+  expect(output).not.toContain('✓');
+});
 
 it.each([0, 2])('lists secrets when the terminal reports %i columns', async (columns) => {
   const descriptor = Object.getOwnPropertyDescriptor(process.stdout, 'columns');

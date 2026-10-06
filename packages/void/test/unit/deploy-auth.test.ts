@@ -168,7 +168,7 @@ describe('runDeploy auth failures', () => {
 
     expect(mockPromptForLoginToken).toHaveBeenCalledTimes(1);
     expect(mockWarn).toHaveBeenCalledWith('Auth token expired. Re-authenticating...');
-    expect(mockSuccess).toHaveBeenCalledWith('Re-authenticated. Retrying deploy...');
+    expect(mockStep).toHaveBeenCalledWith('Re-authenticated. Retrying deploy...');
   });
 
   it('shows a VOID_TOKEN instruction for expired CI tokens', async () => {

@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
 const registries: Array<string> = [];
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -31,6 +32,53 @@ function page(partial: Partial<BuildLogsResponse>): BuildLogsResponse {
 function apiError(status: number, body = '{}'): PlatformApiError {
   return new PlatformApiError('build logs', status, body);
 }
+
+it.each(['complete', 'failed', 'cancelled'])(
+  'uses a success checkmark only for a completed build (%s)',
+  async (status) => {
+    vi.stubEnv('VOID_TOKEN', 'test-build-logs-token');
+    vi.stubEnv('VOID_API_URL', 'https://api.example.test');
+    vi.stubEnv('VOID_PROJECT', '');
+    const registry = mkdtempSync(join(tmpdir(), 'void-build-completion-'));
+    registries.push(registry);
+    vi.stubEnv('VOID_PLATFORM_REGISTRY_DIR', registry);
+    savePlatformConnection({
+      accountId: null,
+      apiUrl: 'https://api.example.test',
+      applicationDomain: 'apps.example.test',
+      displayName: 'Test',
+      installationId: null,
+      kind: 'connected',
+      proxyUrl: 'https://proxy.example.test',
+    });
+    vi.spyOn(PlatformClient.prototype, 'listProjects').mockResolvedValue([
+      { id: 'project', slug: 'project' } as Awaited<
+        ReturnType<PlatformClient['listProjects']>
+      >[number],
+    ]);
+    vi.spyOn(PlatformClient.prototype, 'getBuildLogs').mockResolvedValue(
+      page({ terminal: true, logsComplete: true, status }),
+    );
+    let output = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      output += String(chunk);
+      return true;
+    });
+    await runBuildCommand(process.cwd(), {
+      subcommand: 'logs',
+      buildId: 'build',
+      projectName: 'project',
+      follow: true,
+    });
+    const plain = stripVTControlCharacters(output);
+    if (status === 'complete') {
+      expect(plain).toContain('\n✓ Build succeeded.\n\n');
+    } else {
+      expect(plain).toContain(`Build ${status}.`);
+      expect(plain).not.toContain('✓');
+    }
+  },
+);
 
 describe('isFatalFollowError', () => {
   it('treats every 4xx except 429 as fatal (including 426 cli_outdated)', () => {

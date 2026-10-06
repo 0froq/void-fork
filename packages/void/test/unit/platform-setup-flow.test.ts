@@ -10,6 +10,7 @@ import {
 import { log, note, outro } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { pc } from '../../src/cli/output.ts';
+import * as terminalOutput from '../../src/cli/output.ts';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
 import {
   PlatformCloudflareApiError,
@@ -1113,7 +1114,7 @@ describe('platform credential onboarding', () => {
   });
 
   it('starts installation progress before the installer runs, updates it, and stops on success', async () => {
-    const success = vi.spyOn(log, 'success').mockImplementation(() => {});
+    const success = vi.spyOn(terminalOutput, 'printSuccess').mockImplementation(() => {});
     const info = vi.spyOn(log, 'info').mockImplementation(() => {});
     mocks.install.mockImplementation(async (_plan, _secrets, manifest, dependencies) => {
       expect(mocks.progress.start).toHaveBeenCalledWith('Installing the platform');

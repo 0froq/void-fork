@@ -32,7 +32,7 @@ import {
   type EmailPreflight,
   type EmailWranglerRun,
 } from './email-cloudflare.ts';
-import { createSpinner, note, pc } from './output.ts';
+import { printSuccess, createSpinner, note, pc } from './output.ts';
 import { readProjectConfig } from './project.ts';
 import { writeProvisionedWranglerConfig } from './wrangler.ts';
 
@@ -142,12 +142,12 @@ export async function emailAllow(
   const sent =
     dest.verificationSent !== false && (dest.created || dest.platformVerificationPending);
   if (dest.status === 'verified') {
-    log.success(`${dest.address} is already verified.`);
+    log.info(`${dest.address} is already verified.`);
   } else if (sent) {
-    log.success(`Verification email sent to ${dest.address}.`);
     log.info(
       'They click the link in their inbox — no Void or Cloudflare account needed. `void email destinations` to poll status.',
     );
+    printSuccess(`Verification email sent to ${dest.address}.`);
   } else if (dest.created) {
     log.warn(
       `${dest.address} is on this project's list now, but Cloudflare already had the address pending (added by another project, or by hand), so no new verification email was sent — the link it mailed when the address was first added is the one to click. ${freshLinkHint(dest.address)}`,
@@ -180,7 +180,7 @@ export async function emailDisallow(
     process.exit(1);
   }
   await client.removeEmailDestination(projectId, dest.id);
-  log.success(
+  printSuccess(
     `Removed ${dest.address}. New sends to it are refused immediately; already admitted attempts may finish.`,
   );
 }
@@ -772,6 +772,7 @@ export async function emailDomainAdd(
       }
       log.info(`Run \`void email domain status ${target.emailDomain}\` to inspect setup.`);
       if (operation.status === 'completed') {
+        printSuccess(`Email domain ${target.emailDomain} configured.`);
         return;
       }
       return fail(
@@ -782,13 +783,14 @@ export async function emailDomainAdd(
       `email: setup outcome is unknown (operation ${attemptId}). Nothing was revoked. Check \`void email domain status ${target.emailDomain}\` before starting another setup.`,
     );
   }
-  log.success(
+  log.info(
     'Token stored encrypted on the platform for this zone connection — nothing is kept on this machine.',
   );
   printEmailDomainOutcome(row);
   if (row.operationStatus !== 'completed') {
     return exit(1);
   }
+  printSuccess(`Email domain ${row.domain} configured.`);
 }
 
 function emailDomainStatusText(status: EmailDomainResponse['status']): string {
@@ -892,6 +894,7 @@ export async function emailDomainSync(
       `email: reconciliation ${row.operationStatus ?? 'pending'}; inspect operation ${row.operationId ?? row.domain}`,
     );
   }
+  printSuccess(`Email domain ${domain} reconciled.`);
 }
 
 /** Rotation applies to every domain sharing this zone connection. */
@@ -937,7 +940,7 @@ export async function emailDomainRotateSecret(
           `email: secret rotation ${operation.status}; inspect operation ${operation.operationId}`,
         );
       }
-      log.success('Zone ingress secret rotated and verified on the deployed Worker.');
+      printSuccess('Zone ingress secret rotated and verified on the deployed Worker.');
       return;
     }
     throw new Error(
@@ -950,7 +953,7 @@ export async function emailDomainRotateSecret(
       `email: secret rotation ${row.operationStatus ?? 'pending'}; inspect operation ${row.operationId ?? row.domain}`,
     );
   }
-  log.success('Zone ingress secret rotated and verified on the deployed Worker.');
+  printSuccess('Zone ingress secret rotated and verified on the deployed Worker.');
 }
 
 export async function emailDomainRemove(
@@ -970,7 +973,7 @@ export async function emailDomainRemove(
     (options.exit ?? ((code: number): never => process.exit(code)))(1);
     return;
   }
-  log.success(`Removed ${domain}. Zone resources still used by other domains were retained.`);
+  printSuccess(`Removed ${domain}. Zone resources still used by other domains were retained.`);
 }
 
 async function runEmailDomainCommand(
@@ -1192,7 +1195,7 @@ async function runEmailCloudflareCommandInConfig(
       }),
     );
     if (pre.ready) {
-      log.success(`Email is set up on ${pre.domain}.`);
+      log.info(`Email is set up on ${pre.domain}.`);
       return;
     }
     log.warn(
@@ -1278,5 +1281,5 @@ async function runEmailCloudflareCommandInConfig(
       'Routing rules are created by the next `void deploy --platform cloudflare`, which applies the Email Routing plan from `addresses`.',
     );
   }
-  log.success(`Email set up on ${pre.domain}.`);
+  printSuccess(`Email set up on ${pre.domain}.`);
 }

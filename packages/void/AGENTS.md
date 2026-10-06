@@ -4,6 +4,8 @@ Core Vite plugin — routing, inference, migrations, CLI.
 
 User-facing CLI output and documentation describe Cloudflare operations through Void. Never ask users to install, authenticate, or invoke Wrangler directly. Keep `wrangler.jsonc` / `wrangler.json` and `WRANGLER_*` names only where users must recognize an actual file or environment variable; implementation details may remain in source comments, tests, and debug logs.
 
+Completed CLI actions use `printSuccess` from `src/cli/output.ts`: a blank line, a green checkmark, and green text. Use `log.step` for intermediate work. Keep listings, no-op notices, cancellations, warnings, and checkpointed or pending operations out of the success renderer. Preserve JSON, token, and SQL stdout contracts.
+
 ## Architecture
 
 `application-analysis.ts` owns source feature enablement and handler inventories;

@@ -1,8 +1,10 @@
 import type { Writable } from 'node:stream';
+import { stripVTControlCharacters } from 'node:util';
 import {
   isCI,
   log,
   note as promptsNote,
+  outro,
   settings,
   spinner,
   type SpinnerOptions,
@@ -11,6 +13,12 @@ import {
 import pc from 'picocolors';
 
 export { pc };
+
+/** Complete an action with the same spacing, checkmark, and color on every target. */
+export function printSuccess(message: string): void {
+  // Remove nested styles so a blue URL or dim hint cannot override the success color.
+  outro(`\n${pc.green(`✓ ${stripVTControlCharacters(message)}`)}`, { withGuide: false });
+}
 
 export function formatCount(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`;
