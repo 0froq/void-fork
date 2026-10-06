@@ -179,7 +179,7 @@ describe('D1 migration ownership', () => {
     expect((await handler([])(apply('successor'))).status).toBe(200);
   });
 
-  it('warns about a migration without statement breakpoints only while it is pending', async () => {
+  it('applies splittable SQL without warning about missing statement breakpoints', async () => {
     const { handler } = createDatabase();
     const owner = handler([
       {
@@ -189,9 +189,27 @@ describe('D1 migration ownership', () => {
     ]);
     const first = (await (await owner(apply('first'))).json()) as MigrationResponse;
     expect(first.confirmedApplied).toEqual(['legacy.sql']);
-    expect(first.warnings).toEqual([expect.stringContaining('Migration legacy.sql')]);
+    expect(first.warnings ?? []).toEqual([]);
     const later = (await (await owner(apply('later'))).json()) as MigrationResponse;
     expect(later.confirmedSkipped).toEqual(['legacy.sql']);
+    expect(later.warnings ?? []).toEqual([]);
+  });
+
+  it('warns about compound SQL only while the migration is pending', async () => {
+    const { handler } = createDatabase();
+    const owner = handler([
+      {
+        name: 'trigger.sql',
+        sql: 'CREATE TRIGGER balance_change AFTER UPDATE ON balance BEGIN SELECT 1; END;',
+      },
+    ]);
+    const first = (await (await owner(apply('first'))).json()) as MigrationResponse;
+    expect(first.confirmedApplied).toEqual(['trigger.sql']);
+    expect(first.warnings).toEqual([
+      'Add a `--> statement-breakpoint` line after each complete SQL statement in migration trigger.sql.',
+    ]);
+    const later = (await (await owner(apply('later'))).json()) as MigrationResponse;
+    expect(later.confirmedSkipped).toEqual(['trigger.sql']);
     expect(later.warnings ?? []).toEqual([]);
   });
 

@@ -5,6 +5,7 @@ import {
   classifySqlMigration,
   getMigrationPlanHashInput,
   MIGRATION_CLASSIFIER_VERSION,
+  splitSqlStatements,
   tokenizeSql,
   type MigrationPlanHashInput,
 } from '@void/deploy-core';
@@ -107,10 +108,10 @@ export function classifyMigration(migration: {
   return {
     ...base,
     planHash: hashPlan(base),
-    ...(classification.kind === 'legacy-unsplit-multi-statement'
+    ...(classification.kind === 'legacy-unsplit-multi-statement' && splitSqlStatements(sql) === null
       ? {
           warnings: [
-            `Migration ${migration.name} contains multiple statements without Drizzle statement breakpoints. Add a \`--> statement-breakpoint\` line between statements so each one runs separately.`,
+            `Add a \`--> statement-breakpoint\` line after each complete SQL statement in migration ${migration.name}.`,
           ],
         }
       : {}),
