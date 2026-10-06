@@ -84,10 +84,9 @@ describe('void env check (subprocess)', () => {
     const root = createProject('{ STRIPE_KEY: string() }');
     const { stdout, status } = runVoid(root, ['env', 'check']);
     // The command prints clack's `note()` block to stdout on failure.
-    const combined = stdout;
     expect(status).toBe(1);
-    expect(combined).toContain('Env validation failed');
-    expect(combined).toContain('STRIPE_KEY');
+    expect(stdout).toContain('Env validation failed');
+    expect(stdout).toContain('STRIPE_KEY');
   });
 
   it('exits 0 when .env satisfies every required key locally', () => {
@@ -117,6 +116,28 @@ describe('void env check (subprocess)', () => {
     expect(status).toBe(1);
     expect(stdout).toContain('only .env is supported');
     expect(stdout).toContain('.env.local');
+  });
+
+  it('rejects names reserved for Void in .env', () => {
+    const root = createProject('{ STRIPE_KEY: string() }');
+    writeFileSync(join(root, '.env'), 'STRIPE_KEY=sk_dev\n__VOID_PROXY_TOKEN=local\n');
+    const { stdout, status } = runVoid(root, ['env', 'check']);
+    expect(status).toBe(1);
+    expect(stdout).toContain('.env defines names reserved for Void: __VOID_PROXY_TOKEN.');
+    expect(stdout).toContain('x-void-dev-trigger');
+  });
+
+  it('rejects reserved names written as export K=v or K: v in .env', () => {
+    const root = createProject('{ STRIPE_KEY: string() }');
+    writeFileSync(
+      join(root, '.env'),
+      'STRIPE_KEY=sk_dev\nexport __VOID_PROXY_TOKEN=x\n__VOID_EMAIL_FROM: a@b.c\n',
+    );
+    const { stdout, status } = runVoid(root, ['env', 'check']);
+    expect(status).toBe(1);
+    // The CLI wraps long lines, so check each name on its own.
+    expect(stdout).toContain('.env defines names reserved for Void: __VOID_PROXY_TOKEN,');
+    expect(stdout).toContain('__VOID_EMAIL_FROM.');
   });
 });
 

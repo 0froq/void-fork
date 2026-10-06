@@ -1,4 +1,9 @@
-import { VoidActionError, categorizeActionError, isEqualFormValue } from 'void/pages-client';
+import {
+  VoidActionError,
+  categorizeActionError,
+  getValidationErrors,
+  isEqualFormValue,
+} from 'void/pages-client';
 
 type UntypedIslandForm = {
   readonly data: Record<string, unknown>;
@@ -17,20 +22,6 @@ type UntypedIslandForm = {
   clearErrors(...fields: ReadonlyArray<string>): void;
   clearError(): void;
 };
-
-function getValidationErrors(body: unknown): Record<string, string> | null {
-  if (
-    body &&
-    typeof body === 'object' &&
-    'errors' in body &&
-    body.errors &&
-    typeof body.errors === 'object' &&
-    !Array.isArray(body.errors)
-  ) {
-    return body.errors as Record<string, string>;
-  }
-  return null;
-}
 
 async function readActionErrorBody(response: Response): Promise<unknown> {
   const contentType = response.headers.get('content-type') || '';
@@ -118,7 +109,7 @@ export function useIslandForm(defaults: Record<string, unknown>): UntypedIslandF
           recentlySuccessful = false;
         }, 2000);
         window.location.reload();
-      } else if (!response.ok) {
+      } else {
         const body = await readActionErrorBody(response);
         const actionError = new VoidActionError({
           body,

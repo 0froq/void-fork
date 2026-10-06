@@ -6,7 +6,7 @@ import {
   expandDotenv,
   parseDotenv,
   parseDotenvFile,
-  parseDotenvLine,
+  scanWranglerDotenvKeys,
 } from '../../src/shared/dotenv.ts';
 
 /**
@@ -16,31 +16,23 @@ import {
  * refs, and the no-process.env guarantee.
  */
 
-describe('parseDotenvLine', () => {
+describe('parseDotenv', () => {
   it('parses basic KEY=VALUE', () => {
-    expect(parseDotenvLine('FOO=bar')).toEqual({ key: 'FOO', value: 'bar' });
+    expect(parseDotenv('FOO=bar')).toEqual({ FOO: 'bar' });
   });
 
   it('strips matching double quotes', () => {
-    expect(parseDotenvLine('FOO="bar baz"')).toEqual({ key: 'FOO', value: 'bar baz' });
+    expect(parseDotenv('FOO="bar baz"')).toEqual({ FOO: 'bar baz' });
   });
 
   it('strips matching single quotes', () => {
-    expect(parseDotenvLine("FOO='bar baz'")).toEqual({ key: 'FOO', value: 'bar baz' });
+    expect(parseDotenv("FOO='bar baz'")).toEqual({ FOO: 'bar baz' });
   });
 
-  it('returns null for blanks and comments', () => {
-    expect(parseDotenvLine('')).toBeNull();
-    expect(parseDotenvLine('   ')).toBeNull();
-    expect(parseDotenvLine('# comment')).toBeNull();
+  it('skips blanks, comments, and lines without =', () => {
+    expect(parseDotenv('\n   \n# comment\nNO_EQUALS\n')).toEqual({});
   });
 
-  it('returns null for lines without =', () => {
-    expect(parseDotenvLine('NO_EQUALS')).toBeNull();
-  });
-});
-
-describe('parseDotenv', () => {
   it('parses a multi-line file', () => {
     const out = parseDotenv('A=1\nB=2\n# comment\n\nC=3\n');
     expect(out).toEqual({ A: '1', B: '2', C: '3' });
@@ -68,6 +60,68 @@ describe('parseDotenv', () => {
   });
 });
 
+describe('parseDotenv — lines Vite and Wrangler both read', () => {
+  // Expected values come from running Vite's parser (node:util parseEnv)
+  // and Wrangler's (dotenv 16.3.1) on the same lines; both agree on these.
+  it.each([
+    ['export A=1', { A: '1' }],
+    ['export  B = 2', { B: '2' }],
+    ['  export C=3', { C: '3' }],
+    ['export J="q"', { J: 'q' }],
+    ["export K='q'", { K: 'q' }],
+    ['export=5', { export: '5' }],
+    ['export =6', { export: '6' }],
+    ['exportE=7', { exportE: '7' }],
+    ['export F', {}],
+  ])('%j', (line, expected) => {
+    expect(parseDotenv(line, { expand: false })).toEqual(expected);
+  });
+
+  it('lets a later export line win over an earlier plain line', () => {
+    expect(parseDotenv('VITE_A=2\nexport VITE_A=1\n')).toEqual({ VITE_A: '1' });
+  });
+
+  it('expands references to exported keys', () => {
+    expect(parseDotenv('export BASE=https://a.com\nURL=${BASE}/v1\n')).toEqual({
+      BASE: 'https://a.com',
+      URL: 'https://a.com/v1',
+    });
+  });
+
+  // The runtimes disagree on these, so Void reads neither.
+  it.each([
+    // Wrangler reads K=v; Vite does not read the line.
+    ['K: v'],
+    // Wrangler reads D=4; Vite reads the key "export\tD".
+    ['export\tD=4'],
+    // Vite reads the key "export H"; Wrangler does not read the line.
+    ['export export H=9'],
+  ])('skips %j', (line) => {
+    expect(parseDotenv(line)).toEqual({});
+  });
+});
+
+describe('parseDotenv — values read as Vite reads them', () => {
+  // Expected values come from Vite's parser (node:util parseEnv); Wrangler's
+  // dotenv 16 reads the same values for these lines.
+  it.each([
+    ['inline comment', 'A=val # note', { A: 'val' }],
+    ['comment after a quoted value', 'A="v" # note', { A: 'v' }],
+    ['# inside quotes', 'A="a # b"', { A: 'a # b' }],
+    ['escaped newline in double quotes', 'A="a\\nb"', { A: 'a\nb' }],
+    ['escaped newline in single quotes', "A='a\\nb'", { A: 'a\\nb' }],
+    ['multi-line double quotes', 'A="line1\nline2"\nB=after', { A: 'line1\nline2', B: 'after' }],
+    ['backticks', 'A=`back`', { A: 'back' }],
+    [
+      'export with an inline comment',
+      'export DATABASE_URL="postgres://db/app" # local',
+      { DATABASE_URL: 'postgres://db/app' },
+    ],
+  ])('%s', (_name, content, expected) => {
+    expect(parseDotenv(content, { expand: false })).toEqual(expected);
+  });
+});
+
 describe('parseDotenvFile', () => {
   it('returns {} for a missing file', () => {
     expect(parseDotenvFile('/definitely/not/a/real/path/.env')).toEqual({});
@@ -81,6 +135,13 @@ describe('parseDotenvFile', () => {
       HOST: 'api.example.com',
       URL: 'https://api.example.com',
     });
+  });
+
+  it('reads an export line with an inline comment', () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-dotenv-'));
+    const file = join(root, '.env');
+    writeFileSync(file, 'export DATABASE_URL="postgres://db/app" # local\n');
+    expect(parseDotenvFile(file)).toEqual({ DATABASE_URL: 'postgres://db/app' });
   });
 });
 
@@ -200,5 +261,36 @@ describe('expandDotenv — security', () => {
         process.env.VOID_DOTENV_EXPAND_TEST = previous;
       }
     }
+  });
+});
+
+describe('scanWranglerDotenvKeys', () => {
+  it('reads keys the way Wrangler does, including export and colon forms', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'void-dotenv-scan-'));
+    const file = join(dir, '.env');
+    writeFileSync(
+      file,
+      [
+        '# COMMENTED=1',
+        'PLAIN=ok',
+        'export EXPORTED=x',
+        'COLON: a@b.c',
+        'VALUE=has__VOID_inside',
+        'MULTI="line one',
+        'INSIDE_QUOTES=no"',
+        '',
+      ].join('\n'),
+    );
+    expect([...scanWranglerDotenvKeys(file)]).toEqual([
+      'PLAIN',
+      'EXPORTED',
+      'COLON',
+      'VALUE',
+      'MULTI',
+    ]);
+  });
+
+  it('returns an empty set for a missing file', () => {
+    expect(scanWranglerDotenvKeys('/definitely/not/a/real/path/.env').size).toBe(0);
   });
 });

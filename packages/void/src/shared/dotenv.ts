@@ -1,7 +1,12 @@
 /**
- * Shared dotenv parser + variable expander used by local `.env` consumers and
- * explicit `void secret sync <file>` input. A single source of truth avoids drift when two
- * hand-rolled parsers diverged on quoting / expansion semantics.
+ * Shared dotenv parser + variable expander used by local `.env` consumers.
+ *
+ * Grammar: lines and values follow Vite's parser (`node:util` `parseEnv`).
+ * Wrangler's dotenv (the dev Worker) agrees with it on inline `#` comments,
+ * single, double and backtick quotes, `\n` in double quotes, multi-line
+ * quoted values and the `export ` prefix. Keys that are not plain
+ * identifiers (`A.B`, `A-B`, `export\tA`) are skipped, and `KEY: value`
+ * is not read: Wrangler accepts it but Vite does not.
  *
  * Expansion supports `${VAR}` and `$VAR`, a `\$VAR` literal-escape, and
  * transitive references across earlier entries in the same record. Cycles
@@ -18,6 +23,7 @@
  * `onWarn` callback and left for the caller to route.
  */
 import { existsSync, readFileSync } from 'node:fs';
+import { parseEnv } from 'node:util';
 
 /** Valid dotenv key — ASCII letter/underscore followed by letters/digits/underscore. */
 const VALID_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -27,43 +33,12 @@ export type ParseDotenvOptions = {
   expand?: boolean;
   /**
    * When true (default), silently skip lines whose key doesn't match the
-   * standard dotenv key regex. Set to false to throw instead — used by
-   * `void secret sync` where a malformed key should be a hard error.
+   * standard dotenv key regex. Set to false to throw instead.
    */
   skipInvalidKeys?: boolean;
   /** Callback for expansion warnings (cycles). Caller routes to `voidWarn`. */
   onWarn?: (message: string) => void;
 };
-
-export type ParseDotenvLineResult = {
-  key: string;
-  value: string;
-};
-
-/**
- * Parse a single `KEY=VALUE` line into `{ key, value }`, stripping matching
- * single/double quotes around the value. Returns `null` for blanks, comments,
- * and non-assignment lines.
- */
-export function parseDotenvLine(line: string): ParseDotenvLineResult | null {
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith('#')) {
-    return null;
-  }
-  const equalsIndex = trimmed.indexOf('=');
-  if (equalsIndex === -1) {
-    return null;
-  }
-  const key = trimmed.slice(0, equalsIndex).trim();
-  let value = trimmed.slice(equalsIndex + 1).trim();
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    value = value.slice(1, -1);
-  }
-  return { key, value };
-}
 
 /**
  * Parse the raw contents of a dotenv file into a record, optionally
@@ -75,18 +50,17 @@ export function parseDotenv(
 ): Record<string, string> {
   const { expand: shouldExpand = true, skipInvalidKeys = true, onWarn } = options;
   const env: Record<string, string> = {};
-  for (const line of content.split('\n')) {
-    const parsed = parseDotenvLine(line);
-    if (!parsed) {
+  for (const [key, value] of Object.entries(parseEnv(content))) {
+    if (value === undefined) {
       continue;
     }
-    if (!VALID_KEY.test(parsed.key)) {
+    if (!VALID_KEY.test(key)) {
       if (skipInvalidKeys) {
         continue;
       }
-      throw new Error(`dotenv: Invalid key '${parsed.key}'.`);
+      throw new Error(`dotenv: Invalid key '${key}'.`);
     }
-    env[parsed.key] = parsed.value;
+    env[key] = value;
   }
   return shouldExpand ? expandDotenv(env, { onWarn }) : env;
 }
@@ -217,10 +191,11 @@ function expandValue(value: string, resolve: (key: string) => string): string {
 }
 
 /**
- * Wrangler 4.131's bundled `dotenv` LINE regex (verbatim), used ONLY to detect the
- * declared KEYS wrangler would load — including the OPTIONAL `export ` prefix, the `KEY: val`
- * form, and single/double/backtick quoting — so a transport-redirect / config-override fence
- * sees exactly what wrangler's per-command dotenv reload would. We read keys, never values.
+ * Wrangler's bundled `dotenv` LINE regex (verbatim; checked against wrangler 4.147), used
+ * ONLY to detect the declared KEYS wrangler would load — including the OPTIONAL `export `
+ * prefix, the `KEY: val` form, and single/double/backtick quoting — so a transport-redirect /
+ * config-override fence and the reserved `__VOID_` name check see exactly what wrangler's
+ * dotenv load would. We read keys, never values.
  */
 const WRANGLER_DOTENV_LINE =
   /(?:^|^)\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?(?:$|$)/gm;

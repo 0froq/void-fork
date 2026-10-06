@@ -1,15 +1,16 @@
 import { and, eq } from 'drizzle-orm';
-import { Hono } from 'hono';
-import { hmacVerifyState } from '../auth/hmac.ts';
+import { Hono, type Context } from 'hono';
+import { constantTimeEqual, hmacVerifyState } from '../auth/hmac.ts';
 import type { ApiEnv } from '../env.ts';
+import { getProjectDeploymentWorkerName } from '../naming.ts';
 import { resolvePlanLimits } from '../plans.ts';
-import { getVersionedWorkerName } from '../project-secrets.ts';
 import { computeDispatchLimits } from '../routing.ts';
 import { deployments, projects, users } from '../schema.ts';
 import type { DeployManifest } from '../types.ts';
 import { emailProjectControls } from './admission-schema.ts';
 import { emailZoneConnections } from './connection-schema.ts';
 import {
+  digest,
   emailInstallationId,
   readConnectionSecret,
   readStagedConnectionSecret,
@@ -25,18 +26,14 @@ app.use('*', async (context, next) => {
   }
   await next();
 });
-const encoder = new TextEncoder();
-function sameSecret(a: string, b: string): boolean {
-  const aa = encoder.encode(a),
-    bb = encoder.encode(b);
-  if (aa.byteLength !== bb.byteLength) {
-    return false;
-  }
-  let difference = 0;
-  for (let i = 0; i < aa.byteLength; i++) {
-    difference |= aa[i] ^ bb[i];
-  }
-  return difference === 0;
+
+async function verifyInternalSignature(context: Context<ApiEnv>, signed: string): Promise<boolean> {
+  const auth = context.req.header('x-void-internal');
+  return (
+    !!context.env.EMAIL_SIGNING_SECRET &&
+    !!auth &&
+    (await hmacVerifyState(signed, auth, context.env.EMAIL_SIGNING_SECRET))
+  );
 }
 
 app.post('/probe-ingress', async (context) => {
@@ -60,12 +57,7 @@ app.post('/probe-ingress', async (context) => {
     return context.json({ error: 'invalid probe' }, 400);
   }
   const signed = `email-probe-v1\n${accountId}\n${zoneId}\n${ingressName}`;
-  const auth = context.req.header('x-void-internal');
-  if (
-    !context.env.EMAIL_SIGNING_SECRET ||
-    !auth ||
-    !(await hmacVerifyState(signed, auth, context.env.EMAIL_SIGNING_SECRET))
-  ) {
+  if (!(await verifyInternalSignature(context, signed))) {
     return context.json({ error: 'forbidden' }, 403);
   }
   const connection = (
@@ -88,9 +80,12 @@ app.post('/probe-ingress', async (context) => {
   }
   let accepted = false;
   try {
-    accepted = sameSecret(await readConnectionSecret(context.env, connection), secret as string);
+    accepted = constantTimeEqual(
+      await readConnectionSecret(context.env, connection),
+      secret as string,
+    );
     if (!accepted && connection.staged_secret_generation !== null) {
-      accepted = sameSecret(
+      accepted = constantTimeEqual(
         await readStagedConnectionSecret(context.env, connection),
         secret as string,
       );
@@ -138,12 +133,7 @@ app.post('/resolve-ingress', async (context) => {
   }
   const recipient = (to as string).toLowerCase();
   const signed = `email-ingress-v1\n${accountId}\n${zoneId}\n${ingressName}\n${recipient}`;
-  const auth = context.req.header('x-void-internal');
-  if (
-    !context.env.EMAIL_SIGNING_SECRET ||
-    !auth ||
-    !(await hmacVerifyState(signed, auth, context.env.EMAIL_SIGNING_SECRET))
-  ) {
+  if (!(await verifyInternalSignature(context, signed))) {
     return context.json({ error: 'forbidden' }, 403);
   }
   const db = context.get('db');
@@ -159,20 +149,15 @@ app.post('/resolve-ingress', async (context) => {
   }
   const route = resolved.route;
   if (native) {
-    const shared = context.env as ApiEnv['Bindings'] & {
-      EMAIL_SHARED_ACCOUNT_ID?: string;
-      EMAIL_SHARED_ZONE_ID?: string;
-      EMAIL_SHARED_INGRESS_NAME?: string;
-    };
     if (
       resolved.connection.managed_by !== 'admin' ||
       resolved.connection.account_id !== context.env.CF_ACCOUNT_ID ||
-      !shared.EMAIL_SHARED_ACCOUNT_ID ||
-      !shared.EMAIL_SHARED_ZONE_ID ||
-      !shared.EMAIL_SHARED_INGRESS_NAME ||
-      shared.EMAIL_SHARED_ACCOUNT_ID !== accountId ||
-      shared.EMAIL_SHARED_ZONE_ID !== zoneId ||
-      shared.EMAIL_SHARED_INGRESS_NAME !== ingressName
+      !context.env.EMAIL_SHARED_ACCOUNT_ID ||
+      !context.env.EMAIL_SHARED_ZONE_ID ||
+      !context.env.EMAIL_SHARED_INGRESS_NAME ||
+      context.env.EMAIL_SHARED_ACCOUNT_ID !== accountId ||
+      context.env.EMAIL_SHARED_ZONE_ID !== zoneId ||
+      context.env.EMAIL_SHARED_INGRESS_NAME !== ingressName
     ) {
       return context.json({ error: 'forbidden' }, 403);
     }
@@ -189,10 +174,10 @@ app.post('/resolve-ingress', async (context) => {
     } catch {
       return context.json({ error: 'ingress identity unavailable' }, 503);
     }
-    let authorized = sameSecret(expected, secret as string);
+    let authorized = constantTimeEqual(expected, secret as string);
     if (!authorized && resolved.connection.staged_secret_generation !== null) {
       try {
-        authorized = sameSecret(
+        authorized = constantTimeEqual(
           await readStagedConnectionSecret(context.env, resolved.connection),
           secret as string,
         );
@@ -206,13 +191,10 @@ app.post('/resolve-ingress', async (context) => {
       resolved.connection.previous_secret_until &&
       Date.parse(resolved.connection.previous_secret_until) > Date.now()
     ) {
-      const hash = Array.from(
-        new Uint8Array(
-          await crypto.subtle.digest('SHA-256', encoder.encode(JSON.stringify(secret))),
-        ),
-        (x) => x.toString(16).padStart(2, '0'),
-      ).join('');
-      authorized = sameSecret(resolved.connection.previous_secret_hash, hash);
+      authorized = constantTimeEqual(
+        resolved.connection.previous_secret_hash,
+        await digest(secret),
+      );
     }
     if (!authorized) {
       return context.json({ error: 'forbidden' }, 403);
@@ -228,12 +210,7 @@ app.post('/resolve-ingress', async (context) => {
     }
     const project = (
       await db
-        .select({
-          id: projects.id,
-          slug: projects.slug,
-          status: projects.status,
-          active_deployment_id: projects.active_deployment_id,
-        })
+        .select({ id: projects.id, slug: projects.slug })
         .from(projects)
         .where(and(eq(projects.slug, slugPart), eq(projects.status, 'active')))
         .limit(1)
@@ -266,6 +243,7 @@ app.post('/resolve-ingress', async (context) => {
         suspendedReason: users.suspended_reason,
         plan: users.plan,
         emailSuspendedAt: emailProjectControls.suspended_at,
+        activeDeploymentId: projects.active_deployment_id,
       })
       .from(projects)
       .innerJoin(users, eq(projects.user_id, users.id))
@@ -281,14 +259,7 @@ app.post('/resolve-ingress', async (context) => {
   ) {
     return context.json({ error: 'project email is suspended' }, 403);
   }
-  const project = (
-    await db
-      .select({ active_deployment_id: projects.active_deployment_id })
-      .from(projects)
-      .where(eq(projects.id, projectId!))
-      .limit(1)
-  )[0];
-  const deploymentId = project?.active_deployment_id;
+  const deploymentId = authority.activeDeploymentId;
   if (!deploymentId) {
     return context.json({ error: 'project has no deployment' }, 409);
   }
@@ -319,7 +290,7 @@ app.post('/resolve-ingress', async (context) => {
     projectId,
     slug,
     deploymentId,
-    workerName: getVersionedWorkerName(slug, deploymentId),
+    workerName: getProjectDeploymentWorkerName(slug, deploymentId),
     addressing: route.addressing,
     domain: route.domain,
     routeId: route.id,

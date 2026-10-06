@@ -17,7 +17,15 @@ import { findEnvFile } from '../codegen/env-types.ts';
 import { loadUserEnvFile } from '../host/load-user-env.ts';
 import { voidWarn } from '../log.ts';
 import type { EnvValidationReport } from '../runtime/env-public.ts';
-import { findLegacyEnvFiles, isClientEnvKey, loadLocalEnv } from '../shared/env.ts';
+import { scanWranglerDotenvKeys } from '../shared/dotenv.ts';
+import {
+  findLegacyEnvFiles,
+  findReservedEnvKeys,
+  isClientEnvKey,
+  loadLocalEnv,
+  LOCAL_ENV_FILE,
+  reservedEnvKeysMessage,
+} from '../shared/env.ts';
 import type { StandardSchemaV1 } from '../standard-schema.ts';
 import type { PlatformClient } from './client.ts';
 import {
@@ -109,6 +117,14 @@ export async function validateProdEnv(
       `env: only .env is supported for local development. Remove ${legacyFiles.join(', ')} and follow the env migration guide.`,
     );
   }
+  // Same rule as the Vite plugin, which stops dev and build on these names.
+  // Production validation never reads .env; the build itself reports it.
+  const reservedInDotenv = options.productionOnly
+    ? []
+    : findReservedEnvKeys(scanWranglerDotenvKeys(join(root, LOCAL_ENV_FILE)));
+  if (reservedInDotenv.length > 0) {
+    throw new Error(`env: ${reservedEnvKeysMessage('.env', reservedInDotenv)}`);
+  }
   const envFile = findEnvFile(root);
   if (!envFile) {
     return { hasSchema: false, report: emptyReport() };
@@ -116,6 +132,10 @@ export async function validateProdEnv(
   const mod = await loadSchema(envFile);
   if (!mod) {
     return { hasSchema: false, report: emptyReport() };
+  }
+  const reservedInSchema = findReservedEnvKeys(Object.keys(mod._getRegisteredSchema() ?? {}));
+  if (reservedInSchema.length > 0) {
+    throw new Error(`env: ${reservedEnvKeysMessage('env.ts', reservedInSchema)}`);
   }
 
   const local = options.productionOnly
@@ -439,8 +459,8 @@ export function selfHostSchemaFailureMessage(reason: SelfHostSchemaFailureReason
  * its message, stack, or cause (and `VOID_ENV_UNMASK` disables redaction). Any
  * throw/reject from `fn` is caught, its original message/stack/cause DROPPED,
  * and a fixed structural {@link SelfHostSchemaError} rethrown in its place. The
- * managed `validateProdEnv` itself is NEVER wrapped — only the self-host CALL
- * SITES pass through here, so the managed path is byte-identical.
+ * managed `validateProdEnv` itself is NEVER wrapped — only the self-host call
+ * sites pass through here.
  */
 async function withSchemaBoundary<T>(
   reason: SelfHostSchemaFailureReason,
@@ -457,12 +477,9 @@ async function withSchemaBoundary<T>(
 
 /**
  * The structured, VALUES-FREE outcome of the self-host env DERIVATION — everything
- * decidable from the effective build var map + schema WITHOUT a network round-trip,
- * so the derivation can run in the isolated build-context subprocess (under the
- * scrubbed build env, where the user's env.ts + `loadEnv` never see the parent's
- * credentials) and the parent discharges it with only pure work + one `wrangler
- * secret list`. Carries KEY NAMES + source kinds/filenames + the fixed invalid
- * reason ONLY — never a value — so it crosses the process boundary as safe JSON.
+ * decidable from the emitted worker vars + schema facts WITHOUT a network
+ * round-trip, so the parent discharges it with only pure work + one `wrangler
+ * secret list`. Carries KEY NAMES + source kinds ONLY — never a value.
  */
 export type SelfHostEnvContext = {
   /** Whether the project registered an env schema at all (no schema → nothing to gate). */
@@ -473,7 +490,7 @@ export type SelfHostEnvContext = {
    * FAIL CLOSED unconditionally — the parent throws before any wrangler spawn.
    */
   presentEmptyRequired: Array<string>;
-  /** Per-empty-key WINNING source (kind + filename) so the parent names it — never a value. */
+  /** Per-empty-key WINNING source kind so the parent names it — never a value. */
   presentEmptySources: Record<string, VarSource>;
   /** Required keys the effective build map does NOT set — the only state a remote secret discharges. */
   absentRequired: Array<string>;
@@ -505,9 +522,9 @@ function emptyEnvContext(): SelfHostEnvContext {
 // ---------------------------------------------------------------------------
 // Post-build ground-truth self-host units.
 //
-// The redesigned `void deploy --platform cloudflare` gate validates the REAL
-// build artifact the build emits — `dist/ssr/wrangler.json` `vars` (the plaintext
-// worker vars) — instead of a pre-build `loadEnv` facsimile. It needs only ONE
+// The `void deploy --platform cloudflare` gate validates the REAL build artifact
+// the build emits — `dist/ssr/wrangler.json` `vars` (the plaintext worker vars).
+// It needs only ONE
 // piece of project-derived data: the env-INSENSITIVE server and required key
 // names. Those are derived once in an isolated subprocess; everything else is pure
 // parent work over the emitted map.
@@ -735,10 +752,9 @@ function invalidEnvReport(missing: Array<string>, invalidKeys: Array<string>): E
 
 /**
  * DISCHARGE half of the self-host gate — PURE parent work over the values-free
- * {@link SelfHostEnvContext} the subprocess derived, plus at most one `wrangler
- * secret list`. Runs NO project code, NO `loadEnv`, and imports NO env.ts, so the
- * parent never evaluates arbitrary code with live credentials in scope. Applies
- * the three fences unchanged:
+ * {@link SelfHostEnvContext}, plus at most one `wrangler secret list`. Runs NO
+ * project code, NO `loadEnv`, and imports NO env.ts, so the parent never
+ * evaluates arbitrary code with live credentials in scope. Applies three fences:
  *   - a PRESENT-EMPTY required key fails closed ALWAYS, before any wrangler spawn;
  *   - the pinned worker `name` is reconciled against the config's `name`, and the
  *     target account against the config's `account_id`, BOTH BEFORE `secret list`
@@ -1003,13 +1019,9 @@ function describeVarSource(source: VarSource | undefined): string {
  * config var precedence over a same-named remote secret (`checkRemoteSecretsOverride`
  * in wrangler-dist/cli.js warns "… will replace these remote secrets with the
  * configuration values"), so shipping this would ship an empty value for a
- * required secret (overwriting a remote one if it exists). The fix is to REMOVE
- * the empty assignment, not `secret put`.
- *
- * The empty value can come from ANY of the four build layers, so the
- * remediation names each key's ACTUAL source (its {@link VarSource} provenance)
- * — a dotenv file / `void.json` `worker.vars` / root `wrangler.jsonc` `vars` —
- * instead of misdirecting the user to `.env` files.
+ * required secret (overwriting a remote one if it exists). The remedy is to
+ * REMOVE the empty assignment, not `secret put`. The remediation names each
+ * key's source (its {@link VarSource} provenance).
  */
 function emptyAssignmentError(
   keys: Array<string>,

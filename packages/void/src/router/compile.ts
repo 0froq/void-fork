@@ -40,7 +40,7 @@ export type CompileOptions = {
    * Absolute path to the project's top-level `email/` directory. Set when the
    * app declares inbound email handlers; the route table then emits
    * `__emailHandler`. Lives here rather than in `compileRouteTable`'s
-   * positional list so the ~68 existing call sites keep binding correctly.
+   * positional list so existing call sites keep binding correctly.
    */
   emailDir?: string;
   /** Absolute path to the project root */
@@ -49,12 +49,16 @@ export type CompileOptions = {
   homeDir: string;
   /** Whether to inject React Fast Refresh preamble in dev SSR HTML. */
   reactRefresh: boolean;
-  /** Whether the generated route module is being compiled for dev server usage. */
+  /**
+   * Whether the generated route module is being compiled for the Vite dev
+   * server. Also picks the manual trigger auth rule: dev accepts only
+   * `x-void-dev-trigger`; every build uses the proxy token or build key.
+   */
   dev?: boolean;
   /**
-   * Ephemeral token for local dev manual trigger endpoints when
-   * __VOID_PROXY_TOKEN is unset. Stable for a dev-server process so tooling can
-   * print paste-ready curl commands without requiring .dev.vars.
+   * Token for local dev manual trigger endpoints (`x-void-dev-trigger`).
+   * Stable for a dev-server process so tooling can print paste-ready curl
+   * commands.
    */
   devTriggerToken?: string;
   /** Auth configuration (null = disabled) */
@@ -139,9 +143,9 @@ export function compileRouteTable(
   pages: PagesCompileOptions | null = null,
   /**
    * Merged ISR revalidate config (number | Record<string, number>) baked into
-   * the route table as `__VOID_ISR_REVALIDATE`. Task 8 supplies the real value;
-   * `undefined` (the default) emits `= undefined;` so non-ISR builds are
-   * unaffected — the const is only imported/used when the entry wires ISR.
+   * the route table as `__VOID_ISR_REVALIDATE`. `undefined` (the default)
+   * emits `= undefined;` so non-ISR builds are unaffected — the const is only
+   * imported/used when the entry wires ISR.
    */
   mergedRevalidate?: number | Record<string, number>,
   /** Ordered page TTL policy used by native ISR before the flat fallback map. */
@@ -295,12 +299,7 @@ export function compileRouteTable(
   // Managed bundles omit it because dispatch applies the same rules first.
   const emitEdgeRules = !managedDispatch;
   if (emitEdgeRules && options.redirectRules?.length) {
-    compileRoutingRulesMiddleware(
-      lines,
-      options.redirectRules,
-      options.dev === true,
-      options.nodeTarget === true,
-    );
+    compileRoutingRulesMiddleware(lines, options.redirectRules, options.dev === true);
   }
   if (emitEdgeRules && options.headerRules?.length) {
     compileHeaderMiddleware(lines, options.headerRules);
@@ -511,7 +510,7 @@ export function compileRouteTable(
     lines.push('  const __expected = __getRawEnv()?.__VOID_PROXY_TOKEN;');
     lines.push('  const __devToken = c.req.header("x-void-dev-trigger");');
     lines.push(
-      '  if (__expected ? __token !== __expected : import.meta.env.DEV ? __devToken !== __VOID_DEV_TRIGGER_TOKEN : __token !== __VOID_BUILD_KEY) {',
+      '  if (__VOID_SERVE ? __devToken !== __VOID_DEV_TRIGGER_TOKEN : __expected ? __token !== __expected : __token !== __VOID_BUILD_KEY) {',
     );
     lines.push('    return c.json({ error: "unauthorized" }, 401);');
     lines.push('  }');
@@ -586,7 +585,7 @@ export function compileRouteTable(
     lines.push('  const __expected = __getRawEnv()?.__VOID_PROXY_TOKEN;');
     lines.push('  const __devToken = c.req.header("x-void-dev-trigger");');
     lines.push(
-      '  if (__expected ? __token !== __expected : import.meta.env.DEV ? __devToken !== __VOID_DEV_TRIGGER_TOKEN : __token !== __VOID_BUILD_KEY) {',
+      '  if (__VOID_SERVE ? __devToken !== __VOID_DEV_TRIGGER_TOKEN : __expected ? __token !== __expected : __token !== __VOID_BUILD_KEY) {',
     );
     lines.push('    return c.json({ error: "unauthorized" }, 401);');
     lines.push('  }');
@@ -609,7 +608,7 @@ export function compileRouteTable(
   // Slug stripping: the shared platform sender rewrites every recipient to
   // `<slug>+<tag>@<platform mail domain>`, where `<slug>` is the
   // project slug. User-defined handlers are written against the `<tag>` only
-  // (the slug is invisible to them — see design-doc 0078). When a slug is
+  // (the slug is invisible to them — see design doc 0078-email-cf-native). When a slug is
   // configured (`__VOID_PROJECT_SLUG`) the dispatcher strips everything up to
   // and including the first `+` from the local-part before running it through
   // the pattern table. Without one — a worker on the developer's own zone, or
@@ -653,7 +652,7 @@ export function compileRouteTable(
     // Case is PRESERVED here and the patterns carry the `i` flag instead.
     // Lowercasing the address first would lowercase the captured groups too,
     // silently corrupting a case-sensitive tag such as a ticket id or a token
-    // (`support+T-42@` reached the handler as `t-42`).
+    // (`support+T-42@` would reach the handler as `t-42`).
     lines.push('  const __platformTo = message ? message.__voidPlatformTo : undefined;');
     lines.push('  const __to = String((__platformTo ?? (message && message.to)) || "");');
     lines.push('  const __localFull = __to.split("@")[0] || "";');
@@ -891,6 +890,11 @@ export function compileRouteTable(
   lines.push(
     `export const __VOID_DEV_TRIGGER_TOKEN = ${JSON.stringify(options.devTriggerToken ?? crypto.randomUUID())};`,
   );
+  // Manual trigger auth (`/__void/scheduled`, `/__void/queue`) is fixed when the
+  // module is compiled, not read from `import.meta.env.DEV`: a build with
+  // NODE_ENV=development still has DEV=true, and must keep the proxy-token /
+  // build-key rule. Only the Vite dev server compiles with `dev: true`.
+  lines.push(`const __VOID_SERVE = ${JSON.stringify(options.dev === true)};`);
   // Baked ISR policy. The ordered page table preserves explicit opt-outs and
   // object-config inheritance before the flat fallback map is consulted.
   // `__VOID_ISR_DEPLOYMENT_ID` MUST be a COMPILE-TIME LITERAL —
@@ -1157,21 +1161,6 @@ const serveWithAssets = __createAssetFallback(${JSON.stringify({ assetsDir, serv
 `;
 }
 
-/**
- * Generate the Worker entry module code.
- * Re-exports the Hono app from the virtual module with an asset-serving
- * fallthrough: when the app returns 404, the entry tries env.ASSETS.fetch()
- * and adds proper Cache-Control headers (immutable for Vite-hashed /assets/*).
- *
- * When `hasQueues` is true, also exports a `queue()` handler that
- * serializes the native MessageBatch and dispatches it to the
- * `/__void/queue` Hono route. In local dev Miniflare delivers batches
- * natively to this export; in production the relay worker does it.
- *
- * When `remotePath` is provided, wraps the fetch handler to detect
- * remote mode (`__VOID_REMOTE`) and replace local bindings with
- * proxy-backed versions.
- */
 // Both modules are siblings under `runtime/`, so `_env` -> `email` is the only
 // transform needed. Works for bare specifiers (`void/_env` -> `void/email`) and
 // for resolved file paths (`/.../runtime/env.mjs` -> `/.../runtime/email.mjs`).
@@ -1216,16 +1205,14 @@ export interface WorkerEntryOptions {
    * When present, wraps the render path with the self-host ISR cache ladder.
    * `runtimePath` is the import specifier for `handleIsr`. The deployment id is
    * NOT passed here - the single source of truth is the compile-time
-   * `__VOID_ISR_DEPLOYMENT_ID` const imported from the route table. When
-   * absent, the render path is emitted byte-identical to today (zero
-   * behavioral change for managed/dev/no-ISR builds).
+   * `__VOID_ISR_DEPLOYMENT_ID` const imported from the route table. Absent
+   * for managed, dev, and non-ISR builds.
    */
   isr?: { runtimePath: string; queryAllowlist?: Record<string, Array<string>> };
   /**
    * Resolved `assetConfig.not_found_handling` for this build. Threaded to
    * `compileAssetFallbackHelper` so `routing.notFound: '404-page'` is honored
-   * on the worker-first path instead of being discarded. Defaults to `'none'`,
-   * which emits the pre-existing helper byte-for-byte.
+   * on the worker-first path. Defaults to `'none'`.
    */
   notFound?: NotFoundHandling;
   /**
@@ -1241,6 +1228,20 @@ export interface WorkerEntryOptions {
   }>;
 }
 
+/**
+ * Generate the Worker entry module code.
+ * Re-exports the Hono app from the virtual module with an asset-serving
+ * fallthrough: when the app returns 404, the entry tries env.ASSETS.fetch()
+ * and adds proper Cache-Control headers (immutable for Vite-hashed /assets/*).
+ *
+ * When `hasQueues` is true, also exports a `queue()` method that passes the
+ * native MessageBatch to `__processQueue` and applies its ack/retry
+ * decisions. Managed delivery uses the `/__void/queue` route instead.
+ *
+ * When `remote` is provided, wraps the fetch handler to detect
+ * remote mode (`__VOID_REMOTE`) and replace local bindings with
+ * proxy-backed versions.
+ */
 export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
   const {
     hasQueues = false,
@@ -1328,9 +1329,8 @@ const __filterInternalBindings = (env) => __filterBindings(env, ${JSON.stringify
 
   const assetHelper = compileAssetFallbackHelper(assetsDir, serveSpaFallback, notFound);
 
-  // ISR wiring (self-host only; injected by Task 8 for non-managed builds). When
-  // `isr` is absent every fragment below is an empty string, so the generated
-  // fetch handler is byte-identical to the pre-ISR output.
+  // ISR wiring (self-host only, non-managed builds). When `isr` is absent
+  // every fragment below is an empty string.
   const isrImport = isr
     ? `import { handleIsr } from ${JSON.stringify(isr.runtimePath)};\nimport { __VOID_ISR_REVALIDATE, __VOID_ISR_PAGES, __VOID_ISR_PATH_REVALIDATE, __VOID_ISR_DEPLOYMENT_ID } from 'virtual:void-routes';\n`
     : '';
@@ -1580,11 +1580,7 @@ serve({ fetch: app.fetch, port }, (info) => {
 });`;
 }
 
-/**
- * Generate the server-side fetch client module for non-CF targets.
- * Same as compileWorkerClient but without cloudflare:workers dependency.
- * Calls app.fetch() directly (no HTTP round-trip) with ALS context forwarding.
- */
+/** Generate the browser client module: re-exports the HTTP fetch, stream, and auth clients. */
 export function compileBrowserClient(
   authClientPath: string,
   fetchPath: string,
@@ -1595,6 +1591,11 @@ export { fetchStream, StreamError } from ${JSON.stringify(fetchStreamPath)};
 export { auth, createAuthClient } from ${JSON.stringify(authClientPath)};`;
 }
 
+/**
+ * Generate the server-side fetch client module for non-CF targets.
+ * Same as compileWorkerClient but without cloudflare:workers dependency.
+ * Calls app.fetch() directly (no HTTP round-trip) with ALS context forwarding.
+ */
 export function compileNodeClient(authClientPath: string): string {
   return `import app, { requestContext } from "virtual:void-routes";
 import { interpolateRouteParams } from ${JSON.stringify(ROUTE_URL_PATH)};
@@ -1667,7 +1668,6 @@ function compileRoutingRulesMiddleware(
   lines: Array<string>,
   rules: Array<DevRedirectRule>,
   dev: boolean,
-  _nodeTarget: boolean,
 ): void {
   lines.push('// Routing rules: redirects + rewrites (applied before route handlers)');
   lines.push(`const __routingRules = ${JSON.stringify(dev ? rules : stripOriginForProd(rules))};`);

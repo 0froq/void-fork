@@ -1,7 +1,7 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveConfig } from 'vite';
+import { build, createBuilder, resolveConfig, type InlineConfig } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { envClientFoldPlugin } from '../../src/plugin-env-client-fold.ts';
 import { envSchemaPlugin } from '../../src/plugin-env-schema.ts';
@@ -50,6 +50,37 @@ async function runConfigResolved(
     const handler = (hook as { handler: (c: unknown) => unknown }).handler;
     await handler.call({}, resolved);
   }
+}
+
+async function buildEntry(
+  root: string,
+  config: Pick<InlineConfig, 'envDir' | 'envPrefix'> & { app?: boolean } = {},
+): Promise<string> {
+  const { app, ...rest } = config;
+  const inline: InlineConfig = {
+    ...rest,
+    root,
+    configFile: false,
+    logLevel: 'silent',
+    plugins: [envSchemaPlugin(root)],
+    build: {
+      write: false,
+      minify: false,
+      rollupOptions: { input: join(root, 'entry.js'), preserveEntrySignatures: 'strict' },
+    },
+  };
+  // The app builder resolves the config again for each environment, in the
+  // same process, as `vite build` does with the Cloudflare plugin.
+  const output = app
+    ? await createBuilder({ ...inline, builder: {} }).then((builder) =>
+        builder.build(builder.environments.client!),
+      )
+    : await build(inline);
+  return [output]
+    .flat()
+    .flatMap((result) => ('output' in result ? result.output : []))
+    .map((chunk) => ('code' in chunk ? chunk.code : ''))
+    .join('\n');
 }
 
 afterEach(() => {
@@ -108,10 +139,9 @@ describe('envSchemaPlugin auto-discovery', () => {
     const dtsPath = join(root, '.void', 'env.d.ts');
     expect(existsSync(dtsPath)).toBe(true);
 
-    const { readFileSync } = await import('node:fs');
     const dts = readFileSync(dtsPath, 'utf-8');
     // Top-level export makes this a module augmentation (required; see the
-    // "declare module augmentation requires `export {}`" pitfall in CLAUDE.md).
+    // "declare module augmentation requires `export {}`" pitfall in AGENTS.md).
     expect(dts).toContain('export {}');
     // Augments both public type surfaces — env proxy and Hono c.env bindings.
     expect(dts).toContain('declare module "void/env"');
@@ -124,7 +154,6 @@ describe('envSchemaPlugin auto-discovery', () => {
 
   it('discovers env.ts nested under src/ and resolves the import path correctly', async () => {
     const root = createTempRoot();
-    const { mkdirSync } = await import('node:fs');
     mkdirSync(join(root, 'src'), { recursive: true });
     writeFileSync(
       join(root, 'src', 'env.ts'),
@@ -135,7 +164,6 @@ describe('envSchemaPlugin auto-discovery', () => {
     const plugin = envSchemaPlugin(root);
     await runConfig(plugin);
 
-    const { readFileSync } = await import('node:fs');
     const dts = readFileSync(join(root, '.void', 'env.d.ts'), 'utf-8');
     // Relative path from .void/ to src/env.ts.
     expect(dts).toContain('typeof import("../src/env.ts")');
@@ -179,6 +207,107 @@ describe('envSchemaPlugin auto-discovery', () => {
 
     await expect(runConfigResolved(plugin, resolved)).rejects.toThrow('VITE_TITLE is required');
     expect(resolved.env.VITE_TITLE).toBeUndefined();
+  });
+
+  it('keeps every local .env client value out of a production client build', async () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, '.env'),
+      [
+        'export VITE_B=local-export',
+        // Vite drops the inline comment.
+        'VITE_C=local-comment # note',
+        'VITE_D=local-plain',
+        // Vite reads this key; Void's own parser skips it.
+        'VITE_E.F=local-dot',
+        'MODE=local-mode',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(join(root, 'entry.js'), 'export const env = import.meta.env;\n');
+    for (const key of ['VITE_B', 'VITE_C', 'VITE_D', 'VITE_E.F', 'MODE']) {
+      vi.stubEnv(key, undefined);
+    }
+
+    const code = await buildEntry(root);
+
+    expect(code).not.toContain('local-');
+    expect(code).toContain('"production"');
+  });
+
+  it('keeps a shell value for a key that is also in .env', async () => {
+    const root = createTempRoot();
+    writeFileSync(join(root, '.env'), 'VITE_API=local-api\n');
+    writeFileSync(join(root, 'entry.js'), 'export const api = import.meta.env.VITE_API;\n');
+    vi.stubEnv('VITE_API', 'shell-api');
+
+    const code = await buildEntry(root);
+
+    expect(code).toContain('"shell-api"');
+    expect(code).not.toContain('local-api');
+  });
+
+  it('keeps a .env NODE_ENV out of a production client build', async () => {
+    const root = createTempRoot();
+    writeFileSync(join(root, '.env'), 'NODE_ENV=local-node-env\n');
+    writeFileSync(join(root, 'entry.js'), 'export const env = import.meta.env;\n');
+    vi.stubEnv('VITE_USER_NODE_ENV', undefined);
+
+    const code = await buildEntry(root);
+
+    expect(code).not.toContain('local-node-env');
+    expect(code).not.toContain('VITE_USER_NODE_ENV');
+  });
+
+  it('keeps .env BROWSER values out when envPrefix matches them', async () => {
+    const root = createTempRoot();
+    writeFileSync(join(root, '.env'), 'BROWSER=local-browser\nBROWSER_ARGS=local-args\n');
+    writeFileSync(join(root, 'entry.js'), 'export const env = import.meta.env;\n');
+    vi.stubEnv('BROWSER', undefined);
+    vi.stubEnv('BROWSER_ARGS', undefined);
+
+    const code = await buildEntry(root, { envPrefix: ['VITE_', 'BROWSER'] });
+
+    expect(code).not.toContain('local-');
+    expect(code).toContain('"production"');
+  });
+
+  it('keeps a shell BROWSER value when envPrefix matches it', async () => {
+    const root = createTempRoot();
+    writeFileSync(join(root, '.env'), 'BROWSER=local-browser\n');
+    writeFileSync(join(root, 'entry.js'), 'export const browser = import.meta.env.BROWSER;\n');
+    vi.stubEnv('BROWSER', 'shell-browser');
+
+    const code = await buildEntry(root, { envPrefix: ['VITE_', 'BROWSER'] });
+
+    expect(code).toContain('"shell-browser"');
+    expect(code).not.toContain('local-browser');
+  });
+
+  it('keeps .env values Vite copies to process.env out of every app build environment', async () => {
+    const root = createTempRoot();
+    writeFileSync(join(root, '.env'), 'NODE_ENV=local-node-env\nBROWSER=local-browser\n');
+    writeFileSync(join(root, 'entry.js'), 'export const env = import.meta.env;\n');
+    vi.stubEnv('VITE_USER_NODE_ENV', undefined);
+    vi.stubEnv('BROWSER', undefined);
+
+    const code = await buildEntry(root, { envPrefix: ['VITE_', 'BROWSER'], app: true });
+
+    expect(code).not.toContain('local-');
+    expect(code).toContain('"production"');
+  });
+
+  it('keeps values Vite loads from another envDir', async () => {
+    const root = createTempRoot();
+    mkdirSync(join(root, 'envs'));
+    writeFileSync(join(root, '.env'), 'VITE_API=local-api\n');
+    writeFileSync(join(root, 'envs', '.env.production'), 'VITE_API=prod-api\n');
+    writeFileSync(join(root, 'entry.js'), 'export const api = import.meta.env.VITE_API;\n');
+    vi.stubEnv('VITE_API', undefined);
+
+    const code = await buildEntry(root, { envDir: 'envs' });
+
+    expect(code).toContain('"prod-api"');
   });
 
   it('reports server and required names without values', async () => {
@@ -348,4 +477,83 @@ describe('envSchemaPlugin auto-discovery', () => {
 
     expect(resolved.env).toEqual({ VITE_TITLE: 'Vite' });
   });
+});
+
+describe('envSchemaPlugin reserved __VOID_ names', () => {
+  async function runConfigFor(root: string, command: 'serve' | 'build'): Promise<void> {
+    const handler = envSchemaPlugin(root).config as (c: unknown, e: unknown) => Promise<void>;
+    await handler.call(
+      {},
+      {},
+      { command, mode: command === 'build' ? 'production' : 'development' },
+    );
+  }
+
+  afterEach(async () => {
+    const { defineEnv } = await import('../../src/runtime/env-public.ts');
+    defineEnv({});
+  });
+
+  for (const command of ['serve', 'build'] as const) {
+    for (const withEnvTs of [false, true]) {
+      it.each(['__VOID_PROXY_TOKEN', '__VOID_EMAIL_FROM'])(
+        `rejects %s in .env (${command}, env.ts: ${withEnvTs})`,
+        async (key) => {
+          const root = createTempRoot();
+          if (withEnvTs) {
+            writeFileSync(join(root, 'env.ts'), 'export default {};\n');
+          }
+          writeFileSync(join(root, '.env'), `API_URL=http://localhost\n${key}=local\n`);
+
+          await expect(runConfigFor(root, command)).rejects.toThrow(
+            `.env defines names reserved for Void: ${key}. Void sets these itself; remove them. ` +
+              'To trigger crons or queues locally, use the x-void-dev-trigger header printed at dev start.',
+          );
+        },
+      );
+    }
+
+    // Wrangler loads these forms into the dev Worker too.
+    it.each([
+      ['export __VOID_PROXY_TOKEN=x', '__VOID_PROXY_TOKEN'],
+      ['__VOID_EMAIL_FROM: a@b.c', '__VOID_EMAIL_FROM'],
+    ])(`rejects the Wrangler-only line %s in .env (${command})`, async (line, key) => {
+      const root = createTempRoot();
+      writeFileSync(join(root, '.env'), `API_URL=http://localhost\n${line}\n`);
+
+      await expect(runConfigFor(root, command)).rejects.toThrow(
+        `.env defines names reserved for Void: ${key}.`,
+      );
+    });
+
+    it(`ignores __VOID_ in a comment or a value (${command})`, async () => {
+      const root = createTempRoot();
+      writeFileSync(
+        join(root, '.env'),
+        '# __VOID_X=1\nAPI_URL=http://localhost/__VOID_X\nNOTE: __VOID_Y=2\n',
+      );
+
+      await expect(runConfigFor(root, command)).resolves.toBeUndefined();
+    });
+
+    it(`accepts a normal .env and a reserved name set only in the shell (${command})`, async () => {
+      const root = createTempRoot();
+      writeFileSync(join(root, '.env'), 'API_URL=http://localhost\n');
+      vi.stubEnv('__VOID_PROXY_TOKEN', 'from-shell');
+
+      await expect(runConfigFor(root, command)).resolves.toBeUndefined();
+    });
+
+    it(`rejects a reserved name declared in env.ts (${command})`, async () => {
+      const { defineEnv } = await import('../../src/runtime/env-public.ts');
+      const { string } = await import('../../src/runtime/env-helpers.ts');
+      const root = createTempRoot();
+      writeFileSync(join(root, 'env.ts'), 'export default {};\n');
+      defineEnv({ API_URL: string(), __VOID_X: string().optional() });
+
+      await expect(runConfigFor(root, command)).rejects.toThrow(
+        'env.ts declares names reserved for Void: __VOID_X.',
+      );
+    });
+  }
 });

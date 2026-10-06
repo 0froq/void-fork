@@ -49,7 +49,10 @@ describe('devTriggersHintPlugin', () => {
     const root = createTempRoot();
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     await runConfigureServer(
-      devTriggersHintPlugin(root, { framework: false, devTriggerToken: 'dev-token-test' }),
+      devTriggersHintPlugin(root, {
+        framework: false,
+        devTriggerToken: 'dev-token-test',
+      }),
     );
     expect(log).not.toHaveBeenCalled();
   });
@@ -64,7 +67,10 @@ describe('devTriggersHintPlugin', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     await runConfigureServer(
-      devTriggersHintPlugin(root, { framework: false, devTriggerToken: 'dev-token-test' }),
+      devTriggersHintPlugin(root, {
+        framework: false,
+        devTriggerToken: 'dev-token-test',
+      }),
     );
 
     const output = log.mock.calls.map((c) => String(c[0] ?? '')).join('\n');
@@ -90,7 +96,10 @@ describe('devTriggersHintPlugin', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     await runConfigureServer(
-      devTriggersHintPlugin(root, { framework: false, devTriggerToken: 'dev-token-test' }),
+      devTriggersHintPlugin(root, {
+        framework: false,
+        devTriggerToken: 'dev-token-test',
+      }),
     );
 
     const output = log.mock.calls.map((c) => String(c[0] ?? '')).join('\n');
@@ -100,7 +109,7 @@ describe('devTriggersHintPlugin', () => {
     expect(output).toContain('"queue":"emails"');
   });
 
-  it('prints x-void-internal when .env defines __VOID_PROXY_TOKEN', async () => {
+  it('always prints the dev-trigger header, whatever .env holds', async () => {
     const root = createTempRoot();
     mkdirSync(join(root, 'crons'), { recursive: true });
     writeFileSync(
@@ -115,8 +124,8 @@ describe('devTriggersHintPlugin', () => {
     );
 
     const output = log.mock.calls.map((c) => String(c[0] ?? '')).join('\n');
-    expect(output).toContain('x-void-internal: local-proxy-token');
-    expect(output).not.toContain('x-void-dev-trigger: dev-token-test');
+    expect(output).toContain('x-void-dev-trigger: dev-token-test');
+    expect(output).not.toContain('x-void-internal');
   });
 
   it('prints curl examples in framework mode (same as default mode)', async () => {
@@ -129,7 +138,10 @@ describe('devTriggersHintPlugin', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     await runConfigureServer(
-      devTriggersHintPlugin(root, { framework: true, devTriggerToken: 'dev-token-test' }),
+      devTriggersHintPlugin(root, {
+        framework: true,
+        devTriggerToken: 'dev-token-test',
+      }),
     );
 
     const output = log.mock.calls.map((c) => String(c[0] ?? '')).join('\n');
