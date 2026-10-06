@@ -1,17 +1,9 @@
 import { readFileSync } from 'node:fs';
-import {
-  outro,
-  log,
-  note,
-  cancel,
-  isCancel,
-  password,
-  confirm,
-} from '@voidzero-dev/vite-plus-prompts';
+import { outro, log, cancel, isCancel, password, confirm } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import { PlatformClient } from './client.ts';
 import { validateSecretValues } from './env-validation.ts';
-import { formatCount } from './output.ts';
+import { formatCount, note } from './output.ts';
 import { readDeploymentPlatform, readProjectConfig } from './project.ts';
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project.ts';
 import type { SecretArgs } from './secret-args.ts';

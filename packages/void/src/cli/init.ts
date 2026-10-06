@@ -18,7 +18,6 @@ import {
   confirm,
   isCancel,
   cancel,
-  note,
   select,
   text,
 } from '@voidzero-dev/vite-plus-prompts';
@@ -39,6 +38,7 @@ import { maybeScaffoldEnvTs } from './env-scaffold.ts';
 import { migrateFrameworkAdapterPaths } from './framework-config-migrate.ts';
 import { initialCommitCommand, setupGit } from './init-git.ts';
 import { migrateLegacyVoidConfig } from './migrate.ts';
+import { note } from './output.ts';
 import { discoverPlatform, saveDiscoveredPlatform } from './platform-cmd.ts';
 import { formatProjectCommand } from './preset.ts';
 import {

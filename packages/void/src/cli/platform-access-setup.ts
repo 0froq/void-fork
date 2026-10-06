@@ -7,13 +7,12 @@ import {
   isCancel,
   log,
   multiselect,
-  note,
   password,
   select,
   text,
 } from '@voidzero-dev/vite-plus-prompts';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
-import { pc } from './output.ts';
+import { note, pc } from './output.ts';
 import {
   PlatformAccessClient,
   platformAccessIdentityProvider,

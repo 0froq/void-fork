@@ -9,14 +9,13 @@ import {
   confirm,
   isCancel,
   log,
-  note,
   outro,
   password,
   select,
   text,
 } from '@voidzero-dev/vite-plus-prompts';
 import { resolve } from 'pathslash';
-import { cliCommandName, createSpinner, pc } from './output.ts';
+import { cliCommandName, createSpinner, note, pc } from './output.ts';
 import {
   selectInstallationAppAccess,
   prepareInstallationAppAccess,
