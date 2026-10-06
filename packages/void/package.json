@@ -11,6 +11,7 @@
   },
   "files": [
     "dist",
+    "docs",
     "schema.json",
     "skills",
     "AGENTS_TEMPLATE.md",
@@ -331,7 +332,7 @@
     }
   },
   "scripts": {
-    "build": "node scripts/sync-skill-docs.mjs && vp pack",
+    "build": "node scripts/sync-docs.mjs && vp pack",
     "dev": "vp pack --watch",
     "typecheck": "tsc --noEmit --rootDir ../.."
   },

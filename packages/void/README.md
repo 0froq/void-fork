@@ -24,6 +24,10 @@ Follow the [Quickstart](https://void.cloud/guide/quickstart) for your first app 
 
 ## Documentation
 
+Markdown guides and references are bundled at `node_modules/void/docs/`.
+`void init` adds a short `AGENTS.md` in new projects and asks before changing
+instructions in existing projects. See [Coding agents](https://void.cloud/integrations/agents).
+
 - [Introduction](https://void.cloud/guide/)
 - [Server routing](https://void.cloud/guide/server-routing) and [Pages routing](https://void.cloud/guide/pages-routing/overview)
 - [Database](https://void.cloud/guide/database) and [type safety](https://void.cloud/guide/type-safety)

@@ -6,13 +6,14 @@ import { globSync } from 'tinyglobby';
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(scriptsDir, '..');
 const sourceDir = resolve(packageDir, '../../docs');
-const targetDir = resolve(packageDir, 'skills/void/docs');
+const targetDir = resolve(packageDir, 'docs');
 
 if (!existsSync(sourceDir)) {
   throw new Error(`docs: Missing source directory '${sourceDir}'.`);
 }
 
 rmSync(targetDir, { recursive: true, force: true });
+rmSync(resolve(packageDir, 'skills/void/docs'), { recursive: true, force: true });
 mkdirSync(targetDir, { recursive: true });
 
 for (const file of globSync('**/*.md', { cwd: sourceDir, ignore: ['node_modules/**'] })) {

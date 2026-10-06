@@ -71,7 +71,6 @@ import {
 export type InitArgs = {
   tsconfig: boolean;
   github: boolean;
-  agents: boolean;
   git?: boolean;
 };
 
@@ -83,7 +82,6 @@ export function parseInitArgs(args: Array<string>): InitArgs {
       options: {
         tsconfig: { type: 'boolean' },
         github: { type: 'boolean' },
-        agents: { type: 'boolean' },
         git: { type: 'boolean' },
       },
       allowNegative: true,
@@ -97,7 +95,6 @@ export function parseInitArgs(args: Array<string>): InitArgs {
   return {
     tsconfig: parsed.values.tsconfig === true,
     github: parsed.values.github === true,
-    agents: parsed.values.agents === true,
     git: parsed.values.git as boolean | undefined,
   };
 }
@@ -2928,36 +2925,55 @@ function getOwnVersion(): string {
 const MARKER_VERSION_SOURCE =
   String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?` +
   String.raw`(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?`;
-const MARKER_OPEN_RE = new RegExp(
-  String.raw`^<!--injected-by-void-v(${MARKER_VERSION_SOURCE})-->\r?$`,
-  'm',
-);
 const MARKER_CLOSE = '<!--/injected-by-void-->';
 const MARKER_BLOCK_RE = new RegExp(
   String.raw`^<!--injected-by-void-v${MARKER_VERSION_SOURCE}-->\r?\n[\s\S]*?^<!--\/injected-by-void-->\r?$`,
   'm',
 );
 
-function injectAgentBlock(root: string): void {
+async function injectAgentBlock(root: string, newProject: boolean): Promise<void> {
   const filePath = 'AGENTS.md';
   const fullPath = join(root, filePath);
   const version = getOwnVersion();
   const template = readFileSync(join(getPackageDir(), 'AGENTS_TEMPLATE.md'), 'utf-8');
   const openMarker = `<!--injected-by-void-v${version}-->`;
   const block = `${openMarker}\n${template}\n${MARKER_CLOSE}`;
+  const existing = existsSync(fullPath) ? readFileSync(fullPath, 'utf-8') : null;
+  const managedBlock = existing?.match(MARKER_BLOCK_RE);
+  if (managedBlock?.[0] === block) {
+    log.info(`${filePath} already has Void instructions (v${version})`);
+    return;
+  }
 
-  if (existsSync(fullPath)) {
-    const existing = readFileSync(fullPath, 'utf-8');
-    const match = existing.match(MARKER_OPEN_RE);
-    if (match) {
-      if (match[1] === version) {
-        log.info(`${filePath} already has Void instructions (v${version})`);
-        return;
-      }
-      // Replace existing block with updated version
+  if (!newProject) {
+    if (process.env.CI || !process.stdin.isTTY) {
+      log.info(
+        `Skipping ${filePath} setup without an interactive terminal; read node_modules/void/docs/.`,
+      );
+      return;
+    }
+    const accepted = await confirm({
+      message: managedBlock
+        ? 'Update Void instructions in AGENTS.md?'
+        : existing !== null
+          ? 'Append Void instructions to AGENTS.md?'
+          : 'Create AGENTS.md with Void instructions?',
+      initialValue: true,
+    });
+    if (isCancel(accepted)) {
+      cancel('Setup cancelled.');
+      process.exit(0);
+    }
+    if (!accepted) {
+      return;
+    }
+  }
+
+  if (existing !== null) {
+    if (managedBlock) {
       const updated = existing.replace(MARKER_BLOCK_RE, block);
       writeFileSync(fullPath, updated);
-      log.success(`Updated Void instructions in ${filePath} (v${match[1]} → v${version})`);
+      log.success(`Updated Void instructions in ${filePath}`);
     } else {
       // Append block to end of file
       const separator = existing.endsWith('\n') ? '\n' : '\n\n';
@@ -2973,10 +2989,11 @@ function injectAgentBlock(root: string): void {
 export async function runInitCommand(root: string, initArgs?: InitArgs): Promise<void> {
   console.log();
 
-  const targeted = Boolean(initArgs && (initArgs.tsconfig || initArgs.github || initArgs.agents));
+  const targeted = Boolean(initArgs && (initArgs.tsconfig || initArgs.github));
   if (!targeted) {
     root = await resolveInitRoot(root);
   }
+  const newProject = isScaffoldableEmptyProject(root) && !existsSync(join(root, 'AGENTS.md'));
   const hadTypedConfig = existsSync(join(root, TYPED_CONFIG_FILE));
   if (migrateLegacyVoidConfig(root)) {
     log.success(
@@ -3135,19 +3152,15 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     applyDatabaseSetup(root, await promptDatabaseSetup(root));
   }
 
-  // Steps 4–5: Agent instructions and skills
-  if (!targeted || initArgs?.agents) {
-    // Step 4: Agent instructions
-    injectAgentBlock(root);
+  // Steps 4–5: Agent instructions and skills are part of every init.
+  await injectAgentBlock(root, newProject);
 
-    // Step 5: Link skills
-    const agents = detectAgents(root);
-    if (agents.length > 0) {
-      const { linkSkillsForSpecificAgents } = await import('./skills.ts');
-      linkSkillsForSpecificAgents(root, agents);
-    } else {
-      log.info('No coding agent detected; read the bundled docs linked in AGENTS.md');
-    }
+  const agents = detectAgents(root);
+  if (agents.length > 0) {
+    const { linkSkillsForSpecificAgents } = await import('./skills.ts');
+    linkSkillsForSpecificAgents(root, agents);
+  } else {
+    log.info('Bundled Void docs: node_modules/void/docs/');
   }
 
   // Step 6: Demo code (only in full interactive flow, not for meta-frameworks)

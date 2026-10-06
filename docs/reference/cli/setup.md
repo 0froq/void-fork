@@ -28,7 +28,7 @@ Resources recorded in `void.lock.json` without a matching definition appear sepa
 ## `void init` {#void-init}
 
 ```sh
-void init [--tsconfig] [--github] [--agents] [--git | --no-git]
+void init [--tsconfig] [--github] [--git | --no-git]
 ```
 
 Set up a new or existing Void project. In an empty directory, choose Vite+ or Vite, a framework, and a D1, PostgreSQL, MySQL, or Static Pages starter.
@@ -37,6 +37,12 @@ In an existing app, Void adds missing dependencies and scripts and updates the V
 
 The wizard also sets up TypeScript, agent instructions, environment declarations, and a deployment target. Choose Cloudflare, a Void platform, or skip deployment setup. If you skip sign-in, run `void connect` when you're ready. See [Quick Start](../../guide/quickstart.md).
 
+Every init run sets up coding agents. New projects get a minimal `AGENTS.md`
+pointing to `node_modules/void/docs/`. Existing projects prompt before the file
+is created, appended to, or updated; CI and non-interactive runs leave existing
+projects' instructions unchanged. Skills are linked for detected agents. See
+[Coding Agents](../../integrations/agents.md).
+
 Outside an existing repository or workspace package, Void offers to initialize Git. Use `--git` to initialize without a prompt or `--no-git` to skip it. CI requires `--git` to initialize. Workspace packages do not accept these flags.
 
 Run selected setup steps with:
@@ -44,10 +50,10 @@ Run selected setup steps with:
 | Flag         | Purpose                                                        |
 | ------------ | -------------------------------------------------------------- |
 | `--tsconfig` | Update TypeScript configuration, preserving existing settings. |
-| `--agents`   | Set up agent instructions and skills for detected agents.      |
 | `--github`   | Create the GitHub Actions deployment workflow.                 |
 
-These flags can be combined and skip the other wizard steps. Add `--git` if you also want Git initialization.
+These flags can be combined and skip the other wizard steps. Coding agent setup
+still runs. Add `--git` if you also want Git initialization.
 
 For Cloudflare workflows, add a `CLOUDFLARE_API_TOKEN` repository secret. PostgreSQL and MySQL apps also need `DATABASE_URL`.
 
@@ -60,11 +66,3 @@ void prepare
 ```
 
 Generates Void’s types and TypeScript configuration without starting the dev server or building the app. Run it after a fresh clone or before typechecking in CI.
-
-## Agent {#agent}
-
-### `void init --agents` {#void-init-agents}
-
-Adds Void instructions to `AGENTS.md` and links skills for detected coding agents. Existing instructions outside the Void block are preserved.
-
-If no supported agent is detected, `AGENTS.md` links to the bundled docs. See [Coding Agents](../../integrations/agents.md).

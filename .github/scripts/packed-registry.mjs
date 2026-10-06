@@ -12,6 +12,21 @@ export function inspectPackage(tarball) {
   const files = new Set(
     execFileSync('tar', ['-tf', tarball], { encoding: 'utf8' }).trim().split(/\r?\n/),
   );
+  if (manifest.name === 'void') {
+    for (const file of [
+      'docs/guide/quickstart.md',
+      'docs/reference/cli.md',
+      'skills/void/SKILL.md',
+      'skills/migrate-vite-cloudflare-to-void/SKILL.md',
+      'AGENTS_TEMPLATE.md',
+    ]) {
+      assert(files.has(`package/${file}`), `void: missing bundled ${file}`);
+    }
+    assert(
+      ![...files].some((file) => file.startsWith('package/skills/void/docs/')),
+      'void: docs must be bundled at the package root',
+    );
+  }
   for (const field of [
     'dependencies',
     'optionalDependencies',

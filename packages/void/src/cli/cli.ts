@@ -289,7 +289,7 @@ if (helpPath) {
   const topLevelCommands: Array<SubcommandDef> = [
     {
       name: 'init',
-      hint: '--agents | --tsconfig | --github | --git | --no-git',
+      hint: '--tsconfig | --github | --git | --no-git',
       description: 'Set up void in a new or existing project',
     },
     { name: 'migrate', description: 'Migrate legacy project configuration' },

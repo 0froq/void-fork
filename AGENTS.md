@@ -88,7 +88,7 @@ own README under `packages/{react,vue,svelte,solid}`.
 The [API reference](./docs/reference/api.md) and
 [CLI reference](./docs/reference/cli.md) describe the supported public surface.
 
-`packages/void/skills/void/docs` is ignored by Git and copied from `docs/`
+`packages/void/docs` is ignored by Git and copied from `docs/`
 during the build. Edit the source documentation instead.
 
 ## Tooling

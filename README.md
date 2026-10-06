@@ -24,6 +24,10 @@ Void builds the app, provisions resources, applies database migrations, and prin
 
 ## Documentation
 
+The npm package includes Markdown docs at `node_modules/void/docs/`. `void init`
+sets up coding agents, adding a minimal `AGENTS.md` in new projects and asking
+before changing instructions in existing projects.
+
 - [How Void works](https://void.cloud/guide/)
 - [Server routes](https://void.cloud/guide/server-routing) and [pages](https://void.cloud/guide/pages-routing/overview)
 - [Database](https://void.cloud/guide/database) and [type safety](https://void.cloud/guide/type-safety)

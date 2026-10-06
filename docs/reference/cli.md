@@ -73,7 +73,7 @@ Use this page as a command reference. If you are setting up a project for the fi
 | `void email allow <address>`      | Add a recipient and send a verification email                                 |
 | `void email disallow <address>`   | Remove a recipient from the allowlist                                         |
 | `void email domain`               | Send and receive at your own domain on a Cloudflare zone                      |
-| `void init`                       | Setup wizard for new or existing projects                                     |
+| `void init`                       | Set up a new or existing project, including coding agents                     |
 | `void migrate`                    | Convert legacy `void.json` and root Wrangler JSON/JSONC into `void.config.ts` |
 
 ## Binary Invocation {#binary-invocation}

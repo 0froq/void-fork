@@ -74,7 +74,7 @@ it('keeps an existing typed Astro adapter with dynamic options during targeted i
     );
     writeFileSync(join(root, 'astro.config.ts'), adapter);
 
-    await runInitCommand(root, { tsconfig: false, github: false, agents: true });
+    await runInitCommand(root, { tsconfig: true, github: false });
     expect(readFileSync(join(root, 'astro.config.ts'), 'utf8')).toBe(adapter);
     expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(false);
   } finally {
@@ -89,7 +89,8 @@ describe('init Git arguments', () => {
     expect(parseInitArgs(['--no-git']).git).toBe(false);
     expect(parseInitArgs(['--git', '--no-git']).git).toBe(false);
     expect(parseInitArgs(['--no-git', '--git']).git).toBe(true);
-    expect(parseInitArgs(['--agents', '--git'])).toMatchObject({ agents: true, git: true });
+    expect(parseInitArgs(['--tsconfig', '--git'])).toMatchObject({ tsconfig: true, git: true });
+    expect(() => parseInitArgs(['--agents'])).toThrow('Unknown option');
   });
 
   it.each(['--git', '--no-git'])('keeps the full starter flow with %s', async (flag) => {
@@ -121,7 +122,7 @@ describe('init Git arguments', () => {
         writeFileSync(join(root, 'package.json'), JSON.stringify({ workspaces: ['apps/*'] }));
         const child = join(root, 'apps', 'web');
         mkdirSync(child, { recursive: true });
-        await expect(runInitCommand(child, parseInitArgs(['--agents', flag]))).rejects.toThrow(
+        await expect(runInitCommand(child, parseInitArgs(['--tsconfig', flag]))).rejects.toThrow(
           'The --git/--no-git options are not available when adding a package to an existing monorepo',
         );
         expect(readdirSync(child)).toEqual([]);
@@ -500,9 +501,9 @@ describe('Void platform deployment setup', () => {
         schemaVersion: 1,
       });
 
-      await expect(
-        runInitCommand(root, { agents: false, github: true, tsconfig: false }),
-      ).rejects.toThrow('Company Void does not support GitHub Actions deployments');
+      await expect(runInitCommand(root, { github: true, tsconfig: false })).rejects.toThrow(
+        'Company Void does not support GitHub Actions deployments',
+      );
       expect(existsSync(join(root, '.github', 'workflows', 'void-deploy.yml'))).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -1822,7 +1823,7 @@ describe('isScaffoldableEmptyProject', () => {
         JSON.stringify({ name: 'existing-app', private: true }, null, 2) + '\n',
       );
 
-      await runInitCommand(root, { github: true, tsconfig: false, agents: false });
+      await runInitCommand(root, { github: true, tsconfig: false });
 
       const yaml = readFileSync(join(root, '.github', 'workflows', 'void-deploy.yml'), 'utf-8');
       // OIDC, not a stored secret.
@@ -1864,7 +1865,7 @@ describe('isScaffoldableEmptyProject', () => {
         JSON.stringify({ projectId: 'prj_123', slug: 'my-app' }, null, 2) + '\n',
       );
 
-      await runInitCommand(root, { github: true, tsconfig: false, agents: false });
+      await runInitCommand(root, { github: true, tsconfig: false });
 
       const yaml = readFileSync(join(root, '.github', 'workflows', 'void-deploy.yml'), 'utf-8');
       expect(yaml).toContain('VOID_PROJECT: my-app');
@@ -1969,7 +1970,7 @@ jobs:
 `;
       writeFileSync(existingPath, existing);
 
-      await runInitCommand(root, { github: true, tsconfig: false, agents: false });
+      await runInitCommand(root, { github: true, tsconfig: false });
 
       // The pre-existing workflow is preserved byte-for-byte...
       expect(existsSync(existingPath)).toBe(true);
@@ -2331,7 +2332,7 @@ export default config;
         JSON.stringify({ name: 'targeted-app' }, null, 2) + '\n',
       );
 
-      await runInitCommand(root, { tsconfig: true, github: false, agents: false });
+      await runInitCommand(root, { tsconfig: true, github: false });
 
       const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
       expect(pkg.scripts).toBeUndefined();
@@ -2342,89 +2343,195 @@ export default config;
     }
   });
 
-  it('creates AGENTS.md without prompting when no coding agent is detected', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'void-init-'));
-    try {
-      await runInitCommand(root, { tsconfig: false, github: false, agents: true });
+  describe('coding agent setup', () => {
+    const ttyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+    let previousCI: string | undefined;
 
-      const instructions = readFileSync(join(root, 'AGENTS.md'), 'utf-8');
-      expect(instructions).toContain('## Void');
-      expect(instructions).toContain('node_modules/void/skills/void/docs/');
-      expect(existsSync(join(root, 'CLAUDE.md'))).toBe(false);
-      expect(mockSelect).not.toHaveBeenCalled();
-      expect(mockConfirm).not.toHaveBeenCalled();
+    beforeEach(() => {
+      previousCI = process.env.CI;
+      delete process.env.CI;
+      Object.defineProperty(process.stdin, 'isTTY', { configurable: true, get: () => true });
+    });
 
-      await runInitCommand(root, { tsconfig: false, github: false, agents: true });
-      expect(readFileSync(join(root, 'AGENTS.md'), 'utf-8')).toBe(instructions);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+    afterEach(() => {
+      if (previousCI === undefined) {
+        delete process.env.CI;
+      } else {
+        process.env.CI = previousCI;
+      }
+      if (ttyDescriptor) {
+        Object.defineProperty(process.stdin, 'isTTY', ttyDescriptor);
+      } else {
+        Reflect.deleteProperty(process.stdin, 'isTTY');
+      }
+    });
 
-  it.each([false, true])(
-    'writes AGENTS.md and preserves CLAUDE.md when Claude is detected (existing AGENTS.md: %s)',
-    async (hasAgentsFile) => {
-      // Resolve macOS's /var alias so relative skill symlinks use the fixture's real path.
-      const root = realpathSync(mkdtempSync(join(tmpdir(), 'void-init-')));
+    it('creates minimal AGENTS.md for a new project without prompting or agent detection', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'void-init-'));
       try {
-        const claudeInstructions = '# Claude instructions\n\nKeep these instructions.\n';
-        const projectInstructions = '# Project instructions\n\nKeep this guidance.\n';
-        writeFileSync(join(root, 'CLAUDE.md'), claudeInstructions);
-        mkdirSync(join(root, '.claude'));
-        if (hasAgentsFile) {
-          writeFileSync(join(root, 'AGENTS.md'), projectInstructions);
-        }
-
-        await runInitCommand(root, { tsconfig: false, github: false, agents: true });
+        await runInitCommand(root, { tsconfig: true, github: false });
 
         const instructions = readFileSync(join(root, 'AGENTS.md'), 'utf-8');
         expect(instructions).toContain('## Void');
-        if (hasAgentsFile) {
-          expect(instructions.startsWith(projectInstructions)).toBe(true);
-        }
-        expect(readFileSync(join(root, 'CLAUDE.md'), 'utf-8')).toBe(claudeInstructions);
-        expect(existsSync(join(root, '.claude/skills/void/SKILL.md'))).toBe(true);
+        expect(instructions).toContain('node_modules/void/docs/');
+        expect(instructions.match(/^- /gm)).toHaveLength(2);
+        expect(existsSync(join(root, 'CLAUDE.md'))).toBe(false);
         expect(mockSelect).not.toHaveBeenCalled();
+        expect(mockConfirm).not.toHaveBeenCalled();
+
+        await runInitCommand(root, { tsconfig: true, github: false });
+        expect(readFileSync(join(root, 'AGENTS.md'), 'utf-8')).toBe(instructions);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it.each([false, true])(
+      'writes AGENTS.md and preserves CLAUDE.md when Claude is detected (existing AGENTS.md: %s)',
+      async (hasAgentsFile) => {
+        // Resolve macOS's /var alias so relative skill symlinks use the fixture's real path.
+        const root = realpathSync(mkdtempSync(join(tmpdir(), 'void-init-')));
+        try {
+          const claudeInstructions = '# Claude instructions\n\nKeep these instructions.\n';
+          const projectInstructions = '# Project instructions\n\nKeep this guidance.\n';
+          writeFileSync(join(root, 'CLAUDE.md'), claudeInstructions);
+          mkdirSync(join(root, '.claude'));
+          mkdirSync(join(root, 'src'));
+          if (hasAgentsFile) {
+            writeFileSync(join(root, 'AGENTS.md'), projectInstructions);
+          }
+          mockConfirm.mockResolvedValueOnce(true);
+
+          await runInitCommand(root, { tsconfig: true, github: false });
+
+          const instructions = readFileSync(join(root, 'AGENTS.md'), 'utf-8');
+          expect(instructions).toContain('## Void');
+          if (hasAgentsFile) {
+            expect(instructions.startsWith(projectInstructions)).toBe(true);
+          }
+          expect(readFileSync(join(root, 'CLAUDE.md'), 'utf-8')).toBe(claudeInstructions);
+          expect(existsSync(join(root, '.claude/skills/void/SKILL.md'))).toBe(true);
+          expect(mockSelect).not.toHaveBeenCalled();
+          expect(mockConfirm).toHaveBeenCalledExactlyOnceWith({
+            message: hasAgentsFile
+              ? 'Append Void instructions to AGENTS.md?'
+              : 'Create AGENTS.md with Void instructions?',
+            initialValue: true,
+          });
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+      },
+    );
+
+    it.each(['prerelease', 'current'])(
+      'updates %s agent instructions only after approval',
+      async (versionKind) => {
+        const root = mkdtempSync(join(tmpdir(), 'void-init-'));
+        try {
+          const currentVersion = JSON.parse(
+            readFileSync(join(process.cwd(), 'packages/void/package.json'), 'utf-8'),
+          ).version;
+          const before = '# Project guidance\n\nKeep this user-authored introduction.\n\n';
+          const after = '\n\nKeep this user-authored footer.\n';
+          const oldVersion = versionKind === 'current' ? currentVersion : '1.2.3-beta.2+build.7';
+          writeFileSync(
+            join(root, 'AGENTS.md'),
+            `${before}<!--injected-by-void-v${oldVersion}-->\nStale managed instructions.\n<!--/injected-by-void-->${after}`,
+          );
+          mockConfirm.mockResolvedValueOnce(true);
+
+          await runInitCommand(root, { tsconfig: true, github: false });
+
+          const updated = readFileSync(join(root, 'AGENTS.md'), 'utf-8');
+          expect(updated.startsWith(before)).toBe(true);
+          expect(updated.endsWith(after)).toBe(true);
+          expect(updated).toContain(`<!--injected-by-void-v${currentVersion}-->`);
+          expect(updated).not.toContain('1.2.3-beta.2+build.7');
+          expect(updated).not.toContain('Stale managed instructions.');
+          expect(updated).toContain('node_modules/void/docs/');
+          expect(updated.match(/<!--injected-by-void-v/g)).toHaveLength(1);
+          expect(updated.match(/<!--\/injected-by-void-->/g)).toHaveLength(1);
+          expect(mockConfirm).toHaveBeenCalledExactlyOnceWith({
+            message: 'Update Void instructions in AGENTS.md?',
+            initialValue: true,
+          });
+          await runInitCommand(root, { tsconfig: true, github: false });
+          expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toBe(updated);
+          expect(mockConfirm).toHaveBeenCalledTimes(1);
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+      },
+    );
+
+    it.each([false, true])(
+      'preserves existing project instructions when declined (AGENTS.md: %s)',
+      async (hasInstructions) => {
+        const root = mkdtempSync(join(tmpdir(), 'void-init-agents-decline-'));
+        const original = '# My project\n\nKeep this unchanged.\n';
+        try {
+          mkdirSync(join(root, 'src'));
+          if (hasInstructions) {
+            writeFileSync(join(root, 'AGENTS.md'), original);
+          }
+          mockConfirm.mockResolvedValueOnce(false);
+          await runInitCommand(root, { tsconfig: true, github: false });
+          expect(mockConfirm).toHaveBeenCalledTimes(1);
+          if (hasInstructions) {
+            expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toBe(original);
+          } else {
+            expect(existsSync(join(root, 'AGENTS.md'))).toBe(false);
+          }
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+      },
+    );
+
+    it.each(['CI', 'non-TTY'])('does not change existing AGENTS.md in %s', async (mode) => {
+      const root = mkdtempSync(join(tmpdir(), 'void-init-agents-headless-'));
+      const original = '# Keep my instructions\n';
+      try {
+        writeFileSync(join(root, 'AGENTS.md'), original);
+        if (mode === 'CI') {
+          process.env.CI = 'true';
+        } else {
+          Object.defineProperty(process.stdin, 'isTTY', { configurable: true, get: () => false });
+        }
+        await runInitCommand(root, { tsconfig: true, github: false });
+        expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toBe(original);
         expect(mockConfirm).not.toHaveBeenCalled();
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
-    },
-  );
+    });
 
-  it('updates prerelease agent instructions without changing surrounding prose', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'void-init-'));
-    try {
-      const currentVersion = JSON.parse(
-        readFileSync(join(process.cwd(), 'packages/void/package.json'), 'utf-8'),
-      ).version;
-      const before = '# Project guidance\n\nKeep this user-authored introduction.\n\n';
-      const after = '\n\nKeep this user-authored footer.\n';
-      writeFileSync(
-        join(root, 'AGENTS.md'),
-        `${before}<!--injected-by-void-v1.2.3-beta.2+build.7-->\nStale managed instructions.\n<!--/injected-by-void-->${after}`,
-      );
-
-      await runInitCommand(root, { tsconfig: false, github: false, agents: true });
-
-      const updated = readFileSync(join(root, 'AGENTS.md'), 'utf-8');
-      expect(updated.startsWith(before)).toBe(true);
-      expect(updated.endsWith(after)).toBe(true);
-      expect(updated).toContain(`<!--injected-by-void-v${currentVersion}-->`);
-      expect(updated).not.toContain('1.2.3-beta.2+build.7');
-      expect(updated).not.toContain('Stale managed instructions.');
-      expect(updated).toContain('node_modules/void/skills/void/docs/');
-      expect(updated.match(/<!--injected-by-void-v/g)).toHaveLength(1);
-      expect(updated.match(/<!--\/injected-by-void-->/g)).toHaveLength(1);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    it('cancels before appending instructions', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'void-init-agents-cancel-'));
+      const original = '# Keep my instructions\n';
+      const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('Cancelled');
+      });
+      try {
+        writeFileSync(join(root, 'AGENTS.md'), original);
+        mockConfirm.mockResolvedValueOnce(Symbol.for('cancel'));
+        await expect(runInitCommand(root, { tsconfig: true, github: false })).rejects.toThrow(
+          'Cancelled',
+        );
+        expect(exit).toHaveBeenCalledWith(0);
+        expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toBe(original);
+      } finally {
+        exit.mockRestore();
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
   });
 
   it('creates .gitignore with Void defaults during targeted setup', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));
     try {
-      await runInitCommand(root, { tsconfig: true, github: false, agents: false });
+      await runInitCommand(root, { tsconfig: true, github: false });
 
       const gitignore = readFileSync(join(root, '.gitignore'), 'utf-8');
       expect(gitignore).toContain('node_modules');
@@ -2443,7 +2550,7 @@ export default config;
     try {
       writeFileSync(join(root, '.gitignore'), 'node_modules\ncustom-cache\n');
 
-      await runInitCommand(root, { tsconfig: true, github: false, agents: false });
+      await runInitCommand(root, { tsconfig: true, github: false });
 
       const gitignore = readFileSync(join(root, '.gitignore'), 'utf-8');
       expect(gitignore).toContain('custom-cache');
@@ -2472,7 +2579,7 @@ export default config;
 }\n`,
       );
 
-      await runInitCommand(root, { tsconfig: true, github: false, agents: false });
+      await runInitCommand(root, { tsconfig: true, github: false });
 
       const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
       expect(tsconfig.extends).toBeDefined();
@@ -2506,7 +2613,7 @@ export default config;
         ) + '\n',
       );
 
-      await runInitCommand(root, { tsconfig: true, github: false, agents: false });
+      await runInitCommand(root, { tsconfig: true, github: false });
 
       const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
       expect(tsconfig.extends).toEqual(['./tsconfig.base.json', './.void/tsconfig.json']);
@@ -2553,7 +2660,7 @@ export default config;
         ) + '\n',
       );
 
-      await runInitCommand(root, { tsconfig: true, github: false, agents: false });
+      await runInitCommand(root, { tsconfig: true, github: false });
 
       const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
       expect(tsconfig.extends).toEqual(['./tsconfig.base.json', './.void/tsconfig.json']);
@@ -2599,7 +2706,7 @@ export default config;
         ) + '\n',
       );
 
-      await runInitCommand(root, { tsconfig: true, github: false, agents: false });
+      await runInitCommand(root, { tsconfig: true, github: false });
 
       const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
       expect(tsconfig.extends).toEqual(['../../tsconfig.base.json', './.void/tsconfig.json']);
@@ -2648,7 +2755,7 @@ export default config;
         ) + '\n',
       );
 
-      await runInitCommand(root, { tsconfig: true, github: false, agents: false });
+      await runInitCommand(root, { tsconfig: true, github: false });
 
       const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
       expect(tsconfig.extends).toEqual(['./tsconfig.base.json', './.void/tsconfig.json']);
@@ -4668,7 +4775,7 @@ export default config;
       );
 
       // Targeted `void init --github` — no scaffolding, no prompts.
-      await runInitCommand(subpkgRoot, { github: true, tsconfig: false, agents: false });
+      await runInitCommand(subpkgRoot, { github: true, tsconfig: false });
 
       // The deploy.yml MUST NOT have been written under the subpackage.
       const deployYmlPath = join(subpkgRoot, '.github', 'workflows', 'void-deploy.yml');
@@ -4707,7 +4814,7 @@ export default config;
           writeFileSync(join(subpkgRoot, 'bun.lock'), '');
         }
 
-        await runInitCommand(subpkgRoot, { github: true, tsconfig: false, agents: false });
+        await runInitCommand(subpkgRoot, { github: true, tsconfig: false });
 
         const deployYmlPath = join(subpkgRoot, '.github', 'workflows', 'void-deploy.yml');
         expect(existsSync(deployYmlPath)).toBe(false);

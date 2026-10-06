@@ -145,18 +145,16 @@ const HELP_TREE: HelpTree = {
     summary: 'Set up Void in a new or existing project.',
     usage: ['void init [options]'],
     options: [
-      { command: '--agents', description: 'Set up agent instructions and skills' },
-      { command: '--tsconfig', description: 'Only update tsconfig.json' },
+      { command: '--tsconfig', description: 'Update tsconfig.json and set up coding agents' },
       { command: '--git', description: 'Initialize a Git repository without prompting' },
       { command: '--no-git', description: 'Skip Git repository initialization' },
       {
         command: '--github',
-        description: 'Only create the GitHub Actions deploy workflow (OIDC, no stored token)',
+        description: 'Create the GitHub Actions deploy workflow and set up coding agents',
       },
     ],
     examples: [
       { command: 'void init', description: 'Scaffold or configure the current project' },
-      { command: 'void init --agents', description: 'Install agent instructions and skills' },
       { command: 'void init --github', description: 'Scaffold the GitHub Actions deploy workflow' },
     ],
   },
@@ -1476,9 +1474,6 @@ export function printGlobalHelp(): void {
       globalCommandLine(['prepare'], 'void prepare'),
       ...globalCommandLines('gen', { route: 'route <path> [--methods]' }),
       '',
-      categoryTitle('agent'),
-      helpLine('void init --agents', requiredOption(['init'], '--agents').description),
-      '',
       categoryTitle('help'),
       helpLine('void help <command>', 'Show command-specific help'),
       helpLine('void <command> --help', 'Show command-specific help'),
@@ -1594,14 +1589,6 @@ function globalCommandLine(path: Array<string>, command: string): string {
 function globalOptionLines(path: Array<string>): Array<string> {
   const page = requiredPage(path);
   return (page.options ?? []).map((option) => helpLine(`  ${option.command}`, option.description));
-}
-
-function requiredOption(path: Array<string>, command: string): HelpCommand {
-  const option = requiredPage(path).options?.find((entry) => entry.command === command);
-  if (!option) {
-    throw new Error(`Missing help option: ${formatHelpPath(path)} ${command}`);
-  }
-  return option;
 }
 
 function requiredPage(path: Array<string>): HelpPage {

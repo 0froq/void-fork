@@ -176,6 +176,10 @@ try {
           [join(root, '.github/scripts/packed-init.mjs'), fixture, framework, manager, version],
           work,
         );
+        const agentInstructions = readFileSync(join(fixture, 'AGENTS.md'), 'utf8');
+        assert.equal(agentInstructions.match(/^- /gm)?.length, 2);
+        assert(agentInstructions.includes('node_modules/void/docs/'));
+        assert(existsSync(join(fixture, 'node_modules/void/docs/guide/quickstart.md')));
         assert(
           existsSync(join(fixture, '.git')),
           'Init should initialize the accepted Git repository',

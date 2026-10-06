@@ -110,6 +110,6 @@
   "void-email-domain-remove": "/reference/cli/email#void-email-domain-remove",
   "void-email-status": "/reference/cli/email#void-email-status",
   "void-email-setup": "/reference/cli/email#void-email-setup",
-  "agent": "/reference/cli/setup#agent",
-  "void-init-agents": "/reference/cli/setup#void-init-agents"
+  "agent": "/reference/cli/setup#void-init",
+  "void-init-agents": "/reference/cli/setup#void-init"
 }
