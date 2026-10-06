@@ -337,15 +337,10 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       ].join('\n'),
       'Platform runtime',
     );
-    note(
-      [
-        manifest.desiredState === 'disabled' && args.subcommand !== 'enable'
-          ? 'Application traffic will stay paused because this installation is disabled.'
-          : 'Application traffic may pause during a safe cutover. Traffic resumes after verification.',
-        'Saved progress survives an interruption. Resume with the same runtime files.',
-        `Administrator status: ${plan.apiUrl}/admin/status`,
-      ].join('\n'),
-      'Availability and progress',
+    log.info(
+      manifest.desiredState === 'disabled' && args.subcommand !== 'enable'
+        ? 'Application traffic will stay paused because this installation is disabled.'
+        : 'Application traffic may pause briefly during a safe cutover.',
     );
     if (args.plan) {
       outro('No Cloudflare or local installation state was changed.');

@@ -638,13 +638,11 @@ describe('installed platform upgrade', () => {
       runtime: '',
       yes: true,
     });
-    expect(note).toHaveBeenCalledWith(
-      expect.stringContaining('Traffic resumes after verification.'),
-      'Availability and progress',
+    expect(log.info).toHaveBeenCalledWith(
+      'Application traffic may pause briefly during a safe cutover.',
     );
-    expect(note).not.toHaveBeenCalledWith(
+    expect(log.info).not.toHaveBeenCalledWith(
       expect.stringContaining('Application traffic will stay paused'),
-      'Availability and progress',
     );
   });
 
