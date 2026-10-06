@@ -7,7 +7,10 @@ import {
 } from '@void/platform';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { discoverPlatform, runPlatformCommand } from '../../src/cli/platform-cmd.ts';
-import { writeInstallationManifest } from '../../src/cli/platform-registry.ts';
+import {
+  savePlatformConnection,
+  writeInstallationManifest,
+} from '../../src/cli/platform-registry.ts';
 
 const document = {
   apiUrl: 'https://api.example.com',
@@ -38,6 +41,47 @@ afterEach(() => {
 });
 
 describe('platform discovery', () => {
+  it('lists labeled connection and installation IDs for platform commands', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-list-'));
+    vi.stubEnv('VOID_PLATFORM_REGISTRY_DIR', directory);
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const installed = savePlatformConnection({
+        accountId: null,
+        apiUrl: document.apiUrl,
+        applicationDomain: document.applicationDomain,
+        displayName: document.displayName,
+        installationId: document.installationId,
+        kind: 'installed',
+        proxyUrl: document.proxyUrl,
+      });
+      const connected = savePlatformConnection({
+        accountId: null,
+        apiUrl: 'https://hosted.example.com',
+        applicationDomain: 'hosted.example.com',
+        displayName: 'Hosted',
+        installationId: null,
+        kind: 'connected',
+        proxyUrl: 'https://proxy.hosted.example.com',
+      });
+
+      await runPlatformCommand('.', { subcommand: 'list' });
+
+      expect(output).toHaveBeenCalledWith(expect.stringContaining(`connection: ${installed.id}`));
+      expect(output).toHaveBeenCalledWith(`  installation: ${document.installationId}`);
+      expect(output).toHaveBeenCalledWith(expect.stringContaining(`connection: ${connected.id}`));
+      expect(
+        output.mock.calls.filter(([line]) => String(line).includes('installation:')),
+      ).toHaveLength(1);
+      expect(output).toHaveBeenCalledWith(`  ${document.apiUrl}`);
+      expect(output).toHaveBeenCalledWith(`  apps: *.${document.applicationDomain}`);
+    } finally {
+      vi.restoreAllMocks();
+      vi.unstubAllEnvs();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('shows saved lifecycle progress when live discovery is blocked by maintenance', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-status-'));
     vi.stubEnv('VOID_PLATFORM_REGISTRY_DIR', directory);

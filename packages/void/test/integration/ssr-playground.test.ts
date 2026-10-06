@@ -3,7 +3,12 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import spawn from 'cross-spawn';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
-import { getPort, waitForServer, killChild } from '../../../../test/integration-helpers.ts';
+import {
+  collectServerOutput,
+  getPort,
+  waitForServer,
+  killChild,
+} from '../../../../test/integration-helpers.ts';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 let DEV_PORT: number;
@@ -13,7 +18,7 @@ let PREVIEW_BASE: string;
 
 describe('playground/ssr dev', () => {
   let child: ReturnType<typeof spawn>;
-  let stderr = '';
+  let serverOutput = () => '';
 
   beforeAll(async () => {
     DEV_PORT = await getPort();
@@ -41,19 +46,20 @@ describe('playground/ssr dev', () => {
       },
     );
 
-    child.stderr!.on('data', (chunk: Buffer) => {
-      stderr += String(chunk);
-    });
+    serverOutput = collectServerOutput(child);
 
-    await waitForServer(DEV_BASE, 20_000);
+    await waitForServer(DEV_BASE, 20_000, {
+      isAlive: () => child.exitCode === null && child.signalCode === null,
+      diagnostics: serverOutput,
+    });
   });
 
   afterAll(async () => {
     if (child) {
       await killChild(child);
     }
-    if (stderr.includes('error when starting dev server')) {
-      throw new Error(stderr);
+    if (serverOutput().includes('error when starting dev server')) {
+      throw new Error(serverOutput());
     }
   });
 
@@ -81,7 +87,7 @@ describe('playground/ssr dev', () => {
 
 describe('playground/ssr build + preview', () => {
   let child: ReturnType<typeof spawn>;
-  let stderr = '';
+  let serverOutput = () => '';
 
   beforeAll(async () => {
     rmSync(join(ROOT, 'playground/ssr/dist'), { recursive: true, force: true });
@@ -112,12 +118,11 @@ describe('playground/ssr build + preview', () => {
       },
     );
 
-    child.stderr!.on('data', (chunk: Buffer) => {
-      stderr += String(chunk);
-    });
+    serverOutput = collectServerOutput(child);
 
     await waitForServer(PREVIEW_BASE, 20_000, {
-      isAlive: () => child.exitCode === null,
+      isAlive: () => child.exitCode === null && child.signalCode === null,
+      diagnostics: serverOutput,
     });
   });
 
@@ -125,8 +130,8 @@ describe('playground/ssr build + preview', () => {
     if (child) {
       await killChild(child);
     }
-    if (stderr.includes('error when starting preview server')) {
-      throw new Error(stderr);
+    if (serverOutput().includes('error when starting preview server')) {
+      throw new Error(serverOutput());
     }
   });
 

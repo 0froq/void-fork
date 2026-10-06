@@ -14,6 +14,8 @@ void platform use [id]
 void platform status [id]
 ```
 
+`list` labels each connection ID and shows the installation ID when available. For a platform with local installation records, lifecycle commands such as `upgrade` accept either ID.
+
 `use` and `status` auto-select the only configured platform; with multiple platforms they show a picker interactively and require an id or URL in non-interactive use. A project with a recorded platform URL keeps using that platform when the global default changes.
 
 For a self-hosted installation, `status <installation-id>` prints locally saved

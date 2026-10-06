@@ -106,7 +106,7 @@ void platform uninstall [id] [--plan] [--purge-data] [--keep-zone] [--yes]
 
 `discover --installation` limits recovery and endpoint verification to one installation in a shared Cloudflare account.
 
-Omit `id` when only one installation is configured, or choose from the interactive picker. Non-interactive commands need an ID when several installations exist. Commands that make changes also require `--yes`; `--plan` only previews changes.
+Use a connection or installation ID from `void platform list`, or an installation name. Lifecycle commands require local installation records; use `discover` to restore them on another machine. Omit `id` when only one installation is configured, or choose from the interactive picker. Non-interactive commands need an ID when several installations exist. Commands that make changes also require `--yes`; `--plan` only previews changes.
 
 To add or explicitly change a separately deployed dashboard after installation,
 use `repair --dashboard-url <origin>` or `upgrade --dashboard-url <origin>`.

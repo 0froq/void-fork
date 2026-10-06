@@ -409,11 +409,16 @@ export function resolveInstallationManifest(
   selector: string,
   directory: string = platformRegistryDirectory(),
 ): PlatformInstallationManifest {
+  const connection = selector
+    ? listPlatformConnections(directory).find((entry) => entry.id === selector)
+    : undefined;
   const manifests = listInstallationManifests(directory).filter(
     (manifest) =>
       manifest.status !== 'uninstalled' &&
       (!selector ||
         manifest.id === selector ||
+        (manifest.id === connection?.installationId &&
+          (connection.accountId === null || connection.accountId === manifest.account.id)) ||
         manifest.deployment.installationSlug === selector ||
         manifest.deployment.displayName.toLowerCase() === selector.toLowerCase()),
   );
