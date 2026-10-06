@@ -218,6 +218,7 @@ export async function uploadInstallationWorkers(input: {
       ? await dependencies.deployWorker(workerConfig, workerSecrets, previousWorkerConfig)
       : await deployPlatformWorker(workerConfig, workerSecrets, {
           apiBaseUrl: cloudflareApiBaseUrl,
+          operatorApiToken: dependencies.operatorApiToken,
           ...(parallelWorkerUploads
             ? { acquireUploadSlot, onReadyForActivation, waitForPriorWorker }
             : {}),

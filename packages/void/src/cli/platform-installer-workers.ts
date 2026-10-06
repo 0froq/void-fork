@@ -721,6 +721,7 @@ export async function deployPlatformWorker(
             true,
             workerName,
             options.apiBaseUrl,
+            options.operatorApiToken,
           );
       assertCleanPlatformWrangler(
         uploaded,

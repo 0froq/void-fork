@@ -251,6 +251,8 @@ export type PlatformInstallerDependencies = Readonly<{
     ownershipNonce: string,
   ) => Promise<void>;
   client: InstallerClient;
+  /** The operator bearer used by client, separate from credentials deployed to Workers. */
+  operatorApiToken?: string;
   databaseRollbackSource?: PlatformRuntime;
   deployWorker?: (
     config: Record<string, unknown>,
@@ -317,6 +319,7 @@ export type InstallationCheckpointWriter = (
 
 export type PlatformWorkerDeploymentOptions = Readonly<{
   apiBaseUrl: string;
+  operatorApiToken?: string;
   readCloudflare?: (path: string) => Promise<unknown>;
   acquireUploadSlot?: () => Promise<(failure?: unknown) => void>;
   onReadyForActivation?: () => Promise<void>;

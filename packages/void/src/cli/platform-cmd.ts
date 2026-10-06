@@ -95,7 +95,7 @@ async function resolveConnection(selector: string): Promise<PlatformConnection> 
 function showConnection(connection: PlatformConnection, activeId: string | null): void {
   const marker = connection.id === activeId ? pc.green('●') : pc.dim('○');
   console.log(
-    `${marker} ${pc.bold(connection.displayName)}  ${pc.dim(`connection: ${connection.id}`)}`,
+    `${marker} ${pc.bold(connection.displayName)}${connection.id === activeId ? pc.dim(' (selected)') : ''}  ${pc.dim(`connection: ${connection.id}`)}`,
   );
   if (connection.installationId) {
     console.log(`  installation: ${connection.installationId}`);

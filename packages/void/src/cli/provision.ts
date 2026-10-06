@@ -183,6 +183,8 @@ export interface WranglerCallContext {
    * lister uses. An injected seam may ignore it (it owns its own transport).
    */
   apiBaseUrl?: string;
+  /** Pin the operator credential selected by the caller for every subprocess. */
+  apiToken?: string;
   cwd?: string;
   input?: string;
   /** Keep borrowed OAuth bearer values out of Wrangler's on-disk logs. */
@@ -672,6 +674,7 @@ export function deleteEnvVarCaseAware(
 export function provisionEnv(ctx?: {
   accountId?: string;
   apiBaseUrl?: string;
+  apiToken?: string;
   /** Test seam for the win32 case rule; production always uses the real platform. */
   platform?: NodeJS.Platform;
 }): NodeJS.ProcessEnv {
@@ -729,6 +732,19 @@ export function provisionEnv(ctx?: {
   if (ctx?.accountId) {
     scrub('CLOUDFLARE_ACCOUNT_ID');
     env.CLOUDFLARE_ACCOUNT_ID = ctx.accountId;
+  }
+  if (ctx?.apiToken) {
+    for (const name of [
+      'CLOUDFLARE_API_TOKEN',
+      'CF_API_TOKEN',
+      'CLOUDFLARE_API_KEY',
+      'CF_API_KEY',
+      'CLOUDFLARE_EMAIL',
+      'CF_EMAIL',
+    ]) {
+      scrub(name);
+    }
+    env.CLOUDFLARE_API_TOKEN = ctx.apiToken;
   }
   return env;
 }
@@ -1401,7 +1417,11 @@ export function createDefaultRunWrangler(
         // Hyperdrive REST path use (no split-brain between the config pin and the
         // ambient/dotenv env).
         env: {
-          ...provisionEnv({ accountId: opts.accountId, apiBaseUrl: opts.apiBaseUrl }),
+          ...provisionEnv({
+            accountId: opts.accountId,
+            apiBaseUrl: opts.apiBaseUrl,
+            apiToken: opts.apiToken,
+          }),
           ...(opts.suppressLogs ? { WRANGLER_WRITE_LOGS: 'false' } : {}),
         },
         stdio: [opts.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],

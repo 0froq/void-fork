@@ -1,5 +1,9 @@
 import { runCloudflareAuthCommand, type CloudflareAuthRunner } from './cloudflare-auth.ts';
-import type { PlatformCloudflareClient } from './platform-cloudflare.ts';
+import {
+  PlatformCloudflareApiError,
+  type CloudflareAccount,
+  type PlatformCloudflareClient,
+} from './platform-cloudflare.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
 
 export type PlatformCloudflareCredential = Readonly<{
@@ -18,6 +22,78 @@ export type PlatformManagementAccess = Readonly<{
   protection: boolean;
   readOnly: boolean;
 }>;
+
+/** Use the selected credential for read-only checks before taking lifecycle locks. */
+export async function verifyPlatformCloudflareCredential(
+  client: Pick<PlatformCloudflareClient, 'listAccounts' | 'listWorkerNames' | 'request'>,
+  input: {
+    account: CloudflareAccount;
+    source: PlatformCloudflareCredential['source'];
+    r2Buckets: ReadonlyArray<string>;
+    allowMissingR2Buckets?: boolean;
+  },
+): Promise<void> {
+  const source =
+    input.source === 'saved'
+      ? 'saved management token'
+      : input.source === 'environment'
+        ? 'environment API token'
+        : 'Cloudflare browser login';
+  const retry =
+    input.source === 'oauth'
+      ? 'Run `void cloudflare login`, or set CLOUDFLARE_API_TOKEN for this account, then retry.'
+      : 'Set CLOUDFLARE_API_TOKEN for this account, then retry.';
+  const check = async (
+    label: string,
+    permission: string,
+    action: () => Promise<unknown>,
+    allowMissing = false,
+  ) => {
+    try {
+      await action();
+    } catch (cause) {
+      const status = cause instanceof PlatformCloudflareApiError ? cause.status : null;
+      if (status === 404 && allowMissing) {
+        return;
+      }
+      const detail =
+        status === 401 || status === 403
+          ? `Check that the credential is valid, scoped to this account, and includes ${permission}. ${retry}`
+          : status === 404
+            ? 'Check the bucket name and account scope before retrying.'
+            : status === 429
+              ? 'Cloudflare rate-limited this check. Retry shortly.'
+              : 'Retry the command after Cloudflare connectivity is restored.';
+      throw new Error(
+        `platform: ${label} is unavailable${status === null ? '' : ` (HTTP ${status})`} using the ${source}. ${detail}`,
+        { cause },
+      );
+    }
+  };
+  let accounts: ReadonlyArray<CloudflareAccount> = [];
+  await check('Cloudflare account access', 'Account → Account Settings → Read', async () => {
+    accounts = await client.listAccounts();
+  });
+  if (!accounts.some((account) => account.id === input.account.id)) {
+    throw new Error(
+      `platform: The ${source} cannot access Cloudflare account ${JSON.stringify(input.account.name)} (${input.account.id}). ${retry}`,
+    );
+  }
+  await check('Cloudflare Workers access', 'Account → Workers Scripts → Edit', () =>
+    client.listWorkerNames(input.account.id),
+  );
+  for (const name of new Set(input.r2Buckets)) {
+    await check(
+      `R2 bucket ${JSON.stringify(name)}`,
+      'Account → Workers R2 Storage → Edit',
+      () =>
+        client.request(
+          `/accounts/${encodeURIComponent(input.account.id)}/r2/buckets/${encodeURIComponent(name)}`,
+        ),
+      input.allowMissingR2Buckets,
+    );
+  }
+}
 
 /** Check Access inventory permissions before the installer starts provisioning. */
 export async function verifyPlatformManagementAccess(

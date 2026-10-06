@@ -1164,6 +1164,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
     const result = await installPlatform(plan, secrets, existing, {
       acquireDatabaseLifecycleLock: acquirePlatformDatabaseLifecycleLock,
       client,
+      operatorApiToken: managementApiToken || operatorCredential.token,
       runtime,
       healthCheckResumeCommand: `${cliCommandName()} platform install --resume --name ${existing.id}`,
       onProgress: (message) => progress?.message(message),

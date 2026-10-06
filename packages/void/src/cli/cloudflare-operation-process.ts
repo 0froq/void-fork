@@ -328,7 +328,7 @@ async function cloudflareApiGet(
     });
     const body = object(await response.json());
     if (!response.ok || body.success !== true) {
-      throw new Error(failure);
+      throw new Error(`${failure} (HTTP ${response.status})`);
     }
     return body;
   } finally {

@@ -12,6 +12,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 const state = vi.hoisted(() => ({
   createSecrets: vi.fn(),
   clientTokens: [] as Array<string>,
+  listAccounts: vi.fn(),
+  listWorkerNames: vi.fn(),
+  request: vi.fn(),
   requiredGatewayToken: '',
   events: [] as Array<string>,
   manifest: undefined as PlatformInstallationManifest | undefined,
@@ -52,6 +55,9 @@ vi.mock('../../src/cli/platform-cloudflare.ts', async (importOriginal) => {
       constructor(private readonly token: string) {
         state.clientTokens.push(token);
       }
+      listAccounts = state.listAccounts;
+      listWorkerNames = state.listWorkerNames;
+      request = state.request;
       async getKvValue() {
         return JSON.stringify(state.manifest);
       }
@@ -81,10 +87,6 @@ vi.mock('../../src/cli/platform-cloudflare.ts', async (importOriginal) => {
       }
 
       async listR2Buckets() {
-        return [];
-      }
-
-      async listWorkerNames() {
         return [];
       }
 
@@ -199,6 +201,7 @@ vi.mock('../../src/cli/platform-registry.ts', async (importOriginal) => {
 });
 
 import { log, note } from '@voidzero-dev/vite-plus-prompts';
+import { PlatformCloudflareApiError } from '../../src/cli/platform-cloudflare.ts';
 import {
   acquirePlatformDatabaseLifecycleLock,
   installPlatform,
@@ -208,7 +211,11 @@ import {
   runInstalledPlatformCommand,
 } from '../../src/cli/platform-management.ts';
 import { createPlatformInstallPlan } from '../../src/cli/platform-plan.ts';
-import { readInstallationRecoverySecrets } from '../../src/cli/platform-registry.ts';
+import {
+  acquirePlatformLifecycleLock,
+  readInstallationRecoverySecrets,
+  writeInstallationManifest,
+} from '../../src/cli/platform-registry.ts';
 
 describe('installed platform upgrade', () => {
   it('prints an exact rollback resume command with quoted custom runtime paths', () => {
@@ -234,6 +241,9 @@ describe('installed platform upgrade', () => {
     vi.stubEnv('CF_API_TOKEN', '');
     state.clientTokens.length = 0;
     state.requiredGatewayToken = '';
+    state.listAccounts.mockReset().mockResolvedValue([{ id: 'account', name: 'Account' }]);
+    state.listWorkerNames.mockReset().mockResolvedValue([]);
+    state.request.mockReset().mockResolvedValue({ name: 'assets' });
     vi.mocked(readInstallationRecoverySecrets).mockReturnValue({
       databaseUrl: 'postgres://database',
     });
@@ -328,12 +338,60 @@ describe('installed platform upgrade', () => {
         yes: true,
       });
       expect(state.clientTokens).toEqual([state.requiredGatewayToken]);
+      expect(installPlatform).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ operatorApiToken: state.requiredGatewayToken }),
+      );
       expect(state.events).toContain('installer-finish');
       expect(state.createSecrets).toHaveBeenCalledWith(
         expect.objectContaining({
           checkpoint: expect.objectContaining({ managementApiToken: 'saved-manager' }),
         }),
       );
+    },
+  );
+
+  it.each(['account', 'workers', 'r2'] as const)(
+    'rejects denied %s access before taking locks or changing installation state',
+    async (resource) => {
+      state.manifest = recordInstallationResource(
+        state.manifest!,
+        {
+          configHash: 'hash',
+          id: 'assets',
+          key: 'assets-r2',
+          kind: 'r2-bucket',
+          name: 'assets',
+          ownership: 'created',
+          state: 'ready',
+        },
+        '2026-09-14T00:00:03.000Z',
+      );
+      const check =
+        resource === 'account'
+          ? state.listAccounts
+          : resource === 'workers'
+            ? state.listWorkerNames
+            : state.request;
+      check.mockRejectedValueOnce(new PlatformCloudflareApiError('Authentication error', 403));
+      await expect(
+        runInstalledPlatformCommand({
+          plan: false,
+          runtime: '',
+          selector: state.manifest.id,
+          subcommand: 'upgrade',
+          yes: true,
+        }),
+      ).rejects.toThrow('HTTP 403');
+      expect(acquirePlatformLifecycleLock).not.toHaveBeenCalled();
+      expect(acquirePlatformDatabaseLifecycleLock).not.toHaveBeenCalled();
+      expect(writeInstallationManifest).not.toHaveBeenCalled();
+      expect(createPlatformInstallPlan).not.toHaveBeenCalled();
+      expect(installPlatform).not.toHaveBeenCalled();
+      expect(state.progress.start).not.toHaveBeenCalled();
+      expect(note).not.toHaveBeenCalled();
     },
   );
 
@@ -508,7 +566,7 @@ describe('installed platform upgrade', () => {
     expect(state.events).toEqual([]);
   });
 
-  it('stops progress when preparation fails before deployment starts', async () => {
+  it('does not claim deployment started when credential preparation fails', async () => {
     state.createSecrets.mockImplementationOnce(() => {
       throw new Error('invalid credentials');
     });
@@ -522,7 +580,9 @@ describe('installed platform upgrade', () => {
       }),
     ).rejects.toThrow('invalid credentials');
     expect(installPlatform).not.toHaveBeenCalled();
-    expect(state.progress.error).toHaveBeenCalledExactlyOnceWith('Platform upgrade failed.');
+    expect(state.progress.start).not.toHaveBeenCalled();
+    expect(state.progress.error).not.toHaveBeenCalled();
+    expect(vi.mocked(note).mock.calls).not.toContainEqual([expect.anything(), 'Recovery']);
     expect(state.events).toEqual(['outer-release', 'local-release']);
   });
 

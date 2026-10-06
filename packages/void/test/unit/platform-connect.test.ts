@@ -68,6 +68,9 @@ describe('platform discovery', () => {
       await runPlatformCommand('.', { subcommand: 'list' });
 
       expect(output).toHaveBeenCalledWith(expect.stringContaining(`connection: ${installed.id}`));
+      expect(
+        output.mock.calls.filter(([line]) => String(line).includes('(selected)')),
+      ).toHaveLength(1);
       expect(output).toHaveBeenCalledWith(`  installation: ${document.installationId}`);
       expect(output).toHaveBeenCalledWith(expect.stringContaining(`connection: ${connected.id}`));
       expect(

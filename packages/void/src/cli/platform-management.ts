@@ -20,6 +20,7 @@ import { platformDatabaseNameFromOwnerUrl } from './platform-auth-database.ts';
 import {
   assertPlatformOperatorCredentialCanApplyPlan,
   resolvePlatformCloudflareCredential,
+  verifyPlatformCloudflareCredential,
 } from './platform-auth.ts';
 import {
   hyperdriveOriginConfigHash,
@@ -232,6 +233,18 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     savedManagementToken: readInstallationRecoverySecrets(manifest)?.managementApiToken,
   });
   const operatorClient = new PlatformCloudflareClient(operatorCredential.token);
+  await verifyPlatformCloudflareCredential(operatorClient, {
+    account: manifest.account,
+    source: operatorCredential.source,
+    r2Buckets:
+      args.subcommand === 'disable' || args.subcommand === 'uninstall'
+        ? []
+        : manifest.resources
+            .filter((resource) => resource.kind === 'r2-bucket')
+            .map((resource) => resource.name),
+    allowMissingR2Buckets: args.subcommand === 'repair',
+  });
+  markPhase('operator credential');
   const runtime =
     args.subcommand === 'uninstall' || args.subcommand === 'disable'
       ? null
@@ -347,23 +360,6 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       return;
     }
     assertPlatformOperatorCredentialCanApplyPlan(operatorCredential, plan);
-    progress = createSpinner({
-      // Preserve the subprocess signal coordinator used by platform installs.
-      onCancel: () => {
-        if (!process.emit('SIGINT')) {
-          process.exit(130);
-        }
-      },
-    });
-    progress.start(
-      args.subcommand === 'upgrade'
-        ? 'Upgrading the platform'
-        : args.subcommand === 'rollback'
-          ? 'Rolling back the platform'
-          : args.subcommand === 'enable'
-            ? 'Enabling the platform'
-            : 'Repairing the platform',
-    );
     const repairingMissingRoutingCheckpoint =
       args.subcommand === 'repair' &&
       plan.actions.some(
@@ -398,9 +394,6 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       args.subcommand === 'enable'
         ? setInstallationDesiredState(manifest, 'enabled', new Date().toISOString())
         : manifest;
-    if (installation !== manifest) {
-      writeInstallationManifest(installation);
-    }
     const bootstrapGitHubLogin =
       process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN || recovery?.bootstrapGitHubLogin || '';
     const bootstrapGitHubId =
@@ -446,6 +439,26 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
         'platform: The database lifecycle lock cannot read authoritative authentication settings.',
       );
     }
+    progress = createSpinner({
+      // Preserve the subprocess signal coordinator used by platform installs.
+      onCancel: () => {
+        if (!process.emit('SIGINT')) {
+          process.exit(130);
+        }
+      },
+    });
+    progress.start(
+      args.subcommand === 'upgrade'
+        ? 'Upgrading the platform'
+        : args.subcommand === 'rollback'
+          ? 'Rolling back the platform'
+          : args.subcommand === 'enable'
+            ? 'Enabling the platform'
+            : 'Repairing the platform',
+    );
+    if (installation !== manifest) {
+      writeInstallationManifest(installation);
+    }
     const result = await installPlatform(plan, secrets, installation, {
       // runInstalledPlatformCommand holds the database session lock across the
       // entire replan and mutation sequence.
@@ -460,6 +473,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
           verifyDatabase: databaseLock?.verifyDatabase,
         }),
       client,
+      operatorApiToken: operatorCredential.token,
       databaseRollbackSource: rollbackSourceRuntime ?? undefined,
       onProgress: (message) => {
         markPhase(message);

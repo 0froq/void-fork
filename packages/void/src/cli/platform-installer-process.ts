@@ -44,6 +44,7 @@ export async function runPlatformWranglerAtApiBase(
   capture: boolean,
   apiBaseUrl: string = resolvePinnedApiBaseUrl(),
   parallelWorkerUpload = false,
+  apiToken?: string,
 ): Promise<CloudflareCommandResult> {
   const startedAt = performance.now();
   const runner = createDefaultRunWrangler(process.cwd(), {
@@ -54,6 +55,7 @@ export async function runPlatformWranglerAtApiBase(
   const result = await runner(operation, {
     accountId,
     apiBaseUrl,
+    apiToken,
     cwd,
   });
   if (process.env.VOID_PLATFORM_TIMINGS === '1') {
@@ -292,11 +294,13 @@ export async function runPlatformWranglerForConditionalCreate(
   capture: boolean,
   workerName: string,
   upstreamApiBaseUrl: string,
+  apiToken?: string,
 ): Promise<CloudflareCommandResult> {
   return withConditionalPlatformWorkerCreate(
     accountId,
     workerName,
-    (apiBaseUrl) => runPlatformWranglerAtApiBase(operation, accountId, cwd, capture, apiBaseUrl),
+    (apiBaseUrl) =>
+      runPlatformWranglerAtApiBase(operation, accountId, cwd, capture, apiBaseUrl, false, apiToken),
     upstreamApiBaseUrl,
   );
 }

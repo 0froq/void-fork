@@ -202,13 +202,31 @@ export async function installPlatform(
     accountId,
     cwd,
     capture,
-  ) => runPlatformWranglerAtApiBase(operation, accountId, cwd, capture, cloudflareApiBaseUrl);
+  ) =>
+    runPlatformWranglerAtApiBase(
+      operation,
+      accountId,
+      cwd,
+      capture,
+      cloudflareApiBaseUrl,
+      false,
+      dependencies.operatorApiToken,
+    );
   const runParallelPinnedPlatformWrangler: typeof runPlatformWrangler = (
     operation,
     accountId,
     cwd,
     capture,
-  ) => runPlatformWranglerAtApiBase(operation, accountId, cwd, capture, cloudflareApiBaseUrl, true);
+  ) =>
+    runPlatformWranglerAtApiBase(
+      operation,
+      accountId,
+      cwd,
+      capture,
+      cloudflareApiBaseUrl,
+      true,
+      dependencies.operatorApiToken,
+    );
   const resolvedRuntime = dependencies.runtime ?? resolvePlatformRuntime();
   const runtimeDirectory = resolvedRuntime.directory;
   const runtime = resolvedRuntime.manifest;

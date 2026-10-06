@@ -873,66 +873,71 @@ it('uses the configured HTTP proxy for cf resource requests', async () => {
   }
 }, 30_000);
 
-it('stops a prebuilt platform upload before cf can create a missing R2 bucket', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'void-cf-platform-r2-preflight-'));
-  const requests: Array<string> = [];
-  const api = createServer((request, response) => {
-    requests.push(`${request.method} ${request.url}`);
-    response.statusCode = 404;
-    response.setHeader('Content-Type', 'application/json');
-    response.end(JSON.stringify({ success: false, errors: [{ code: 10006 }] }));
-  });
-  await new Promise<void>((resolve) => api.listen(0, '127.0.0.1', resolve));
-  try {
-    const configPath = join(directory, 'wrangler.json');
-    writeFileSync(
-      join(directory, 'index.js'),
-      'export default { fetch() { return new Response("ok") } };',
-    );
-    writeFileSync(
-      configPath,
-      JSON.stringify({
-        name: 'test-worker',
-        account_id: 'test-account',
-        compatibility_date: '2026-09-29',
-        main: 'index.js',
-        no_bundle: true,
-        r2_buckets: [{ binding: 'ASSETS', bucket_name: 'missing-bucket' }],
-      }),
-    );
-    const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
-    const output = await new Promise<{ status: number; stderr: string }>((resolve) => {
-      execFile(
-        command!,
-        [...prefix, ...encodeCloudflareOperation({ type: 'versions.upload', configPath })],
-        {
-          cwd: directory,
-          timeout: 20_000,
-          env: {
-            ...process.env,
-            CF_API_TOKEN: 'synthetic-token',
-            CLOUDFLARE_ACCOUNT_ID: 'test-account',
-            CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${(api.address() as AddressInfo).port}/client/v4`,
-            HTTP_PROXY: '',
-            HTTPS_PROXY: '',
-            http_proxy: '',
-            https_proxy: '',
-          },
-        },
-        (error, _stdout, stderr) => resolve({ status: error ? 1 : 0, stderr }),
+it.each([401, 403, 404, 503])(
+  'stops a prebuilt platform upload before cf can provision an unavailable R2 bucket (HTTP %s)',
+  async (status) => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-cf-platform-r2-preflight-'));
+    const requests: Array<string> = [];
+    const api = createServer((request, response) => {
+      requests.push(`${request.method} ${request.url}`);
+      response.statusCode = status;
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({ success: false, errors: [{ code: 10006 }] }));
+    });
+    await new Promise<void>((resolve) => api.listen(0, '127.0.0.1', resolve));
+    try {
+      const configPath = join(directory, 'wrangler.json');
+      writeFileSync(
+        join(directory, 'index.js'),
+        'export default { fetch() { return new Response("ok") } };',
       );
-    });
-    expect(output.status).toBe(1);
-    expect(output.stderr).toContain('refusing automatic provisioning');
-    expect(requests).toEqual(['GET /client/v4/accounts/test-account/r2/buckets/missing-bucket']);
-  } finally {
-    await new Promise<void>((resolve) => {
-      api.close(() => resolve());
-      api.closeAllConnections();
-    });
-    rmSync(directory, { recursive: true, force: true });
-  }
-}, 30_000);
+      writeFileSync(
+        configPath,
+        JSON.stringify({
+          name: 'test-worker',
+          account_id: 'test-account',
+          compatibility_date: '2026-09-29',
+          main: 'index.js',
+          no_bundle: true,
+          r2_buckets: [{ binding: 'ASSETS', bucket_name: 'missing-bucket' }],
+        }),
+      );
+      const [command, ...prefix] = resolveCloudflareOperationArgv(directory);
+      const output = await new Promise<{ status: number; stderr: string }>((resolve) => {
+        execFile(
+          command!,
+          [...prefix, ...encodeCloudflareOperation({ type: 'versions.upload', configPath })],
+          {
+            cwd: directory,
+            timeout: 20_000,
+            env: {
+              ...process.env,
+              CF_API_TOKEN: 'synthetic-token',
+              CLOUDFLARE_ACCOUNT_ID: 'test-account',
+              CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${(api.address() as AddressInfo).port}/client/v4`,
+              HTTP_PROXY: '',
+              HTTPS_PROXY: '',
+              http_proxy: '',
+              https_proxy: '',
+            },
+          },
+          (error, _stdout, stderr) => resolve({ status: error ? 1 : 0, stderr }),
+        );
+      });
+      expect(output.status).toBe(1);
+      expect(output.stderr).toContain('refusing automatic provisioning');
+      expect(output.stderr).toContain(`HTTP ${status}`);
+      expect(requests).toEqual(['GET /client/v4/accounts/test-account/r2/buckets/missing-bucket']);
+    } finally {
+      await new Promise<void>((resolve) => {
+        api.close(() => resolve());
+        api.closeAllConnections();
+      });
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+  30_000,
+);
 
 it('allows a prebuilt platform upload when named resources already exist', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'void-cf-platform-resource-preflight-'));

@@ -8,7 +8,9 @@ import {
   resolvePlatformCloudflareCredentialWithInput,
   platformOperatorNeedsManagementToken,
   verifyPlatformManagementAccess,
+  verifyPlatformCloudflareCredential,
 } from '../../src/cli/platform-auth.ts';
+import { PlatformCloudflareClient } from '../../src/cli/platform-cloudflare.ts';
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
@@ -25,6 +27,106 @@ afterEach(() => {
 });
 
 describe('platform Cloudflare authentication', () => {
+  it('verifies the selected account, Workers and installed R2 buckets using only reads', async () => {
+    const paths: Array<string> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (url, init) => {
+        expect(init?.method ?? 'GET').toBe('GET');
+        const path = new URL(String(url)).pathname;
+        paths.push(path);
+        const result = path.endsWith('/accounts')
+          ? [{ id: 'account', name: 'Account' }]
+          : path.endsWith('/workers/scripts')
+            ? []
+            : { name: 'assets' };
+        return Response.json({ success: true, result });
+      },
+    });
+    await verifyPlatformCloudflareCredential(client, {
+      account: { id: 'account', name: 'Account' },
+      source: 'saved',
+      r2Buckets: ['assets'],
+    });
+    expect(paths).toEqual([
+      '/client/v4/accounts',
+      '/client/v4/accounts/account/workers/scripts',
+      '/client/v4/accounts/account/r2/buckets/assets',
+    ]);
+  });
+
+  it('rejects credentials scoped to another account before reading its resources', async () => {
+    const client = {
+      listAccounts: async () => [{ id: 'other', name: 'Other' }],
+      listWorkerNames: vi.fn(),
+      request: vi.fn(),
+    };
+    await expect(
+      verifyPlatformCloudflareCredential(client as never, {
+        account: { id: 'account', name: 'Account' },
+        source: 'environment',
+        r2Buckets: [],
+      }),
+    ).rejects.toThrow('cannot access Cloudflare account "Account" (account)');
+    expect(client.listWorkerNames).not.toHaveBeenCalled();
+    expect(client.request).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 403, 429, 503])(
+    'reports an R2 credential check failure with HTTP %s without echoing provider secrets',
+    async (status) => {
+      const client = new PlatformCloudflareClient('token', {
+        fetcher: async (url) => {
+          const path = new URL(String(url)).pathname;
+          return path.includes('/r2/')
+            ? Response.json({ success: false, errors: [{ message: 'secret-token' }] }, { status })
+            : Response.json({
+                success: true,
+                result: path.endsWith('/accounts') ? [{ id: 'account', name: 'Account' }] : [],
+              });
+        },
+      });
+      const error = await verifyPlatformCloudflareCredential(client, {
+        account: { id: 'account', name: 'Account' },
+        source: 'saved',
+        r2Buckets: ['assets'],
+      }).catch((error) => error);
+      expect(error.message).toContain(`HTTP ${status}`);
+      expect(error.message).toContain('saved management token');
+      expect(error.message).not.toContain('secret-token');
+      expect(error.message).toContain(
+        status === 401 || status === 403 ? 'Workers R2 Storage → Edit' : 'Retry',
+      );
+    },
+  );
+
+  it.each([false, true])(
+    'only permits a missing bucket when repairing (repair: %s)',
+    async (repair) => {
+      const client = new PlatformCloudflareClient('token', {
+        fetcher: async (url) => {
+          const path = new URL(String(url)).pathname;
+          return path.includes('/r2/')
+            ? Response.json({ success: false }, { status: 404 })
+            : Response.json({
+                success: true,
+                result: path.endsWith('/accounts') ? [{ id: 'account', name: 'Account' }] : [],
+              });
+        },
+      });
+      const promise = verifyPlatformCloudflareCredential(client, {
+        account: { id: 'account', name: 'Account' },
+        source: 'saved',
+        r2Buckets: ['assets'],
+        allowMissingR2Buckets: repair,
+      });
+      if (repair) {
+        await expect(promise).resolves.toBeUndefined();
+      } else {
+        await expect(promise).rejects.toThrow('R2 bucket "assets" is unavailable (HTTP 404)');
+      }
+    },
+  );
+
   it('requires a management token for Access even without DNS writes', () => {
     const credential = { source: 'oauth' as const, token: 'browser' };
     const plan = { actions: [] };
