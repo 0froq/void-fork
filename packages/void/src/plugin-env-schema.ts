@@ -106,10 +106,10 @@ function stripLocalClientEnv(
   }
 }
 
-/** Vite resolves symlinks in `root` (and so `envDir`); compare real paths. */
+/** Match Vite's canonical paths, including Windows short names and filesystem casing. */
 function realDir(dir: string): string {
   try {
-    return realpathSync(dir);
+    return realpathSync.native(dir);
   } catch {
     return resolve(dir);
   }

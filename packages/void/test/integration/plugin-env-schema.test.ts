@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { build, createBuilder, resolveConfig, type InlineConfig } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { envClientFoldPlugin } from '../../src/plugin-env-client-fold.ts';
@@ -244,6 +244,21 @@ describe('envSchemaPlugin auto-discovery', () => {
     const code = await buildEntry(root);
 
     expect(code).toContain('"shell-api"');
+    expect(code).not.toContain('local-api');
+  });
+
+  it('strips local client values when Vite canonicalizes the root casing', async (context) => {
+    const root = createTempRoot();
+    const aliasedRoot = join(dirname(root), basename(root).toUpperCase());
+    if (!existsSync(aliasedRoot)) {
+      context.skip();
+    }
+    writeFileSync(join(root, '.env'), 'VITE_API=local-api\n');
+    writeFileSync(join(root, 'entry.js'), 'export const api = import.meta.env.VITE_API;\n');
+    vi.stubEnv('VITE_API', undefined);
+
+    const code = await buildEntry(aliasedRoot);
+
     expect(code).not.toContain('local-api');
   });
 

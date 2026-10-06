@@ -645,7 +645,10 @@ describe('react-pages client (dev)', () => {
       });
 
       const serverTimeout = process.platform === 'win32' ? 45_000 : 20_000;
-      await waitForServer(DEV_BASE, serverTimeout);
+      await waitForServer(DEV_BASE, serverTimeout, {
+        isAlive: () => child.exitCode === null && child.signalCode === null,
+        diagnostics: collectServerOutput(child),
+      });
       const paths = ['/', '/users', '/action-error', '/router-params/alpha', '/visit-await'];
       coldStartResponses.push(
         ...(await Promise.all(
