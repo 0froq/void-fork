@@ -92,20 +92,17 @@ async function resolveConnection(selector: string): Promise<PlatformConnection> 
   return selectPlatformConnection(String(picked));
 }
 
-function showConnection(connection: PlatformConnection, activeId: string | null): void {
-  const marker = connection.id === activeId ? pc.green('●') : pc.dim('○');
-  console.log(
-    `${marker} ${pc.bold(connection.displayName)}${connection.id === activeId ? pc.dim(' (selected)') : ''}  ${pc.dim(`connection: ${connection.id}`)}`,
-  );
+function showPlatform(connection: PlatformConnection): void {
+  console.log(`  ${pc.bold(connection.displayName)} ${pc.dim(connection.id)}`);
   if (connection.installationId) {
-    console.log(`  installation: ${connection.installationId}`);
+    console.log(`    installation: ${connection.installationId}`);
   }
-  console.log(`  ${connection.apiUrl}`);
+  console.log(`    ${connection.apiUrl}`);
   if (connection.applicationDomain) {
     console.log(
       connection.applicationDomain.endsWith('.workers.dev')
-        ? '  apps: workers.dev (testing)'
-        : `  apps: *.${connection.applicationDomain}`,
+        ? '    apps: workers.dev (testing)'
+        : `    apps: *.${connection.applicationDomain}`,
     );
   }
 }
@@ -163,9 +160,23 @@ export async function runPlatformCommand(_root: string, args: PlatformArgs): Pro
       log.info('No platforms configured. Run `void connect <url>`.');
       return;
     }
-    const activeId = getActivePlatformConnection()?.id ?? null;
-    for (const connection of connections) {
-      showConnection(connection, activeId);
+    const active = getActivePlatformConnection();
+    if (active) {
+      console.log(pc.bold('Currently selected platform:'));
+      showPlatform(active);
+    } else {
+      console.log('No platform selected.');
+    }
+    const others = connections.filter((connection) => connection.id !== active?.id);
+    if (others.length > 0) {
+      console.log('');
+      console.log('Other platforms (run `void platform use <id>` to select one):');
+      for (const [index, connection] of others.entries()) {
+        if (index > 0) {
+          console.log('');
+        }
+        showPlatform(connection);
+      }
     }
     return;
   }

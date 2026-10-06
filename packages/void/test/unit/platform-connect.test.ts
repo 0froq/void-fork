@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
@@ -41,7 +42,7 @@ afterEach(() => {
 });
 
 describe('platform discovery', () => {
-  it('lists labeled connection and installation IDs for platform commands', async () => {
+  it('groups the current platform first and explains how to select another platform', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-list-'));
     vi.stubEnv('VOID_PLATFORM_REGISTRY_DIR', directory);
     const output = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -67,17 +68,18 @@ describe('platform discovery', () => {
 
       await runPlatformCommand('.', { subcommand: 'list' });
 
-      expect(output).toHaveBeenCalledWith(expect.stringContaining(`connection: ${installed.id}`));
-      expect(
-        output.mock.calls.filter(([line]) => String(line).includes('(selected)')),
-      ).toHaveLength(1);
-      expect(output).toHaveBeenCalledWith(`  installation: ${document.installationId}`);
-      expect(output).toHaveBeenCalledWith(expect.stringContaining(`connection: ${connected.id}`));
-      expect(
-        output.mock.calls.filter(([line]) => String(line).includes('installation:')),
-      ).toHaveLength(1);
-      expect(output).toHaveBeenCalledWith(`  ${document.apiUrl}`);
-      expect(output).toHaveBeenCalledWith(`  apps: *.${document.applicationDomain}`);
+      expect(output.mock.calls.map(([line]) => stripVTControlCharacters(String(line)))).toEqual([
+        'Currently selected platform:',
+        `  Hosted ${connected.id}`,
+        '    https://hosted.example.com',
+        '    apps: *.hosted.example.com',
+        '',
+        'Other platforms (run `void platform use <id>` to select one):',
+        `  Example ${installed.id}`,
+        `    installation: ${document.installationId}`,
+        `    ${document.apiUrl}`,
+        `    apps: *.${document.applicationDomain}`,
+      ]);
     } finally {
       vi.restoreAllMocks();
       vi.unstubAllEnvs();
