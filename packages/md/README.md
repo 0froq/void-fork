@@ -1,6 +1,6 @@
 # @void/md
 
-Add Markdown routes to Void Pages with frontmatter, syntax highlighting, layouts, and interactive islands.
+Markdown adapter for [Void](https://void.cloud). Build content pages with frontmatter, syntax highlighting, layouts, and interactive islands alongside your application routes.
 
 ## Setup
 
@@ -25,4 +25,8 @@ export default defineConfig({
 
 Create `.md` files in `pages/`. The plugin also works with React, Svelte, and Solid.
 
-See [Markdown](https://void.cloud/guide/pages-routing/markdown) for frontmatter, themes, navigation, and plugin options, and [Islands](https://void.cloud/guide/pages-routing/islands) for interactive components. Repository verification is documented in [TESTING.md](../../TESTING.md).
+## Documentation
+
+See [Markdown](https://void.cloud/guide/pages-routing/markdown) for frontmatter, themes, navigation, and plugin options, and [Islands](https://void.cloud/guide/pages-routing/islands) for interactive components.
+
+Read the [Void documentation](https://void.cloud) online or use the Markdown guides and references in `node_modules/void/docs/`, included with the `void` package.

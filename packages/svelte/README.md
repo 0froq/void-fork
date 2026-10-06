@@ -1,10 +1,12 @@
 # @void/svelte
 
-Build server-rendered Void pages with Svelte 5, server loaders, and typed forms.
+Svelte adapter for [Void](https://void.cloud). Build server-rendered pages with typed server loaders, forms, layouts, and interactive islands.
+
+Requires Svelte 5.
 
 ## Setup
 
-Install alongside `void`:
+For a new app, run `npx void init` and choose Svelte. To add the adapter to an existing Void app:
 
 ```sh
 npm install @void/svelte
@@ -22,6 +24,8 @@ export default defineConfig({
 });
 ```
 
-Follow [Pages Routing](https://void.cloud/guide/pages-routing/overview) to add pages, then use [loaders](https://void.cloud/guide/pages-routing/loaders), [forms](https://void.cloud/guide/pages-routing/actions-and-forms), and [layouts](https://void.cloud/guide/pages-routing/layouts).
+## Documentation
 
-See the [adapter API reference](https://void.cloud/reference/api/pages) for plugin options and runtime helpers, and [TESTING.md](../../TESTING.md) for repository verification.
+Follow [Pages Routing](https://void.cloud/guide/pages-routing/overview) to add pages, then use [loaders](https://void.cloud/guide/pages-routing/loaders), [forms](https://void.cloud/guide/pages-routing/actions-and-forms), and [layouts](https://void.cloud/guide/pages-routing/layouts). See the [adapter API reference](https://void.cloud/reference/api/pages) for plugin options and runtime helpers.
+
+Read the [Void documentation](https://void.cloud) online or use the Markdown guides and references in `node_modules/void/docs/`, included with the `void` package.
