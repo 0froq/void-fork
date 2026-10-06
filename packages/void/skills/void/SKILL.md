@@ -79,7 +79,7 @@ the app's existing saved destination, including when the target project is new.
   `void/env`; follow `docs/guide/env-vars.md` for local and production values.
 - For platform setup, follow the pages linked from
   `docs/guide/self-hosted-platform.md`. Use `void platform list` to find the
-  connection or installation ID for maintenance. For recovery, use its documented resume
+  installation slug for maintenance. For recovery, use its documented resume
   or repair workflow and preserve the installation's credentials and resources.
 - Use `--plan` to review platform changes. If an operation has an uncertain
   outcome, inspect its status and events before retrying.

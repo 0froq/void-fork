@@ -45,7 +45,7 @@ function operatorHelpTree(): HelpTree {
                 ],
                 options: [
                   {
-                    command: '--connection <id-or-url>',
+                    command: '--connection <slug-or-url>',
                     description:
                       'Choose a registered connection; otherwise use VOID_API_URL or the active connection',
                   },
@@ -356,7 +356,10 @@ const HELP_TREE: HelpTree = {
               { command: 'sync', description: 'Continue pending account limit updates' },
             ],
             options: [
-              { command: '--connection <id-or-url>', description: 'Select a registered platform' },
+              {
+                command: '--connection <slug-or-url>',
+                description: 'Select a registered platform',
+              },
               {
                 command: '--file <path>',
                 description: 'Read plan settings and partial limits from JSON',
@@ -423,7 +426,10 @@ const HELP_TREE: HelpTree = {
               },
             ],
             options: [
-              { command: '--connection <id-or-url>', description: 'Select a registered platform' },
+              {
+                command: '--connection <slug-or-url>',
+                description: 'Select a registered platform',
+              },
               {
                 command: '--installation <id>',
                 description: 'Select recovery authority for protection or provider recovery',
@@ -470,7 +476,10 @@ const HELP_TREE: HelpTree = {
         },
       },
       list: basicSubcommand('List installed and connected platforms.', 'void platform list'),
-      use: basicSubcommand('Select the default Void platform.', 'void platform use [id]'),
+      use: basicSubcommand(
+        'Select the default Void platform by installation slug, name, saved ID, or API URL.',
+        'void platform use [id]',
+      ),
       status: basicSubcommand('Inspect a platform and its health.', 'void platform status [id]'),
       discover: {
         summary: 'Recover owned platform installations from Cloudflare.',

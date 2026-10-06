@@ -16,6 +16,7 @@ import {
   savePlatformConnection,
   selectPlatformConnection,
   listInstallationManifests,
+  platformConnectionSlug,
   type PlatformConnection,
 } from './platform-registry.ts';
 
@@ -76,7 +77,9 @@ async function resolveConnection(selector: string): Promise<PlatformConnection> 
     return selectPlatformConnection(connections[0]!.id);
   }
   if (!process.stdin.isTTY) {
-    throw new Error('platform: Multiple platforms are configured; specify an id or URL.');
+    throw new Error(
+      'platform: Multiple platforms are configured; specify a slug, name, ID, or URL.',
+    );
   }
   const picked = await select({
     message: 'Select a Void platform:',
@@ -92,11 +95,12 @@ async function resolveConnection(selector: string): Promise<PlatformConnection> 
   return selectPlatformConnection(String(picked));
 }
 
-function showPlatform(connection: PlatformConnection): void {
-  console.log(`  ${pc.bold(connection.displayName)} ${pc.dim(connection.id)}`);
-  if (connection.installationId) {
-    console.log(`    installation: ${connection.installationId}`);
-  }
+function showPlatform(
+  connection: PlatformConnection,
+  installations: ReadonlyArray<PlatformInstallationManifest>,
+): void {
+  const slug = platformConnectionSlug(connection, installations);
+  console.log(`  ${pc.bold(connection.displayName)}${slug ? ` ${pc.dim(`(${slug})`)}` : ''}`);
   console.log(`    ${connection.apiUrl}`);
   if (connection.applicationDomain) {
     console.log(
@@ -161,24 +165,25 @@ export async function runPlatformCommand(_root: string, args: PlatformArgs): Pro
       return;
     }
     const active = getActivePlatformConnection();
+    const installations = listInstallationManifests();
     if (active) {
       console.log(pc.blue(pc.bold('Currently selected platform:')));
-      showPlatform(active);
+      showPlatform(active, installations);
     } else {
       console.log('No platform selected.');
     }
     const others = connections.filter((connection) => connection.id !== active?.id);
     if (others.length > 0) {
       console.log('');
-      console.log(
-        `${pc.blue(pc.bold('Other platforms'))} ${pc.gray('(run `void platform use <id>` to select one):')}`,
-      );
+      console.log(pc.blue(pc.bold('Other platforms:')));
       for (const [index, connection] of others.entries()) {
         if (index > 0) {
           console.log('');
         }
-        showPlatform(connection);
+        showPlatform(connection, installations);
       }
+      console.log('');
+      console.log(pc.gray('run `void platform use <id>` to select one'));
     }
     return;
   }

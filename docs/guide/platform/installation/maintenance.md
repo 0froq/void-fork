@@ -6,7 +6,7 @@ outline: deep
 
 ## Resume, repair, recover, and upgrade
 
-Run `void platform list` to find platform and installation IDs. Lifecycle commands accept either ID, or an installation name. You can omit the ID when only one installation is configured. With several installations, choose one interactively or pass its ID in CI.
+Run `void platform list` to find the installation slug beside its name. Lifecycle commands accept this slug, an installation ID, or a saved connection ID. You can omit the selector when only one installation is configured. With several installations, choose one interactively or pass its slug or ID in CI.
 
 ### Resume an installation
 

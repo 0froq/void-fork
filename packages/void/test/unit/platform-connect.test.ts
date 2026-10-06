@@ -47,7 +47,7 @@ describe('platform discovery', () => {
     vi.stubEnv('VOID_PLATFORM_REGISTRY_DIR', directory);
     const output = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
-      const installed = savePlatformConnection({
+      savePlatformConnection({
         accountId: null,
         apiUrl: document.apiUrl,
         applicationDomain: document.applicationDomain,
@@ -56,7 +56,21 @@ describe('platform discovery', () => {
         kind: 'installed',
         proxyUrl: document.proxyUrl,
       });
-      const connected = savePlatformConnection({
+      writeInstallationManifest(
+        createPlatformInstallationManifest({
+          account: { id: 'account', name: 'Account' },
+          createdAt: '2026-10-06T00:00:00.000Z',
+          deployment: createPlatformDeploymentManifest({
+            application: { baseDomain: document.applicationDomain, zoneName: 'example.com' },
+            displayName: document.displayName,
+            installationSlug: 'example',
+          }),
+          id: document.installationId,
+          ownershipNonce: '0123456789abcdef0123456789abcdef',
+          platformVersion: '1.0.0',
+        }),
+      );
+      savePlatformConnection({
         accountId: null,
         apiUrl: 'https://hosted.example.com',
         applicationDomain: 'hosted.example.com',
@@ -70,15 +84,16 @@ describe('platform discovery', () => {
 
       expect(output.mock.calls.map(([line]) => stripVTControlCharacters(String(line)))).toEqual([
         'Currently selected platform:',
-        `  Hosted ${connected.id}`,
+        '  Hosted',
         '    https://hosted.example.com',
         '    apps: *.hosted.example.com',
         '',
-        'Other platforms (run `void platform use <id>` to select one):',
-        `  Example ${installed.id}`,
-        `    installation: ${document.installationId}`,
+        'Other platforms:',
+        '  Example (example)',
         `    ${document.apiUrl}`,
         `    apps: *.${document.applicationDomain}`,
+        '',
+        'run `void platform use <id>` to select one',
       ]);
     } finally {
       vi.restoreAllMocks();

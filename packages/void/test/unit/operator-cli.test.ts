@@ -1,6 +1,10 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  createPlatformDeploymentManifest,
+  createPlatformInstallationManifest,
+} from '@void/platform';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { hasHelpPage } from '../../src/cli/help.ts';
 import { operatorCommands, parseOperatorArgs } from '../../src/cli/operator-args.ts';
@@ -16,6 +20,7 @@ import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
 import {
   getActivePlatformConnection,
   savePlatformConnection,
+  writeInstallationManifest,
 } from '../../src/cli/platform-registry.ts';
 
 const keyring = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), remove: vi.fn() }));
@@ -487,6 +492,34 @@ describe('operator argument and help coverage', () => {
 });
 
 describe('operator credential isolation', () => {
+  it('resolves an installation slug without changing the active connection', () => {
+    const manifest = createPlatformInstallationManifest({
+      account: { id: 'account', name: 'Account' },
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: createPlatformDeploymentManifest({
+        application: { baseDomain: 'example.com', zoneName: 'example.com' },
+        displayName: 'Example',
+        installationSlug: 'example',
+      }),
+      id: 'example-a1b2c3d4',
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    writeInstallationManifest(manifest);
+    const installed = savePlatformConnection({
+      accountId: manifest.account.id,
+      apiUrl: 'https://api.example.com',
+      applicationDomain: 'example.com',
+      displayName: 'Friendly platform name',
+      installationId: manifest.id,
+      kind: 'installed',
+      proxyUrl: null,
+    });
+    const active = connect('https://other.example.com');
+    expect(resolveOperatorOrigin('example')).toBe(installed.apiUrl);
+    expect(getActivePlatformConnection()?.id).toBe(active.id);
+    expect(keyring.read).not.toHaveBeenCalled();
+  });
   it('uses only registered explicit connections, without changing the active connection', () => {
     const first = connect('https://one.example');
     const second = connect('https://two.example');

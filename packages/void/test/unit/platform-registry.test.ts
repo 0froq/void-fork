@@ -11,6 +11,8 @@ import {
   acquirePlatformLifecycleLock,
   assertPlatformInstallationSlugAvailable,
   getActivePlatformConnection,
+  findPlatformConnections,
+  platformConnectionSlug,
   listInstallationManifests,
   listPlatformConnections,
   normalizePlatformApiUrl,
@@ -156,6 +158,63 @@ describe('platform registry', () => {
     const manifest = exampleInstallation();
     writeInstallationManifest(manifest, directory);
     expect(listInstallationManifests(directory)).toEqual([manifest]);
+  });
+
+  it('resolves a local installation slug for selection without changing the default on lookup', () => {
+    const directory = temporaryRegistry();
+    const manifest = exampleInstallation();
+    writeInstallationManifest(manifest, directory);
+    const connection = savePlatformConnection(
+      {
+        accountId: manifest.account.id,
+        apiUrl: manifest.endpoints.apiUrl!,
+        applicationDomain: 'example.com',
+        displayName: 'Friendly platform name',
+        installationId: manifest.id,
+        kind: 'installed',
+        proxyUrl: null,
+      },
+      directory,
+    );
+    const before = readFileSync(join(directory, 'registry.json'), 'utf8');
+    expect(platformConnectionSlug(connection, [manifest])).toBe('example');
+    expect(findPlatformConnections('example', directory)).toEqual([connection]);
+    expect(readFileSync(join(directory, 'registry.json'), 'utf8')).toBe(before);
+    expect(selectPlatformConnection('example', directory).id).toBe(connection.id);
+    expect(
+      platformConnectionSlug({ ...connection, accountId: 'another-account' }, [manifest]),
+    ).toBeNull();
+    expect(platformConnectionSlug(connection, [{ ...manifest, status: 'uninstalled' }])).toBeNull();
+  });
+
+  it('refuses an ambiguous slug and lets an API URL select the intended account', () => {
+    const directory = temporaryRegistry();
+    const first = exampleInstallation();
+    const second = {
+      ...first,
+      account: { id: 'account_456', name: 'Other account' },
+      id: 'example-other',
+    };
+    for (const [index, manifest] of [first, second].entries()) {
+      writeInstallationManifest(manifest, directory);
+      savePlatformConnection(
+        {
+          accountId: manifest.account.id,
+          apiUrl: `https://api-${index}.example.com`,
+          applicationDomain: 'example.com',
+          displayName: `Platform ${index}`,
+          installationId: manifest.id,
+          kind: 'installed',
+          proxyUrl: null,
+        },
+        directory,
+      );
+    }
+    expect(findPlatformConnections('example', directory)).toHaveLength(2);
+    expect(() => selectPlatformConnection('example', directory)).toThrow('More than one platform');
+    expect(selectPlatformConnection('https://api-0.example.com', directory).installationId).toBe(
+      first.id,
+    );
   });
 
   it('resolves connection IDs to local installations without changing the active connection', () => {

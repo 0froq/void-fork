@@ -2,7 +2,7 @@ import { deleteKeyringPassword, readKeyringPassword, writeKeyringPassword } from
 import { OperatorClient, OperatorClientError } from './operator-client.ts';
 import {
   getActivePlatformConnection,
-  listPlatformConnections,
+  findPlatformConnections,
   normalizePlatformApiUrl,
   platformCredentialAccount,
 } from './platform-registry.ts';
@@ -12,21 +12,10 @@ export const OPERATOR_KEYRING_SERVICE = 'dev.void.cli.operator';
 /** Operator authority never comes from repository-controlled metadata. */
 export function resolveOperatorOrigin(connection = ''): string {
   if (connection) {
-    let normalized: string | null = null;
-    try {
-      normalized = normalizePlatformApiUrl(connection);
-    } catch {
-      /* An ID is also valid. */
-    }
-    const matches = listPlatformConnections().filter(
-      (entry) =>
-        entry.id === connection ||
-        entry.installationId === connection ||
-        entry.apiUrl === normalized,
-    );
+    const matches = findPlatformConnections(connection);
     if (matches.length !== 1) {
       throw new OperatorClientError(
-        'Select a registered platform connection ID or URL. Run `void connect <url> --no-login` to register it first.',
+        'Select a registered platform slug or URL. Run `void connect <url> --no-login` to register it first.',
         'invalid_connection',
       );
     }

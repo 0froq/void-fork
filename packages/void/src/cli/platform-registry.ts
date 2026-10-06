@@ -286,6 +286,44 @@ export function getActivePlatformConnection(
   );
 }
 
+export function platformConnectionSlug(
+  connection: PlatformConnection,
+  installations: ReadonlyArray<PlatformInstallationManifest>,
+): string | null {
+  const matches = installations.filter(
+    (manifest) =>
+      manifest.status !== 'uninstalled' &&
+      manifest.id === connection.installationId &&
+      (connection.accountId === null || connection.accountId === manifest.account.id),
+  );
+  return matches.length === 1 ? matches[0]!.deployment.installationSlug : null;
+}
+
+/** Resolve saved platforms without selecting one or changing its credentials. */
+export function findPlatformConnections(
+  selector: string,
+  directory: string = platformRegistryDirectory(),
+  connections: ReadonlyArray<PlatformConnection> = listPlatformConnections(directory),
+): ReadonlyArray<PlatformConnection> {
+  let normalizedUrl: string | null = null;
+  try {
+    normalizedUrl = normalizePlatformApiUrl(selector);
+  } catch {
+    // Names, slugs, and IDs are also valid selectors.
+  }
+  const installations = connections.some((connection) => connection.installationId)
+    ? listInstallationManifests(directory)
+    : [];
+  return connections.filter(
+    (entry) =>
+      entry.id === selector ||
+      entry.installationId === selector ||
+      entry.displayName.toLowerCase() === selector.toLowerCase() ||
+      entry.apiUrl === normalizedUrl ||
+      platformConnectionSlug(entry, installations) === selector.toLowerCase(),
+  );
+}
+
 export function savePlatformConnection(
   input: Omit<PlatformConnection, 'id' | 'lastUsedAt'> & { lastUsedAt?: string },
   directory: string = platformRegistryDirectory(),
@@ -314,20 +352,7 @@ export function selectPlatformConnection(
 ): PlatformConnection {
   return withRegistryLock(directory, () => {
     const current = readRegistry(directory);
-    const normalizedUrl = (() => {
-      try {
-        return normalizePlatformApiUrl(selector);
-      } catch {
-        return null;
-      }
-    })();
-    const matches = current.connections.filter(
-      (entry) =>
-        entry.id === selector ||
-        entry.installationId === selector ||
-        entry.displayName.toLowerCase() === selector.toLowerCase() ||
-        (normalizedUrl !== null && entry.apiUrl === normalizedUrl),
-    );
+    const matches = findPlatformConnections(selector, directory, current.connections);
     if (matches.length !== 1) {
       throw new Error(
         matches.length === 0
