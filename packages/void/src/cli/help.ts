@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { note, outro } from '@voidzero-dev/vite-plus-prompts';
+import { outro } from '@voidzero-dev/vite-plus-prompts';
 import { join } from 'pathslash';
 import { getPackageDir } from './agents.ts';
 import { asciiArts } from './ascii.ts';
 import { operatorCommands, operatorGroups } from './operator-args.ts';
-import { categoryTitle, helpLine, pc, sectionTitle } from './output.ts';
+import { categoryTitle, helpLine, note, pc, sectionTitle } from './output.ts';
 
 type HelpCommand = {
   command: string;
@@ -588,6 +588,11 @@ const HELP_TREE: HelpTree = {
           {
             command: '--purge-data',
             description: 'Delete installer-owned data even when it contains apps',
+          },
+          {
+            command: '--purge-resources',
+            description:
+              'Delete every resource the installation created (includes --purge-data); keeps zones, adopted resources, and PostgreSQL',
           },
           {
             command: '--keep-zone',

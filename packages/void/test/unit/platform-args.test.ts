@@ -172,10 +172,27 @@ describe('platform args', () => {
       selector: '',
       plan: false,
       purgeData: true,
+      purgeResources: false,
       deleteZone: false,
       yes: false,
     });
     expect(() => parsePlatformArgs(['uninstall', '--delete-zone', '--keep-zone'])).toThrow();
+  });
+
+  it('treats --purge-resources as a purge of data and every other created resource', () => {
+    expect(parsePlatformArgs(['uninstall', 'team', '--purge-resources', '--plan'])).toEqual({
+      subcommand: 'uninstall',
+      selector: 'team',
+      plan: true,
+      purgeData: true,
+      purgeResources: true,
+      deleteZone: null,
+      yes: false,
+    });
+    expect(parsePlatformArgs(['uninstall', '--purge-data', '--purge-resources'])).toMatchObject({
+      purgeData: true,
+      purgeResources: true,
+    });
   });
 
   it('parses explicit lifecycle acknowledgement', () => {

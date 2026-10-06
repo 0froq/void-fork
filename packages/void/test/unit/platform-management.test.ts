@@ -15,7 +15,8 @@ import {
   type PlatformInstallationManifest,
   type ResourceOwnership,
 } from '@void/platform';
-import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
+import { log, note } from '@voidzero-dev/vite-plus-prompts';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   disablePlatform,
   resolvePlatformRuntimeTokenToPreflight,
@@ -29,6 +30,7 @@ import {
   platformProvisionIntentHash,
 } from '../../src/cli/platform-plan.ts';
 import {
+  installationManifestPath,
   listInstallationManifests,
   promoteInstallationSecrets,
   readInstallationRecoverySecrets,
@@ -41,9 +43,16 @@ import {
   readPlatformProjectZeroTrustStateConnection,
 } from '../../src/cli/platform-zero-trust-uninstall.ts';
 
+vi.mock('@voidzero-dev/vite-plus-prompts', async (original) => {
+  const actual = await original<typeof import('@voidzero-dev/vite-plus-prompts')>();
+  return { ...actual, log: { ...actual.log, success: vi.fn() }, note: vi.fn() };
+});
+
 const directories: Array<string> = [];
 
 beforeEach(() => {
+  vi.mocked(note).mockClear();
+  vi.mocked(log.success).mockClear();
   process.env.VOID_PLATFORM_RECOVERY_KEY = Buffer.alloc(32, 7).toString('base64');
 });
 
@@ -164,7 +173,10 @@ function client(manifest: PlatformInstallationManifest) {
     get removedRoutes() {
       return removedRoutes;
     },
-    deleteResource: async (_account: string, kind: string, id: string): Promise<void> => {
+    deleteResource: async (
+      _account: string,
+      { id, kind }: Readonly<{ id: string; kind: string; name: string }>,
+    ): Promise<void> => {
       // Like Cloudflare, refuse to delete a Queue while a platform Worker
       // still binds it.
       const bindingWorker = (await fake.listWorkerNames())[0];
@@ -296,11 +308,30 @@ function ownershipMarker(
   );
 }
 
+function noteText(title: string): string {
+  return String(
+    vi
+      .mocked(note)
+      .mock.calls.filter(([, noteTitle]) => noteTitle === title)
+      .at(-1)?.[0] ?? '',
+  );
+}
+
+function expectInOrder(text: string, lines: ReadonlyArray<string>): void {
+  const positions = lines.map((line) => text.indexOf(line));
+  expect(
+    positions.every((position) => position >= 0),
+    text,
+  ).toBe(true);
+  expect(positions, text).toEqual([...positions].sort((left, right) => left - right));
+}
+
 const uninstallArgs = {
   subcommand: 'uninstall' as const,
   selector: '',
   plan: false,
   purgeData: false,
+  purgeResources: false,
   deleteZone: null,
   yes: true,
 };
@@ -1138,6 +1169,19 @@ describe('platform lifecycle management', () => {
     expect(databaseCheckpoints.at(-1)?.status).toBe('disabled');
   });
 
+  it('describes the disable plan in user terms', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+
+    await disablePlatform(fake, manifest, true);
+
+    expect(noteText('Disable plan')).toBe(
+      'Block all platform traffic and the platform API. Routes, custom domains, Workers, and data stay installed.',
+    );
+    expect(fake.disabledWrites).toEqual([]);
+  });
+
   it('selects cross-host disabled and uninstalled state over a stale local manifest', () => {
     const local = installedManifest();
     const disabled = { ...local, desiredState: 'disabled' as const, status: 'disabled' as const };
@@ -1391,6 +1435,118 @@ describe('platform lifecycle management', () => {
     expect(retained).toHaveLength(15);
   });
 
+  it('lists every kept resource in manual cleanup order after uninstall', async () => {
+    const manifest = {
+      ...installedManifest(),
+      authenticationResources: [
+        {
+          key: 'login-access',
+          kind: 'application' as const,
+          accountId: 'account',
+          id: 'access-app-id',
+          name: 'login-access',
+          ownership: 'created' as const,
+        },
+      ],
+    };
+    persist(manifest);
+    const fake = client(manifest);
+
+    await uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies);
+
+    const kept = noteText('Kept for manual cleanup');
+    expectInOrder(kept, [
+      'dns-record: application-dns (application-dns-id)',
+      'queue: cron-queue (cron-queue-id)',
+      'queue: usage-queue (usage-queue-id)',
+      'worker: api-worker (void-example-api)',
+      'worker: dispatch-worker (void-example-dispatch)',
+      'dispatch-namespace: dispatch-namespace (dispatch-namespace-id)',
+      // Cloudflare refuses the tail Worker while other Workers send it logs.
+      'worker: tail-worker (void-example-tail)',
+      'kv-namespace: routing-kv (routing-kv-id)',
+      'hyperdrive: hyperdrive (hyperdrive-id)',
+      'r2-bucket: assets-bucket (assets-bucket-id)',
+      'ai-gateway: ai-gateway (ai-gateway-id)',
+      'zone: zone (zone-id)',
+      'created application: login-access (access-app-id, account account)',
+    ]);
+    expect(vi.mocked(log.success).mock.calls.at(-1)?.[0]).toBe(
+      `Example was uninstalled. The full record is in ${installationManifestPath('account', manifest.id)}.`,
+    );
+  });
+
+  it('names the resources a purge plan keeps', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+
+    await uninstallPlatform(
+      fake,
+      manifest,
+      { ...uninstallArgs, plan: true, purgeData: true },
+      uninstallDependencies,
+    );
+
+    const plan = noteText('Uninstall plan');
+    expectInOrder(plan, [
+      'dns-record: application-dns (application-dns-id)',
+      'queue: usage-queue (usage-queue-id)',
+      'worker: api-worker (void-example-api)',
+      'r2-bucket: assets-bucket (assets-bucket-id)',
+      'ai-gateway: ai-gateway (ai-gateway-id)',
+      'zone: zone (zone-id)',
+    ]);
+    expect(plan).not.toContain('kv-namespace:');
+    expect(plan).not.toContain('hyperdrive:');
+    expect(plan).not.toContain('dispatch-namespace:');
+    expect(plan).not.toContain('Email Routing');
+    expect(fake.deleted).toEqual([]);
+  });
+
+  it('says Email Routing is kept when the installation sends email', async () => {
+    const base = installedManifest();
+    const manifest = {
+      ...base,
+      deployment: {
+        ...base.deployment,
+        capabilities: { ...base.deployment.capabilities, email: true },
+        emailSenderDomain: 'mail.example.com',
+        emailSharedZoneId: 'zone-id',
+      },
+    };
+    persist(manifest);
+    const fake = client(manifest);
+    const emailLine = `Email Routing for mail.example.com (zone zone-id): its routing DNS records and any catch-all rule that sends mail to ${base.deployment.resources.emailGatewayWorker}.`;
+
+    await uninstallPlatform(
+      fake,
+      manifest,
+      { ...uninstallArgs, plan: true },
+      uninstallDependencies,
+    );
+    expect(noteText('Uninstall plan')).toContain(emailLine);
+
+    await uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies);
+    expect(noteText('Kept for manual cleanup')).toContain(emailLine);
+  });
+
+  it('records an AI Gateway already removed in Cloudflare as deleted', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    fake.listAiGateways = async () => [];
+
+    await uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies);
+
+    expect(fake.deleted).toEqual([]);
+    expect(
+      listInstallationManifests()[0]?.resources.find((resource) => resource.key === 'ai-gateway')
+        ?.state,
+    ).toBe('deleted');
+    expect(noteText('Kept for manual cleanup')).not.toContain('ai-gateway:');
+  });
+
   it('refuses automatic deletion of an installer-created zone', async () => {
     const manifest = installedManifest();
     persist(manifest);
@@ -1509,11 +1665,11 @@ describe('platform lifecycle management', () => {
     persist(manifest);
     const first = client(manifest);
     const originalDelete = first.deleteResource;
-    first.deleteResource = async (account, kind, id) => {
-      if (kind === 'dispatch-namespace') {
+    first.deleteResource = async (account, resource) => {
+      if (resource.kind === 'dispatch-namespace') {
         throw new Error('temporary deletion failure');
       }
-      await originalDelete(account, kind, id);
+      await originalDelete(account, resource);
     };
     await expect(
       uninstallPlatform(
@@ -1620,9 +1776,9 @@ describe('platform lifecycle management', () => {
     persist(manifest);
     const first = client(manifest);
     const originalDelete = first.deleteResource;
-    first.deleteResource = async (account, kind, id) => {
-      await originalDelete(account, kind, id);
-      if (kind === 'kv-namespace' && id === 'routing-kv-id') {
+    first.deleteResource = async (account, resource) => {
+      await originalDelete(account, resource);
+      if (resource.kind === 'kv-namespace' && resource.id === 'routing-kv-id') {
         throw new Error('connection closed after routing deletion');
       }
     };

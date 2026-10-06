@@ -58,6 +58,7 @@ import { type ApiEnv, isDevBypass } from '../env.ts';
 import { validateSubmittedExecutionPlans } from '../migrations/execution-plan.ts';
 import { ensureTrackingTable, queryD1, runRemoteMigrations } from '../migrations/remote-runner.ts';
 import { getProjectDeploymentWorkerName, getProjectQueueName } from '../naming.ts';
+import { LOG_ROW_GROUP_BY } from '../observability/log-rows.ts';
 import { resolvePlan, resolvePlanLimits } from '../plans.ts';
 import { PROJECT_PERMISSION_MESSAGES } from '../project-access.ts';
 import { encryptProjectSecret, decryptProjectSecret } from '../project-secrets.ts';
@@ -88,7 +89,8 @@ import {
   resolveRoutingUndo,
 } from '../routing.ts';
 import type { Build, DeployManifest, Project, ProjectRole, User } from '../types.ts';
-import { zeroTrustNotReadyMessage } from '../zero-trust/errors.ts';
+import { ZeroTrustUnavailableError, zeroTrustNotReadyMessage } from '../zero-trust/errors.ts';
+import { lockZeroTrustConfiguration } from '../zero-trust/lock.ts';
 import { initializeNewProjectZeroTrust } from '../zero-trust/project.ts';
 import {
   resolveProjectZeroTrustRouting,
@@ -742,7 +744,13 @@ const app = new Hono<ApiEnv>()
 
     const userId = context.get('user').id;
     try {
-      const project = await createProject(context.get('db'), userId, body.slug);
+      // `void platform uninstall --purge-resources` holds this lock across its last
+      // check for projects and records the uninstall before releasing it, so a
+      // project either commits before that check or is refused here.
+      const project = await context.get('db').transaction(async (tx) => {
+        await lockZeroTrustConfiguration(tx, 'shared');
+        return createProject(tx, userId, body.slug);
+      });
       let zeroTrust: Awaited<ReturnType<typeof initializeNewProjectZeroTrust>> = null;
       let zeroTrustWarning: string | undefined;
       try {
@@ -813,6 +821,14 @@ const app = new Hono<ApiEnv>()
         201,
       );
     } catch (err) {
+      // Only the configuration lock above throws this here: the uninstall
+      // record exists.
+      if (err instanceof ZeroTrustUnavailableError) {
+        return context.json(
+          { error: 'The platform is being uninstalled, so new projects cannot be created.' },
+          err.status,
+        );
+      }
       // Unique constraint violation — slug was taken between check and insert
       if (
         err instanceof Error &&
@@ -2668,11 +2684,12 @@ const app = new Hono<ApiEnv>()
         blob6 as statusCode,
         blob7 as deployId,
         double1 as ts,
-        timestamp
+        min(timestamp) as ingestedAt
       FROM ${dataset}
       WHERE index1 = '${workerName}'
         AND timestamp >= toDateTime('${sinceStr}')${deployFilter}${levelFilter}
-      ORDER BY timestamp DESC
+      ${LOG_ROW_GROUP_BY}
+      ORDER BY ingestedAt DESC
       LIMIT ${limit}
     `;
 

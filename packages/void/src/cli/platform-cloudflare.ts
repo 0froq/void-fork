@@ -41,6 +41,8 @@ export class PlatformWorkerRoutesChangedError extends Error {
 
 export type CloudflareAccount = Readonly<{ id: string; name: string }>;
 export type CloudflareNamedResource = Readonly<{
+  /** When Cloudflare created it, where the API reports that. */
+  createdAt?: string;
   fingerprint?: string;
   id: string;
   name: string;
@@ -90,6 +92,28 @@ export type CloudflareWorkerServiceRoute = Readonly<{
   pattern: string;
   zoneName: string;
 }>;
+/** What still depends on a Worker, as `wrangler delete` reads it before forcing. */
+export type CloudflareWorkerDependents = Readonly<{
+  /**
+   * Workers that use it through a service binding, a Durable Object namespace
+   * it implements, a dispatch namespace outbound, or as their tail Worker.
+   */
+  workers: ReadonlyArray<string>;
+  /** A Pages project binds to it; Cloudflare does not name the project. */
+  pagesFunction: boolean;
+}>;
+export type CloudflareQueueConsumer = Readonly<{
+  id: string;
+  /** Worker that consumes the Queue (`script_name`); null for an HTTP pull consumer. */
+  script: string | null;
+}>;
+export type PlatformAccessResourceKind = 'application' | 'service-token';
+export type CloudflareEmailRoutingCatchAll = Readonly<{
+  enabled: boolean;
+  /** The Worker that receives mail; null unless its only action is one Worker. */
+  workerName: string | null;
+}>;
+export type CloudflareEmailRoutingRule = CloudflareEmailRoutingCatchAll & Readonly<{ id: string }>;
 export type PlatformManagedWorkerTraffic = Readonly<{
   customDomains: ReadonlyArray<Readonly<{ hostname: string; service: string }>>;
   routes: ReadonlyArray<Readonly<{ pattern: string; script: string }>>;
@@ -220,11 +244,7 @@ export class PlatformCloudflareClient {
       );
     }
     if (!response.ok || envelope.success !== true || envelope.result === undefined) {
-      const details =
-        envelope.errors
-          ?.map((error) => error.message)
-          .filter(Boolean)
-          .join(', ') || `HTTP ${response.status}`;
+      const details = cloudflareErrorDetails(envelope, response.status);
       throw new PlatformCloudflareApiError(
         `Cloudflare API error: ${details} (HTTP ${response.status}; ${init?.method ?? 'GET'} ${path.split('?')[0]}).`,
         response.status,
@@ -284,9 +304,9 @@ export class PlatformCloudflareClient {
     if (this.#aiGatewayClient) {
       return this.#aiGatewayClient.listAiGateways(accountId);
     }
-    const entries: Array<{ id?: unknown }> = [];
+    const entries: Array<{ created_at?: unknown; id?: unknown }> = [];
     for (let page = 1; ; page++) {
-      const result = await this.request<ReadonlyArray<{ id?: unknown }>>(
+      const result = await this.request<ReadonlyArray<{ created_at?: unknown; id?: unknown }>>(
         `/accounts/${encodeURIComponent(accountId)}/ai-gateway/gateways?page=${page}&per_page=50`,
       );
       entries.push(...result);
@@ -295,6 +315,7 @@ export class PlatformCloudflareClient {
       }
     }
     return entries.map((entry) => ({
+      ...withCreatedAt(entry.created_at),
       id: requiredString(entry.id, 'AI Gateway id'),
       name: requiredString(entry.id, 'AI Gateway id'),
     }));
@@ -947,6 +968,8 @@ export class PlatformCloudflareClient {
     accountId: string,
     bucketName: string,
     preservedKeys: ReadonlySet<string> = new Set(),
+    /** Runs before each page of deletes; throw to stop emptying the bucket. */
+    beforeDelete?: () => Promise<void>,
   ): Promise<void> {
     let cursor = '';
     const observedCursors = new Set<string>();
@@ -985,6 +1008,9 @@ export class PlatformCloudflareClient {
       const keys = envelope.result
         .map((object) => requiredString(object.key, 'R2 object key'))
         .filter((key) => !preservedKeys.has(key));
+      if (keys.length > 0) {
+        await beforeDelete?.();
+      }
       for (let offset = 0; offset < keys.length; offset += 1000) {
         await this.deleteR2Objects(accountId, bucketName, keys.slice(offset, offset + 1000));
       }
@@ -1023,12 +1049,19 @@ export class PlatformCloudflareClient {
 
   async deleteResource(
     accountId: string,
-    kind: string,
-    id: string,
+    resource: Readonly<{ id: string; kind: string; name: string }>,
     zoneId?: string,
   ): Promise<void> {
+    const { kind } = resource;
+    if (kind === 'ai-gateway' && this.#aiGatewayClient) {
+      return this.#aiGatewayClient.deleteResource(accountId, resource, zoneId);
+    }
     const account = encodeURIComponent(accountId);
-    const encoded = encodeURIComponent(id);
+    // Cloudflare addresses dispatch namespaces and Workers by name; every
+    // other kind by id.
+    const encoded = encodeURIComponent(
+      kind === 'dispatch-namespace' || kind === 'worker' ? resource.name : resource.id,
+    );
     const path =
       kind === 'kv-namespace'
         ? `/accounts/${account}/storage/kv/namespaces/${encoded}`
@@ -1054,14 +1087,230 @@ export class PlatformCloudflareClient {
     if (!path) {
       throw new Error(`platform: Unsupported Cloudflare deletion kind ${kind}.`);
     }
+    await this.#deleteIfPresent(path);
+  }
+
+  /**
+   * DELETE one resource by the key Cloudflare addresses it with. Only
+   * `forceDeleteWorker` sends `force`; otherwise Cloudflare refuses a
+   * resource another Worker still uses. A 404 means it is already gone.
+   */
+  async #deleteIfPresent(path: string): Promise<void> {
+    const response = await this.#fetcher(`${this.apiBaseUrl}${path}`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${this.#token}` },
+      method: 'DELETE',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (response.status === 404) {
+      return;
+    }
+    let envelope: CloudflareEnvelope<unknown> = {};
     try {
-      await this.request(path, { method: 'DELETE' });
+      envelope = (await response.json()) as CloudflareEnvelope<unknown>;
+    } catch {
+      // Judge an empty body by its status alone.
+      envelope = { success: response.ok };
+    }
+    if (!response.ok || envelope.success !== true) {
+      throw new PlatformCloudflareApiError(
+        `Cloudflare API error: ${cloudflareErrorDetails(envelope, response.status)} (HTTP ${response.status}; DELETE ${path}).`,
+        response.status,
+        path,
+      );
+    }
+  }
+
+  async deleteWorkerRoute(zoneId: string, routeId: string): Promise<void> {
+    await this.#deleteIfPresent(
+      `/zones/${encodeURIComponent(zoneId)}/workers/routes/${encodeURIComponent(routeId)}`,
+    );
+  }
+
+  async deleteWorkerDomain(accountId: string, domainId: string): Promise<void> {
+    await this.#deleteIfPresent(
+      `/accounts/${encodeURIComponent(accountId)}/workers/domains/${encodeURIComponent(domainId)}`,
+    );
+  }
+
+  async listQueueConsumers(
+    accountId: string,
+    queueId: string,
+  ): Promise<ReadonlyArray<CloudflareQueueConsumer>> {
+    const result = await this.request<ReadonlyArray<Record<string, unknown>>>(
+      `/accounts/${encodeURIComponent(accountId)}/queues/${encodeURIComponent(queueId)}/consumers`,
+    );
+    return result.map((entry) => ({
+      id: requiredString(entry.consumer_id, 'Queue consumer id'),
+      // The API documents `script_name`; Wrangler still reads `script` and
+      // `service`. A Worker consumer without a name would keep its Worker
+      // and Queue from being deleted, so refuse it instead of skipping it.
+      script:
+        entry.type === 'http_pull'
+          ? null
+          : requiredString(
+              entry.script_name ?? entry.script ?? entry.service,
+              'Queue consumer Worker name',
+            ),
+    }));
+  }
+
+  async listWorkerDependents(
+    accountId: string,
+    workerName: string,
+  ): Promise<CloudflareWorkerDependents> {
+    const account = encodeURIComponent(accountId);
+    const script = encodeURIComponent(workerName);
+    type Reference = Readonly<{ script?: unknown; service?: unknown }>;
+    const references = await this.request<{
+      dispatch_outbounds?: ReadonlyArray<Reference>;
+      durable_objects?: ReadonlyArray<Reference>;
+      services?: { incoming?: ReadonlyArray<Reference>; pages_function?: unknown };
+    }>(`/accounts/${account}/workers/scripts/${script}/references`);
+    const tails = await this.request<ReadonlyArray<{ producer?: Reference }>>(
+      `/accounts/${account}/workers/tails/by-consumer/${script}`,
+    );
+    const name = (reference: Reference | undefined) =>
+      requiredString(reference?.script ?? reference?.service, 'Dependent Worker name');
+    const workers = [
+      ...(references.services?.incoming ?? []).map(name),
+      // A Worker lists the Durable Object namespaces it implements itself.
+      ...(references.durable_objects ?? []).map(name).filter((entry) => entry !== workerName),
+      ...(references.dispatch_outbounds ?? []).map(name),
+      ...tails.map((tail) => name(tail.producer)),
+    ];
+    return {
+      pagesFunction: references.services?.pages_function === true,
+      workers: [...new Set(workers)],
+    };
+  }
+
+  /**
+   * DELETE a Worker even though other Workers still bind to it. Cloudflare
+   * leaves those bindings pointing at nothing, so callers first check that
+   * every dependent is going away too.
+   */
+  async forceDeleteWorker(accountId: string, workerName: string): Promise<void> {
+    await this.#deleteIfPresent(
+      `/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(workerName)}?force=true`,
+    );
+  }
+
+  async deleteQueueConsumer(accountId: string, queueId: string, consumerId: string): Promise<void> {
+    await this.#deleteIfPresent(
+      `/accounts/${encodeURIComponent(accountId)}/queues/${encodeURIComponent(queueId)}/consumers/${encodeURIComponent(consumerId)}`,
+    );
+  }
+
+  async listDispatchNamespaceScripts(
+    accountId: string,
+    namespace: string,
+  ): Promise<ReadonlyArray<string>> {
+    const result = await this.request<ReadonlyArray<{ id?: unknown }>>(
+      `/accounts/${encodeURIComponent(accountId)}/workers/dispatch/namespaces/${encodeURIComponent(namespace)}/scripts`,
+    );
+    return result.map((entry) => requiredString(entry.id, 'Dispatch namespace script name'));
+  }
+
+  async deleteDispatchNamespaceScript(
+    accountId: string,
+    namespace: string,
+    scriptName: string,
+  ): Promise<void> {
+    await this.#deleteIfPresent(
+      `/accounts/${encodeURIComponent(accountId)}/workers/dispatch/namespaces/${encodeURIComponent(namespace)}/scripts/${encodeURIComponent(scriptName)}`,
+    );
+  }
+
+  /** Read one Access application or service token; null when it is gone. */
+  async getAccessResource(
+    accountId: string,
+    kind: PlatformAccessResourceKind,
+    id: string,
+  ): Promise<CloudflareNamedResource | null> {
+    try {
+      const result = await this.request<{ id?: unknown; name?: unknown }>(
+        accessResourcePath(accountId, kind, id),
+      );
+      return {
+        id: requiredString(result.id, 'Access resource id'),
+        name: requiredString(result.name, 'Access resource name'),
+      };
     } catch (error) {
       if (error instanceof PlatformCloudflareApiError && error.status === 404) {
-        return;
+        return null;
       }
       throw error;
     }
+  }
+
+  async deleteAccessResource(
+    accountId: string,
+    kind: PlatformAccessResourceKind,
+    id: string,
+  ): Promise<void> {
+    await this.#deleteIfPresent(accessResourcePath(accountId, kind, id));
+  }
+
+  /** Email Routing rules in a zone, without the catch-all, which has its own endpoint. */
+  async listEmailRoutingRules(zoneId: string): Promise<ReadonlyArray<CloudflareEmailRoutingRule>> {
+    const entries: Array<Record<string, unknown>> = [];
+    for (let page = 1; ; page++) {
+      const query = new URLSearchParams({ page: String(page), per_page: '50' });
+      const result = await this.request<ReadonlyArray<Record<string, unknown>>>(
+        `/zones/${encodeURIComponent(zoneId)}/email/routing/rules?${query}`,
+      );
+      entries.push(...result);
+      if (result.length < 50) {
+        break;
+      }
+    }
+    return entries
+      .filter(
+        (entry) =>
+          !(Array.isArray(entry.matchers) ? entry.matchers : []).some(
+            (matcher: unknown) => (matcher as { type?: unknown } | null)?.type === 'all',
+          ),
+      )
+      .map((entry) => ({
+        // `tag` is the deprecated name of `id`.
+        id: requiredString(entry.id ?? entry.tag, 'Email Routing rule id'),
+        ...parseEmailRoutingTarget(entry),
+      }));
+  }
+
+  async deleteEmailRoutingRule(zoneId: string, ruleId: string): Promise<void> {
+    await this.#deleteIfPresent(
+      `/zones/${encodeURIComponent(zoneId)}/email/routing/rules/${encodeURIComponent(ruleId)}`,
+    );
+  }
+
+  /** The zone's Email Routing catch-all rule; null when the zone has none. */
+  async getEmailRoutingCatchAll(zoneId: string): Promise<CloudflareEmailRoutingCatchAll | null> {
+    try {
+      return parseEmailRoutingTarget(
+        await this.request<Record<string, unknown>>(
+          `/zones/${encodeURIComponent(zoneId)}/email/routing/rules/catch_all`,
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PlatformCloudflareApiError && error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /** Point the catch-all back at its disabled default, which drops mail. */
+  async resetEmailRoutingCatchAll(zoneId: string): Promise<void> {
+    await this.request(`/zones/${encodeURIComponent(zoneId)}/email/routing/rules/catch_all`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        matchers: [{ type: 'all' }],
+        actions: [{ type: 'drop' }],
+        enabled: false,
+      }),
+    });
   }
 
   async removeRoutes(
@@ -1095,8 +1344,54 @@ export class PlatformCloudflareClient {
   }
 }
 
+function accessResourcePath(
+  accountId: string,
+  kind: PlatformAccessResourceKind,
+  id: string,
+): string {
+  return `/accounts/${encodeURIComponent(accountId)}/access/${kind === 'application' ? 'apps' : 'service_tokens'}/${encodeURIComponent(id)}`;
+}
+
+function parseEmailRoutingTarget(rule: Record<string, unknown>): CloudflareEmailRoutingCatchAll {
+  const actions = Array.isArray(rule.actions) ? (rule.actions as Array<unknown>) : [];
+  const action =
+    actions.length === 1 ? (actions[0] as { type?: unknown; value?: unknown } | null) : null;
+  const value = Array.isArray(action?.value) ? (action.value as Array<unknown>) : [];
+  return {
+    enabled: rule.enabled === true,
+    workerName:
+      action?.type === 'worker' && value.length === 1 && typeof value[0] === 'string'
+        ? value[0]
+        : null,
+  };
+}
+
+function cloudflareErrorDetails(envelope: CloudflareEnvelope<unknown>, status: number): string {
+  return (
+    envelope.errors
+      ?.filter((error) => error.message)
+      .map((error) =>
+        error.code === undefined ? error.message : `${error.message} (code ${error.code})`,
+      )
+      .join(', ') || `HTTP ${status}`
+  );
+}
+
 function encodeR2ObjectKey(key: string): string {
   return key.split('/').map(encodeURIComponent).join('/');
+}
+
+/**
+ * An AI Gateway creation time as ISO 8601 UTC. Cloudflare reports it without a
+ * zone ("2026-10-05 18:29:14"), which JavaScript would read as local time.
+ */
+function withCreatedAt(value: unknown): { createdAt?: string } {
+  if (typeof value !== 'string') {
+    return {};
+  }
+  const zoneless = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value);
+  const time = Date.parse(zoneless ? `${value.replace(' ', 'T')}Z` : value);
+  return Number.isNaN(time) ? {} : { createdAt: new Date(time).toISOString() };
 }
 
 function requiredString(value: unknown, label: string): string {

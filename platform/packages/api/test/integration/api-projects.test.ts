@@ -682,6 +682,49 @@ describe('project CI credential ownership', () => {
         .where(eq(projectDeployCredentials.project_id, project.id)),
     ).toMatchObject([{ id: 'deleting-credential-row', revoked_at: null }]);
   });
+
+  it('returns ISO-8601 timestamps from create, list, and renew', async () => {
+    const isoTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+    const owner = await createTestUser(env.db, 'credential-iso-owner');
+    const project = await createTestProject(env.db, owner.id, 'credential-iso-project');
+
+    const created = await app.fetch(
+      credentialRequest(project.id, owner.jwt, 'POST', '', { name: 'ISO CI', expiresInDays: 30 }),
+      env,
+    );
+    expect(created.status).toBe(201);
+    const credential = await created.json<{ id: string; createdAt: string; expiresAt: string }>();
+    expect(credential.createdAt).toMatch(isoTimestamp);
+    expect(credential.expiresAt).toMatch(isoTimestamp);
+
+    const renewed = await app.fetch(
+      credentialRequest(project.id, owner.jwt, 'POST', `/${credential.id}/renew`, {
+        expiresInDays: 30,
+      }),
+      env,
+    );
+    expect(renewed.status).toBe(200);
+    const replacement = await renewed.json<{ createdAt: string; expiresAt: string }>();
+    expect(replacement.createdAt).toMatch(isoTimestamp);
+    expect(replacement.expiresAt).toMatch(isoTimestamp);
+
+    const listed = await app.fetch(credentialRequest(project.id, owner.jwt, 'GET'), env);
+    expect(listed.status).toBe(200);
+    const rows =
+      await listed.json<
+        Array<{ id: string; createdAt: string; expiresAt: string; revokedAt: string | null }>
+      >();
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.createdAt).toMatch(isoTimestamp);
+      expect(row.expiresAt).toMatch(isoTimestamp);
+      if (row.id === credential.id) {
+        expect(row.revokedAt).toMatch(isoTimestamp);
+      } else {
+        expect(row.revokedAt).toBeNull();
+      }
+    }
+  });
 });
 
 describe('POST /projects/:id/prerender-token', () => {
@@ -3126,7 +3169,11 @@ describe('GET /projects/:id/logs', () => {
       analyticsQuery: (_url, init) => {
         const body = typeof init?.body === 'string' ? init.body : '';
         expect(body).toContain('user-my-app');
-        expect(body).toContain('ORDER BY timestamp DESC');
+        // The dispatch Worker's tail consumer and the user Worker's own consumer
+        // each deliver a dispatched request, so identical rows are collapsed.
+        expect(body).toContain('GROUP BY blob1, blob2, blob3, blob4, blob5, blob6, blob7, double1');
+        expect(body).toContain('min(timestamp) as ingestedAt');
+        expect(body).toContain('ORDER BY ingestedAt DESC');
         return Response.json(mockData);
       },
     });

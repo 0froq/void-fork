@@ -136,7 +136,11 @@ export class OperatorClient {
         throw new OperatorClientError(
           typeof result.message === 'string'
             ? result.message
-            : `Operator request failed (HTTP ${response.status}).`,
+            : typeof result.error === 'string'
+              ? result.error === 'Platform disabled' && result.reason === 'maintenance'
+                ? `Operator request failed (HTTP ${response.status}): the platform is paused for an upgrade or repair. Retry when it finishes.`
+                : `Operator request failed (HTTP ${response.status}): ${result.error}.${result.error === 'Platform disabled' ? ' Run `void platform enable`.' : ''}`
+              : `Operator request failed (HTTP ${response.status}).`,
           typeof result.error === 'string' ? result.error : 'request_failed',
           response.status,
           result.details,

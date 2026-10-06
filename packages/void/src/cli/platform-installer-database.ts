@@ -25,6 +25,7 @@ import {
 } from './platform-installer-types.ts';
 import { type PlatformInstallPlan } from './platform-plan.ts';
 import { writeInstallationManifest } from './platform-registry.ts';
+import { readPlatformProjectSlugsConnection } from './platform-teardown.ts';
 import {
   fencePlatformProjectZeroTrustConnection,
   liftPlatformProjectZeroTrustFenceConnection,
@@ -269,6 +270,26 @@ export async function readPlatformProjectZeroTrustState(
     // Throws unless the database is claimed by this installation.
     await readPlatformDatabaseLifecycleManifestConnection(pool, installationId, ownershipNonce);
     return await readPlatformProjectZeroTrustStateConnection(pool);
+  } finally {
+    await pool.end();
+  }
+}
+
+/** Read project slugs for a --purge-resources plan, which holds no lifecycle lock. */
+export async function readPlatformProjectSlugs(
+  databaseUrl: string,
+  installationId: string,
+  ownershipNonce: string,
+): Promise<ReadonlyArray<string>> {
+  if (!databaseUrl) {
+    throw new Error('the installation database URL is not recorded on this machine');
+  }
+  const { Pool } = await import('pg');
+  const pool = new Pool({ connectionString: platformDatabaseClientUrl(databaseUrl), max: 1 });
+  try {
+    // Throws unless the database is claimed by this installation.
+    await readPlatformDatabaseLifecycleManifestConnection(pool, installationId, ownershipNonce);
+    return await readPlatformProjectSlugsConnection(pool);
   } finally {
     await pool.end();
   }
@@ -564,6 +585,7 @@ export async function acquirePlatformDatabaseLifecycleLockConnection(
       : null;
   };
   release.readProjectZeroTrust = () => readPlatformProjectZeroTrustStateConnection(client);
+  release.readProjects = () => readPlatformProjectSlugsConnection(client);
   release.lockProjectZeroTrust = () => lockPlatformProjectZeroTrustConnection(client);
   release.fenceProjectZeroTrust = () => fencePlatformProjectZeroTrustConnection(client);
   release.liftProjectZeroTrustFence = () => liftPlatformProjectZeroTrustFenceConnection(client);
@@ -918,10 +940,13 @@ export async function claimPlatformDatabaseConnection(
     );
     const claim = result.rows[0];
     if (!claim) {
+      // Migration history lives outside search_path. Leftover history would be
+      // read as already-applied migrations only after the claim, so check it
+      // here. Other provider-owned schemas stay out of scope.
       const contents = await client.query<{ schemaname: string; tablename: string }>(
         `SELECT "schemaname", "tablename"
          FROM "pg_catalog"."pg_tables"
-         WHERE "schemaname" = ANY (current_schemas(false))
+         WHERE ("schemaname" = ANY (current_schemas(false)) OR "schemaname" = 'drizzle')
            AND "tablename" <> '__void_platform_installation'
          ORDER BY "schemaname", "tablename"
          LIMIT 1`,

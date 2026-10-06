@@ -89,9 +89,13 @@ export type ApiEnv = Env & {
     DISPATCH_WORKER_NAME?: string;
     /**
      * Name of the tail-consumer Worker that receives runtime logs (Tail Worker).
-     * Wired into per-user-script `tail_consumers` metadata on each WfP upload
-     * so user scripts have explicit, belt-and-suspenders log fan-out in
-     * addition to the dispatch worker's namespace-wide propagation.
+     * Wired into per-user-script `tail_consumers` metadata on each WfP upload.
+     * This is the only log path for invocations that skip the dispatch Worker
+     * (crons, `/__void/migrate`, Durable Object alarms). Queue deliveries go
+     * through the dispatch Worker. The dispatch Worker's own consumer also
+     * receives the user items it invoked, each in its own tail invocation, so
+     * those rows are stored twice; log queries collapse them
+     * (`observability/log-rows.ts`).
      * Falls back to `void-tail` when unset.
      */
     TAIL_SERVICE_NAME?: string;

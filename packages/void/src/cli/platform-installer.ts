@@ -1112,6 +1112,7 @@ export {
   claimPlatformDatabase,
   acquirePlatformDatabaseLifecycleLock,
   readPlatformDatabaseLifecycleManifest,
+  readPlatformProjectSlugs,
   readPlatformProjectZeroTrustState,
   inspectPlatformDatabaseStateConnection,
   preparePlatformDatabaseConnection,

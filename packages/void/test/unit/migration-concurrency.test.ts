@@ -26,7 +26,6 @@ function createDatabase(
   hooks: {
     beforeBatch?: (sql: Array<string>) => Promise<void>;
     afterLockWrite?: () => Promise<void>;
-    beforeExec?: () => Promise<void>;
   } = {},
 ) {
   const sqlite = new DatabaseSync(':memory:');
@@ -61,7 +60,6 @@ function createDatabase(
   const db = {
     prepare,
     async exec(sql: string) {
-      await hooks.beforeExec?.();
       sqlite.exec(sql);
     },
     async batch(statements: Array<ReturnType<typeof prepare>>) {
@@ -148,13 +146,15 @@ describe('D1 migration ownership', () => {
     ).toBe('unknown');
   });
 
-  it('keeps the lock while a legacy raw execution is in flight', async () => {
+  it('keeps the lock while an unfenced legacy migration is in flight', async () => {
     const paused = deferred();
     const resume = deferred();
     const { sqlite, handler } = createDatabase({
-      beforeExec: async () => {
-        paused.resolve();
-        await resume.promise;
+      beforeBatch: async (sql) => {
+        if (sql.includes('UPDATE balance SET amount = amount - 10;')) {
+          paused.resolve();
+          await resume.promise;
+        }
       },
     });
     const owner = handler([
@@ -177,6 +177,22 @@ describe('D1 migration ownership', () => {
     }
     expect(sqlite.prepare('SELECT amount FROM balance').get()?.amount).toBe(80);
     expect((await handler([])(apply('successor'))).status).toBe(200);
+  });
+
+  it('warns about a migration without statement breakpoints only while it is pending', async () => {
+    const { handler } = createDatabase();
+    const owner = handler([
+      {
+        name: 'legacy.sql',
+        sql: 'UPDATE balance SET amount = amount - 10; UPDATE balance SET amount = amount - 10;',
+      },
+    ]);
+    const first = (await (await owner(apply('first'))).json()) as MigrationResponse;
+    expect(first.confirmedApplied).toEqual(['legacy.sql']);
+    expect(first.warnings).toEqual([expect.stringContaining('Migration legacy.sql')]);
+    const later = (await (await owner(apply('later'))).json()) as MigrationResponse;
+    expect(later.confirmedSkipped).toEqual(['legacy.sql']);
+    expect(later.warnings ?? []).toEqual([]);
   });
 
   it('keeps completed attempts idempotent and rolls back failing migration batches', async () => {
