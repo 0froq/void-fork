@@ -162,7 +162,7 @@ export async function runPlatformCommand(_root: string, args: PlatformArgs): Pro
     }
     const active = getActivePlatformConnection();
     if (active) {
-      console.log(pc.bold('Currently selected platform:'));
+      console.log(pc.blue(pc.bold('Currently selected platform:')));
       showPlatform(active);
     } else {
       console.log('No platform selected.');
@@ -170,7 +170,9 @@ export async function runPlatformCommand(_root: string, args: PlatformArgs): Pro
     const others = connections.filter((connection) => connection.id !== active?.id);
     if (others.length > 0) {
       console.log('');
-      console.log('Other platforms (run `void platform use <id>` to select one):');
+      console.log(
+        `${pc.blue(pc.bold('Other platforms'))} ${pc.gray('(run `void platform use <id>` to select one):')}`,
+      );
       for (const [index, connection] of others.entries()) {
         if (index > 0) {
           console.log('');
