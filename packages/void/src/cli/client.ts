@@ -170,6 +170,23 @@ export function isExpiredTokenError(error: unknown): boolean {
   return false;
 }
 
+/**
+ * True when `fetch` gave up waiting for response headers (undici's
+ * `HeadersTimeoutError`, 300 seconds by default). The request reached the
+ * server, which is still working on it.
+ */
+export function isHeadersTimeoutError(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 6 && current !== null && typeof current === 'object'; depth++) {
+    const { code, name } = current as { code?: unknown; name?: unknown };
+    if (code === 'UND_ERR_HEADERS_TIMEOUT' || name === 'HeadersTimeoutError') {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 function isPreflightRejection(error: unknown): boolean {
   return (
     error instanceof PlatformApiError &&
@@ -577,6 +594,10 @@ export type ManifestOnlyDeployPayload = DeployUploadPayload;
  * - Only `fetch` rejections (`TypeError` — no HTTP response) are retried.
  *   A Response of any status means the server answered; surface it
  *   verbatim rather than replay a request it may have accepted.
+ * - A headers timeout is retried too. Every attempt sends the same
+ *   idempotency key, so once an earlier request has created its deployment,
+ *   a receipt-aware platform answers the retry with that deployment's
+ *   receipt and the CLI follows it to the real result.
  * - A rejected fetch does NOT prove the request never arrived — the
  *   connection may have dropped after delivery. Arbitration is left to
  *   the server's precheck, the only atomic (project-locked) verdict: if
@@ -590,6 +611,11 @@ export type ManifestOnlyDeployPayload = DeployUploadPayload;
  */
 const DEPLOY_POST_MAX_RETRIES = 3;
 const DEPLOY_POST_BACKOFF_MS = [1000, 5000, 10000];
+/**
+ * Every transport failure is retried, so a `TypeError` thrown by the deploy
+ * POST always comes after this many attempts.
+ */
+export const DEPLOY_POST_ATTEMPTS: number = DEPLOY_POST_MAX_RETRIES + 1;
 const DEPLOY_OBSERVATION_TIMEOUT_MS = 30_000;
 const DEPLOY_OBSERVATION_DEADLINE_MS = 30 * 60_000;
 const DEPLOY_OBSERVATION_BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000];
