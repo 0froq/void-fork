@@ -29,6 +29,7 @@ catalog:
   # (Buffer loses its members; ~30 typecheck errors). Revisit when upstream drops those globals.
   '@cloudflare/workers-types': ^4.20260702.1
   '@types/node': ^26.6.4
+  '@voidzero-dev/vite-plus-prompts': 1.1.0
   typescript: 7.0.2
   '@voidzero-dev/vitepress-theme': ^5.0.7
   pathslash: ^0.1.0
@@ -99,3 +100,8 @@ minimumReleaseAgeExclude:
   - 'workerd@1.20260930.2'
   - hono@4.13.13
   - lucide-react@1.52.0
+  - '@voidzero-dev/vite-plus-prompts@1.1.0'
+
+patchedDependencies:
+  # Remove when upgrading to the next prompts release containing the one-space output fix.
+  '@voidzero-dev/vite-plus-prompts@1.1.0': patches/@voidzero-dev__vite-plus-prompts@1.1.0.patch

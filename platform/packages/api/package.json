@@ -55,7 +55,7 @@
     "@types/pg": "8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@voidzero-dev/vite-plus-prompts": "workspace:*",
+    "@voidzero-dev/vite-plus-prompts": "catalog:",
     "drizzle-kit": "^0.31.11",
     "typescript": "catalog:",
     "vite": "catalog:",

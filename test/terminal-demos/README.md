@@ -21,7 +21,7 @@ When updating transcripts, compare wording and phases to:
 - `packages/void/src/cli/platform-lifecycle.ts`: install prompts and completion.
 - `packages/void/src/cli/platform-installer.ts`: progress messages.
 - `packages/void/src/cli/logs.ts` and `rollback.ts`: request formatting and rollback prompts.
-- `packages/prompts`: the shared Vite+ glyphs, spinner, colors, and boxes.
+- `@voidzero-dev/vite-plus-prompts`: the shared Vite+ glyphs, spinner, colors, and boxes.
 
 Keep transient spinner updates on the same line ID and remove prompt options after selection. Do not invent resource guarantees or hide required credentials in the surrounding explanatory copy. The deploy sample targets Cloudflare directly; installation and recovery demonstrate the Orange Cloud Void platform.
 

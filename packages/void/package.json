@@ -381,7 +381,7 @@
     "@types/node": "catalog:",
     "@types/pg": "^8.23.1",
     "@types/proper-lockfile": "^4.1.4",
-    "@voidzero-dev/vite-plus-prompts": "workspace:*",
+    "@voidzero-dev/vite-plus-prompts": "catalog:",
     "arktype": "^2.2.7",
     "ci-info": "^4.4.0",
     "estree-walker": "^3.0.3",
