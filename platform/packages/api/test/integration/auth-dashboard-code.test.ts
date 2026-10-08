@@ -282,3 +282,39 @@ describe('dashboard auth code exchange', () => {
     expect(replayRes.status).toBe(400);
   });
 });
+
+describe('browser callback error presentation', () => {
+  it('keeps JSON errors for API callers and renders browser navigation with the same status', async () => {
+    const url = 'https://api.staging.void.cloud/auth/callback';
+    const api = await app.fetch(
+      new Request(url, { headers: { Accept: 'application/json' } }),
+      env,
+      executionCtx,
+    );
+    const body = await api.json();
+    const browser = await app.fetch(
+      new Request(url, { headers: { Accept: 'text/html,application/xhtml+xml' } }),
+      env,
+      executionCtx,
+    );
+    expect(api.status).toBe(400);
+    expect(body).toHaveProperty('error');
+    expect(browser.status).toBe(api.status);
+    expect(browser.headers.get('Content-Type')).toContain('text/html');
+    expect(browser.headers.get('Cache-Control')).toBe('no-store');
+    expect(browser.headers.get('Referrer-Policy')).toBe('no-referrer');
+    const html = await browser.text();
+    expect(html).toContain('Login failed');
+    expect(html).toContain('href="https://dash.staging.void.cloud/login"');
+  });
+  it('does not send HTML to a caller that refuses it', async () => {
+    const response = await app.fetch(
+      new Request('https://api.staging.void.cloud/auth/callback', {
+        headers: { Accept: 'text/html;q=0,application/json' },
+      }),
+      env,
+      executionCtx,
+    );
+    expect(response.headers.get('Content-Type')).toContain('application/json');
+  });
+});

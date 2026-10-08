@@ -4,9 +4,6 @@ import { fetchApi, getPublicApiUrl } from '../lib/api.ts';
 import { isLocalDashboardHost } from '../lib/origin.ts';
 import { createPkceChallenge, createPkceVerifier } from '../lib/pkce.ts';
 import { discoveryDisplayName, platformPageTitle } from '../lib/platform-title.ts';
-import apkProtocolMedium from '../ui/fonts/APK-Protocol-Medium.woff2';
-import interRomanLatin from '../ui/fonts/inter-roman-latin.woff2';
-import khTekaMonoRegular from '../ui/fonts/KHTekaMono-Regular.woff2';
 
 export type Props = Readonly<{
   methods: ReadonlyArray<{ id: string; label: string; url: string }>;
@@ -17,11 +14,6 @@ export type Props = Readonly<{
 
 export const head = defineHead<Props>((_context, props) => ({
   title: platformPageTitle('Sign in', props.platformName),
-  link: [
-    { rel: 'preload', href: apkProtocolMedium, as: 'font', type: 'font/woff2', crossorigin: '' },
-    { rel: 'preload', href: interRomanLatin, as: 'font', type: 'font/woff2', crossorigin: '' },
-    { rel: 'preload', href: khTekaMonoRegular, as: 'font', type: 'font/woff2', crossorigin: '' },
-  ],
 }));
 
 export const loader = defineHandler<Props>(async (context) => {

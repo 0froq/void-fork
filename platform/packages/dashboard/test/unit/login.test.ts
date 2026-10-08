@@ -121,3 +121,22 @@ describe('dashboard login discovery', () => {
     expect(options.redirect).toBe('manual');
   });
 });
+
+describe('login presentation', () => {
+  it('escapes the platform and provider names without changing the login URL', async () => {
+    const { renderToStaticMarkup } = await import('react-dom/server');
+    const { default: LoginPage } = await import('../../pages/login.tsx');
+    const url =
+      'https://api.example.com/auth/login?provider=company&redirect=https%3A%2F%2Fdash.example.com%2Fauth%2Fcallback';
+    const html = renderToStaticMarkup(
+      LoginPage({
+        platformName: '<script>company</script>',
+        methods: [{ id: 'company', label: '<script>SSO</script>', url }],
+      }),
+    );
+    expect(html).toContain('Sign in to &lt;script&gt;company&lt;/script&gt;');
+    expect(html).toContain('Continue with &lt;script&gt;SSO&lt;/script&gt;');
+    expect(html).toContain(url.replaceAll('&', '&amp;'));
+    expect(html).not.toContain('<script>');
+  });
+});

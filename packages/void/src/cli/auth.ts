@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { browserPageLead, browserPageStatus, renderBrowserPage } from '@void/platform/browser-page';
 import { join } from 'pathslash';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { ensureCloudflaredToken } from './cf-access.ts';
@@ -306,11 +307,12 @@ export function getProxyUrl(root: string = process.cwd()): string {
 }
 
 function page(title: string, message: string): string {
-  return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title} - Void</title>
-<style>:root{color-scheme:light dark}*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#fafafa;color:#111}.card{text-align:center;padding:3rem}h1{font-size:1.5rem;font-weight:600;margin-bottom:.75rem}p{color:#666;font-size:1rem}@media (prefers-color-scheme:dark){body{background:#0a0a0a;color:#fafafa}p{color:#a3a3a3}}</style>
-</head><body><div class="card"><h1>${title}</h1><p>${message}</p></div></body></html>`;
+  return renderBrowserPage({
+    title,
+    content:
+      browserPageStatus(title === 'Login failed' ? 'error' : 'success') +
+      browserPageLead(title, message),
+  });
 }
 
 export function openBrowser(
@@ -373,6 +375,8 @@ export async function awaitBrowserCallback<T>(options: {
    * reject the outer promise with the thrown error.
    */
   finalize: (params: URLSearchParams) => Promise<T>;
+  /** Name the completed action in the browser. Defaults to sign-in. */
+  successTitle?: string;
   /** Map an `?error=…` query to a user message (return null to ignore). */
   describeError?: (params: URLSearchParams) => string | null;
   /**
@@ -468,7 +472,12 @@ export async function awaitBrowserCallback<T>(options: {
         return;
       }
       res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(page('Login successful!', 'You can close this tab and return to the terminal.'));
+      res.end(
+        page(
+          options.successTitle ?? 'Signed in to Void',
+          'You can close this tab and return to the terminal.',
+        ),
+      );
       succeed(result);
     });
 

@@ -1,17 +1,21 @@
 import type { PlatformLoginConfiguration, PlatformAuthenticationRecovery } from '@void/platform';
+import {
+  browserPageIdentity,
+  browserPageLead,
+  browserPageStatus,
+} from '@void/platform/browser-page';
 import { and, eq, gt } from 'drizzle-orm';
 import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import { acceptsBrowserHtml, platformBrowserError, platformBrowserPage } from '../browser-page.ts';
 import {
   acceptInvitationByEmail,
   linkGitHubInstallationToUser,
   storeAuthCode,
   type Db,
 } from '../db.ts';
-import { escapeHtml } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
-import { getPlatformPageTitle } from '../platform-identity.ts';
 import { platformAuthAttempts, platformLoginTests } from '../schema.ts';
 import { stageBootstrapIdentity, verifyBootstrapCode } from './bootstrap.ts';
 import {
@@ -71,12 +75,28 @@ function oidcProvider(configuration: PlatformLoginConfiguration): PlatformOidcPr
 
 function authenticationError(context: Context<ApiEnv>, error: unknown): Response {
   if (error instanceof AuthenticationConfigurationError) {
+    if (acceptsBrowserHtml(context)) {
+      return platformBrowserError(
+        context,
+        'Login failed',
+        error.message,
+        error.status as ContentfulStatusCode,
+      );
+    }
     return context.json(
       { error: error.code, message: error.message },
       error.status as ContentfulStatusCode,
     );
   }
   // Provider responses may contain secrets or untrusted data. Do not echo or log them.
+  if (acceptsBrowserHtml(context)) {
+    return platformBrowserError(
+      context,
+      'Login failed',
+      'Login could not be completed. Start a new login or check the provider configuration.',
+      400,
+    );
+  }
   return context.json(
     {
       error: 'login_failed',
@@ -541,18 +561,16 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
       // This page submits an origin-checked confirmation form. Keep the origin
       // while withholding the OAuth callback path and query from referrers.
       context.header('Referrer-Policy', 'strict-origin');
-      return context.html(
-        '<!doctype html><title>' +
-          escapeHtml(
-            getPlatformPageTitle('Confirm platform administrator', context.env, context.req.url),
-          ) +
-          '</title><h1>Confirm the first administrator</h1><p>Account: ' +
-          escapeHtml(identity.login) +
-          '</p><p>Provider: ' +
-          escapeHtml(identity.issuer) +
-          '</p><p>Identity: ' +
-          escapeHtml(identity.subject) +
-          '</p><form method="post" action="/auth/bootstrap/confirm"><input type="hidden" name="confirm" value="yes"><button type="submit">Make this account the platform administrator</button></form>',
+      return platformBrowserPage(
+        context,
+        'Confirm platform administrator',
+        browserPageLead(
+          'Confirm the first administrator',
+          'Review the account below before giving it administrator access to this platform.',
+        ) +
+          browserPageIdentity(identity) +
+          '<p class="void-auth-note">This account will be able to manage the platform and its users.</p>' +
+          '<form method="post" action="/auth/bootstrap/confirm"><input type="hidden" name="confirm" value="yes"><button class="void-auth-button void-auth-button-primary" type="submit">Make this account the platform administrator</button></form>',
       );
     }
     if (attempt.purpose === 'test' || attempt.purpose === 'link') {
@@ -631,25 +649,28 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
           path: '/auth/link/confirm',
           maxAge: 300,
         });
-        return context.html(
-          '<!doctype html><title>' +
-            escapeHtml(getPlatformPageTitle('Link login method', context.env, context.req.url)) +
-            '</title><h1>Link this identity to your Void account?</h1><p>' +
-            escapeHtml(identity.login) +
-            '</p><p>' +
-            escapeHtml(identity.issuer) +
-            '</p><p>' +
-            escapeHtml(identity.subject) +
-            '</p><form method="post" action="/auth/link/confirm"><input type="hidden" name="confirm" value="yes"><button>Link this identity</button></form>',
+        return platformBrowserPage(
+          context,
+          'Link login method',
+          browserPageLead(
+            'Link this login method?',
+            'Review the identity before linking it to your existing Void account.',
+          ) +
+            browserPageIdentity(identity) +
+            '<form method="post" action="/auth/link/confirm"><input type="hidden" name="confirm" value="yes"><button class="void-auth-button void-auth-button-primary" type="submit">Link this identity</button></form>',
         );
       }
       if (saved.actor?.audience === 'admin') {
         return context.redirect(`/admin/config/auth?test=${encodeURIComponent(saved.testId!)}`);
       }
-      return context.html(
-        '<!doctype html><title>' +
-          escapeHtml(getPlatformPageTitle('Login test', context.env, context.req.url)) +
-          '</title><p>Login verified. Return to Void to review the identity and finish configuration.</p>',
+      return platformBrowserPage(
+        context,
+        'Login verified',
+        browserPageStatus('success') +
+          browserPageLead(
+            'Login verified',
+            'Return to Void to review the identity and finish configuration.',
+          ),
       );
     }
     const { user } = await resolvePlatformLogin(
@@ -832,10 +853,14 @@ export async function confirmIdentityLink(context: Context<ApiEnv>): Promise<Res
     await db.delete(platformLoginTests).where(eq(platformLoginTests.id, attempt.id));
     deleteCookie(context, 'void_link_confirm', { path: '/auth/link/confirm' });
     context.header('Cache-Control', 'no-store');
-    return context.html(
-      '<!doctype html><title>' +
-        escapeHtml(getPlatformPageTitle('Login linked', context.env, context.req.url)) +
-        '</title><p>Your login method is linked. You can close this window and return to Void.</p>',
+    return platformBrowserPage(
+      context,
+      'Login method linked',
+      browserPageStatus('success') +
+        browserPageLead(
+          'Login method linked',
+          'Your login method is linked. You can close this window and return to Void.',
+        ),
     );
   } catch (error) {
     return authenticationError(context, error);

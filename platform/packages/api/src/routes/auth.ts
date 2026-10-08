@@ -25,6 +25,7 @@ import {
 import { updateUserRevokingInheritedDestinations } from '../auth/profile.ts';
 import { isAllowedRedirect, isLocalhostRedirect } from '../auth/redirects.ts';
 import { validateHumanSession } from '../auth/sessions.ts';
+import { acceptsBrowserHtml, platformBrowserError } from '../browser-page.ts';
 import { getPlatformCapabilities } from '../capabilities.ts';
 export { isAllowedRedirect } from '../auth/redirects.ts';
 import {
@@ -61,6 +62,27 @@ app.use('*', async (context, next) => {
   context.header('Cache-Control', 'no-store');
   context.header('Referrer-Policy', 'no-referrer');
   await next();
+  // Only browser navigation gets a presentation layer; API error bodies stay JSON.
+  if (
+    ['/auth/login', '/auth/callback', '/auth/link/confirm'].includes(context.req.path) &&
+    acceptsBrowserHtml(context) &&
+    context.res.status >= 400 &&
+    context.res.headers.get('Content-Type')?.includes('application/json')
+  ) {
+    const body = (await context.res
+      .clone()
+      .json()
+      .catch(() => null)) as { error?: string } | null;
+    const expired = body?.error === 'invalid or expired OAuth state';
+    context.res = platformBrowserError(
+      context,
+      expired ? 'Your sign-in link expired' : 'Login failed',
+      expired
+        ? 'Start a new sign-in to continue.'
+        : 'Login could not be completed. Start a new sign-in or contact your platform administrator.',
+      context.res.status as 400,
+    );
+  }
 });
 app.get('/test', (context) => startLoginTest(context));
 app.get('/link', (context) => startLoginTest(context, 'link'));

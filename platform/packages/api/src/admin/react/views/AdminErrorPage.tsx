@@ -1,18 +1,29 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
-import { Banner } from '@astryxdesign/core/Banner';
-import { Button } from '@astryxdesign/core/Button';
-
-export function AdminErrorPage({ message, status }: { message: string; status: number }) {
+import { AuthPage } from './AuthPage.tsx';
+export function AdminErrorPage({
+  message,
+  status,
+  platformName,
+}: {
+  message: string;
+  status: number;
+  platformName: string;
+}) {
   return (
-    <main className="void-admin-auth">
-      <Banner status="error" title={message} />
-      <div className="void-admin-auth-actions">
-        <Button
-          as="a"
-          href={status === 401 ? '/admin/logout' : '/admin/'}
-          label={status === 401 ? 'Sign in again' : 'Return to admin'}
-        />
+    <AuthPage platformName={platformName}>
+      <div className="void-auth-status void-auth-status-error" aria-label="Error">
+        !
       </div>
-    </main>
+      <div className="void-auth-lead">
+        <h1 id="void-auth-title">{status === 401 ? 'Sign in again' : 'Unable to continue'}</h1>
+        <p>{message}</p>
+      </div>
+      <a
+        className="void-auth-button void-auth-button-primary"
+        href={status === 401 ? '/admin/logout' : '/admin/'}
+      >
+        {status === 401 ? 'Sign in again' : 'Return to admin'}
+      </a>
+    </AuthPage>
   );
 }

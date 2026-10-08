@@ -43,6 +43,18 @@ function startCallback<T = URLSearchParams>(options?: {
 }
 
 describe('awaitBrowserCallback', () => {
+  it('escapes callback error text without altering the failure reported to the CLI', async () => {
+    const message = '<script>alert("callback")</script>';
+    const { resultPromise, callbackPromise } = startCallback({ describeError: () => message });
+    const rejection = expect(resultPromise).rejects.toThrow(message);
+    const response = await fetch(await callbackPromise);
+    expect(response.status).toBe(403);
+    const html = await response.text();
+    expect(html).not.toContain(message);
+    expect(html).toContain('&lt;script&gt;');
+    await rejection;
+  });
+
   it('runs finalize in the request path and resolves with its return value', async () => {
     const finalize = vi.fn(async (params: URLSearchParams) => ({
       linked: params.get('link_code'),
@@ -61,6 +73,9 @@ describe('awaitBrowserCallback', () => {
 
     const res = await fetch(hit);
     expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('Signed in to Void');
+    expect(html).toContain('aria-label="Success"');
 
     // finalize ran inside the request handler with the callback params, and the
     // outer promise resolves with finalize's return value.

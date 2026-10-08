@@ -326,9 +326,7 @@ describe('configured platform login routes', () => {
         await page.goto(
           `${origin}/auth/callback?code=provider-code&state=${authorization.searchParams.get('state')}`,
         );
-        await page
-          .getByRole('heading', { name: 'Link this identity to your Void account?' })
-          .waitFor();
+        await page.getByRole('heading', { name: 'Link this login method?' }).waitFor();
         await Promise.all([
           page.waitForURL(`${origin}/auth/link/confirm`),
           page.getByRole('button', { name: 'Link this identity' }).click(),

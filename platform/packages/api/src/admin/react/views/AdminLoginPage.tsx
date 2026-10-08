@@ -1,25 +1,35 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
-import { Button } from '@astryxdesign/core/Button';
-import { Card } from '@astryxdesign/core/Card';
-import { Heading, Text } from '@astryxdesign/core/Text';
+import { AuthPage } from './AuthPage.tsx';
 
-export function AdminLoginPage({ providers }: { providers: Array<{ id: string; label: string }> }) {
+export function AdminLoginPage({
+  providers,
+  platformName,
+}: {
+  providers: Array<{ id: string; label: string }>;
+  platformName: string;
+}) {
   return (
-    <main className="void-admin-auth">
-      <Card>
-        <Heading level={1}>Void Admin</Heading>
-        <Text>Sign in with your admin account</Text>
-        <div className="void-admin-auth-actions">
-          {providers.map(({ id, label }) => (
-            <Button
-              key={id}
-              as="a"
-              href={`/admin/login/${encodeURIComponent(id)}`}
-              label={`Sign in with ${label}`}
-            />
-          ))}
-        </div>
-      </Card>
-    </main>
+    <AuthPage platformName={platformName}>
+      <div className="void-auth-lead">
+        <h1 id="void-auth-title">Sign in to administer {platformName}</h1>
+        <p>Sign in with your administrator account.</p>
+      </div>
+      <div className="void-auth-actions">
+        {providers.map(({ id, label }, index) => (
+          <a
+            key={id}
+            className={
+              index === 0 ? 'void-auth-button void-auth-button-primary' : 'void-auth-button'
+            }
+            href={`/admin/login/${encodeURIComponent(id)}`}
+          >
+            Sign in with {label}
+          </a>
+        ))}
+      </div>
+      {providers.length === 0 && (
+        <p>No administrator login methods are available. Resume setup from the installing CLI.</p>
+      )}
+    </AuthPage>
   );
 }

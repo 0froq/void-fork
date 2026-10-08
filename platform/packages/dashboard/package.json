@@ -15,6 +15,7 @@
     "@base-ui/react": "1.8.0",
     "@iconify/react": "^6.0.2",
     "@nkzw/stack": "2.3.2",
+    "@void/platform": "workspace:*",
     "hono": "catalog:platform",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"

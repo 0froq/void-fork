@@ -26,6 +26,10 @@
     "./plans": {
       "types": "./dist/plans.d.mts",
       "import": "./dist/plans.mjs"
+    },
+    "./browser-page": {
+      "types": "./dist/browser-page.d.mts",
+      "import": "./dist/browser-page.mjs"
     }
   },
   "publishConfig": {

@@ -2235,7 +2235,9 @@ describe('GET /admin/login', () => {
     const res = await app.fetch(new Request('http://localhost/admin/login'), env);
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain('Void Admin');
+    expect(html).toContain('Sign in to administer');
+    expect(html).toContain('Void Platform');
+    expect(html).toContain('aria-label="Void"');
     expect(html).toContain('GitHub');
     expect(html).toContain('Google');
   });

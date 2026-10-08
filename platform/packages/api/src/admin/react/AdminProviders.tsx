@@ -10,6 +10,7 @@ import { createFateClient } from '../fate/client.generated.ts';
 import { AdminFateErrorBoundary } from './AdminFateErrorBoundary.tsx';
 
 type AdminShared = {
+  platformName?: string;
   adminFateSession?: string;
   adminFateSnapshot?: Parameters<ReturnType<typeof createFateClient>['hydrate']>[0];
   adminPageUrl?: string;
@@ -52,7 +53,12 @@ export function AdminProviders({ children }: { children: ReactNode }) {
   return (
     <AdminUiProviders>
       <FateClient client={fate} key={session}>
-        <AdminFateErrorBoundary key={shared.adminPageUrl}>{children}</AdminFateErrorBoundary>
+        <AdminFateErrorBoundary
+          key={shared.adminPageUrl}
+          platformName={shared.platformName ?? 'Void Platform'}
+        >
+          {children}
+        </AdminFateErrorBoundary>
       </FateClient>
     </AdminUiProviders>
   );

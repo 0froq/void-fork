@@ -12,7 +12,10 @@ function isFateRequestError(error: unknown): error is Error & { status: number }
   );
 }
 
-export class AdminFateErrorBoundary extends Component<{ children: ReactNode }, { error: unknown }> {
+export class AdminFateErrorBoundary extends Component<
+  { children: ReactNode; platformName: string },
+  { error: unknown }
+> {
   state: { error: unknown } = { error: null };
 
   static getDerivedStateFromError(error: unknown) {
@@ -26,7 +29,9 @@ export class AdminFateErrorBoundary extends Component<{ children: ReactNode }, {
       const message = isFateRequestError(error)
         ? error.message
         : 'The admin page could not be loaded.';
-      return <AdminErrorPage message={message} status={status} />;
+      return (
+        <AdminErrorPage message={message} status={status} platformName={this.props.platformName} />
+      );
     }
     return this.props.children;
   }

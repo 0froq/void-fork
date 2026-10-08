@@ -13,8 +13,10 @@
  * See the email design's recipient-consent section for the trust boundary.
  */
 
+import { browserPageLead, browserPageStatus } from '@void/platform/browser-page';
 import { Hono } from 'hono';
 import { verifyConfirmToken } from '../auth/confirm-token.ts';
+import { platformBrowserPage } from '../browser-page.ts';
 import { getEmailDestinationById, getProject, updateEmailDestinationStatus } from '../db.ts';
 import { escapeHtml } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
@@ -34,7 +36,12 @@ app.use('/destinations/confirm', async (context, next) => {
 app.get('/destinations/confirm', async (context) => {
   const token = context.req.query('token');
   if (!token) {
-    return context.html(errorPage('Missing confirmation token.'), 400);
+    return platformBrowserPage(
+      context,
+      'Confirmation failed',
+      errorPage('Missing confirmation token.'),
+      400,
+    );
   }
 
   const payload = await verifyConfirmToken(token, context.env.EMAIL_SIGNING_SECRET);
@@ -42,7 +49,9 @@ app.get('/destinations/confirm', async (context) => {
     // Don't distinguish bad signature vs expired vs malformed in the
     // user-visible page — they're all "this link no longer works".
     // Distinct outcomes are still observable via tail logs if needed.
-    return context.html(
+    return platformBrowserPage(
+      context,
+      'Confirmation failed',
       errorPage(
         'This link is invalid or has expired. Ask the project to resend the confirmation email.',
       ),
@@ -57,14 +66,19 @@ app.get('/destinations/confirm', async (context) => {
     // (2) tampered token (different did/pid/addr),
     // (3) projectId / address mismatch from a token replay attempt.
     // All three deserve 404 — there is no row to confirm.
-    return context.html(errorPage('Destination not found.'), 404);
+    return platformBrowserPage(
+      context,
+      'Confirmation failed',
+      errorPage('Destination not found.'),
+      404,
+    );
   }
 
   const project = await getProject(context.get('db'), row.project_id);
   const slug = project?.slug ?? row.project_id;
 
   if (row.status === 'verified') {
-    return context.html(successPage(slug, row.address, true));
+    return platformBrowserPage(context, 'Email confirmed', successPage(slug, row.address, true));
   }
 
   const updated = await updateEmailDestinationStatus(
@@ -80,41 +94,32 @@ app.get('/destinations/confirm', async (context) => {
     undefined,
   );
   if (!updated) {
-    return context.html(errorPage('Destination not found.'), 404);
+    return platformBrowserPage(
+      context,
+      'Confirmation failed',
+      errorPage('Destination not found.'),
+      404,
+    );
   }
 
-  return context.html(successPage(slug, row.address, false));
+  return platformBrowserPage(context, 'Email confirmed', successPage(slug, row.address, false));
 });
 
-function pageShell(title: string, body: string): string {
-  return `<!DOCTYPE html>
-<html><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escapeHtml(title)} - Void</title>
-<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fafafa}.card{max-width:480px;padding:40px;color:#1a1a1a}h1{font-size:1.25rem;margin-bottom:12px}p{color:#444;line-height:1.55}</style>
-</head><body><div class="card">${body}</div></body></html>`;
-}
-
 function successPage(slug: string, address: string, alreadyVerified: boolean): string {
-  const heading = alreadyVerified ? 'Already confirmed' : 'Confirmed';
+  const heading = alreadyVerified ? 'Already confirmed' : 'Email confirmed';
   const lead = alreadyVerified
     ? `<strong>${escapeHtml(slug)}</strong> is already authorized to send email to <strong>${escapeHtml(address)}</strong>.`
     : `You've authorized <strong>${escapeHtml(slug)}</strong> to send email to <strong>${escapeHtml(address)}</strong>.`;
-  return pageShell(
-    heading,
-    `<h1>${heading}</h1>
-<p>${lead}</p>
-<p style="color:#666;font-size:0.85rem">If you didn't expect this, ignore future emails from this project — no further permission will be granted without your action.</p>`,
+  return (
+    browserPageStatus('success') +
+    `<div class="void-auth-lead"><h1 id="void-auth-title">${heading}</h1>
+<p>${lead}</p></div>
+<p class="void-auth-note">If you didn't expect this, ignore future emails from this project — no further permission will be granted without your action.</p>`
   );
 }
 
 function errorPage(message: string): string {
-  return pageShell(
-    'Confirmation failed',
-    `<h1>Confirmation failed</h1>
-<p>${escapeHtml(message)}</p>`,
-  );
+  return browserPageStatus('error') + browserPageLead('Confirmation failed', message);
 }
 
 export default app;

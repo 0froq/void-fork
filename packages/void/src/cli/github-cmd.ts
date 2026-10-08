@@ -278,6 +278,7 @@ export async function runGithubLink(client: PlatformClient): Promise<void> {
   let status: 'linked' | 'already_linked';
   try {
     ({ status } = await awaitBrowserCallback<{ status: 'linked' | 'already_linked' }>({
+      successTitle: 'GitHub account linked',
       state,
       buildAuthUrl: async (callback) => {
         callback.searchParams.set('state', state);
@@ -336,6 +337,7 @@ export async function performGithubJoin(client: PlatformClient): Promise<number>
   // completeGithubJoin runs INSIDE the request handler (via finalize), so the
   // browser only shows the success page after the join actually succeeds.
   const { count } = await awaitBrowserCallback<{ status: 'joined'; count: number }>({
+    successTitle: 'GitHub installations joined',
     state,
     buildAuthUrl: async (callback) => {
       callback.searchParams.set('state', state);
@@ -427,6 +429,7 @@ async function runGithubConnectAuthorize(
   const state = randomBytes(32).toString('hex');
 
   const { connectGrant } = await awaitBrowserCallback<{ connectGrant: string }>({
+    successTitle: 'GitHub connection authorized',
     state,
     buildAuthUrl: async (callback) => {
       callback.searchParams.set('state', state);

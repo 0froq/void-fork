@@ -1,4 +1,5 @@
 import { parsePlatformAuthenticationSetup } from '@void/platform';
+import { browserPageLead, browserPageStatus } from '@void/platform/browser-page';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
@@ -14,9 +15,9 @@ import {
 import { AuthenticationConfigurationError, readLoginRevision } from '../auth/configuration.ts';
 import { hmacVerifyState } from '../auth/hmac.ts';
 import { startBootstrapLogin } from '../auth/login.ts';
+import { acceptsBrowserHtml, platformBrowserError, platformBrowserPage } from '../browser-page.ts';
 import { escapeHtml } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
-import { getPlatformPageTitle } from '../platform-identity.ts';
 
 const app = new Hono<ApiEnv>();
 const noStore: MiddlewareHandler<ApiEnv> = async (context, next) => {
@@ -28,6 +29,19 @@ const noStore: MiddlewareHandler<ApiEnv> = async (context, next) => {
     context.req.path === '/setup' ? 'strict-origin' : 'no-referrer',
   );
   await next();
+  if (
+    context.req.path.startsWith('/auth/bootstrap') &&
+    acceptsBrowserHtml(context) &&
+    context.res.status >= 400 &&
+    context.res.headers.get('Content-Type')?.includes('application/json')
+  ) {
+    context.res = platformBrowserError(
+      context,
+      'Administrator setup failed',
+      'The setup request could not be verified. Resume setup from the installing CLI.',
+      context.res.status as ContentfulStatusCode,
+    );
+  }
 };
 for (const path of [
   '/setup',
@@ -39,9 +53,25 @@ for (const path of [
 }
 app.onError((error, context) => {
   if (error instanceof AuthenticationConfigurationError) {
+    if (acceptsBrowserHtml(context)) {
+      return platformBrowserError(
+        context,
+        'Administrator setup failed',
+        error.message,
+        error.status as ContentfulStatusCode,
+      );
+    }
     return context.json(
       { error: error.code, message: error.message },
       error.status as ContentfulStatusCode,
+    );
+  }
+  if (acceptsBrowserHtml(context)) {
+    return platformBrowserError(
+      context,
+      'Administrator setup failed',
+      'Platform administrator setup failed. Resume setup from the installing CLI.',
+      500,
     );
   }
   return context.json(
@@ -128,25 +158,31 @@ app.get('/setup', async (context) => {
   }
   const revision = await readLoginRevision(context.get('db'), pending.connection_id, 1);
   if (Date.parse(pending.expires_at) <= Date.now()) {
-    return context.html(
-      '<!doctype html><title>' +
-        escapeHtml(getPlatformPageTitle('Setup code expired', context.env, context.req.url)) +
-        '</title><h1>Setup code expired</h1><p>Run <code>void platform repair ' +
+    return platformBrowserPage(
+      context,
+      'Setup code expired',
+      browserPageStatus('error') +
+        browserPageLead(
+          'Setup code expired',
+          'Generate a new code from the computer you used to install the platform.',
+        ) +
+        '<pre><code>void platform repair ' +
         escapeHtml(pending.installation_id) +
-        '</code> from the installing computer to generate a new code. If installation was interrupted, resume the original install command instead.</p>',
+        '</code></pre>' +
+        '<p class="void-auth-note">If installation was interrupted, resume the original install command instead.</p>',
       410,
     );
   }
-  return context.html(
-    '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>' +
-      escapeHtml(getPlatformPageTitle('Set up administrator', context.env, context.req.url)) +
-      '</title>' +
-      '<main style="font-family:system-ui;max-width:40rem;margin:4rem auto;padding:1rem"><h1>Set up your platform administrator</h1>' +
-      '<p>Enter the setup code printed by the installer. You will sign in and review the account before it becomes the first administrator.</p>' +
-      '<form method="post" action="/auth/bootstrap"><label>Setup code <input name="code" type="password" autocomplete="one-time-code" required></label>' +
-      '<button type="submit">Continue with ' +
+  return platformBrowserPage(
+    context,
+    'Set up administrator',
+    browserPageLead(
+      'Set up your administrator',
+      'Enter the setup code printed by the installer. You’ll sign in and review the account before it becomes the first administrator.',
+    ) +
+      '<form class="void-auth-form" method="post" action="/auth/bootstrap"><label for="setup-code">Setup code</label><input id="setup-code" name="code" type="password" autocomplete="one-time-code" placeholder="Enter your setup code" required><button class="void-auth-button void-auth-button-primary" type="submit">Continue with ' +
       escapeHtml(revision?.configuration.label ?? pending.connection_id) +
-      '</button></form></main>',
+      '</button></form>',
   );
 });
 

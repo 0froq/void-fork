@@ -1888,7 +1888,7 @@ describe('GET /email/destinations/confirm', () => {
     const res = await confirm(token);
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain('Confirmed');
+    expect(html).toContain('Email confirmed');
     expect(html).toContain('shared@example.com');
 
     const [row] = await env.db

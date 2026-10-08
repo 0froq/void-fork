@@ -23,6 +23,7 @@ export async function renderAdminPage(
     props,
     params: {},
     shared: {
+      platformName,
       adminPageUrl: pathname + search,
       adminFateSession: `${context.get('user')?.id ?? 'guest'}:${context.get('humanSession')?.id ?? 'none'}`,
       ...(options.fateSnapshot ? { adminFateSnapshot: options.fateSnapshot } : {}),

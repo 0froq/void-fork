@@ -885,6 +885,9 @@ importers:
       '@nkzw/stack':
         specifier: 2.3.2
         version: 2.3.2(react@19.3.0)
+      '@void/platform':
+        specifier: workspace:*
+        version: link:../../../packages/platform
       hono:
         specifier: catalog:platform
         version: 4.13.13
