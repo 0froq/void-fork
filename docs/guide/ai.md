@@ -133,7 +133,7 @@ const result = await ai.run('google/gemini-2.5-flash', {
 });
 ```
 
-Pass AI Gateway options as the third argument: `ai.run(model, inputs, { gateway: { skipCache: true } })`.
+Pass AI Gateway options as the third argument: `ai.run(model, inputs, { gateway: { skipCache: true } })`. On a team platform, the platform chooses the gateway and sets its metadata and logging; options such as `skipCache` and `cacheTtl` still apply.
 
 For provider-native requests on a direct deployment, configure [`ai.gateway`](../integrations/cloudflare.md#ai-self-host).
 
@@ -142,7 +142,9 @@ For provider-native requests on a direct deployment, configure [`ai.gateway`](..
 Use `ai.provider(provider).fetch(path, init)` for a provider-native API with your
 own provider key. The request goes through the configured Cloudflare AI Gateway
 and retains the provider's native HTTP shape. On a team platform, it also passes
-through that installation's proxy.
+through that installation's proxy. AI Gateway cache, timeout and retry headers,
+such as `cf-aig-cache-ttl` and `cf-aig-max-attempts`, still apply there; the
+platform ignores logging, metadata and cost headers.
 
 ### OpenAI
 

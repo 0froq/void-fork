@@ -55,6 +55,7 @@ import {
   tryCreateEmailDestination,
   ACTIVE_BUILD_STATUSES,
 } from '../db.ts';
+import { databaseTimestampMs } from '../deploy/recovery.ts';
 import { type ApiEnv, isDevBypass } from '../env.ts';
 import { validateSubmittedExecutionPlans } from '../migrations/execution-plan.ts';
 import { ensureTrackingTable, queryD1, runRemoteMigrations } from '../migrations/remote-runner.ts';
@@ -113,7 +114,7 @@ import { requireProjectRouteCapability } from './project-access.ts';
 import { getRequestsDataset, queryAnalyticsEngine, queryProjectRequestOverview } from './usage.ts';
 
 /**
- * Slugs no project may claim. Two overlapping reasons:
+ * Slugs no project may claim. Three overlapping reasons:
  *
  *  - hostname collisions on `*.void.app` (`www`, `api`, `dash`, `cname`, …),
  *    including the hostname dispatch keeps for platform health probes;
@@ -123,12 +124,17 @@ import { getRequestsDataset, queryAnalyticsEngine, queryProjectRequestOverview }
  *    could send mail indistinguishable from the platform's own. That set
  *    is folded in here rather than listed twice: this check only reaches
  *    NEW projects, so the email path enforces the same set on its own
- *    against a project that registered the slug before it was reserved.
+ *    against a project that registered the slug before it was reserved;
+ *  - certificate-authority domain-validation mailboxes on the shared mail
+ *    domain (`admin`, `administrator`, `hostmaster`, `postmaster`,
+ *    `webmaster`): a project receiving one could pass a CA email check and
+ *    get a certificate for that domain. Reserved for new projects only.
  */
 export const RESERVED_SLUGS = new Set([
   ...EMAIL_RESERVED_SLUGS,
   PLATFORM_HEALTH_HOSTNAME_LABEL,
   'admin',
+  'administrator',
   'api',
   'app',
   'assets',
@@ -143,6 +149,7 @@ export const RESERVED_SLUGS = new Set([
   'ftp',
   'gateway',
   'help',
+  'hostmaster',
   'imap',
   'login',
   'mail',
@@ -161,6 +168,7 @@ export const RESERVED_SLUGS = new Set([
   'static',
   'status',
   'support',
+  'webmaster',
   'www',
 ]);
 
@@ -2663,7 +2671,11 @@ const app = new Hono<ApiEnv>()
     }
 
     const workerName = `user-${project.slug}`;
-    const sinceStr = new Date(Date.now() - sinceMs).toISOString().replace('T', ' ').slice(0, 19);
+    // A slug can be reused after deletion, so rows from before this project
+    // existed belong to an earlier owner.
+    const createdAtMs = databaseTimestampMs(project.created_at) ?? 0;
+    const startMs = Math.max(Date.now() - sinceMs, createdAtMs);
+    const sinceStr = new Date(startMs).toISOString().replace('T', ' ').slice(0, 19);
     const dataset = context.env.LOGS_DATASET ?? 'void_logs';
 
     const deployFilter = deploymentId ? `\n        AND blob7 = '${deploymentId}'` : '';
@@ -2677,6 +2689,10 @@ const app = new Hono<ApiEnv>()
       levelFilter = `\n        AND blob2 LIKE '%"level":"${level}"%'`;
     }
 
+    // `timestamp` is when the row was written, in whole seconds, and keeps the
+    // scan short. An earlier owner's invocation can start before this project
+    // was created and still be written after, so also bound its start time
+    // (`double1`, in ms).
     const query = `
       SELECT
         blob1 as outcome,
@@ -2690,7 +2706,8 @@ const app = new Hono<ApiEnv>()
         min(timestamp) as ingestedAt
       FROM ${dataset}
       WHERE index1 = '${workerName}'
-        AND timestamp >= toDateTime('${sinceStr}')${deployFilter}${levelFilter}
+        AND timestamp >= toDateTime('${sinceStr}')
+        AND double1 >= ${createdAtMs}${deployFilter}${levelFilter}
       ${LOG_ROW_GROUP_BY}
       ORDER BY ingestedAt DESC
       LIMIT ${limit}

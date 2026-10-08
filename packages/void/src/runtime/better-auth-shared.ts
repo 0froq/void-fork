@@ -276,6 +276,130 @@ function resolveUserConfig(
   return mergeEmailAndPasswordDefaults({ ...defaults, ...userConfig });
 }
 
+const SESSION_SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+// An http page never counts for an https request. An https page counts for an
+// http request on the same host: Vite HTTPS dev and preview hand WebSocket
+// upgrades to the Worker with an http:// URL.
+function isRequestOrigin(origin: string, requestUrl: string): boolean {
+  try {
+    const from = new URL(origin);
+    const to = new URL(requestUrl);
+    return from.host === to.host && (from.protocol === to.protocol || from.protocol === 'https:');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Headers used to look up the signed-in session for app routes and WebSockets.
+ *
+ * The session cookie is SameSite=Lax, so a page on another origin of the same
+ * site (for example a sibling subdomain) can still send it with a WebSocket
+ * handshake or a POST that needs no CORS preflight. For those requests the
+ * cookie only counts when the Origin is the request origin or one Better Auth
+ * trusts, following Better Auth's own origin check for its endpoints. The
+ * request is not rejected; it is resolved without a user.
+ */
+async function sessionHeaders(
+  request: Request,
+  auth: ReturnType<typeof betterAuth>,
+): Promise<Headers> {
+  const headers = request.headers;
+  if (!headers.has('cookie')) {
+    return headers;
+  }
+  if (
+    SESSION_SAFE_METHODS.has(request.method) &&
+    headers.get('upgrade')?.toLowerCase() !== 'websocket'
+  ) {
+    return headers;
+  }
+  const origin = headers.get('origin');
+  if (!origin || isRequestOrigin(origin, request.url)) {
+    return headers;
+  }
+  if (origin === 'null' && headers.get('sec-fetch-site') === 'same-origin') {
+    return headers;
+  }
+
+  // Better Auth skips its origin check when CSRF checks are off, and treats
+  // `disableOriginCheck: true` the same way while `disableCSRFCheck` is unset.
+  const advanced = auth.options.advanced;
+  if (
+    advanced?.disableCSRFCheck === true ||
+    (advanced?.disableOriginCheck === true && advanced.disableCSRFCheck === undefined)
+  ) {
+    return headers;
+  }
+
+  const context = await auth.$context;
+  if (context.isTrustedOrigin(origin, { allowRelativePaths: false })) {
+    return headers;
+  }
+  // The function form is evaluated per request by Better Auth, while the
+  // context list was built once without a request. `isTrustedOrigin` matches
+  // against `this.trustedOrigins`, so reuse it to keep wildcard patterns.
+  const trustedOrigins = auth.options.trustedOrigins;
+  if (typeof trustedOrigins === 'function') {
+    const requestOrigins = (await trustedOrigins(request)).filter((value): value is string =>
+      Boolean(value),
+    );
+    if (
+      context.isTrustedOrigin.call({ trustedOrigins: requestOrigins }, origin, {
+        allowRelativePaths: false,
+      })
+    ) {
+      return headers;
+    }
+  }
+
+  const withoutCookie = new Headers(headers);
+  withoutCookie.delete('cookie');
+  console.warn(
+    `auth: Ignored the session cookie on a ${request.method} request from ${origin}. Add this origin to auth trustedOrigins if it should use the signed-in session.`,
+  );
+  return withoutCookie;
+}
+
+const LOOPBACK_IP = /^(127\.|::1$|::ffff:127\.)/;
+
+/**
+ * The client IP set by Cloudflare's edge, or null outside a deployed Worker.
+ * `request.cf` keeps a client-supplied header from being trusted on Node, Bun
+ * or Deno, and local previews report a loopback address.
+ */
+function cloudflareClientIp(request: Request): string | null {
+  const cf = (request as { cf?: unknown }).cf;
+  if (typeof cf !== 'object' || cf === null) {
+    return null;
+  }
+  const ip = request.headers.get('cf-connecting-ip');
+  if (!ip || LOOPBACK_IP.test(ip)) {
+    return null;
+  }
+  return ip;
+}
+
+/**
+ * Better Auth enables rate limiting only when NODE_ENV is "production", which
+ * Workers never set. Turn it on for deployed Cloudflare requests and key it by
+ * Cloudflare's client IP header. Explicit user settings still win.
+ */
+function applyCloudflareRateLimitDefaults(options: BetterAuthOptions): BetterAuthOptions {
+  return {
+    ...options,
+    rateLimit: {
+      ...options.rateLimit,
+      enabled: options.rateLimit?.enabled ?? true,
+    },
+    advanced: {
+      ...options.advanced,
+      ipAddress: options.advanced?.ipAddress ?? { ipAddressHeaders: ['cf-connecting-ip'] },
+    },
+  };
+}
+
 export function assertRuntimeDialect(
   runtime: VoidAuthRuntimeOptions,
   dialect: VoidAuthDialect,
@@ -319,8 +443,12 @@ export function createVoidAuthRuntime(
       trustedOrigins: [origin],
     };
 
+    const resolved = resolveUserConfig(runtime.userConfig, defaults, request, env, dialect);
     return {
-      options: resolveUserConfig(runtime.userConfig, defaults, request, env, dialect),
+      options:
+        runtime.dev !== true && cloudflareClientIp(request)
+          ? applyCloudflareRateLimitDefaults(resolved)
+          : resolved,
       dispose,
     };
   }
@@ -362,7 +490,7 @@ export function createVoidAuthRuntime(
 
     try {
       const result = await auth.api.getSession({
-        headers: request.headers,
+        headers: await sessionHeaders(request, auth),
         asResponse: false,
         returnHeaders: true,
       });
@@ -400,7 +528,7 @@ export function createVoidAuthRuntime(
 
     try {
       const result = await auth.api.getSession({
-        headers: c.req.raw.headers,
+        headers: await sessionHeaders(c.req.raw, auth),
         asResponse: false,
         returnHeaders: true,
       });

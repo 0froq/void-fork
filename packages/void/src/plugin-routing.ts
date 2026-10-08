@@ -482,6 +482,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         hasEmail: hasEmailHandlers(),
         serveSpaFallback: shouldServeSpaFallback(),
         live: options.live,
+        dev: compileOptions.dev,
         isr,
         notFound: currentNotFoundHandling(),
         durableObjects: options.durableObjects,
@@ -713,6 +714,14 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         }
         if (id !== VIRTUAL_ROUTES_ID) {
           return;
+        }
+        // The route table embeds the dev-trigger token. Only server environments import
+        // it; refusing the client environment keeps `/@id/virtual:void-routes` from
+        // returning it, either as the module or as code on Vite's error page.
+        if (this?.environment?.name === 'client') {
+          throw new Error(
+            `${VIRTUAL_ROUTES_ID} is server-only and cannot be loaded by client code.`,
+          );
         }
         if (!scan) {
           await rescan();

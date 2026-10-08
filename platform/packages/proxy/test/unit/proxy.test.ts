@@ -1,5 +1,5 @@
 import { signEmailReceipt } from '@void/platform/email-protocol';
-import { deriveProxyToken } from '@voidcloud/api/proxy-token';
+import { deriveAiUsageTag, deriveProxyToken } from '@voidcloud/api/proxy-token';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite-plus/test';
 import worker from '../../src/index.ts';
 import { PLATFORM_DISABLED_KEY } from '../../src/platform-lifecycle.ts';
@@ -166,7 +166,10 @@ function createEnv(
 }
 
 function post(path: string, body: unknown, headers?: Record<string, string>): Request {
-  return new Request(`https://proxy.void.cloud${path}`, {
+  // Service-binding callers use bare hosts and no header; HTTPS callers send Bearer.
+  const origin =
+    headers?.authorization === undefined ? 'https://proxy' : 'https://proxy.void.cloud';
+  return new Request(`${origin}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(body),
@@ -178,6 +181,7 @@ function post(path: string, body: unknown, headers?: Record<string, string>): Re
 describe('proxy worker', () => {
   let validToken: string;
   const aiTokens: Record<string, string> = {};
+  const usageTags: Record<string, string> = {};
 
   beforeEach(clearProxyTokenStateCache);
 
@@ -195,6 +199,7 @@ describe('proxy worker', () => {
       'proj_000000000000',
     ]) {
       aiTokens[pid] = await signAiToken(pid, JWT_SECRET);
+      usageTags[pid] = await deriveAiUsageTag(JWT_SECRET, pid);
     }
   });
 
@@ -302,7 +307,7 @@ describe('proxy worker', () => {
         controller.close();
       });
       const cancel = vi.fn();
-      const request = new Request('https://proxy.void.cloud/ai/models', {
+      const request = new Request('https://ai-proxy/ai/models', {
         method: 'POST',
         headers: { 'content-length': String(1024 * 1024 + 1) },
         body: new ReadableStream({ pull, cancel }, { highWaterMark: 0 }),
@@ -317,7 +322,7 @@ describe('proxy worker', () => {
 
     it('enforces the byte cap when Content-Length is missing', async () => {
       const body = new TextEncoder().encode(JSON.stringify({ pad: 'x'.repeat(1024 * 1024) }));
-      const request = new Request('https://proxy.void.cloud/ai/models', {
+      const request = new Request('https://ai-proxy/ai/models', {
         method: 'POST',
         body: new ReadableStream({
           start(controller) {
@@ -337,7 +342,7 @@ describe('proxy worker', () => {
       vi.useFakeTimers();
       let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
       let cancelled = false;
-      const request = new Request('https://proxy.void.cloud/ai/models', {
+      const request = new Request('https://ai-proxy/ai/models', {
         method: 'POST',
         body: new ReadableStream({
           start(value) {
@@ -456,7 +461,7 @@ describe('proxy worker', () => {
   describe('email send request bounds', () => {
     it('allows a maximum-size MIME envelope through to authentication', async () => {
       const response = await worker.fetch(
-        new Request('https://proxy.void.cloud/email/send', {
+        new Request('https://email-proxy/email/send', {
           method: 'POST',
           body: JSON.stringify({
             projectId: 'proj_000000000001',
@@ -477,7 +482,7 @@ describe('proxy worker', () => {
           controller.close();
         });
         const cancel = vi.fn();
-        const request = new Request(`https://proxy.void.cloud${path}`, {
+        const request = new Request(`https://email-proxy${path}`, {
           method: 'POST',
           headers: { 'content-length': String(8 * 1024 * 1024 + 1) },
           body: new ReadableStream({ pull, cancel }, { highWaterMark: 0 }),
@@ -493,7 +498,7 @@ describe('proxy worker', () => {
     it('ends a stalled unauthenticated send body without waiting for cancellation', async () => {
       vi.useFakeTimers();
       const cancel = vi.fn(() => new Promise<void>(() => {}));
-      const request = new Request('https://proxy.void.cloud/email/send', {
+      const request = new Request('https://email-proxy/email/send', {
         method: 'POST',
         body: new ReadableStream({ cancel }),
         duplex: 'half',
@@ -506,6 +511,79 @@ describe('proxy worker', () => {
       expect(status).toBe(400);
       expect(cancel).toHaveBeenCalledOnce();
       await response;
+    });
+  });
+
+  describe('authentication before the body is read', () => {
+    function streamedPost(url: string, headers: Record<string, string> = {}) {
+      const pull = vi.fn((controller: ReadableStreamDefaultController<Uint8Array>) => {
+        controller.enqueue(new TextEncoder().encode('{}'));
+        controller.close();
+      });
+      const request = new Request(url, {
+        method: 'POST',
+        headers,
+        body: new ReadableStream({ pull, cancel: vi.fn() }, { highWaterMark: 0 }),
+        duplex: 'half',
+      } as RequestInit);
+      return { request, pull };
+    }
+
+    it.each(['https://proxy.void.cloud', 'https://void-proxy.example.workers.dev'])(
+      'refuses a request to %s without a header before reading its body',
+      async (host) => {
+        const { request, pull } = streamedPost(`${host}/ai/run`);
+        const response = await worker.fetch(request, createEnv());
+        expect(response.status).toBe(401);
+        expect(await response.json()).toMatchObject({ error: 'authorization required' });
+        expect(pull).not.toHaveBeenCalled();
+      },
+    );
+
+    it('refuses an invalid bearer token before reading the body', async () => {
+      const { request, pull } = streamedPost('https://proxy.void.cloud/ai/run', {
+        authorization: 'Bearer junk',
+      });
+      const response = await worker.fetch(request, createEnv());
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({ error: 'invalid or expired token' });
+      expect(pull).not.toHaveBeenCalled();
+    });
+
+    it('never accepts a body project token next to a non-bearer header', async () => {
+      const env = createEnv();
+      const response = await worker.fetch(
+        post(
+          '/ai/run',
+          {
+            model: 'm',
+            inputs: {},
+            projectId: 'proj_000000000001',
+            aiToken: aiTokens['proj_000000000001'],
+          },
+          { authorization: 'Basic x' },
+        ),
+        env,
+      );
+      expect(response.status).toBe(401);
+      expect(env.AI.run).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      'https://ai-proxy/ai/run',
+      'https://proxy/revalidate',
+      'https://email-proxy/email/send',
+    ])('checks the body project token on the binding host %s', async (url) => {
+      const response = await worker.fetch(
+        new Request(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ projectId: 'proj_000000000001', aiToken: 'invalid' }),
+        }),
+        createEnv(),
+      );
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: 'invalid project token' });
     });
   });
 
@@ -1341,7 +1419,7 @@ describe('proxy worker', () => {
         { prompt: 'hi' },
         {
           max_tokens: 100,
-          gateway: { id: 'void', metadata: { projectId: 'proj_000000000042' } },
+          gateway: { id: 'void', metadata: { projectId: usageTags['proj_000000000042'] } },
         },
       );
     });
@@ -1362,7 +1440,7 @@ describe('proxy worker', () => {
         'm',
         {},
         {
-          gateway: { id: 'void-team', metadata: { projectId: 'proj_000000000042' } },
+          gateway: { id: 'void-team', metadata: { projectId: usageTags['proj_000000000042'] } },
         },
       );
     });
@@ -1395,7 +1473,87 @@ describe('proxy worker', () => {
             id: 'void',
             skipCache: true,
             cacheTtl: 60,
-            metadata: { user: 'alice', projectId: 'proj_000000000042' },
+            metadata: { projectId: usageTags['proj_000000000042'] },
+          },
+        },
+      );
+    });
+
+    it.each([
+      { a: '1', b: '2', c: '3', d: '4', e: '5' },
+      { '0': '1', '1': '2', '2': '3', '3': '4', '4': '5' },
+    ])('keeps the project as the only gateway metadata entry %j', async (metadata) => {
+      const env = createEnv();
+      await worker.fetch(
+        post('/ai/run', {
+          model: 'm',
+          inputs: {},
+          options: { gateway: { metadata } },
+          projectId: 'proj_000000000042',
+          aiToken: aiTokens['proj_000000000042'],
+        }),
+        env,
+      );
+
+      const options = env.AI.run.mock.calls[0]![2] as { gateway: { metadata: unknown } };
+      expect(options.gateway.metadata).toStrictEqual({ projectId: usageTags['proj_000000000042'] });
+    });
+
+    it('keeps gateway logging on and drops caller gateway control headers', async () => {
+      const env = createEnv();
+      await worker.fetch(
+        post('/ai/run', {
+          model: 'm',
+          inputs: {},
+          options: {
+            gateway: { collectLog: false, eventId: 'event-1' },
+            extraHeaders: {
+              'cf-aig-metadata': '{"projectId":"proj_000000000001"}',
+              'CF-AIG-Custom-Cost': '{"total_cost":0}',
+              'x-keep': 'yes',
+            },
+          },
+          projectId: 'proj_000000000042',
+          aiToken: aiTokens['proj_000000000042'],
+        }),
+        env,
+      );
+
+      expect(env.AI.run).toHaveBeenCalledWith(
+        'm',
+        {},
+        {
+          gateway: {
+            id: 'void',
+            eventId: 'event-1',
+            metadata: { projectId: usageTags['proj_000000000042'] },
+          },
+          extraHeaders: { 'x-keep': 'yes' },
+        },
+      );
+    });
+
+    it('scopes a caller cache key to the project', async () => {
+      const env = createEnv();
+      await worker.fetch(
+        post('/ai/run', {
+          model: 'm',
+          inputs: {},
+          options: { gateway: { cacheKey: 'k' } },
+          projectId: 'proj_000000000042',
+          aiToken: aiTokens['proj_000000000042'],
+        }),
+        env,
+      );
+
+      expect(env.AI.run).toHaveBeenCalledWith(
+        'm',
+        {},
+        {
+          gateway: {
+            id: 'void',
+            cacheKey: 'proj_000000000042:k',
+            metadata: { projectId: usageTags['proj_000000000042'] },
           },
         },
       );
@@ -1517,9 +1675,30 @@ describe('proxy worker', () => {
         'm',
         {},
         {
-          gateway: { id: 'void', metadata: { projectId: 'proj_000000000099' } },
+          gateway: { id: 'void', metadata: { projectId: usageTags['proj_000000000099'] } },
         },
       );
+    });
+
+    it('tags gateway metadata with the signed project value the usage query counts', async () => {
+      const env = createEnv();
+      await worker.fetch(
+        post('/ai/run', {
+          model: 'm',
+          inputs: {},
+          projectId: 'proj_000000000042',
+          aiToken: aiTokens['proj_000000000042'],
+        }),
+        env,
+      );
+
+      const options = env.AI.run.mock.calls[0]![2] as {
+        gateway: { metadata: { projectId: string } };
+      };
+      const tag = options.gateway.metadata.projectId;
+      expect(tag).toBe(await deriveAiUsageTag(env.JWT_SECRET, 'proj_000000000042'));
+      expect(tag).toMatch(/^proj_000000000042\.[A-Za-z0-9_-]{22}$/);
+      expect(tag).not.toBe(await deriveAiUsageTag('other-secret', 'proj_000000000042'));
     });
   });
 
@@ -1560,7 +1739,40 @@ describe('proxy worker', () => {
 
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual(result);
-      expect(env.AI.toMarkdown).toHaveBeenCalledWith({ content: 'hello' }, { format: 'md' });
+      expect(env.AI.toMarkdown).toHaveBeenCalledWith(
+        { content: 'hello' },
+        {
+          format: 'md',
+          gateway: { id: 'void', metadata: { projectId: usageTags['proj_000000000000'] } },
+        },
+      );
+    });
+
+    it('converts through the installation gateway without caller gateway control', async () => {
+      const env = { ...createEnv(), AI_GATEWAY_ID: 'void-team' };
+
+      await worker.fetch(
+        post('/ai/toMarkdown', {
+          inputs: { content: 'hello' },
+          options: {
+            gateway: { id: 'other', collectLog: false, metadata: { projectId: 'x' } },
+            extraHeaders: { 'cf-aig-custom-cost': '{"total_cost":0}', 'x-keep': 'yes' },
+            conversionOptions: { image: { descriptionLanguage: 'en' } },
+          },
+          projectId: 'proj_000000000042',
+          aiToken: aiTokens['proj_000000000042'],
+        }),
+        env,
+      );
+
+      expect(env.AI.toMarkdown).toHaveBeenCalledWith(
+        { content: 'hello' },
+        {
+          gateway: { id: 'void-team', metadata: { projectId: usageTags['proj_000000000042'] } },
+          extraHeaders: { 'x-keep': 'yes' },
+          conversionOptions: { image: { descriptionLanguage: 'en' } },
+        },
+      );
     });
   });
 
@@ -1622,7 +1834,7 @@ describe('proxy worker', () => {
       expect(init.method).toBe('POST');
       const headers = new Headers(init.headers);
       expect(headers.get('authorization')).toBe('Bearer sk-test-key');
-      expect(headers.get('cf-aig-metadata-projectId')).toBe('proj_000000000001');
+      expect([...headers.keys()].filter((name) => name.startsWith('cf-aig-'))).toEqual([]);
       expect(headers.get('content-type')).toBe('application/json');
       expect(headers.get('openai-beta')).toBe('assistants=v2');
       expect(JSON.parse(init.body as string)).toEqual({
@@ -1681,7 +1893,120 @@ describe('proxy worker', () => {
       const headers = new Headers(fetchMock.mock.calls[0][1]!.headers);
       expect(headers.get('x-goog-api-key')).toBe('google-key');
       expect(headers.get('authorization')).toBeNull();
-      expect(headers.get('cf-aig-metadata-projectId')).toBe('proj_000000000001');
+      expect([...headers.keys()].filter((name) => name.startsWith('cf-aig-'))).toEqual([]);
+    });
+
+    function gatewayHeaders(headers: Headers): Array<[string, string]> {
+      return [...headers].filter(([name]) => name.startsWith('cf-aig-'));
+    }
+
+    it('drops caller gateway control headers on provider-native calls', async () => {
+      const fetchMock = mockProviderFetch('{}', {
+        headers: { 'content-type': 'application/json' },
+      });
+      const { gateway } = mockProviderGateway();
+      const env = createEnv({ gateway });
+
+      const callerHeaders = await worker.fetch(
+        post('/ai/provider', {
+          provider: 'openai',
+          path: '/chat/completions',
+          headers: {
+            'cf-aig-metadata': '{"projectId":"proj_000000000001"}',
+            'CF-AIG-Collect-Log': 'false',
+            'cf-aig-collect-log-payload': 'false',
+            'cf-aig-custom-cost': '{"total_cost":0}',
+            'cf-aig-authorization': 'Bearer platform-gateway-token',
+            'cf-aig-byok-alias': 'platform-key',
+            'cf-aig-future-control': 'on',
+            'x-keep': 'yes',
+          },
+          providerKey: 'sk-test',
+          projectId: 'proj_000000000001',
+          aiToken: aiTokens['proj_000000000001'],
+        }),
+        env,
+      );
+      expect(callerHeaders.status).toBe(200);
+      const forwarded = new Headers(fetchMock.mock.calls[0][1]!.headers);
+      expect(gatewayHeaders(forwarded)).toStrictEqual([]);
+      expect(forwarded.get('x-keep')).toBe('yes');
+      expect(forwarded.get('authorization')).toBe('Bearer sk-test');
+
+      const keyHeader = await worker.fetch(
+        post('/ai/provider', {
+          provider: 'openai',
+          path: '/chat/completions',
+          apiKeyHeader: 'cf-aig-collect-log',
+          apiKeyPrefix: '',
+          providerKey: 'false',
+          projectId: 'proj_000000000001',
+          aiToken: aiTokens['proj_000000000001'],
+        }),
+        env,
+      );
+      expect(keyHeader.status).toBe(200);
+      expect(gatewayHeaders(new Headers(fetchMock.mock.calls[1][1]!.headers))).toStrictEqual([]);
+    });
+
+    it('forwards cache, timeout and retry gateway headers on provider-native calls', async () => {
+      const fetchMock = mockProviderFetch('{}', {
+        headers: { 'content-type': 'application/json' },
+      });
+      const { gateway } = mockProviderGateway();
+      const env = createEnv({ gateway });
+
+      const callerHeaders = await worker.fetch(
+        post('/ai/provider', {
+          provider: 'openai',
+          path: '/chat/completions',
+          headers: {
+            'cf-aig-cache-ttl': '3600',
+            'CF-AIG-Skip-Cache': 'true',
+            'cf-aig-request-timeout': '5000',
+            'cf-aig-max-attempts': '3',
+            'cf-aig-retry-delay': '1000',
+            'cf-aig-backoff': 'exponential',
+            'cf-aig-event-id': 'evt_1',
+            'CF-AIG-Cache-Key': 'shared-key',
+            'cf-aig-metadata': '{"projectId":"proj_000000000001"}',
+          },
+          providerKey: 'sk-test',
+          projectId: 'proj_000000000001',
+          aiToken: aiTokens['proj_000000000001'],
+        }),
+        env,
+      );
+      expect(callerHeaders.status).toBe(200);
+      expect(
+        Object.fromEntries(gatewayHeaders(new Headers(fetchMock.mock.calls[0][1]!.headers))),
+      ).toStrictEqual({
+        'cf-aig-cache-ttl': '3600',
+        'cf-aig-skip-cache': 'true',
+        'cf-aig-request-timeout': '5000',
+        'cf-aig-max-attempts': '3',
+        'cf-aig-retry-delay': '1000',
+        'cf-aig-backoff': 'exponential',
+        'cf-aig-event-id': 'evt_1',
+        'cf-aig-cache-key': 'proj_000000000001:shared-key',
+      });
+
+      const keyHeader = await worker.fetch(
+        post('/ai/provider', {
+          provider: 'openai',
+          path: '/chat/completions',
+          apiKeyHeader: 'cf-aig-cache-key',
+          apiKeyPrefix: '',
+          providerKey: 'shared-key',
+          projectId: 'proj_000000000001',
+          aiToken: aiTokens['proj_000000000001'],
+        }),
+        env,
+      );
+      expect(keyHeader.status).toBe(200);
+      expect(gatewayHeaders(new Headers(fetchMock.mock.calls[1][1]!.headers))).toStrictEqual([
+        ['cf-aig-cache-key', 'proj_000000000001:shared-key'],
+      ]);
     });
 
     it('reconstructs multipart form data bodies', async () => {

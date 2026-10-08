@@ -48,6 +48,7 @@ import type { AssetConfig } from './static.ts';
 import {
   buildVariantOriginalUrl,
   exactQueryAllowlist,
+  hasUnlistedQueryParams,
   type QueryAllowlist,
 } from './variant-key.ts';
 import {
@@ -89,6 +90,17 @@ type RoutingEntry = Readonly<{
   zeroTrust?: ProjectZeroTrustRouting;
 }>;
 
+// Written by the API (suspension.ts projectSuspensionKey) while an administrator
+// has suspended the project's owner.
+async function isProjectSuspended(env: Env, projectId: string): Promise<boolean> {
+  try {
+    return (await env.ROUTING.get(`project-suspended:${projectId}`, { cacheTtl: 60 })) !== null;
+  } catch (error) {
+    console.error(`[queue-relay] suspension check failed project="${projectId}"; relaying`, error);
+    return false;
+  }
+}
+
 type QueueRoutingEntry = Readonly<{
   workerName: string;
   projectId: string;
@@ -103,6 +115,12 @@ type QueueRoutingEntry = Readonly<{
 const CLIENT_REVALIDATE_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
 const STATIC_ASSET_HEDGE_DELAY_MS = 1000;
 const PLATFORM_QUEUE_RETRY_DELAY_SECONDS = 300;
+// Batches of a project whose owner an administrator suspended wait here. Each
+// retry uses one of the queue's max_retries (3 unless the app sets maxRetries),
+// so a message survives about one hour per retry, and a queue with maxRetries 0
+// drops it on the first suspended delivery. Delivery resumes within about an
+// hour of a restore.
+const SUSPENDED_PROJECT_QUEUE_RETRY_DELAY_SECONDS = 3600;
 // A relay the Worker rejects for its token is retried after the queue routing
 // entry (read with cacheTtl 60) has had time to catch up with a token rotation,
 // so one rotation costs a message about one attempt instead of all of them.
@@ -316,19 +334,25 @@ function buildFallbackOriginalUrlVariant(
   routing: RoutingEntry,
   originalUrlVariant: string | undefined,
 ): string | undefined {
-  // Fallback rewrites are discovered after the first worker/static miss, but
-  // ISR needs the read key before dispatching. If a fallback rule can handle
-  // this pathname, use the same original-URL variant a later fallback dispatch
-  // would expose via X-Void-Original-URL so query-allowlisted renders cannot
-  // collide with the direct ISR key.
-  if (originalUrlVariant || !routing.fallbackRules?.length) {
+  // ISR keys a request by its allowlisted query params. A redirect-rule rewrite
+  // already built that variant. Fallback rewrites are discovered after the
+  // first worker/static miss, but ISR needs the read key before dispatching: if
+  // a fallback rule can handle this pathname, use the same original-URL variant
+  // a later fallback dispatch would expose via X-Void-Original-URL so
+  // query-allowlisted renders cannot collide with the direct ISR key. A direct
+  // request keys on its allowlisted params too, and keeps the bare key when it
+  // has none.
+  if (originalUrlVariant) {
     return originalUrlVariant;
   }
-  const fallback = applyRoutingRules(pathname, routing.fallbackRules, requestHost);
-  if (fallback?.type !== 'rewrite') {
-    return undefined;
+  const variant = buildVariantOriginalUrl(requestUrl, pathname, routing.queryAllowlist);
+  const fallback = routing.fallbackRules?.length
+    ? applyRoutingRules(pathname, routing.fallbackRules, requestHost)
+    : undefined;
+  if (fallback?.type === 'rewrite') {
+    return variant;
   }
-  return buildVariantOriginalUrl(requestUrl, pathname, routing.queryAllowlist);
+  return new URL(variant).search ? variant : undefined;
 }
 
 function resolveCachedWfpFallbackPathname(
@@ -898,6 +922,8 @@ export default {
         // filenames are already content-addressed by their pathname.
         const cacheUrl = new URL(url.toString());
         cacheUrl.search = '';
+        // A host can move to another project; immutable entries must not carry over.
+        cacheUrl.searchParams.set('_p', routing.projectId);
         const cacheKey = new Request(cacheUrl.toString());
 
         // Hashed assets are served straight from the immutable edge cache. Apply
@@ -1144,6 +1170,14 @@ export default {
           routing,
           originalUrlVariant,
         );
+        // The key drops these params, but a render may still read them. Never
+        // store such a render under the shared key. Match the allowlist on the
+        // pre-rewrite path, as the rewrite variant does.
+        const unlisted = hasUnlistedQueryParams(
+          request.url,
+          new URL(request.url).pathname,
+          routing.queryAllowlist,
+        );
         const cacheKey = isrEdgeCacheKey(request, pathname, isrDeploymentId, isrOriginalUrlVariant);
         const jsonCacheKey = isrEdgeCacheKeyJson(
           request,
@@ -1239,11 +1273,22 @@ export default {
             }
             if (stale) {
               const staleCacheResponse = cacheResponse.clone();
+              // Refresh from the key's own URL, not the triggering one.
+              let revalidateRequest = workerRequest;
+              if (unlisted) {
+                const keyUrl = new URL(workerRequest.url);
+                keyUrl.search = isrOriginalUrlVariant ? new URL(isrOriginalUrlVariant).search : '';
+                revalidateRequest = rebuildRequest(workerRequest, keyUrl.toString(), (headers) => {
+                  if (originalUrlHeader && isrOriginalUrlVariant) {
+                    headers.set('X-Void-Original-URL', isrOriginalUrlVariant);
+                  }
+                });
+              }
               ctx.waitUntil(
                 revalidateInBackground(
                   env,
                   routing,
-                  workerRequest,
+                  revalidateRequest,
                   url.hostname,
                   pathname,
                   isrTtl,
@@ -1368,6 +1413,7 @@ export default {
           // user-configured rewrite to a private endpoint must not be able to poison
           // the page key just by omitting Cache-Control.
           if (
+            !unlisted &&
             ttl > 0 &&
             workerResponse.status === 200 &&
             (routing.type !== 'framework' || isHtmlResponse(workerResponse)) &&
@@ -1923,7 +1969,16 @@ export default {
       batch.retryAll();
       return;
     }
-    const { workerName, queueName, proxyToken } = JSON.parse(routingRaw) as QueueRoutingEntry;
+    const { workerName, projectId, queueName, proxyToken } = JSON.parse(
+      routingRaw,
+    ) as QueueRoutingEntry;
+    if (projectId && (await isProjectSuspended(env, projectId))) {
+      console.warn(
+        `[queue-relay] project suspended; retrying queue="${batch.queue}" in ${SUSPENDED_PROJECT_QUEUE_RETRY_DELAY_SECONDS}s`,
+      );
+      batch.retryAll({ delaySeconds: SUSPENDED_PROJECT_QUEUE_RETRY_DELAY_SECONDS });
+      return;
+    }
 
     // Serialize batch for relay
     const messages = Array.from(batch.messages, (message) => ({

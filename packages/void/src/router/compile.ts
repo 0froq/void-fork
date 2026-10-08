@@ -1122,7 +1122,7 @@ function compilePageRoutes(
       page.renderMode === 'island' && pages.islandClientEntryId
         ? 'getIslandsAssetTags'
         : 'getPagesAssetTags';
-    const routeOptions = `{ ${serverImportPath ? 'load: _pload_' + safeId + ', ' : ''}${mdHeadRef ? 'head: ' + mdHeadRef + ', ' : ''}componentId: ${JSON.stringify(page.componentId)}, render: ${renderer}, assets: ${assetTags}, headConfig: __voidHeadConfig, renderOptions: ${JSON.stringify({ renderMode: page.renderMode })} }`;
+    const routeOptions = `{ ${serverImportPath ? 'load: _pload_' + safeId + ', ' : ''}${mdHeadRef ? 'head: ' + mdHeadRef + ', ' : ''}componentId: ${JSON.stringify(page.componentId)}, render: ${renderer}, assets: ${assetTags}, headConfig: __voidHeadConfig, renderOptions: ${JSON.stringify({ renderMode: page.renderMode, ...(options.dev === true ? { dev: true } : {}) })} }`;
     lines.push(
       `app.get(${JSON.stringify(page.pattern)}, __createPageGetHandler(${routeOptions}));`,
     );
@@ -1202,6 +1202,11 @@ export interface WorkerEntryOptions {
   hasEmail?: boolean;
   live?: boolean | { bindingName?: string; className?: string };
   /**
+   * Whether the entry is compiled for the Vite dev server. Dev lets void/live
+   * send the real internal error message to the client; builds never set it.
+   */
+  dev?: boolean;
+  /**
    * When present, wraps the render path with the self-host ISR cache ladder.
    * `runtimePath` is the import specifier for `handleIsr`. The deployment id is
    * NOT passed here - the single source of truth is the compile-time
@@ -1256,6 +1261,7 @@ export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
     serveSpaFallback = false,
     hasEmail = false,
     live,
+    dev = false,
     isr,
     notFound = 'none',
     durableObjects = [],
@@ -1291,11 +1297,15 @@ export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
       ? (live.className ?? 'VoidLiveStreamDurableObject')
       : 'VoidLiveStreamDurableObject';
   const liveRouteImport = hasLive ? ', VoidLiveStreamDurableObject' : '';
-  const liveRuntimeImport = hasLive ? `import { __setLiveBindingName } from "void/live";\n` : '';
+  const liveDev = hasLive && dev === true;
+  const liveRuntimeImport = hasLive
+    ? `import { __setLiveBindingName${liveDev ? ', __setLiveDev' : ''} } from "void/live";\n`
+    : '';
+  const liveDevCall = liveDev ? '__setLiveDev(true);\n' : '';
   const liveExport = hasLive
     ? liveClassName === 'VoidLiveStreamDurableObject'
-      ? `export { VoidLiveStreamDurableObject };\n__setLiveBindingName(${JSON.stringify(liveBindingName)});\n`
-      : `export { VoidLiveStreamDurableObject as ${liveClassName} };\n__setLiveBindingName(${JSON.stringify(liveBindingName)});\n`
+      ? `export { VoidLiveStreamDurableObject };\n__setLiveBindingName(${JSON.stringify(liveBindingName)});\n${liveDevCall}`
+      : `export { VoidLiveStreamDurableObject as ${liveClassName} };\n__setLiveBindingName(${JSON.stringify(liveBindingName)});\n${liveDevCall}`
     : '';
   const durableObjectImports = durableObjects
     .map(
@@ -1521,8 +1531,12 @@ export function compileNodeApp(
     ? `import ${JSON.stringify(envSchemaModule.importPath)};\nimport { _validateEnvOnce } from ${JSON.stringify(envSchemaModule.helperPath)};\n`
     : '';
   const envSource = target === 'deno' ? 'Deno.env.toObject()' : 'process.env';
+  // Path discovery answers only the build-time prerender runner, which passes
+  // `{ __VOID_PRERENDER: "1" }` as the Hono env. HTTP servers never do: Node
+  // passes `{ incoming, outgoing }`, Bun its Server and Deno its handler info.
+  const discoveryRequest = `c.req.method === "POST" && c.req.path === "/__void/prerender-paths" && c.env?.__VOID_PRERENDER === "1"`;
   const envMiddleware = envSchemaModule
-    ? `app.use("*", async (c, next) => { if (c.req.method !== "POST" || c.req.path !== "/__void/prerender-paths") await _validateEnvOnce(${envSource}); return next(); });\n`
+    ? `app.use("*", async (c, next) => { if (!(${discoveryRequest})) await _validateEnvOnce(${envSource}); return next(); });\n`
     : '';
 
   return `${staticImport}
@@ -1537,11 +1551,7 @@ assetApp.get("*", serveStatic({ root: clientRoot }));
 const assets = { fetch: (request) => assetApp.fetch(request) };
 const app = new Hono();
 ${envMiddleware}app.post("/__void/prerender-paths", async (c) => {
-  const __expected = c.env?.__VOID_PROXY_TOKEN;
-  if (__expected) {
-    const __token = c.req.header("x-void-internal");
-    if (!__token || __token !== __expected) return c.json({ error: "unauthorized" }, 401);
-  }
+  if (c.env?.__VOID_PRERENDER !== "1") return c.notFound();
   const paths = await __voidCollectPrerenderPaths(c.req.raw);
   return c.json({ paths });
 });

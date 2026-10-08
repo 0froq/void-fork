@@ -1084,6 +1084,7 @@ describe('GET /admin/users/:id', () => {
     expect(html).toContain('detailuser');
     expect(html).toContain('Plan');
     expect(html).toContain('Suspension');
+    expect(html).toContain('Queue messages are dropped when their retries run out');
   });
 
   test('renders plan limits card', async () => {
@@ -2250,6 +2251,20 @@ describe('GET /admin/login', () => {
     expect(html).toContain('aria-label="Void"');
     expect(html).toContain('GitHub');
     expect(html).toContain('Google');
+  });
+
+  // A tenant app can share a site with the API, so a page that frames the
+  // admin UI would still be sent the admin cookie.
+  test('admin pages refuse framing', async () => {
+    const page = await app.fetch(new Request('http://localhost/admin/login'), env);
+    expect(page.headers.get('content-type')).toContain('text/html');
+    expect(page.headers.get('x-frame-options')).toBe('DENY');
+    expect(page.headers.get('content-security-policy')).toBe("frame-ancestors 'none'");
+
+    const health = await app.fetch(new Request('http://localhost/health'), env);
+    expect(health.headers.get('content-type')).toContain('application/json');
+    expect(health.headers.get('x-frame-options')).toBeNull();
+    expect(health.headers.get('content-security-policy')).toBeNull();
   });
 
   test('shows only the authentication providers enabled by the platform', async () => {

@@ -174,6 +174,41 @@ describe('routingPlugin', () => {
     expect(workerCode).toContain('cloudflare:workers');
   });
 
+  it('refuses to load the route table in the client environment', async () => {
+    const plugin = routingPlugin(createBareTempRoot(), {
+      isAuthEnabled: () => false,
+      devTriggerToken: 'secret-dev-token',
+    });
+    const config = getHookHandler(plugin.config) as (
+      config: import('vite').UserConfig,
+      env: import('vite').ConfigEnv,
+    ) => void;
+    const configResolved = getHookHandler(plugin.configResolved) as (
+      config: import('vite').ResolvedConfig,
+    ) => void;
+    const buildStart = getHookHandler(plugin.buildStart) as () => Promise<void>;
+    const load = getHookHandler(plugin.load) as (
+      this: { environment?: { name?: string } },
+      id: string,
+    ) => Promise<string | undefined>;
+
+    config({}, { command: 'serve', mode: 'development' });
+    configResolved({
+      build: { assetsDir: 'assets' },
+      command: 'serve',
+      mode: 'development',
+      plugins: [],
+    } as unknown as import('vite').ResolvedConfig);
+    await buildStart.call({} as never);
+
+    await expect(
+      load.call({ environment: { name: 'client' } }, 'virtual:void-routes'),
+    ).rejects.toThrow('server-only');
+    await expect(
+      load.call({ environment: { name: 'void_worker' } }, 'virtual:void-routes'),
+    ).resolves.toContain('secret-dev-token');
+  });
+
   it('restarts dev when a structural route change changes the asset routing policy', async () => {
     const root = createTempRoot();
     writeFileSync(join(root, 'routes', 'api.ts'), 'export const GET = () => new Response();\n');
@@ -516,6 +551,50 @@ describe('routingPlugin', () => {
       const code = await load('virtual:void-routes');
       expect(code).toContain('app.post("/__void/scheduled"');
       expect(code).toContain(`const __VOID_SERVE = ${serve};`);
+    },
+  );
+
+  // void/live sends the real error message only from the dev server's entry.
+  it.each([
+    { command: 'serve' as const, isPreview: false, dev: true },
+    { command: 'serve' as const, isPreview: true, dev: false },
+    { command: 'build' as const, isPreview: false, dev: false },
+  ])(
+    'writes the live dev flag for $command (preview: $isPreview) as $dev',
+    async ({ command, isPreview, dev }) => {
+      const root = createTempRoot();
+      const plugin = routingPlugin(root, {
+        isAuthEnabled: () => false,
+        live: { bindingName: 'VOID_LIVE', className: 'VoidLiveStreamDurableObject' },
+      });
+      const entryPath = join(root, '.void', 'entry.ts');
+      expect(readFileSync(entryPath, 'utf-8')).not.toContain('__setLiveDev');
+
+      const config = getHookHandler(plugin.config) as (
+        config: import('vite').UserConfig,
+        env: import('vite').ConfigEnv,
+      ) => unknown;
+      const configResolved = getHookHandler(plugin.configResolved) as (
+        config: import('vite').ResolvedConfig,
+      ) => void;
+      const buildStart = getHookHandler(plugin.buildStart) as () => Promise<void>;
+
+      config({}, { command, mode: 'development', isPreview });
+      configResolved({
+        build: { assetsDir: 'assets' },
+        command,
+        mode: 'development',
+        plugins: [],
+      } as unknown as import('vite').ResolvedConfig);
+      await buildStart.call({} as never);
+
+      const entry = readFileSync(entryPath, 'utf-8');
+      expect(entry).toContain('__setLiveBindingName("VOID_LIVE")');
+      if (dev) {
+        expect(entry).toContain('__setLiveDev(true);');
+      } else {
+        expect(entry).not.toContain('__setLiveDev');
+      }
     },
   );
 });

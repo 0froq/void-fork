@@ -1,4 +1,5 @@
 import { isRecord } from '@void/deploy-core';
+import { deriveAiUsageTag } from '@voidcloud/api/proxy-token';
 import { Hono } from 'hono';
 import { asRecord, asString } from './body.ts';
 import type { ProxyEnv } from './types.ts';
@@ -162,26 +163,64 @@ function providerAuthDefaults(provider: string): { header: string; prefix: strin
   return PROVIDER_AUTH_DEFAULTS[provider] ?? { header: 'authorization', prefix: 'Bearer ' };
 }
 
+// AI usage is counted from the platform gateway's log rows by their
+// `projectId` metadata, which holds the signed project tag from
+// `deriveAiUsageTag`, so the platform owns the gateway id, its metadata and
+// logging. Cloudflare saves only the first five metadata entries, and
+// integer-like keys always sort first, so caller metadata could push the
+// project out; `collectLog: false` would drop the row.
+const PLATFORM_GATEWAY_KEYS = new Set(['id', 'metadata', 'collectLog']);
+// `cf-aig-*` request headers set the same metadata, logging and cost.
+const GATEWAY_CONTROL_HEADER = /^cf-aig-/i;
+// Provider-native calls keep the gateway headers that only shape their own
+// request: cache, timeout, retry and the trace id. A caller cache key is kept
+// inside its project; every other `cf-aig-*` header is dropped.
+const PROVIDER_GATEWAY_HEADERS = new Set([
+  'cf-aig-cache-ttl',
+  'cf-aig-skip-cache',
+  'cf-aig-request-timeout',
+  'cf-aig-max-attempts',
+  'cf-aig-retry-delay',
+  'cf-aig-backoff',
+  'cf-aig-event-id',
+]);
+const CACHE_KEY_HEADER = 'cf-aig-cache-key';
+
+/** A caller cache key only hits inside its own project. */
+function projectCacheKey(projectId: string, cacheKey: string): string {
+  return `${projectId}:${cacheKey}`;
+}
+
+function withoutKeys(
+  record: Record<string, unknown>,
+  drop: (key: string) => boolean,
+): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(record).filter(([key]) => !drop(key)));
+}
+
+/** Options for an AI binding call that goes through the project-tagged platform gateway. */
 function gatewayOptions(
   value: unknown,
   projectId: string,
+  usageTag: string,
   gatewayId: string,
 ): Record<string, unknown> {
   const options = asRecord(value);
-  const gateway = asRecord(options.gateway);
-  const metadata = asRecord(gateway.metadata);
+  const gateway = withoutKeys(asRecord(options.gateway), (key) => PLATFORM_GATEWAY_KEYS.has(key));
+  if (typeof gateway.cacheKey === 'string') {
+    gateway.cacheKey = projectCacheKey(projectId, gateway.cacheKey);
+  }
 
-  return {
+  const result: Record<string, unknown> = {
     ...options,
-    gateway: {
-      ...gateway,
-      id: gatewayId,
-      metadata: {
-        ...metadata,
-        projectId,
-      },
-    },
+    gateway: { ...gateway, id: gatewayId, metadata: { projectId: usageTag } },
   };
+  if ('extraHeaders' in options) {
+    result.extraHeaders = withoutKeys(asRecord(options.extraHeaders), (key) =>
+      GATEWAY_CONTROL_HEADER.test(key),
+    );
+  }
+  return result;
 }
 
 function applyProviderHeaders({
@@ -206,7 +245,22 @@ function applyProviderHeaders({
   const keyPrefix = apiKeyPrefix ?? defaults.prefix;
 
   headers.set(keyHeader, `${keyPrefix}${providerKey}`);
-  headers.set('cf-aig-metadata-projectId', projectId);
+  // Provider-native calls bill to the app's own provider key, so they carry
+  // no usage tag and do not count toward the platform AI allowance. Caller
+  // gateway headers are filtered after the key header is set, so neither they
+  // nor a caller-chosen key header name can set gateway metadata, logging,
+  // cost or billing, or use a cache key outside the project.
+  const callerGatewayHeaders = [...headers.keys()].filter(
+    (name) => GATEWAY_CONTROL_HEADER.test(name) && !PROVIDER_GATEWAY_HEADERS.has(name),
+  );
+  for (const name of callerGatewayHeaders) {
+    const value = headers.get(name);
+    if (name === CACHE_KEY_HEADER && value !== null) {
+      headers.set(name, projectCacheKey(projectId, value));
+    } else {
+      headers.delete(name);
+    }
+  }
   if (contentType && !headers.has('content-type')) {
     headers.set('content-type', contentType);
   }
@@ -346,6 +400,7 @@ ai.post('/run', async (context) => {
   const options = gatewayOptions(
     body.options,
     projectId,
+    await deriveAiUsageTag(context.env.JWT_SECRET, projectId),
     context.env.AI_GATEWAY_ID ?? DEFAULT_GATEWAY_ID,
   );
 
@@ -438,8 +493,15 @@ ai.post('/models', async (context) => {
 
 ai.post('/toMarkdown', async (context) => {
   const body = context.get('body');
+  const projectId = context.get('projectId');
+  const options = gatewayOptions(
+    body.options,
+    projectId,
+    await deriveAiUsageTag(context.env.JWT_SECRET, projectId),
+    context.env.AI_GATEWAY_ID ?? DEFAULT_GATEWAY_ID,
+  );
   try {
-    const result = await context.env.AI.toMarkdown(body.inputs, body.options);
+    const result = await context.env.AI.toMarkdown(body.inputs, options);
     return context.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

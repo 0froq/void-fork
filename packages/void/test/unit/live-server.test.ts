@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vite-plus/test';
 import type { CloudContext } from '../../src/runtime/handler.ts';
 import { createLiveDurableObject } from '../../src/runtime/live-server.ts';
-import { defineLiveStream, type LiveLimits } from '../../src/runtime/live.ts';
+import { __setLiveDev, defineLiveStream, type LiveLimits } from '../../src/runtime/live.ts';
 
 const LIMITS: LiveLimits = {
   maxSubscriptionsPerConnection: 256,
@@ -655,6 +655,130 @@ describe('live Durable Object runtime', () => {
     ).toBe(404);
     const topicName = `live:app:topic:${await topicDigest('app', 'post:12')}`;
     expect(await harness.subscriberCount(topicName)).toBe(0);
+  });
+
+  it('hides internal error text when a subscribe hook throws', async () => {
+    const harness = createHarness();
+    const error = new Error('secret detail');
+    const stream = defineLiveStream({
+      id: `subscribe-error-${crypto.randomUUID()}`,
+      allowAnonymousControl: true,
+      onSubscribe() {
+        throw error;
+      },
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const response = await stream.control(
+        liveContext(harness.env, 'https://void.live/live', {
+          connectionId: 'connection-subscribe-error',
+          operations: [{ kind: 'subscribe', id: 'card', topic: 'post:12' }],
+        }),
+      );
+      const text = await response.text();
+
+      expect(response.status).toBe(500);
+      expect(JSON.parse(text)).toEqual({
+        accepted: false,
+        error: { code: 'INTERNAL_ERROR', message: 'live: internal error.' },
+      });
+      expect(text).not.toContain('secret detail');
+      expect(consoleError).toHaveBeenCalledWith(error);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('hides internal error text when a connect hook throws', async () => {
+    const harness = createHarness();
+    const stream = defineLiveStream({
+      id: `connect-error-${crypto.randomUUID()}`,
+      allowAnonymousControl: true,
+      onConnect() {
+        throw new Error('secret detail');
+      },
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const response = await stream.connect(
+        liveContext(harness.env, 'https://void.live/live?connectionId=connection-connect-error'),
+      );
+      const text = await response.text();
+
+      expect(response.status).toBe(500);
+      expect(JSON.parse(text)).toEqual({
+        accepted: false,
+        error: { code: 'INTERNAL_ERROR', message: 'live: internal error.' },
+      });
+      expect(text).not.toContain('secret detail');
+      expect(consoleError).toHaveBeenCalledTimes(1);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('sends the real hook error message in dev only', async () => {
+    const harness = createHarness();
+    const stream = defineLiveStream({
+      id: `dev-error-${crypto.randomUUID()}`,
+      allowAnonymousControl: true,
+      onSubscribe() {
+        throw new Error('hook detail');
+      },
+    });
+    const control = () =>
+      stream.control(
+        liveContext(harness.env, 'https://void.live/live', {
+          connectionId: 'connection-dev-error',
+          operations: [{ kind: 'subscribe', id: 'card', topic: 'post:12' }],
+        }),
+      );
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      __setLiveDev(true);
+      const devResponse = await control();
+      expect(devResponse.status).toBe(500);
+      await expect(devResponse.json()).resolves.toEqual({
+        accepted: false,
+        error: { code: 'INTERNAL_ERROR', message: 'hook detail' },
+      });
+
+      __setLiveDev(false);
+      const prodResponse = await control();
+      expect(prodResponse.status).toBe(500);
+      await expect(prodResponse.json()).resolves.toEqual({
+        accepted: false,
+        error: { code: 'INTERNAL_ERROR', message: 'live: internal error.' },
+      });
+    } finally {
+      __setLiveDev(false);
+      consoleError.mockRestore();
+    }
+  });
+
+  it('keeps specific messages for invalid control requests', async () => {
+    const harness = createHarness();
+    const stream = defineLiveStream({
+      id: `control-json-${crypto.randomUUID()}`,
+      allowAnonymousControl: true,
+    });
+    const ctx = {
+      env: harness.env,
+      req: {
+        raw: new Request('https://void.live/live', { method: 'POST', body: 'not json' }),
+      },
+      get() {
+        return undefined;
+      },
+    } as unknown as CloudContext;
+
+    const response = await stream.control(ctx);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      accepted: false,
+      error: { code: 'BAD_REQUEST', message: 'live: control request body must be JSON.' },
+    });
   });
 });
 

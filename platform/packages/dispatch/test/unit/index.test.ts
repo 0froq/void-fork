@@ -1415,13 +1415,13 @@ describe('ISR (stale-while-revalidate)', () => {
       }),
     });
 
-    for (let i = 0; i < 3; i++) {
+    for (const query of ['', '?cb=0', '?cb=1', '?cb=2']) {
       const ctx = createCtx();
-      await app.fetch(new Request(`https://my-app.void.app/docs?cb=${i}`), env, ctx);
+      await app.fetch(new Request(`https://my-app.void.app/docs${query}`), env, ctx);
       await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
     }
 
-    // First request renders + writes; subsequent requests hit the same KV
+    // The clean request renders + writes; later requests hit the same KV
     // slot regardless of `?cb=` value, so the worker is invoked exactly once.
     expect(workerFetch).toHaveBeenCalledTimes(1);
     const variantKeys = [...kvStore.keys()].filter((k) => k.includes('#rw='));
@@ -1449,14 +1449,223 @@ describe('ISR (stale-while-revalidate)', () => {
       await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
     };
 
-    await send('https://my-app.void.app/search?q=void&cb=1');
-    await send('https://my-app.void.app/search?q=void&cb=2'); // different cb → same slot (cb dropped)
+    await send('https://my-app.void.app/search?q=void');
+    await send('https://my-app.void.app/search?q=void&cb=1'); // cb dropped → same slot
+    await send('https://my-app.void.app/search?q=void&cb=2'); // different cb → same slot
     await send('https://my-app.void.app/search?q=cloud'); // different q → new slot
 
-    // Three requests, two distinct cache slots, two worker invocations.
+    // Four requests, two distinct cache slots, two worker invocations.
     expect(workerFetch).toHaveBeenCalledTimes(2);
     const variantKeys = [...kvStore.keys()].filter((k) => k.includes('#rw='));
     expect(variantKeys).toHaveLength(2);
+  });
+
+  describe('query params outside the allowlist', () => {
+    const settle = async (ctx: ExecutionContext) => {
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    };
+    // The page reflects `msg`, which no allowlist names.
+    const renderMsg = async (request: Request) =>
+      new Response(`<html>${new URL(request.url).searchParams.get('msg') ?? 'clean'}</html>`, {
+        headers: { 'Content-Type': 'text/html' },
+      });
+    const rewriteRules = [{ source: '/old', destination: '/blog/post', status: 200 }];
+
+    it.each([
+      { label: 'a direct request', rewrite: false },
+      { label: 'a redirect-rule rewrite', rewrite: true },
+    ])('does not store a cold render for $label', async ({ rewrite }) => {
+      const source = rewrite ? '/old' : '/blog/post';
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+          ...(rewrite ? { redirectRules: rewriteRules } : {}),
+        },
+      });
+      workerFetch.mockImplementation(renderMsg);
+
+      const poisonedCtx = createCtx();
+      const poisoned = await app.fetch(
+        new Request(`https://my-app.void.app${source}?msg=evil`),
+        env,
+        poisonedCtx,
+      );
+      await settle(poisonedCtx);
+      // Rendered live from the full URL for this visitor, but never shared.
+      expect(await poisoned.text()).toBe('<html>evil</html>');
+      expect(kvStore.size).toBe(0);
+      expect(edgeCacheStore.size).toBe(0);
+
+      const cleanCtx = createCtx();
+      const clean = await app.fetch(new Request(`https://my-app.void.app${source}`), env, cleanCtx);
+      await settle(cleanCtx);
+      expect(clean.headers.get('x-isr-cache')).toBe('MISS');
+      expect(await clean.text()).toBe('<html>clean</html>');
+      expect([...kvStore.keys()]).toEqual([
+        isrCacheKey(
+          'proj_1',
+          'legacy',
+          'my-app.void.app',
+          '/blog/post',
+          rewrite ? 'https://my-app.void.app/old' : undefined,
+        ),
+      ]);
+
+      // Once warm, the same unlisted param gets the shared page.
+      const later = await app.fetch(
+        new Request(`https://my-app.void.app${source}?msg=evil`),
+        env,
+        createCtx(),
+      );
+      expect(later.headers.get('x-isr-cache')).toBe('HIT');
+      expect(await later.text()).toBe('<html>clean</html>');
+      expect(workerFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+      { label: 'a direct request', rewrite: false, query: '' },
+      { label: 'a redirect-rule rewrite', rewrite: true, query: '' },
+      { label: 'a direct request with an allowlisted param', rewrite: false, query: 'q=a' },
+      { label: 'a redirect-rule rewrite with an allowlisted param', rewrite: true, query: 'q=a' },
+    ])('refreshes a stale entry from the cache key URL for $label', async ({ rewrite, query }) => {
+      const source = rewrite ? '/old' : '/blog/post';
+      const search = query ? `?${query}` : '';
+      const originalUrl =
+        rewrite || query ? `https://my-app.void.app${source}${search}` : undefined;
+      const key = isrCacheKey('proj_1', 'legacy', 'my-app.void.app', '/blog/post', originalUrl);
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+          queryAllowlist: { '/blog/post': ['q'], '/old': ['q'] },
+          ...(rewrite ? { redirectRules: rewriteRules } : {}),
+        },
+        assets: {
+          [key]: {
+            body: '<html>stale</html>',
+            createdAt: Date.now() - 120_000,
+            ttl: 60,
+            headers: { 'Content-Type': 'text/html' },
+          },
+        },
+      });
+      workerFetch.mockImplementation(renderMsg);
+
+      const ctx = createCtx();
+      const response = await app.fetch(
+        new Request(`https://my-app.void.app${source}?${query ? `${query}&` : ''}msg=evil`, {
+          headers: { 'X-Test-Marker': 'keep' },
+        }),
+        env,
+        ctx,
+      );
+      expect(response.headers.get('x-isr-cache')).toBe('STALE');
+      expect(await response.text()).toBe('<html>stale</html>');
+      await settle(ctx);
+
+      expect(workerFetch).toHaveBeenCalledOnce();
+      const refresh = workerFetch.mock.calls[0]![0] as Request;
+      expect(refresh.url).toBe(`https://my-app.void.app/blog/post${search}`);
+      expect(refresh.headers.get('X-Test-Marker')).toBe('keep');
+      expect(refresh.headers.get('X-Void-Original-URL')).toBe(
+        rewrite ? `https://my-app.void.app/old${search}` : null,
+      );
+      const unpacked = unpackIsrValue(kvStore.get(key)!.value);
+      expect(new TextDecoder().decode(unpacked!.body)).toBe('<html>clean</html>');
+    });
+  });
+
+  describe('allowlisted query params on direct requests', () => {
+    const send = async (env: Env, path: string) => {
+      const ctx = createCtx();
+      const response = await app.fetch(new Request(`https://my-app.void.app${path}`), env, ctx);
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      return response;
+    };
+    // The page reflects `q`.
+    const renderQuery = async (request: Request) =>
+      new Response(`<html>${new URL(request.url).searchParams.get('q') ?? 'none'}</html>`, {
+        headers: { 'Content-Type': 'text/html' },
+      });
+    const bareKey = isrCacheKey('proj_1', 'legacy', 'my-app.void.app', '/search');
+
+    it('stores each allowlisted value under its own key', async () => {
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+          queryAllowlist: { '/search': ['q'] },
+        },
+      });
+      workerFetch.mockImplementation(renderQuery);
+
+      expect(await (await send(env, '/search?q=a')).text()).toBe('<html>a</html>');
+      const b = await send(env, '/search?q=b');
+      expect(b.headers.get('x-isr-cache')).toBe('MISS');
+      expect(await b.text()).toBe('<html>b</html>');
+      const again = await send(env, '/search?q=a');
+      expect(again.headers.get('x-isr-cache')).toBe('HIT');
+      expect(await again.text()).toBe('<html>a</html>');
+      expect(workerFetch).toHaveBeenCalledTimes(2);
+      expect([...kvStore.keys()].filter((k) => k.includes('#rw='))).toHaveLength(2);
+      expect(kvStore.has(bareKey)).toBe(false);
+
+      // A request without allowlisted params keeps the bare key.
+      const plain = await send(env, '/search');
+      expect(plain.headers.get('x-isr-cache')).toBe('MISS');
+      expect(await plain.text()).toBe('<html>none</html>');
+      expect(kvStore.has(bareKey)).toBe(true);
+    });
+
+    it('shares the bare key across query values without an allowlist', async () => {
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: { workerName: 'user-app', projectId: 'proj_1', ssr: true, revalidate: 60 },
+      });
+      workerFetch.mockImplementation(renderQuery);
+
+      expect((await send(env, '/search')).headers.get('x-isr-cache')).toBe('MISS');
+      for (const path of ['/search?q=a', '/search?q=b']) {
+        const response = await send(env, path);
+        expect(response.headers.get('x-isr-cache')).toBe('HIT');
+        expect(await response.text()).toBe('<html>none</html>');
+      }
+      expect(workerFetch).toHaveBeenCalledOnce();
+      expect([...kvStore.keys()]).toEqual([bareKey]);
+    });
+
+    it('keys allowlisted params when fallback rules cover other paths', async () => {
+      const { env, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+          queryAllowlist: { '/search': ['q'] },
+          fallbackRules: [{ source: '/app/*', destination: '/index.html', status: 200 }],
+        },
+        workerResponse: new Response('<html>a</html>', {
+          headers: { 'Content-Type': 'text/html' },
+        }),
+      });
+
+      await send(env, '/search?q=a');
+      expect([...kvStore.keys()]).toEqual([
+        isrCacheKey(
+          'proj_1',
+          'legacy',
+          'my-app.void.app',
+          '/search',
+          'https://my-app.void.app/search?q=a',
+        ),
+      ]);
+    });
   });
 
   it('isolates ISR KV keys between direct and rewritten requests to the same path', async () => {
@@ -3556,9 +3765,33 @@ describe('hashed asset caching', () => {
     expect(workerFetch).toHaveBeenCalledTimes(1); // still 1
   });
 
+  it('does not serve one project cached asset to the next project on the same host', async () => {
+    const url = 'https://test.void.app/assets/main-abc123.js';
+    const previous = createEnv({
+      routing: { workerName: 'old-worker', projectId: 'proj-old', hashedAssetsPrefix: 'assets' },
+      workerResponse: new Response('evil'),
+    });
+    const previousCtx = createCtx();
+    expect(await (await app.fetch(new Request(url), previous.env, previousCtx)).text()).toBe(
+      'evil',
+    );
+    await Promise.all(
+      (previousCtx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]),
+    );
+    expect(edgeCacheStore.size).toBe(1);
+
+    const next = createEnv({
+      routing: { workerName: 'new-worker', projectId: 'proj-new', hashedAssetsPrefix: 'assets' },
+      workerResponse: new Response('fresh'),
+    });
+    const res = await app.fetch(new Request(url), next.env, createCtx());
+    expect(await res.text()).toBe('fresh');
+    expect(next.workerFetch).toHaveBeenCalledOnce();
+  });
+
   it('replaces an unmarked legacy hashed body instead of serving it', async () => {
     edgeCacheStore.set(
-      'https://test.void.app/assets/stale.js',
+      'https://test.void.app/assets/stale.js?_p=proj-1',
       new Response('user-alice', {
         headers: { 'Cache-Control': 'public, max-age=31536000, immutable' },
       }),
@@ -3579,7 +3812,7 @@ describe('hashed asset caching', () => {
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
 
-    const replacement = edgeCacheStore.get('https://test.void.app/assets/stale.js');
+    const replacement = edgeCacheStore.get('https://test.void.app/assets/stale.js?_p=proj-1');
     expect(replacement?.headers.get(SHARED_CACHE_POLICY_HEADER)).toBe(
       String(SHARED_CACHE_POLICY_VERSION),
     );
@@ -3700,8 +3933,8 @@ describe('hashed asset caching', () => {
 
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
 
-    expect(edgeCacheStore.has('https://test.void.app/assets/logo-abc123.png')).toBe(true);
-    expect(edgeCacheStore.has('https://test.void.app/logo')).toBe(false);
+    expect(edgeCacheStore.has('https://test.void.app/assets/logo-abc123.png?_p=proj-1')).toBe(true);
+    expect(edgeCacheStore.has('https://test.void.app/logo?_p=proj-1')).toBe(false);
   });
 
   it('normalizes query strings for cache key', async () => {
@@ -3762,7 +3995,7 @@ describe('hashed asset caching', () => {
     expect(await second.text()).toBe('user-2');
     expect(second.headers.get('Set-Cookie')).toContain('sid=user-2');
     expect(workerFetch).toHaveBeenCalledTimes(2);
-    expect(edgeCacheStore.has(url)).toBe(false);
+    expect(edgeCacheStore.has(`${url}?_p=proj-1`)).toBe(false);
   });
 
   it('keeps credentialed hashed-path responses private without response opt-out headers', async () => {
@@ -3796,7 +4029,7 @@ describe('hashed asset caching', () => {
     expect(workerFetch.mock.calls[0]?.[0].headers.get('Cookie')).toBe('session=alice');
     expect(workerFetch.mock.calls[1]?.[0].headers.get('Cookie')).toBe('session=bob');
     expect(workerFetch).toHaveBeenCalledTimes(2);
-    expect(edgeCacheStore.has(url)).toBe(false);
+    expect(edgeCacheStore.has(`${url}?_p=proj-1`)).toBe(false);
   });
 
   it.each([
@@ -3809,7 +4042,7 @@ describe('hashed asset caching', () => {
         headers: { 'Cache-Control': 'public, max-age=31536000, immutable' },
       }),
     );
-    edgeCacheStore.set(url, currentEntry);
+    edgeCacheStore.set(`${url}?_p=proj-1`, currentEntry);
     const { env, workerFetch } = createEnv({
       routing: {
         workerName: 'test-worker',
@@ -3827,7 +4060,7 @@ describe('hashed asset caching', () => {
 
     expect(await response.text()).toBe('live-user');
     expect(workerFetch).toHaveBeenCalledOnce();
-    expect(await edgeCacheStore.get(url)?.clone().text()).toBe('cached-user');
+    expect(await edgeCacheStore.get(`${url}?_p=proj-1`)?.clone().text()).toBe('cached-user');
   });
 
   it('returns 429 when worker exceeds CPU limit', async () => {
@@ -4158,6 +4391,8 @@ describe('queue relay', () => {
     trafficState?: string;
     lifecycleValue?: string | null;
     lifecycleError?: Error;
+    suspendedProjects?: Array<string>;
+    markerError?: Error;
   }) {
     const workerFetch = vi.fn(
       async (_req: Request) =>
@@ -4169,6 +4404,13 @@ describe('queue relay', () => {
           throw options.lifecycleError;
         }
         return options.lifecycleValue ?? null;
+      }
+      if (key.startsWith('project-suspended:')) {
+        if (options.markerError) {
+          throw options.markerError;
+        }
+        const projectId = key.slice('project-suspended:'.length);
+        return options.suspendedProjects?.includes(projectId) ? 'operator_review' : null;
       }
       return options.routingRaw ?? null;
     });
@@ -4298,6 +4540,78 @@ describe('queue relay', () => {
 
     expect(batch.retryAll).toHaveBeenCalledOnce();
     expect(batch.ackAll).not.toHaveBeenCalled();
+  });
+
+  it("holds a suspended project's batch without invoking its worker", async () => {
+    const routing = JSON.stringify({
+      workerName: 'user-app',
+      projectId: 'p1',
+      queueName: 'emails',
+    });
+    const batch = createMockBatch('test-queue', [{ id: 'm1', body: 'hello' }]);
+    const { env, dispatchGet } = createQueueEnv({
+      routingRaw: routing,
+      suspendedProjects: ['p1'],
+    });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await app.queue(batch, env);
+    } finally {
+      warning.mockRestore();
+    }
+
+    expect(dispatchGet).not.toHaveBeenCalled();
+    expect(batch.retryAll).toHaveBeenCalledWith({ delaySeconds: 3600 });
+    expect(batch.ackAll).not.toHaveBeenCalled();
+  });
+
+  it('relays batches of projects without a suspension marker', async () => {
+    const routing = JSON.stringify({
+      workerName: 'user-app',
+      projectId: 'p2',
+      queueName: 'emails',
+    });
+    const batch = createMockBatch('test-queue', [{ id: 'm1', body: 'hello' }]);
+    const { env, routingGet, workerFetch } = createQueueEnv({
+      routingRaw: routing,
+      suspendedProjects: ['p1'],
+      workerResponse: Response.json({ ok: true }),
+    });
+
+    await app.queue(batch, env);
+
+    expect(routingGet).toHaveBeenCalledWith('project-suspended:p2', { cacheTtl: 60 });
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(batch.ackAll).toHaveBeenCalledOnce();
+  });
+
+  it('relays when the suspension marker cannot be read', async () => {
+    const routing = JSON.stringify({
+      workerName: 'user-app',
+      projectId: 'p3',
+      queueName: 'emails',
+    });
+    const batch = createMockBatch('test-queue', [{ id: 'm1', body: 'hello' }]);
+    const { env, workerFetch } = createQueueEnv({
+      routingRaw: routing,
+      markerError: new Error('routing unavailable'),
+      workerResponse: Response.json({ ok: true }),
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await app.queue(batch, env);
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining('suspension check failed'),
+        expect.any(Error),
+      );
+    } finally {
+      error.mockRestore();
+    }
+
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(batch.ackAll).toHaveBeenCalledOnce();
   });
 
   it('acks all on legacy protocol (ok: true, no decisions)', async () => {
@@ -4625,7 +4939,9 @@ describe('queue relay', () => {
       return Response.json({ ok: true });
     });
     const env = {
-      ROUTING: { get: async () => routing },
+      ROUTING: {
+        get: async (key: string) => (key.startsWith('project-suspended:') ? null : routing),
+      },
       DISPATCH: { get: () => ({ fetch: workerFetch }) },
       ISR_CACHE: { getWithMetadata: async () => ({ value: null, metadata: null }) },
       ANALYTICS: { writeDataPoint: () => {} },
