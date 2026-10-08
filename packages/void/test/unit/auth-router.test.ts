@@ -56,7 +56,7 @@ describe('void auth destination routing', () => {
 
   it('asks for the target when the project has no preference', async () => {
     mocks.select.mockResolvedValue('cloudflare');
-    await runAuthRouter(root, parseAuthArgs(['whoami']), true);
+    await runAuthRouter(root, parseAuthArgs(['status']), true);
     expect(mocks.select).toHaveBeenCalledOnce();
     expect(mocks.cloudflare).toHaveBeenCalledWith(root, { subcommand: 'status' });
   });
@@ -92,26 +92,17 @@ describe('void auth destination routing', () => {
     expect(mocks.cloudflare).not.toHaveBeenCalled();
   });
 
-  it('keeps old platform-only shortcuts, even for a Cloudflare project', async () => {
-    writeDeploymentPlatform(root, 'cloudflare');
-    await runAuthRouter(root, parseAuthArgs(['link', 'company']), false);
-    await runAuthRouter(root, parseAuthArgs(['token']), false);
-    expect(mocks.account).toHaveBeenCalledWith(root, {
-      subcommand: 'link',
-      connectionId: 'company',
-    });
-    expect(mocks.account).toHaveBeenCalledWith(root, { subcommand: 'token' });
-    expect(mocks.select).not.toHaveBeenCalled();
+  it.each(['whoami', 'link', 'token'])('rejects the retired auth %s shortcut', (command) => {
+    expect(() => parseAuthArgs([command])).toThrow('void auth <login|status|logout>');
+    expect(mocks.account).not.toHaveBeenCalled();
+    expect(mocks.cloudflare).not.toHaveBeenCalled();
   });
 
-  it('validates explicit targets and rejects Cloudflare for platform-only actions', () => {
+  it('validates explicit targets', () => {
     expect(parseAuthArgs(['login', '--platform', 'cloudflare'])).toEqual({
       subcommand: 'login',
       platform: 'cloudflare',
     });
     expect(() => parseAuthArgs(['login', '--platform', 'other'])).toThrow('--platform');
-    expect(() => parseAuthArgs(['token', '--platform', 'cloudflare'])).toThrow(
-      'void account token',
-    );
   });
 });

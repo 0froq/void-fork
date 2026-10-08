@@ -32,11 +32,6 @@ platform. In a non-interactive shell, pass `--platform cloudflare|void` or use
 the explicit `void cloudflare` and `void account` commands. Choosing a destination
 for authentication does not change the project's deploy target.
 
-`void auth whoami`, `void auth link`, and `void auth token` remain supported for
-existing scripts. `whoami` follows the selected destination; `link` and `token`
-are Void account operations. Prefer `void auth status`, `void account link`, and
-`void account token` in new scripts.
-
 ## Void platform account {#void-platform-account}
 
 ### `void account login` {#void-account-login}

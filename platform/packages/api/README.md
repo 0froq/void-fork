@@ -219,7 +219,7 @@ their deployment-time GitHub/Google configuration. After callback, the API
 validates the signed state and provider identity, then signs in the linked
 account or applies the installation's signup policy to a new account. In a
 configurable installation, a matching email address does not automatically
-link another login method; users link it explicitly with `void auth link` or
+link another login method; users link it explicitly with `void account link` or
 the optional dashboard's **Account** page.
 
 A successful login signs a JWT and redirects back:

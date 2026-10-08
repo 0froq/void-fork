@@ -25,10 +25,6 @@ export type VoidAuthEnv = Record<string, unknown> & {
   DATABASE_URL?: string;
   HYPERDRIVE?: { connectionString?: string };
   BETTER_AUTH_SECRET?: string;
-  GITHUB_OAUTH_ID?: string;
-  GITHUB_OAUTH_SECRET?: string;
-  GOOGLE_OAUTH_ID?: string;
-  GOOGLE_OAUTH_SECRET?: string;
 };
 
 export type ResolvedDatabase = {
@@ -103,14 +99,9 @@ function resolveSecret(env: VoidAuthEnv, dev: boolean): string {
   throw new Error('auth: Missing Better Auth secret. Set BETTER_AUTH_SECRET.');
 }
 
-function readEnvString(env: VoidAuthEnv, ...keys: Array<string>): string | undefined {
-  for (const key of keys) {
-    const value = env[key];
-    if (typeof value === 'string' && value.length > 0) {
-      return value;
-    }
-  }
-  return undefined;
+function readEnvString(env: VoidAuthEnv, key: string): string | undefined {
+  const value = env[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 /** Local development uses `DATABASE_URL`; production uses the Hyperdrive binding. */
@@ -190,16 +181,8 @@ function resolveSocialProviderCredentials(
   provider: VoidSocialAuthProvider,
 ): { clientId: string; clientSecret: string } {
   const envNames = getVoidAuthProviderEnvNames(provider);
-  const clientIdKeys = [envNames.clientId];
-  const clientSecretKeys = [envNames.clientSecret];
-  if (envNames.legacyClientId) {
-    clientIdKeys.push(envNames.legacyClientId);
-  }
-  if (envNames.legacyClientSecret) {
-    clientSecretKeys.push(envNames.legacyClientSecret);
-  }
-  const clientId = readEnvString(env, ...clientIdKeys);
-  const clientSecret = readEnvString(env, ...clientSecretKeys);
+  const clientId = readEnvString(env, envNames.clientId);
+  const clientSecret = readEnvString(env, envNames.clientSecret);
 
   if (!clientId || !clientSecret) {
     throw new Error(

@@ -7,8 +7,6 @@ type TsconfigHook = (config: Tsconfig) => Tsconfig | void;
 export type VoidSvelteKitTsconfigOptions = {
   /** Project root. Defaults to process.cwd(). */
   root?: string;
-  /** @deprecated Generated paths no longer depend on SvelteKit's output directory. */
-  outDir?: string;
 };
 
 /**

@@ -1,7 +1,6 @@
 import { isCancel, select } from '@voidzero-dev/vite-plus-prompts';
 import type { AccountArgs } from './account-args.ts';
 import type { AuthArgs } from './auth-args.ts';
-import type { CloudflareArgs } from './cloudflare-args.ts';
 import { listPlatformConnections } from './platform-registry.ts';
 import { readDeploymentPlatform } from './project.ts';
 
@@ -48,28 +47,10 @@ export async function runAuthRouter(
   args: AuthArgs,
   interactive: boolean = Boolean(process.stdin.isTTY),
 ): Promise<void> {
-  // These old commands have no Cloudflare counterpart. Keep them as shortcuts
-  // for existing scripts while `void account` makes their destination explicit.
-  if (args.subcommand === 'link') {
-    const { runAccountCommand } = await import('./account-cmd.ts');
-    await runAccountCommand(root, {
-      subcommand: 'link',
-      ...(args.connectionId ? { connectionId: args.connectionId } : {}),
-    });
-    return;
-  }
-  if (args.subcommand === 'token') {
-    const { runAccountCommand } = await import('./account-cmd.ts');
-    await runAccountCommand(root, { subcommand: 'token' });
-    return;
-  }
-
   const destination = await chooseDestination(root, args, interactive);
   if (destination.platform === 'cloudflare') {
     const { runCloudflareCommand } = await import('./cloudflare-cmd.ts');
-    const subcommand: CloudflareArgs['subcommand'] =
-      args.subcommand === 'whoami' || args.subcommand === 'status' ? 'status' : args.subcommand;
-    await runCloudflareCommand(root, { subcommand });
+    await runCloudflareCommand(root, { subcommand: args.subcommand });
     return;
   }
 

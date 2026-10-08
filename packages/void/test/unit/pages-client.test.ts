@@ -20,7 +20,7 @@ function stubClientGlobals() {
       }
       if (id === 'app') {
         return {
-          getAttribute: vi.fn(() => null),
+          getAttribute: vi.fn((): string | null => null),
         };
       }
       return null;
@@ -60,6 +60,33 @@ function stubClientGlobals() {
 }
 
 describe('createVoidRouter prefetch', () => {
+  it('requires the page-data script even when a legacy data-page attribute is present', async () => {
+    const documentStub = stubClientGlobals();
+    documentStub.getElementById.mockImplementation((id: string) =>
+      id === 'app'
+        ? { getAttribute: vi.fn(() => JSON.stringify({ component: 'home', props: {} })) }
+        : null,
+    );
+    await expect(
+      createVoidRouter({
+        adapter: {
+          applyUpdate: vi.fn(),
+          createDeferred: () => ({}),
+          isLoading: () => false,
+          resolveDeferred: (_ref, value) => value,
+          rejectDeferred: (_ref, error) => error,
+        },
+        components: { home: async () => ({ default: {} }) },
+        layoutTree: {},
+        routeMeta: {},
+        matchRoute: () => 'home',
+        viewTransitions: false,
+        prefetchHoverDelay: 75,
+        prefetchDefaultCacheFor: parseCacheFor('30s'),
+      }),
+    ).rejects.toThrow('pages: Missing initial page payload.');
+  });
+
   it.each([
     [{}, false],
     [{ method: 'POST' }, true],

@@ -98,6 +98,31 @@ describe('resolveVoidAuthOptions', () => {
     });
   });
 
+  it.each(['github', 'google'] as const)(
+    'requires both standardized credential names for %s',
+    async (provider) => {
+      const prefix = provider.toUpperCase();
+      const legacy = {
+        [`${prefix}_OAUTH_ID`]: 'old-id',
+        [`${prefix}_OAUTH_SECRET`]: 'old-secret',
+      };
+      for (const credentials of [
+        legacy,
+        { ...legacy, [`AUTH_${prefix}_CLIENT_ID`]: 'new-id' },
+        { ...legacy, [`AUTH_${prefix}_CLIENT_SECRET`]: 'new-secret' },
+      ]) {
+        await expect(
+          resolveVoidAuthOptions(
+            new Request('https://example.com/api/auth'),
+            { BETTER_AUTH_SECRET: 'secret', ...credentials },
+            { dialect: 'sqlite', providers: [provider] },
+            {} as never,
+          ),
+        ).rejects.toThrow(`Set AUTH_${prefix}_CLIENT_ID and AUTH_${prefix}_CLIENT_SECRET`);
+      }
+    },
+  );
+
   it('preserves a custom password handler when email auth is customized', async () => {
     const password = {
       async hash(value: string) {

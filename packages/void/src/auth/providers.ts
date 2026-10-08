@@ -59,30 +59,10 @@ export function isVoidAuthProvider(value: string): value is VoidAuthProvider {
 export function getVoidAuthProviderEnvNames(provider: VoidSocialAuthProvider): {
   clientId: string;
   clientSecret: string;
-  legacyClientId?: string;
-  legacyClientSecret?: string;
 } {
   const normalized = provider.toUpperCase().replaceAll('-', '_');
-  const envNames = {
+  return {
     clientId: `AUTH_${normalized}_CLIENT_ID`,
     clientSecret: `AUTH_${normalized}_CLIENT_SECRET`,
   };
-
-  if (provider === 'github') {
-    return {
-      ...envNames,
-      legacyClientId: 'GITHUB_OAUTH_ID',
-      legacyClientSecret: 'GITHUB_OAUTH_SECRET',
-    };
-  }
-
-  if (provider === 'google') {
-    return {
-      ...envNames,
-      legacyClientId: 'GOOGLE_OAUTH_ID',
-      legacyClientSecret: 'GOOGLE_OAUTH_SECRET',
-    };
-  }
-
-  return envNames;
 }

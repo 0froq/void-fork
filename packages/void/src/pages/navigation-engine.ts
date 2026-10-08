@@ -165,15 +165,10 @@ function clonePageData(pageData: PageData): PageData {
   return JSON.parse(JSON.stringify(pageData)) as PageData;
 }
 
-function readInitialPageData(appEl: HTMLElement): PageData {
+function readInitialPageData(): PageData {
   const scriptEl = document.getElementById(PAGE_DATA_SCRIPT_ID);
   if (scriptEl?.textContent) {
     return JSON.parse(scriptEl.textContent) as PageData;
-  }
-
-  const legacyData = appEl.getAttribute('data-page');
-  if (legacyData) {
-    return JSON.parse(legacyData) as PageData;
   }
 
   throw new Error('pages: Missing initial page payload.');
@@ -894,8 +889,7 @@ export async function createPageNavigationEngine(
     };
   }
 
-  const appEl = document.getElementById('app')!;
-  const initialPageData = readInitialPageData(appEl);
+  const initialPageData = readInitialPageData();
   const [initialComponent, initialLayouts] = await Promise.all([
     resolveComponent(initialPageData.component),
     resolveLayouts(initialPageData.component),

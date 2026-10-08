@@ -80,7 +80,7 @@ describe('mergeVoidSvelteKitTsconfig', () => {
       );
       const config = mergeVoidSvelteKitTsconfig(
         { compilerOptions: { moduleResolution: 'bundler', module: 'esnext' } },
-        { root: TMP, outDir: configDir },
+        { root: TMP },
       );
       const parsed = ts.parseJsonConfigFileContent(config, ts.sys, join(TMP, configDir));
       expect(parsed.errors).toEqual([]);
