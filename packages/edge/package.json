@@ -1,6 +1,12 @@
 {
   "name": "@void/edge",
   "version": "0.26.0",
+  "description": "Routing, headers, and static asset helpers for Void runtimes.",
+  "homepage": "https://void.cloud",
+  "bugs": {
+    "url": "https://github.com/voidzero-dev/void/issues"
+  },
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/voidzero-dev/void.git",

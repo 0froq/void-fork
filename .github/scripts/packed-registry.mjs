@@ -5,6 +5,14 @@ import { once } from 'node:events';
 import { createReadStream, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 
+function isHttpsUrl(value) {
+  try {
+    return typeof value === 'string' && new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 export function inspectPackage(tarball) {
   const manifest = JSON.parse(
     execFileSync('tar', ['-xOf', tarball, 'package/package.json'], { encoding: 'utf8' }),
@@ -12,6 +20,14 @@ export function inspectPackage(tarball) {
   const files = new Set(
     execFileSync('tar', ['-tf', tarball], { encoding: 'utf8' }).trim().split(/\r?\n/),
   );
+  assert(
+    typeof manifest.description === 'string' && manifest.description.trim().length > 0,
+    `${manifest.name}: missing package description`,
+  );
+  assert.equal(manifest.license, 'MIT', `${manifest.name}: package license must be MIT`);
+  assert(isHttpsUrl(manifest.homepage), `${manifest.name}: homepage must be an HTTPS URL`);
+  assert(isHttpsUrl(manifest.bugs?.url), `${manifest.name}: bugs.url must be an HTTPS URL`);
+  assert(files.has('package/LICENSE'), `${manifest.name}: missing packaged LICENSE`);
   if (manifest.name === 'void') {
     for (const file of [
       'docs/guide/quickstart.md',

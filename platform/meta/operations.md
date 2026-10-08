@@ -210,7 +210,10 @@ void github connect void-docs \
   --executor container
 ```
 
-Release publishing still uses the `Release` GitHub environment with an
-`NPM_TOKEN` secret via `.github/workflows/publish.yml`.
+Release publishing uses `.github/workflows/publish.yml` in the `Release`
+GitHub environment with OIDC (`id-token: write`). Configure an
+[npm trusted publisher](https://docs.npmjs.com/trusted-publishers/) for each public
+package: organization `voidzero-dev`, repository `void`, workflow `publish.yml`,
+and environment `Release`. This workflow does not require an `NPM_TOKEN` secret.
 
 CI (`ci.yml`) runs on PRs to `main` and requires no secrets.

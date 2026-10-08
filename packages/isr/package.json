@@ -1,6 +1,12 @@
 {
   "name": "@void/isr",
   "version": "0.26.0",
+  "description": "Incremental revalidation and cache helpers for Void runtimes.",
+  "homepage": "https://void.cloud",
+  "bugs": {
+    "url": "https://github.com/voidzero-dev/void/issues"
+  },
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/voidzero-dev/void.git",

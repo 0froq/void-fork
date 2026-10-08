@@ -1,6 +1,12 @@
 {
   "name": "@void/deploy-core",
   "version": "0.26.0",
+  "description": "Shared deployment contracts, manifests, and resource plans for Void.",
+  "homepage": "https://void.cloud",
+  "bugs": {
+    "url": "https://github.com/voidzero-dev/void/issues"
+  },
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/voidzero-dev/void.git",
