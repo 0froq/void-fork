@@ -188,6 +188,11 @@ function assertHandledFollowUps(followUps: Array<MigrationFollowUp>): void {
     if (!item.blocking) {
       continue;
     }
+    // We consume only Worker settings for prebuilt output, never the generated Vite config.
+    // Upgrading that unused config's plugin is unnecessary; keep other follow-ups blocking.
+    if (item.code === 'vite-plugin-install-disabled' && item.sourcePath === undefined) {
+      continue;
+    }
     const path = item.sourcePath ?? item.code;
     const handled =
       (path === 'assets.directory' && item.message.includes('assets directory')) ||

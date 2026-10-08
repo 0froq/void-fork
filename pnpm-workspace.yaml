@@ -36,8 +36,8 @@ catalog:
   vite: npm:@voidzero-dev/vite-plus-core@1.0.0
   vite-plus: 1.0.0
   vitest: 5.0.3
-  wrangler: 4.147.0
-  cf: 1.0.0-beta.12
+  wrangler: 4.148.0
+  cf: 1.0.0-beta.13
   oauth4webapi: ^3.8.8
   '@astryxdesign/core': 0.6.5
   '@astryxdesign/theme-neutral': 0.6.5
@@ -49,7 +49,7 @@ catalogs:
   platform:
     '@cloudflare/workers-types': ^5.20260929.1
     hono: 4.13.13
-    wrangler: ^4.147.0
+    wrangler: ^4.148.0
   sveltekit:
     typescript: 6.0.3
 
@@ -86,18 +86,20 @@ minimumReleaseAgeExclude:
   - react-fate
   - void
   - void-fate
-  # Required by cf beta 12; keep these exceptions limited to its exact dependency releases.
-  - '@cloudflare/build-output-utils@0.8.5'
-  - '@cloudflare/codemods@0.4.0'
-  - '@cloudflare/config@0.23.0'
-  - '@cloudflare/runtime-types@0.1.7'
-  - '@cloudflare/workerd-darwin-64@1.20260930.2'
-  - '@cloudflare/workerd-darwin-arm64@1.20260930.2'
-  - '@cloudflare/workerd-linux-64@1.20260930.2'
-  - '@cloudflare/workerd-linux-arm64@1.20260930.2'
-  - '@cloudflare/workerd-windows-64@1.20260930.2'
-  - 'miniflare@5.20260930.0-alpha'
-  - 'workerd@1.20260930.2'
+  # Keep the cf and Workers SDK release batch aligned, with exact age exceptions.
+  - '@cloudflare/build-output-utils@0.8.6'
+  - '@cloudflare/codemods@0.4.1'
+  - '@cloudflare/config@0.24.0'
+  - '@cloudflare/runtime-types@0.1.8'
+  - '@cloudflare/vite-plugin@1.63.0'
+  - '@cloudflare/workerd-darwin-64@1.20261006.1'
+  - '@cloudflare/workerd-darwin-arm64@1.20261006.1'
+  - '@cloudflare/workerd-linux-64@1.20261006.1'
+  - '@cloudflare/workerd-linux-arm64@1.20261006.1'
+  - '@cloudflare/workerd-windows-64@1.20261006.1'
+  - 'miniflare@5.20261006.0-alpha'
+  - 'workerd@1.20261006.1'
+  - 'wrangler@4.148.0'
   - hono@4.13.13
   - lucide-react@1.52.0
   - '@voidzero-dev/vite-plus-prompts@1.1.0'

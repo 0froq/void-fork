@@ -183,7 +183,7 @@ it(
         },
       );
       expect(dryRun.status, `${dryRun.stdout}\n${dryRun.stderr}`).toBe(0);
-      expect(dryRun.stdout).toContain('Dry run complete');
+      expect(dryRun.stdout).toContain('--dry-run: exiting now.');
     } finally {
       prepared.dispose();
     }
