@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { setGlobalProxyFromEnv } from 'node:http';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 /**
@@ -10,7 +11,6 @@ import { fileURLToPath } from 'node:url';
 import type { CloudflareOperation } from '@void/deploy-cloudflare';
 import { parse } from 'jsonc-parser';
 import { dirname, join, resolve } from 'pathslash';
-import { EnvHttpProxyAgent, fetch as httpFetch } from 'undici';
 import { persistCfKeyringPreference, readCfSessionCredential } from './cf-session.ts';
 import {
   cloudflareDeviceCode,
@@ -42,13 +42,13 @@ const operation = (() => {
 // This dedicated transport process uses the same OAuth store for login,
 // deployment, and ancillary API calls. API-token overrides still win.
 process.env.CLOUDFLARE_AUTH_USE_KEYRING ??= 'true';
+// Proxy configuration is scoped to this disposable transport process.
+if (hasProxyEnvironment(process.env)) {
+  setGlobalProxyFromEnv();
+}
 
 function hasProxyEnvironment(env: NodeJS.ProcessEnv): boolean {
   return Boolean(env.HTTP_PROXY || env.HTTPS_PROXY || env.http_proxy || env.https_proxy);
-}
-
-function proxyAgent(): EnvHttpProxyAgent | null {
-  return hasProxyEnvironment(process.env) ? new EnvHttpProxyAgent() : null;
 }
 
 function apiBaseUrl(): string {
@@ -326,89 +326,69 @@ async function cloudflareApiGet(
   extraHeaders: Record<string, string> = {},
 ): Promise<Json> {
   const url = `${apiBaseUrl()}${path}`;
-  const proxy = proxyAgent();
-  try {
-    const response = await httpFetch(url, {
-      headers: { ...(await apiHeaders()), ...extraHeaders },
-      redirect: 'error',
-      signal: AbortSignal.timeout(30_000),
-      ...(proxy ? { dispatcher: proxy } : {}),
-    });
-    const body = object(await response.json());
-    if (!response.ok || body.success !== true) {
-      throw new Error(`${failure} (HTTP ${response.status})`);
-    }
-    return body;
-  } finally {
-    await proxy?.close();
+  const response = await fetch(url, {
+    headers: { ...(await apiHeaders()), ...extraHeaders },
+    redirect: 'error',
+    signal: AbortSignal.timeout(30_000),
+  });
+  const body = object(await response.json());
+  if (!response.ok || body.success !== true) {
+    throw new Error(`${failure} (HTTP ${response.status})`);
   }
+  return body;
 }
 
 async function clearWorkerCronSchedules(worker: string): Promise<Result> {
   const endpoint = `${apiBaseUrl()}/accounts/${encodeURIComponent(accountId())}/workers/scripts/${encodeURIComponent(worker)}/schedules`;
-  const proxy = proxyAgent();
-  try {
-    const response = await httpFetch(endpoint, {
-      method: 'PUT',
-      headers: { ...(await apiHeaders()), 'Content-Type': 'application/json' },
-      body: '[]',
-      redirect: 'error',
-      signal: AbortSignal.timeout(30_000),
-      ...(proxy ? { dispatcher: proxy } : {}),
-    });
-    const body = object(await response.json());
-    const schedules = object(body.result).schedules;
-    if (
-      !response.ok ||
-      body.success !== true ||
-      !Array.isArray(schedules) ||
-      schedules.length !== 0
-    ) {
-      throw new Error(
-        `Cloudflare did not clear the Worker Cron Triggers (HTTP ${response.status}).`,
-      );
-    }
-    return result(0);
-  } finally {
-    await proxy?.close();
+  const response = await fetch(endpoint, {
+    method: 'PUT',
+    headers: { ...(await apiHeaders()), 'Content-Type': 'application/json' },
+    body: '[]',
+    redirect: 'error',
+    signal: AbortSignal.timeout(30_000),
+  });
+  const body = object(await response.json());
+  const schedules = object(body.result).schedules;
+  if (
+    !response.ok ||
+    body.success !== true ||
+    !Array.isArray(schedules) ||
+    schedules.length !== 0
+  ) {
+    throw new Error(`Cloudflare did not clear the Worker Cron Triggers (HTTP ${response.status}).`);
   }
+  return result(0);
 }
 
 async function clearWorkerCustomDomains(worker: string): Promise<Result> {
   const endpoint = `${apiBaseUrl()}/accounts/${encodeURIComponent(accountId())}/workers/scripts/${encodeURIComponent(worker)}/domains/records`;
-  const proxy = proxyAgent();
-  try {
-    const response = await httpFetch(endpoint, {
-      method: 'PUT',
-      headers: { ...(await apiHeaders()), 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        override_scope: true,
-        override_existing_origin: false,
-        override_existing_dns_record: false,
-        origins: [],
-      }),
-      redirect: 'error',
-      signal: AbortSignal.timeout(30_000),
-      ...(proxy ? { dispatcher: proxy } : {}),
-    });
-    if (!response.ok) {
-      throw new Error(`Cloudflare rejected the empty custom-domain set (HTTP ${response.status}).`);
-    }
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
-      throw new Error(
-        `Cloudflare returned HTTP ${response.status} with a non-JSON custom-domain response.`,
-      );
-    }
-    if (object(body).success !== true) {
-      throw new Error(`Cloudflare rejected the empty custom-domain set (HTTP ${response.status}).`);
-    }
-    return result(0);
-  } finally {
-    await proxy?.close();
+  const response = await fetch(endpoint, {
+    method: 'PUT',
+    headers: { ...(await apiHeaders()), 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      override_scope: true,
+      override_existing_origin: false,
+      override_existing_dns_record: false,
+      origins: [],
+    }),
+    redirect: 'error',
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    throw new Error(`Cloudflare rejected the empty custom-domain set (HTTP ${response.status}).`);
   }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new Error(
+      `Cloudflare returned HTTP ${response.status} with a non-JSON custom-domain response.`,
+    );
+  }
+  if (object(body).success !== true) {
+    throw new Error(`Cloudflare rejected the empty custom-domain set (HTTP ${response.status}).`);
+  }
+  return result(0);
 }
 
 async function assertExistingProvisionableResources(

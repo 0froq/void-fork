@@ -163,7 +163,6 @@ export default defineConfig({
         '@napi-rs/keyring',
         '@cloudflare/sandbox',
         '@cloudflare/containers',
-        'undici', // ofetch imports this in types
       ],
       onlyBundle: [
         'fdir',
