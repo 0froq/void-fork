@@ -33,6 +33,10 @@ export default defineNuxtConfig({
   nitro: {
     preset: 'cloudflare-module',
     cloudflareDev: { configPath: './.void-wrangler.jsonc' },
+    // Required for Nuxt 4.6.0 on Windows.
+    externals: {
+      inline: [/[\\/]node_modules[\\/]nuxt[\\/]dist[\\/]/],
+    },
     alias: {
       // Nitro has its own bundler that doesn't use Vite aliases.
       // Duplicate @schema here so Nitro can resolve it.
