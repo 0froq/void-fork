@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { parse } from 'acorn';
 import { join } from 'pathslash';
+import { parseSync } from 'vite';
 import { loadTypedVoidConfigFile, TYPED_CONFIG_FILE } from './config-loader.ts';
 import { validateConfig, type VoidConfig } from './config.ts';
 
@@ -74,18 +74,24 @@ function isGeneratedStaticConfig(source: string): boolean {
   if (!GENERATED_MARKERS.some((marker) => source.startsWith(marker))) {
     return false;
   }
-  const comments: Array<string> = [];
   let program: StaticNode;
   try {
-    program = parse(source, {
-      ecmaVersion: 'latest',
+    const parsed = parseSync(TYPED_CONFIG_FILE, source, {
+      // Generated config is plain JavaScript; authored TypeScript must stay untouched.
+      lang: 'js',
       sourceType: 'module',
-      onComment: (_block, comment) => comments.push(comment.trim()),
-    }) as unknown as StaticNode;
+      preserveParens: false,
+      showSemanticErrors: true,
+    });
+    if (
+      parsed.errors.length > 0 ||
+      parsed.comments.length !== 1 ||
+      !GENERATED_MARKERS.includes(`// ${parsed.comments[0]?.value.trim()}`)
+    ) {
+      return false;
+    }
+    program = parsed.program as unknown as StaticNode;
   } catch {
-    return false;
-  }
-  if (comments.length !== 1 || !GENERATED_MARKERS.includes(`// ${comments[0]}`)) {
     return false;
   }
   const [importDeclaration, exportDeclaration] = program.body ?? [];
