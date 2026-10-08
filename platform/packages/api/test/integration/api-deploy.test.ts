@@ -12,7 +12,6 @@ import {
   vi,
 } from 'vite-plus/test';
 import { computeAssetHash } from '../../src/assets.ts';
-import { hmacSignState } from '../../src/auth/hmac.ts';
 import {
   beginDeploymentCutover,
   cancelDeployment,
@@ -28,7 +27,7 @@ import app from '../../src/index.ts';
 import { writePlanCatalog } from '../../src/plans.ts';
 import * as projectAccess from '../../src/project-access.ts';
 import * as projectIngress from '../../src/project-ingress.ts';
-import { deriveProxyToken, proxyTokenStateKey } from '../../src/proxy-token.ts';
+import { deriveProxyToken } from '../../src/proxy-token.ts';
 import { validateManifestShape } from '../../src/routes/deploy.ts';
 import {
   builds,
@@ -41,6 +40,7 @@ import {
   projectZeroTrust,
   projectSecrets,
   platformSettings,
+  projectCleanupJobs,
   users,
 } from '../../src/schema.ts';
 import {
@@ -2002,15 +2002,15 @@ describe('POST /projects/:id/deploy', () => {
       workerName: expect.stringMatching(/^user-queue-kv-app-dpl_/),
       projectId: project.id,
       queueName: 'emails',
-      proxyToken: await hmacSignState(project.id, JWT_SECRET),
+      proxyToken: await deriveProxyToken(JWT_SECRET, project.id, 1),
     });
   });
 
-  it('issues the proxy token for the project accept floor', async () => {
+  it('issues generation 1 on the first deploy of a new project', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'queue-kv-floor-app');
-    await env.ROUTING.put(proxyTokenStateKey(project.id), JSON.stringify({ gen: 1 }));
     const fetchMock = mockCfApi();
+    const kvPut = vi.spyOn(env.ROUTING, 'put');
 
     const res = await app.fetch(
       await buildDeployRequest(env, project.id, user.jwt, {
@@ -2046,6 +2046,56 @@ describe('POST /projects/:id/deploy', () => {
       proxyToken: string;
     } | null;
     expect(queueRouting?.proxyToken).toBe(expected);
+
+    const [row] = await env.db
+      .select({ gen: projects.proxy_token_gen })
+      .from(projects)
+      .where(eq(projects.id, project.id));
+    expect(row!.gen).toBe(1);
+    // The deployment records the generation its Worker was uploaded with.
+    expect(
+      await env.db
+        .select({ gen: deployments.proxy_token_gen })
+        .from(deployments)
+        .where(eq(deployments.project_id, project.id)),
+    ).toEqual([{ gen: 1 }]);
+    expect(kvPut.mock.calls.map(([key]) => key)).not.toContainEqual(
+      expect.stringMatching(/^proxy-token:/),
+    );
+    expect(
+      await env.db
+        .select()
+        .from(projectCleanupJobs)
+        .where(eq(projectCleanupJobs.kind, 'proxy-token-rotation')),
+    ).toEqual([]);
+  });
+
+  it('moves a project on the legacy token to generation 1 without a rotation', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'legacy-redeploy-app');
+    mockCfApi();
+    const deploy = async () => {
+      const res = await app.fetch(await buildDeployRequest(env, project.id, user.jwt), env);
+      expect(res.status).toBe(200);
+      await res.text();
+    };
+    await deploy();
+    // A project whose Workers predate token generations.
+    await env.db.update(projects).set({ proxy_token_gen: 0 }).where(eq(projects.id, project.id));
+
+    await deploy();
+
+    const [row] = await env.db
+      .select({ gen: projects.proxy_token_gen })
+      .from(projects)
+      .where(eq(projects.id, project.id));
+    expect(row!.gen).toBe(1);
+    expect(
+      await env.db
+        .select()
+        .from(projectCleanupJobs)
+        .where(eq(projectCleanupJobs.kind, 'proxy-token-rotation')),
+    ).toEqual([]);
   });
 
   it('removes queue routing entries omitted by the next deployment', async () => {

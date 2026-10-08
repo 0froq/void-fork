@@ -17,6 +17,10 @@ import { alias } from 'drizzle-orm/pg-core';
 import { lockAuthSettings } from '../auth/configuration.ts';
 import { generateId } from '../id.ts';
 import {
+  requestProxyTokenRotation,
+  requestProxyTokenRotationsForMember,
+} from '../proxy-token-rotation-request.ts';
+import {
   users,
   projects,
   projectMembers,
@@ -175,6 +179,11 @@ async function withAdminRemovalGuard<T>(
   });
 }
 
+/** An admin suspension ends deploy access, like account deletion. */
+async function requestRotationsForAdminSuspension(tx: Db, id: string): Promise<void> {
+  await requestProxyTokenRotationsForMember(tx, id, 'user-suspended');
+}
+
 /**
  * Revoke administrator access before external deletion/suspension work begins.
  * This durable change prevents another removal from counting this administrator
@@ -192,6 +201,11 @@ export async function prepareUserRemoval(
         .update(users)
         .set(action.kind === 'delete' ? { role: 'user' } : { suspended_reason: action.reason })
         .where(eq(users.id, id));
+      // The suspension is in force from here, even when the rest of the
+      // removal fails.
+      if (action.kind === 'suspend' && isAdminSuspended(action.reason)) {
+        await requestRotationsForAdminSuspension(tx, id);
+      }
     }
     return user;
   });
@@ -202,7 +216,10 @@ export async function suspendUser(db: Db, id: string, reason: string): Promise<v
     await target.update(users).set({ suspended_reason: reason }).where(eq(users.id, id));
   };
   if (isAdminSuspended(reason)) {
-    await withAdminRemovalGuard(db, id, suspend);
+    await withAdminRemovalGuard(db, id, async (tx) => {
+      await suspend(tx);
+      await requestRotationsForAdminSuspension(tx, id);
+    });
   } else {
     // Usage limits suspend app traffic, not administrator access. A delayed
     // quota write must not undo an administrator's manual access revocation.
@@ -289,6 +306,21 @@ export async function deleteUser(db: Db, id: string): Promise<ReadonlyArray<Term
             'github connection authorizer account deleted',
           )),
         );
+      }
+
+      const deployMemberships = await tx
+        .select({ projectId: projectMembers.project_id })
+        .from(projectMembers)
+        .where(
+          and(
+            eq(projectMembers.user_id, id),
+            inArray(projectMembers.role, ['collaborator', 'admin']),
+            inArray(projectMembers.project_id, projectIds),
+          ),
+        )
+        .orderBy(asc(projectMembers.project_id));
+      for (const { projectId } of deployMemberships) {
+        await requestProxyTokenRotation(tx, projectId, 'user-deleted', 'member');
       }
     }
     await tx.delete(users).where(eq(users.id, id));

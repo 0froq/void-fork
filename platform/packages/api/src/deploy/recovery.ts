@@ -29,6 +29,7 @@ import {
   removeQueueConsumer,
   getDispatchWorkerProxyToken,
 } from '../provisioning/cloudflare-api.ts';
+import { requestRotationIfReplacingUntrustedCode } from '../proxy-token-rotation.ts';
 import { buildRoutingJson, buildStaticRoutingJson, computeDispatchLimits } from '../routing.ts';
 import { type DeployManifest, type Deployment, type Project } from '../types.ts';
 import {
@@ -102,6 +103,7 @@ export async function commitCutoverLive(
     // began, so no final object-store scan is needed.
     await updateDeploymentStatus(tx, deploymentId, 'live', undefined, { force: true });
     await updateProjectType(tx, projectId, input.projectType);
+    await requestRotationIfReplacingUntrustedCode(tx, projectId, deploymentId);
     await setActiveDeployment(tx, projectId, deploymentId);
     await markDeploymentRetained(tx, deploymentId, true);
   });
@@ -329,6 +331,7 @@ export async function replayDeploymentCutover(
     desiredQueueResources.set(queue.name, resource);
   }
   const needsProxyToken = !isStatic && (!!manifest.schedules?.length || desiredQueues.length > 0);
+  // The token the replayed Worker holds, which may be older than the issued one.
   const proxyToken = needsProxyToken
     ? await resolveCutoverProxyToken(env, workerName, project.id)
     : null;

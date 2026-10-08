@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vite-plus/test';
 import {
   createGitHubConnection,
@@ -12,14 +12,18 @@ import {
   getGitHubConnection,
   getProject,
   respondToProjectInvitation,
+  suspendUser,
 } from '../../src/db.ts';
+import { proxyTokenRotationTarget } from '../../src/proxy-token-rotation-request.ts';
 import {
   projectAccessEvents,
+  projectCleanupJobs,
   projectInvitations,
   projectMembers,
   projectOwnershipPeriods,
   users,
 } from '../../src/schema.ts';
+import { REASON_REQUESTS_EXCEEDED } from '../../src/suspension.ts';
 import {
   createTestBuild,
   captureQueries,
@@ -135,6 +139,131 @@ describe('project team lifecycle', () => {
       .where(eq(projectAccessEvents.project_id, project.id));
     expect(events.map((event) => event.action)).toEqual(['invited', 'accepted']);
     expect(events.every((event) => event.subject_user_id === member.id)).toBe(true);
+  });
+
+  it('rotates the proxy token of every project the deleted user could deploy to', async () => {
+    const owner = await createTestUser(env.db, 'rotation-owner');
+    const member = await createTestUser(env.db, 'rotation-member');
+    const collaborated = await createProject(env.db, owner.id, 'rotation-collaborator');
+    const read = await createProject(env.db, owner.id, 'rotation-reader');
+    const administered = await createProject(env.db, owner.id, 'rotation-admin');
+    await env.db.insert(projectMembers).values([
+      { project_id: collaborated.id, user_id: member.id, role: 'collaborator' },
+      { project_id: read.id, user_id: member.id, role: 'reader' },
+      { project_id: administered.id, user_id: member.id, role: 'admin' },
+    ]);
+
+    await deleteUser(env.db, member.id);
+
+    const jobs = await env.db.select().from(projectCleanupJobs);
+    expect(jobs.map((job) => job.project_id).sort()).toEqual(
+      [collaborated.id, administered.id].sort(),
+    );
+    for (const job of jobs) {
+      expect(job).toMatchObject({
+        kind: 'proxy-token-rotation',
+        payload: { phase: 'requested', reason: 'user-deleted' },
+      });
+    }
+  });
+
+  it('rotates the proxy token of every project an admin-suspended user could deploy to', async () => {
+    const owner = await createTestUser(env.db, 'suspension-owner');
+    const member = await createTestUser(env.db, 'suspension-member');
+    const collaborated = await createProject(env.db, owner.id, 'suspension-collaborator');
+    const read = await createProject(env.db, owner.id, 'suspension-reader');
+    const administered = await createProject(env.db, owner.id, 'suspension-admin');
+    await env.db.insert(projectMembers).values([
+      { project_id: collaborated.id, user_id: member.id, role: 'collaborator' },
+      { project_id: read.id, user_id: member.id, role: 'reader' },
+      { project_id: administered.id, user_id: member.id, role: 'admin' },
+    ]);
+
+    await suspendUser(env.db, member.id, REASON_REQUESTS_EXCEEDED);
+    await suspendUser(env.db, owner.id, 'admin_suspended');
+    expect(await env.db.select().from(projectCleanupJobs)).toEqual([]);
+
+    await suspendUser(env.db, member.id, 'admin_suspended');
+
+    const jobs = await env.db.select().from(projectCleanupJobs);
+    expect(jobs.map((job) => job.project_id).sort()).toEqual(
+      [collaborated.id, administered.id].sort(),
+    );
+    for (const job of jobs) {
+      expect(job).toMatchObject({
+        kind: 'proxy-token-rotation',
+        payload: { phase: 'requested', reason: 'user-suspended' },
+      });
+    }
+  });
+
+  it('queues the rotations of an admin suspension in one statement, keeping queued jobs', async () => {
+    const owner = await createTestUser(env.db, 'many-owner');
+    const member = await createTestUser(env.db, 'many-member');
+    const collaborated = await createProject(env.db, owner.id, 'many-collaborator');
+    const administered = await createProject(env.db, owner.id, 'many-admin');
+    const read = await createProject(env.db, owner.id, 'many-reader');
+    const queued = await createProject(env.db, owner.id, 'many-queued');
+    const started = await createProject(env.db, owner.id, 'many-started');
+    await env.db.insert(projectMembers).values([
+      { project_id: collaborated.id, user_id: member.id, role: 'collaborator' },
+      { project_id: administered.id, user_id: member.id, role: 'admin' },
+      { project_id: read.id, user_id: member.id, role: 'reader' },
+      { project_id: queued.id, user_id: member.id, role: 'collaborator' },
+      { project_id: started.id, user_id: member.id, role: 'admin' },
+    ]);
+    const later = sql`now() + interval '1 hour'`;
+    await env.db.insert(projectCleanupJobs).values([
+      {
+        target: proxyTokenRotationTarget(queued.id),
+        project_id: queued.id,
+        kind: 'proxy-token-rotation',
+        payload: { phase: 'requested', reason: 'member-role-changed' },
+        next_attempt_at: later,
+      },
+      {
+        target: proxyTokenRotationTarget(started.id),
+        project_id: started.id,
+        kind: 'proxy-token-rotation',
+        payload: { phase: 'patch', reason: 'operator', gen: '1', cursor: '' },
+        attempts: 2,
+        next_attempt_at: later,
+      },
+    ]);
+    const before = new Map(
+      (await env.db.select().from(projectCleanupJobs)).map((job) => [job.project_id, job]),
+    );
+
+    const { queries } = await captureQueries(env.db, () =>
+      suspendUser(env.db, member.id, 'admin_suspended'),
+    );
+
+    const jobs = new Map(
+      (await env.db.select().from(projectCleanupJobs)).map((job) => [job.project_id, job]),
+    );
+    expect([...jobs.keys()].sort()).toEqual(
+      [collaborated.id, administered.id, queued.id, started.id].sort(),
+    );
+    for (const projectId of [collaborated.id, administered.id]) {
+      expect(jobs.get(projectId)).toMatchObject({
+        target: proxyTokenRotationTarget(projectId),
+        kind: 'proxy-token-rotation',
+        payload: { phase: 'requested', reason: 'user-suspended' },
+        attempts: 0,
+        last_error: null,
+      });
+    }
+    // A job that has not started covers the request as it is.
+    expect(jobs.get(queued.id)).toEqual(before.get(queued.id));
+    // A started job finishes and runs once more, on its own schedule.
+    const startedBefore = before.get(started.id)!;
+    expect(jobs.get(started.id)).toEqual({
+      ...startedBefore,
+      payload: { ...startedBefore.payload, again: '1' },
+    });
+    expect(
+      queries.filter((query) => /^insert into "project_cleanup_jobs"/i.test(query.trim())),
+    ).toHaveLength(1);
   });
 
   it('atomically discovers and locks pending-invitation projects before user deletion', async () => {

@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import {
   afterAll,
   afterEach,
@@ -17,6 +18,7 @@ import {
   deriveProxyToken,
   type ProxyInternalRoute,
 } from '../../src/proxy-token.ts';
+import { deployments, projects } from '../../src/schema.ts';
 import {
   clearTables,
   createTestDeployment,
@@ -131,17 +133,30 @@ describe('per-project token checks', () => {
     expect(run).toHaveBeenCalledOnce();
   });
 
-  it.each(['revalidate', 'resolve-resource', 'resolve-worker', 'verify-prerender-build'])(
-    'rejects a login JWT presented as a project id and token at /internal/%s',
+  it('rejects a login JWT presented as a project id and token at /internal/revalidate', async () => {
+    const forged = await loginJwtAsProjectToken();
+    const response = await internalRequest('revalidate', forged.projectId, forged.token);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: 'invalid internal auth' });
+  });
+
+  it.each(['resolve-resource', 'resolve-worker', 'verify-prerender-build'])(
+    'rejects a login JWT presented as a project id and credential at /internal/%s',
     async (route) => {
       const forged = await loginJwtAsProjectToken();
-      const response = await internalRequest(route, forged.projectId, forged.token);
-      expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({ error: 'invalid internal auth' });
+      const asProxy = await internalRequest(route, forged.projectId, {
+        'x-void-proxy-internal': forged.token,
+      });
+      expect(asProxy.status).toBe(403);
+      expect(await asProxy.json()).toEqual({ error: 'invalid internal auth' });
+
+      const asProject = await internalRequest(route, forged.projectId, forged.token);
+      expect(asProject.status).toBe(401);
+      expect(await asProject.json()).toEqual({ error: 'missing internal auth' });
     },
   );
 
-  it('accepts a generated project id with its token at every internal route', async () => {
+  it('accepts a generated project id at every internal route', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
     const deployment = await createTestDeployment(env.db, project.id, 'live');
@@ -149,29 +164,42 @@ describe('per-project token checks', () => {
     await env.ROUTING.put(project.slug, JSON.stringify({ version: deployment.id }));
     mockCfApi();
     const token = await hmacSignState(project.id, JWT_SECRET);
+    const proxyAuth = async (route: ProxyInternalRoute) => ({
+      'x-void-proxy-internal': await deriveProxyInternalAuth(JWT_SECRET, route, project.id),
+    });
 
     const revalidated = await internalRequest('revalidate', project.id, token, {
       paths: ['/about'],
     });
     expect(revalidated.status).toBe(200);
 
-    const resource = await internalRequest('resolve-resource', project.id, token, {
-      type: 'kv',
-      binding: 'CACHE',
-    });
+    const resource = await internalRequest(
+      'resolve-resource',
+      project.id,
+      await proxyAuth('resolve-resource'),
+      { type: 'kv', binding: 'CACHE' },
+    );
     expect(resource.status).toBe(200);
     expect(await resource.json()).toEqual({ cf_id: 'cf-kv-id' });
 
-    const worker = await internalRequest('resolve-worker', project.id, token);
+    const worker = await internalRequest(
+      'resolve-worker',
+      project.id,
+      await proxyAuth('resolve-worker'),
+    );
     expect(worker.status).toBe(200);
     expect(await worker.json()).toEqual({
       workerName: `user-${project.slug}-${deployment.id}`,
       deploymentId: deployment.id,
+      proxyTokenGen: 0,
     });
 
-    const prerender = await internalRequest('verify-prerender-build', project.id, token, {
-      userId: user.id,
-    });
+    const prerender = await internalRequest(
+      'verify-prerender-build',
+      project.id,
+      await proxyAuth('verify-prerender-build'),
+      { userId: user.id },
+    );
     expect(prerender.status).toBe(200);
     expect(await prerender.json()).toEqual({ ok: true });
   });
@@ -286,11 +314,12 @@ describe('proxy credential on the metadata routes', () => {
       'resolve-worker': {
         workerName: `user-${project.slug}-${deployment.id}`,
         deploymentId: deployment.id,
+        proxyTokenGen: 0,
       },
       'resolve-resource': { cf_id: 'cf-kv-id' },
       'verify-prerender-build': { ok: true },
     };
-    return { project, bodies, expected };
+    return { project, deployment, bodies, expected };
   }
 
   function floorReads(get: { mock: { calls: Array<Array<unknown>> } }) {
@@ -318,6 +347,65 @@ describe('proxy credential on the metadata routes', () => {
       expect(floorReads(get)).toEqual([]);
     },
   );
+
+  async function resolvedGeneration(projectId: string): Promise<unknown> {
+    const response = await internalRequest(
+      'resolve-worker',
+      projectId,
+      {
+        'x-void-proxy-internal': await deriveProxyInternalAuth(
+          JWT_SECRET,
+          'resolve-worker',
+          projectId,
+        ),
+      },
+      {},
+    );
+    expect(response.status).toBe(200);
+    return ((await response.json()) as { proxyTokenGen?: unknown }).proxyTokenGen;
+  }
+
+  async function setGenerations(
+    projectId: string,
+    issued: number,
+    held: Readonly<Record<string, number>>,
+  ): Promise<void> {
+    await env.db
+      .update(projects)
+      .set({ proxy_token_gen: issued })
+      .where(eq(projects.id, projectId));
+    for (const [deploymentId, gen] of Object.entries(held)) {
+      await env.db
+        .update(deployments)
+        .set({ proxy_token_gen: gen })
+        .where(eq(deployments.id, deploymentId));
+    }
+  }
+
+  it('reports the generation the active Worker holds from /internal/resolve-worker', async () => {
+    const { project, deployment } = await liveProject();
+    await setGenerations(project.id, 3, { [deployment.id]: 3 });
+    expect(await resolvedGeneration(project.id)).toBe(3);
+  });
+
+  it('reports the held generation, not the issued one, when they differ', async () => {
+    const { project, deployment } = await liveProject();
+    await setGenerations(project.id, 2, { [deployment.id]: 0 });
+    expect(await resolvedGeneration(project.id)).toBe(0);
+  });
+
+  it('reports generation 0 after a rollback to a Worker that still holds the legacy token', async () => {
+    const { project, deployment: older } = await liveProject();
+    const newer = await createTestDeployment(env.db, project.id, 'live');
+    await setGenerations(project.id, 1, { [older.id]: 0, [newer.id]: 1 });
+    expect(await resolvedGeneration(project.id)).toBe(1);
+
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: older.id })
+      .where(eq(projects.id, project.id));
+    expect(await resolvedGeneration(project.id)).toBe(0);
+  });
 
   it.each(routes)(
     'rejects a proxy credential made for another route at /internal/%s',
@@ -357,40 +445,21 @@ describe('proxy credential on the metadata routes', () => {
     },
   );
 
-  it.each(routes)('applies the floor to a project token at /internal/%s', async (route) => {
-    const { project, bodies, expected } = await liveProject();
-    const legacy = await hmacSignState(project.id, JWT_SECRET);
-
-    const accepted = await internalRequest(route, project.id, legacy, bodies[route]);
-    expect(accepted.status).toBe(200);
-    expect(await accepted.json()).toEqual(expected[route]);
-
-    await env.ROUTING.put(`proxy-token:${project.id}`, '{"gen":1}');
-    const rejected = await internalRequest(route, project.id, legacy, bodies[route]);
-    expect(rejected.status).toBe(403);
-    expect(await rejected.json()).toEqual({ error: 'invalid internal auth' });
-
-    await env.ROUTING.put(`proxy-token:${project.id}`, 'not json');
-    const unavailable = await internalRequest(route, project.id, legacy, bodies[route]);
-    expect(unavailable.status).toBe(503);
-    expect(await unavailable.json()).toEqual({ error: 'project token state unavailable' });
-  });
-
-  it.each(routes)('requires internal auth at /internal/%s', async (route) => {
+  it.each(routes)('requires the proxy credential at /internal/%s', async (route) => {
     const { project, bodies } = await liveProject();
     const missing = await internalRequest(route, project.id, {}, bodies[route]);
     expect(missing.status).toBe(401);
     expect(await missing.json()).toEqual({ error: 'missing internal auth' });
 
     const get = vi.spyOn(env.ROUTING, 'get');
-    const forged = await internalRequest(
-      route,
-      project.id,
-      await hmacSignState('proj_000000000999', JWT_SECRET),
-      bodies[route],
-    );
-    expect(forged.status).toBe(403);
-    expect(await forged.json()).toEqual({ error: 'invalid internal auth' });
+    for (const token of [
+      await hmacSignState(project.id, JWT_SECRET),
+      await deriveProxyToken(JWT_SECRET, project.id, 1),
+    ]) {
+      const projectToken = await internalRequest(route, project.id, token, bodies[route]);
+      expect(projectToken.status).toBe(401);
+      expect(await projectToken.json()).toEqual({ error: 'missing internal auth' });
+    }
     expect(floorReads(get)).toEqual([]);
   });
 });

@@ -87,6 +87,10 @@ import {
   isAlreadyExistsError as isDestinationAlreadyExistsError,
 } from '../provisioning/email-routing.ts';
 import { isManagedSandbox, verifySandboxController } from '../provisioning/sandbox-controller.ts';
+import {
+  proxyTokenRotationWarnings,
+  requestRotationIfReplacingUntrustedCode,
+} from '../proxy-token-rotation.ts';
 import { EMAIL_RESERVED_SLUGS } from '../reserved-slugs.ts';
 import {
   buildRoutingJson,
@@ -977,9 +981,16 @@ const app = new Hono<ApiEnv>()
             manifest: sanitizeDeploymentManifest(deployment.manifest),
           }))
         : deployments;
+    const warnings = await proxyTokenRotationWarnings(
+      context.get('db'),
+      project.id,
+      access.role,
+      !!context.get('deployScope'),
+    );
     return context.json({
       deployments: sanitized,
       activeDeploymentId: project.active_deployment_id,
+      ...(warnings.length > 0 ? { warnings } : {}),
     });
   })
 
@@ -1455,6 +1466,7 @@ const app = new Hono<ApiEnv>()
           // PG flip FIRST. If this throws, no external state is mutated
           // yet — the tx rolls back cleanly and the caller can retry.
           await updateProjectType(tx, projectId, targetType);
+          await requestRotationIfReplacingUntrustedCode(tx, projectId, target.id);
           await setActiveDeployment(tx, projectId, target.id);
 
           const snapshottedRoutingKeys = new Set<string>();
@@ -1516,6 +1528,8 @@ const app = new Hono<ApiEnv>()
             // /__void/scheduled and /__void/queue handlers both validate
             // against the SAME __VOID_PROXY_TOKEN binding, so one lookup
             // is authoritative for both.
+            // The target may hold an older generation than the issued one;
+            // its copies get the token it holds.
             const needsProxyToken = !!manifest?.schedules?.length || !!manifest?.queues?.length;
             const targetProxyToken = needsProxyToken
               ? await resolveRollbackProxyToken(context.env, workerName, projectId)

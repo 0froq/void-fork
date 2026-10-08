@@ -81,6 +81,15 @@ export function serializeProxyTokenState(state: ProxyTokenState): string {
   return JSON.stringify({ gen: state.gen });
 }
 
+/**
+ * The floor a deleted project keeps. Issued generations are a Postgres
+ * `integer`, far below it, so no token is accepted. Deleting the key instead
+ * would bring back floor 0 and the legacy token.
+ */
+export const CLOSED_PROXY_TOKEN_STATE = serializeProxyTokenState({
+  gen: Number.MAX_SAFE_INTEGER - 1,
+});
+
 export function isAcceptedGeneration(state: ProxyTokenState, gen: number): boolean {
   return gen >= state.gen;
 }
@@ -271,19 +280,6 @@ export async function verifyProxyToken(
     return false;
   }
   return true;
-}
-
-/**
- * Returns the token for the current floor (floor 0 is the legacy token).
- * Stopgap until the issued generation is stored with the project.
- */
-export async function issueProxyToken(
-  routing: Pick<KVNamespace, 'get'>,
-  jwtSecret: string,
-  projectId: string,
-): Promise<string> {
-  const state = await readProxyTokenState(routing, projectId);
-  return deriveProxyToken(jwtSecret, projectId, state.gen);
 }
 
 // --- Isolate cache ---

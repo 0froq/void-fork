@@ -306,6 +306,8 @@ export const projects = pgTable(
     type: text('mode').notNull().default('void').$type<'void' | 'spa' | 'static' | 'framework'>(),
     active_deployment_id: text('active_deployment_id'),
     websocket_version: integer('websocket_version').notNull().default(0),
+    // Highest proxy token generation issued for this project. 0 = legacy token.
+    proxy_token_gen: integer('proxy_token_gen').notNull().default(0),
     status: text('status').notNull().default('active').$type<'active' | 'deleting'>(),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
@@ -566,6 +568,9 @@ export const deployments = pgTable(
     // attribution survives account deletion.
     billing_user_id: text('billing_user_id'),
     initiated_by_user_id: text('initiated_by_user_id'),
+    // Proxy token generation this deployment's Worker holds. 0 = legacy token,
+    // which every Worker deployed before generations were stored holds.
+    proxy_token_gen: integer('proxy_token_gen').notNull().default(0),
   },
   (table) => [
     index('idx_deployments_project_id').on(table.project_id, table.created_at),
@@ -634,8 +639,10 @@ export const projectCleanupJobs = pgTable(
         | 'worker-bundle'
         | 'project-assets'
         | 'routing-key'
+        | 'routing-put'
         | 'cron'
         | 'custom-hostname'
+        | 'proxy-token-rotation'
       >(),
     payload: jsonb('payload').notNull().$type<Record<string, string>>(),
     attempts: integer('attempts').notNull().default(0),

@@ -619,7 +619,7 @@ describe('WfP dispatch path', () => {
       expect(capturedHeaders['x-void-proxy-internal']).toBeUndefined();
     });
 
-    it('authenticates worker resolution with the proxy credential and the legacy header', async () => {
+    it('authenticates worker resolution with the proxy credential only', async () => {
       const env = createEnv({ proj_000000000001: 'user-my-app' }, async () =>
         Response.json({ results: [], success: true, meta: {} }),
       );
@@ -632,7 +632,7 @@ describe('WfP dispatch path', () => {
       expect(headers['x-void-proxy-internal']).toBe(
         await deriveProxyInternalAuth(JWT_SECRET, 'resolve-worker', 'proj_000000000001'),
       );
-      expect(headers['x-void-internal']).toBe(token);
+      expect(headers['x-void-internal']).toBeUndefined();
     });
   });
 });
@@ -756,6 +756,33 @@ describe('proxy token generations', () => {
       expect(sent.map((s) => s.token)).toEqual([await tok(2)]);
     },
   );
+
+  it('sends the generation the Worker holds when a higher one is issued', async () => {
+    // Issued generation 2 and floor 0; the active deployment still holds the legacy token.
+    const legacy = await tok(0);
+    const { env, sent, floorReads } = setup({
+      resolution: { workerName: 'user-my-app', deploymentId: 'dpl_active', proxyTokenGen: 0 },
+      held: legacy,
+    });
+
+    const res = await dispatchToWorker(env, PROJECT_ID, '/kv/get', KV_BODY);
+
+    expect(res?.status).toBe(200);
+    expect(sent.map((s) => s.token)).toEqual([legacy]);
+    expect(floorReads()).toBe(0);
+  });
+
+  it('makes exactly one request to a Worker that always rejects', async () => {
+    const { env, sent } = setup({
+      resolution: { workerName: 'user-my-app', deploymentId: 'dpl_active', proxyTokenGen: 0 },
+      respond: () => Response.json({ error: 'unauthorized' }, { status: 403 }),
+    });
+
+    const res = await dispatchToWorker(env, PROJECT_ID, '/d1/query', KV_BODY);
+
+    expect(res?.status).toBe(403);
+    expect(sent.map((s) => s.token)).toEqual([await tok(0)]);
+  });
 
   it('does not replay after a thrown fetch', async () => {
     const { env, sent } = setup({

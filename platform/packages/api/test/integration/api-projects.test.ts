@@ -18,7 +18,11 @@ import {
 import * as db from '../../src/db.ts';
 import app from '../../src/index.ts';
 import * as projectAccess from '../../src/project-access.ts';
-import { deriveProxyInternalAuth } from '../../src/proxy-token.ts';
+import {
+  proxyTokenRotationStuckWarning,
+  proxyTokenRotationTarget,
+} from '../../src/proxy-token-rotation.ts';
+import { deriveProxyInternalAuth, deriveProxyToken } from '../../src/proxy-token.ts';
 import { users } from '../../src/schema.ts';
 import {
   deployments,
@@ -31,6 +35,7 @@ import {
   projectDeployCredentials,
   platformLoginConnections,
   platformSettings,
+  projectCleanupJobs,
 } from '../../src/schema.ts';
 import {
   createTestBuild,
@@ -2271,6 +2276,76 @@ describe('GET /projects/:id/deployments', () => {
       ssr: true,
     });
   });
+
+  it('warns only owners and admins about a stuck credential rotation', async () => {
+    const owner = await createTestUser(env.db, 'stuck-owner');
+    const project = await createTestProject(env.db, owner.id, 'stuck-project');
+    const members: Record<'reader' | 'collaborator' | 'admin', string> = {
+      reader: '',
+      collaborator: '',
+      admin: '',
+    };
+    for (const role of ['reader', 'collaborator', 'admin'] as const) {
+      const user = await createTestUser(env.db, `stuck-${role}`);
+      await env.db.insert(projectMembers).values({
+        project_id: project.id,
+        user_id: user.id,
+        role,
+        added_by_user_id: owner.id,
+      });
+      members[role] = user.jwt;
+    }
+    const build = await createTestBuild(env.db, {
+      projectId: project.id,
+      userId: owner.id,
+      status: 'building',
+    });
+    const deployToken = await signDeployToken(
+      { projectId: project.id, userId: owner.id, login: owner.login, buildId: build.id },
+      env.JWT_SECRET,
+    );
+    await createDeployment(env.db, project.id, JSON.stringify({ version: 3, bindings: {} }));
+
+    const listAs = async (jwt: string) => {
+      const response = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deployments`, {
+          headers: { Authorization: `Bearer ${jwt}` },
+        }),
+        env,
+      );
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(text).not.toContain('cf boom');
+      expect(text).not.toContain('user-x-dep');
+      expect(text).not.toContain('mock-proxy-token');
+      return JSON.parse(text) as { deployments: Array<unknown>; warnings?: Array<string> };
+    };
+
+    expect(await listAs(owner.jwt)).not.toHaveProperty('warnings');
+
+    await env.db.insert(projectCleanupJobs).values({
+      target: proxyTokenRotationTarget(project.id),
+      project_id: project.id,
+      kind: 'proxy-token-rotation',
+      payload: { phase: 'patch', reason: 'member-removed' },
+      attempts: 3,
+      last_error: 'cf boom user-x-dep',
+    });
+    expect(await listAs(owner.jwt)).not.toHaveProperty('warnings');
+
+    await env.db
+      .update(projectCleanupJobs)
+      .set({ attempts: 4 })
+      .where(eq(projectCleanupJobs.target, proxyTokenRotationTarget(project.id)));
+    for (const jwt of [owner.jwt, members.admin]) {
+      const body = await listAs(jwt);
+      expect(body.warnings).toEqual([proxyTokenRotationStuckWarning(project.id)]);
+      expect(body.deployments).toHaveLength(1);
+    }
+    for (const jwt of [members.reader, members.collaborator, deployToken]) {
+      expect(await listAs(jwt)).not.toHaveProperty('warnings');
+    }
+  });
 });
 
 describe('POST /projects/:id/rollback', () => {
@@ -3138,6 +3213,87 @@ describe('POST /projects/:id/rollback', () => {
       proxyToken: 'token-baked-into-d1',
     });
   });
+
+  it.each([
+    { issued: 1, held: 0 },
+    { issued: 1, held: 1 },
+    { issued: 0, held: 0 },
+  ])(
+    'rollback to a Worker on generation $held while generation $issued is issued writes only its token',
+    async ({ issued, held }) => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, 'roll-token-gen');
+      await env.db
+        .update(projects)
+        .set({ proxy_token_gen: issued })
+        .where(eq(projects.id, project.id));
+      const queueRoutingKey = `queue:${project.id.replaceAll('_', '-')}-emails`;
+      await env.db.insert(resources).values({
+        id: 'res_roll_token_gen',
+        project_id: project.id,
+        type: 'queue',
+        cf_id: '25832cb0ce3d4f60b1e538911a4629f4',
+        binding_name: 'emails',
+      });
+      const manifest = JSON.stringify({
+        version: 3,
+        bindings: {},
+        schedules: [{ cron: '*/5 * * * *', filePath: 'crons/tick.ts' }],
+        queues: [{ name: 'emails', bindingName: 'QUEUE_EMAILS' }],
+      });
+      const d1 = await createDeployment(env.db, project.id, manifest);
+      await updateDeploymentStatus(env.db, d1.id, 'live');
+      await markDeploymentRetained(env.db, d1.id, true);
+      const d2 = await createDeployment(env.db, project.id, manifest);
+      await updateDeploymentStatus(env.db, d2.id, 'live');
+      await markDeploymentRetained(env.db, d2.id, true);
+      await setActiveDeployment(env.db, project.id, d2.id);
+
+      const heldToken = await deriveProxyToken(env.JWT_SECRET, project.id, held);
+      mockCfApi({
+        listWorkerBindings: () =>
+          cfSuccess([{ type: 'plain_text', name: '__VOID_PROXY_TOKEN', text: heldToken }]),
+      });
+      const syncBodies: Array<string> = [];
+      const originalGet = env.CRON_SCHEDULER.get.bind(env.CRON_SCHEDULER);
+      vi.spyOn(env.CRON_SCHEDULER, 'get').mockImplementation((id) => {
+        const stub = originalGet(id);
+        return {
+          ...stub,
+          fetch: async (req: Request) => {
+            if (new URL(req.url).pathname === '/sync') {
+              syncBodies.push(await req.text());
+            }
+            return new Response('{}', { status: 200 });
+          },
+        } as unknown as DurableObjectStub;
+      });
+
+      const res = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/rollback`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ deploymentId: d1.id }),
+        }),
+        env,
+      );
+      expect(res.status).toBe(200);
+
+      expect(await env.ROUTING.get(queueRoutingKey, 'json')).toEqual({
+        workerName: `user-roll-token-gen-${d1.id}`,
+        projectId: project.id,
+        queueName: 'emails',
+        proxyToken: heldToken,
+      });
+      expect(syncBodies).toHaveLength(1);
+      const sync = JSON.parse(syncBodies[0]!) as Record<string, unknown>;
+      // Exactly one token: the one the Worker holds.
+      expect(Object.keys(sync).filter((key) => key.startsWith('proxyToken'))).toEqual([
+        'proxyToken',
+      ]);
+      expect(sync.proxyToken).toBe(heldToken);
+    },
+  );
 });
 
 describe('GET /projects/:id/logs', () => {
