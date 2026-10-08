@@ -28,7 +28,7 @@ describe('platform onboarding pages', () => {
     expect(response.headers.get('Content-Type')).toContain('text/html');
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     const html = await response.text();
-    expect(html).toContain('<h1>Welcome to &lt;Example Platform&gt;</h1>');
+    expect(html).toContain('<h1 id="void-auth-title">Welcome to &lt;Example Platform&gt;</h1>');
     expect(html).toContain('<title>Welcome · &lt;Example Platform&gt; · Void</title>');
     expect(html).toContain('npm install -g void');
     expect(html).toContain('void connect &#39;https://api.example.com&#39;');
@@ -119,7 +119,7 @@ describe('platform onboarding pages', () => {
     expect(html).toContain('use a separate checkout without a <code>.void/project.json</code>');
     expect(html).toContain('Accepting an invitation keeps existing project links.');
     expect(html).not.toContain('choose a project on this platform before deploying');
-    expect(html).not.toMatch(/dashboard/i);
+    expect(html).not.toContain('href="/admin');
   });
 
   it('does not render shell instructions for a malformed invitation id', async () => {

@@ -51,7 +51,6 @@ import {
   type Db,
 } from './db.ts';
 import { deploymentExecutionStatus, dispatchPendingDeployments } from './deployment-execution.ts';
-import { escapeHtml } from './email.ts';
 import { pruneEmailActionHistory } from './email/admission.ts';
 import { emailDomainRoutes, emailOperations } from './email/connection-schema.ts';
 import {
@@ -74,17 +73,17 @@ import {
   isMaintenanceLoginCallback,
   isAdministratorCallback,
 } from './middleware/platform-maintenance.ts';
+import {
+  platformWelcomePage,
+  platformInvitationPage,
+  platformRestrictedSignupPage,
+} from './onboarding-pages.ts';
 import { operatorApi } from './operator/index.ts';
 import { sandboxDrainStatus } from './operator/sandbox-operations.ts';
 import { platformAppAccess } from './platform-app-access.ts';
 import { platformDomainActivation } from './platform-domain-activation.ts';
 import { platformDomainPreflight } from './platform-domain-preflight.ts';
-import {
-  getPlatformApiUrl,
-  getPlatformDisplayName,
-  getPlatformPageTitle,
-  platformConnectCommand,
-} from './platform-identity.ts';
+import { getPlatformApiUrl, getPlatformDisplayName } from './platform-identity.ts';
 import { processPlatformQueue } from './platform-queue.ts';
 import { tryActivateDomain } from './provisioning/activate-domain.ts';
 import { reconcileProjectCleanupJobs } from './provisioning/cleanup.ts';
@@ -506,77 +505,30 @@ const app = new Hono<ApiEnv>()
     }),
   )
   .get('/', (context) => {
-    const name = escapeHtml(getPlatformDisplayName(context.env, context.req.url));
-    const command = escapeHtml(
-      platformConnectCommand(getPlatformApiUrl(context.env, context.req.url)),
-    );
     context.header('Cache-Control', 'no-store');
-    return context.html(`<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(getPlatformPageTitle('Welcome', context.env, context.req.url))}</title>
-</head><body>
-<main style="font-family:system-ui;max-width:40rem;margin:4rem auto;padding:1rem">
-<h1>Welcome to ${name}</h1>
-<p>This is a Void platform. Connect the Void CLI to deploy and manage your applications here.</p>
-<h2>Connect to this platform</h2>
-<p>Install the Void CLI if you haven't already:</p>
-<pre style="overflow:auto"><code>npm install -g void</code></pre>
-<p>From a new or unlinked Void app directory, connect to this platform:</p>
-<pre style="overflow:auto"><code>${command}</code></pre>
-<p>The CLI opens your browser to sign in when needed. If access is restricted, ask your platform administrator for an invitation and sign in with the invited email address.</p>
-<p>Ready to deploy? Run <code>void deploy</code> from your application's directory. To create a new application, follow the <a href="https://void.cloud/guide/quickstart">Void quickstart</a>, then connect it to this platform before deploying.</p>
-<h2>Administration</h2>
-<p>Platform administrators can <a href="/admin/">open the administrator dashboard</a> to manage this instance. If you're setting up the first administrator, you'll be guided through setup.</p>
-</main>
-</body></html>`);
+    return context.html(
+      platformWelcomePage(
+        getPlatformDisplayName(context.env, context.req.url),
+        getPlatformApiUrl(context.env, context.req.url),
+      ),
+    );
   })
-  .get('/signup-restricted', (context) => {
-    const name = escapeHtml(getPlatformDisplayName(context.env, context.req.url));
-    return context.html(`<!DOCTYPE html>
-<html><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escapeHtml(getPlatformPageTitle('Signup Restricted', context.env, context.req.url))}</title>
-<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fafafa}.card{text-align:center;max-width:400px;padding:40px}h1{font-size:1.25rem;margin-bottom:12px}p{color:#666;line-height:1.6}</style>
-</head><body>
-<div class="card"><h1>Signup Restricted</h1><p>New accounts on ${name} require administrator approval.</p><p>Ask your platform administrator for an invitation, then sign in with an account whose verified email address matches that invitation.</p></div>
-</body></html>`);
-  })
+  .get('/signup-restricted', (context) =>
+    context.html(
+      platformRestrictedSignupPage(getPlatformDisplayName(context.env, context.req.url)),
+    ),
+  )
   .get('/invite', (context) => {
-    const name = escapeHtml(getPlatformDisplayName(context.env, context.req.url));
     const invitationIdParam = context.req.query('project-invitation')?.trim();
     const invitationId =
       invitationIdParam && /^pinv_[0-9a-z]{12}$/.test(invitationIdParam) ? invitationIdParam : null;
-    const command = escapeHtml(
-      platformConnectCommand(getPlatformApiUrl(context.env, context.req.url)),
+    return context.html(
+      platformInvitationPage(
+        getPlatformDisplayName(context.env, context.req.url),
+        getPlatformApiUrl(context.env, context.req.url),
+        invitationId,
+      ),
     );
-    const invitationCommand = invitationId
-      ? escapeHtml(`void project team accept ${invitationId}`)
-      : null;
-    return context.html(`<!DOCTYPE html>
-<html><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escapeHtml(getPlatformPageTitle(invitationCommand ? 'Accept Project Invitation' : 'Get Started', context.env, context.req.url))}</title>
-<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fafafa}.card{max-width:520px;padding:40px}h1{font-size:1.5rem;margin-bottom:12px}p{color:#666;line-height:1.6;margin-bottom:20px}pre{background:#eee;padding:16px;overflow:auto}a{color:inherit}</style>
-</head><body>
-<div class="card">
-<h1>${invitationCommand ? 'Accept your project invitation' : `Get Started with ${name}`}</h1>
-<p>Connect the Void CLI to this platform. When prompted, sign in with an account whose verified email address matches your invitation:</p>
-<pre><code>${command}</code></pre>
-${
-  invitationCommand
-    ? `<p>Then accept the project invitation. The CLI checks that it is still valid and addressed to your signed-in account:</p>
-<pre><code>${invitationCommand}</code></pre>`
-    : ''
-}
-<p>The CLI opens your browser to sign in when needed. Invitation commands use your connected platform account and can run from any directory.</p>
-<p>To work on an application on this platform, open its directory and run <code>void project link</code> if it is not linked yet. If that directory is already linked to another project, use a separate checkout without a <code>.void/project.json</code> file, connect to this platform there, and run <code>void project link</code>. Accepting an invitation keeps existing project links.</p>
-<p>Need to create an application? Read the <a href="https://void.cloud/guide/quickstart">Void quickstart</a>, then return here to connect to this platform before deploying.</p>
-</div>
-</body></html>`);
   })
   .route('/', platformBootstrapRoutes)
   .route('/auth', auth)
