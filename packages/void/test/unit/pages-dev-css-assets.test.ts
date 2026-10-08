@@ -123,6 +123,33 @@ async function postCollector(
 }
 
 describe('pages dev CSS assets', () => {
+  it('resolves transformed component imports and re-exports in source order', async () => {
+    const [, plugin] = pagesDevCssAssetsPlugin('/root', 'secret');
+    const transform = plugin.transform as (
+      this: unknown,
+      code: string,
+      id: string,
+    ) => Promise<void>;
+    const resolve = vi.fn(async (source: string) => ({ id: `/root/${source}` }));
+    await transform.call(
+      { environment: { name: 'client' }, resolve },
+      `import './first.css';
+       export * from './second.js';
+       import('./lazy.css');
+       export { value } from './third.js';
+       export {} from './fourth.js';
+       import './last.css';`,
+      '/root/page.vue?vue&type=script&lang.ts',
+    );
+    expect(resolve.mock.calls.map(([source]) => source)).toEqual([
+      './first.css',
+      './second.js',
+      './third.js',
+      './fourth.js',
+      './last.css',
+    ]);
+  });
+
   it('preserves existing Vite client URLs during normalization', () => {
     expect(normalizeDevCssUrl('/@fs/Users/me/app/src/page.css', '/Users/me/app')).toBe(
       '/@fs/Users/me/app/src/page.css',

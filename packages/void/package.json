@@ -360,7 +360,6 @@
     "drizzle-valibot": "^0.4.2",
     "drizzle-zod": "^0.8.3",
     "email-validator": "^2.0.4",
-    "es-module-lexer": "^3.0.2",
     "hono": "^4.13.13",
     "ignore": "^7.0.12",
     "jiti": "^2.7.0",

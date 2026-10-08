@@ -14,19 +14,6 @@ type BundleOutput =
       code?: string;
     };
 
-function stripUseAsmPlugin() {
-  return {
-    name: 'void:strip-use-asm',
-    // es-module-lexer/js (asm.js variant) contains "use asm" which triggers a
-    // harmless but noisy V8 warning on Node 24+. Strip it from the bundle.
-    renderChunk(code: string) {
-      if (code.includes('"use asm"')) {
-        return code.replace('"use asm"', '');
-      }
-    },
-  };
-}
-
 function injectWorkersTypesReferencePlugin() {
   return {
     name: 'void:inject-workers-types-reference',
@@ -158,7 +145,7 @@ export default defineConfig({
     format: 'esm',
     dts: true,
     clean: true,
-    plugins: [stripUseAsmPlugin(), injectWorkersTypesReferencePlugin()],
+    plugins: [injectWorkersTypesReferencePlugin()],
     deps: {
       resolveDepSubpath: true,
       neverBundle: [
@@ -183,7 +170,6 @@ export default defineConfig({
         'picomatch',
         'tinyglobby',
         'estree-walker',
-        'es-module-lexer',
         'magic-string',
         '@jridgewell/sourcemap-codec',
         '@voidzero-dev/vite-plus-prompts',

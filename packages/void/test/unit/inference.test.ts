@@ -1,8 +1,39 @@
-import { parse } from 'es-module-lexer/js';
 import { describe, expect, it } from 'vite-plus/test';
 import { inferBindingsFromSource, mergeBindings } from '../../src/inference/walk.ts';
 
 describe('inferBindingsFromSource', () => {
+  it.each([
+    "const load = () => import('void/ai');",
+    'const load = () => import(`void/ai`);',
+    "const load = () => import('void/\\u0061i');",
+    "const load = () => import(('void/ai'));",
+  ])('detects literal dynamic imports in TSX: %s', (statement) => {
+    expect(inferBindingsFromSource(`${statement}\nconst view = <div />;`, 'view.tsx').needsAI).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    "type T = import('void/ai').AI;",
+    "import type {} from 'void/ai';",
+    "import { /* keep */ type AI } from 'void/ai';",
+    "export type * from 'void/ai';",
+    "const load = () => import('void/' + feature);",
+    'const load = () => import(`void/${feature}`);',
+    '// import("void/ai")\nconst text = "void/ai";',
+  ])('does not infer runtime bindings from %s', (code) => {
+    expect(inferBindingsFromSource(code, 'test.ts').needsAI).toBe(false);
+  });
+
+  it.each([
+    "import {} from 'void/ai';",
+    "export {} from 'void/ai';",
+    "export /* keep */ {} from 'void/ai';",
+    "export { /* keep */ } from 'void/ai';",
+  ])('retains side-effect module references: %s', (code) => {
+    expect(inferBindingsFromSource(code, 'test.ts').needsAI).toBe(true);
+  });
+
   it('detects c.env.DB', () => {
     const code = `
       export default defineHandler((c) => {
@@ -280,7 +311,6 @@ describe('inferBindingsFromSource', () => {
       import type { AI } from 'void/ai';
       export const View = () => <div>AI</div>;
     `;
-    expect(() => parse(typeOnly)).toThrow();
     expect(inferBindingsFromSource(typeOnly, 'View.tsx').needsAI).toBe(false);
 
     const mixed = `
@@ -296,7 +326,6 @@ describe('inferBindingsFromSource', () => {
       import { ai } from 'void/ai';
       export const View = () => <div>{String(ai)}</div>;
     `;
-    expect(() => parse(code)).toThrow();
     expect(inferBindingsFromSource(code, 'View.tsx').needsAI).toBe(true);
   });
 
@@ -415,11 +444,6 @@ describe('inferBindingsFromSource', () => {
     expect(result.needsEmail).toBe(true);
   });
 
-  // TSX is exactly where a component importing a type lands, and it is served
-  // by the regex fallback rather than the lexer — so the guard has to exist on
-  // BOTH paths. The `parse` assertion pins that this fixture really does take
-  // the fallback; if es-module-lexer ever learns JSX, this test would silently
-  // stop covering it.
   it("does not detect email from a type-only 'void/email' import in .tsx", () => {
     const code = `
       import type { SendEmailOptions } from "void/email";
@@ -429,7 +453,6 @@ describe('inferBindingsFromSource', () => {
         </form>
       );
     `;
-    expect(() => parse(code)).toThrow();
     const result = inferBindingsFromSource(code, 'Compose.tsx');
     expect(result.needsEmail).toBe(false);
   });
@@ -445,7 +468,6 @@ describe('inferBindingsFromSource', () => {
         </form>
       );
     `;
-    expect(() => parse(code)).toThrow();
     const result = inferBindingsFromSource(code, 'Compose.tsx');
     expect(result.needsEmail).toBe(true);
   });

@@ -1,7 +1,8 @@
-import { parse } from 'es-module-lexer/js';
 import { walk } from 'estree-walker';
 import { parseSync } from 'vite';
-import { isIdentifier, isMemberExpression, type AstNode, type AstProgram } from '../shared/ast.ts';
+import { isIdentifier, isMemberExpression, type AstNode } from '../shared/ast.ts';
+import { staticModuleReferences } from '../shared/module-references.ts';
+import { staticLiteral } from '../shared/static-exports.ts';
 
 export type InferredBindings = {
   needsD1: boolean;
@@ -17,18 +18,14 @@ export type InferredBindings = {
 
 // SEND_EMAIL is intentionally absent from this regex: Void owns that binding
 // (managed sends go through __VOID_PROXY/email/send; native Cloudflare deploys
-// add SEND_EMAIL themselves), so the `void/email` import (tier 1 below) is the
+// add SEND_EMAIL themselves), so the `void/email` import (below) is the
 // sole driver of `needsEmail`.
 const ENV_BINDING_RE = /\benv\s*\.\s*(DB|KV|STORAGE|QUEUE_\w+|AI|SANDBOX)\b/;
 
 /**
  * Infer which Cloudflare bindings a source file uses.
  *
- * Uses a tiered approach for performance:
- *   Tier 1: es-module-lexer to extract import sources (fast, asm.js, no init),
- *           with a TSX parser fallback when the lexer cannot parse JSX
- *   Tier 2: Regex check for env.DB/KV/STORAGE patterns
- *   Tier 3: Full AST walk only when regex matches (to confirm member expressions)
+ * Read Vite's module metadata, then walk the AST only for potential env bindings.
  */
 export function inferBindingsFromSource(code: string, filename: string): InferredBindings {
   const result: InferredBindings = {
@@ -43,52 +40,17 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
     needsEmail: false,
   };
 
-  const moduleReferences: Array<{ source: string; statement: string }> = [];
-  let parsedProgram: AstProgram | undefined;
-
-  // Tier 1: Fast import detection via es-module-lexer
+  let parsed: ReturnType<typeof parseSync>;
   try {
-    const [imports] = parse(code);
-    for (const imp of imports) {
-      if (imp.specifier) {
-        moduleReferences.push({
-          source: imp.specifier,
-          statement: code.slice(imp.importStart, imp.importEnd + 1),
-        });
-      }
+    parsed = parseSync(filename, code);
+    if (parsed.errors.length > 0) {
+      return result;
     }
   } catch {
-    // JSX/TSX is not accepted by es-module-lexer. Parse it once instead of
-    // scanning across unrelated import statements with a multiline regex.
-    try {
-      parsedProgram = parseSync(filename, code).program as unknown as AstProgram;
-      for (const node of parsedProgram.body as Array<{
-        type: string;
-        start: number;
-        end: number;
-        source?: { value?: unknown };
-      }>) {
-        if (
-          (node.type === 'ImportDeclaration' ||
-            node.type === 'ExportNamedDeclaration' ||
-            node.type === 'ExportAllDeclaration') &&
-          typeof node.source?.value === 'string'
-        ) {
-          moduleReferences.push({
-            source: node.source.value,
-            statement: code.slice(node.start, node.end),
-          });
-        }
-      }
-    } catch {
-      // Invalid source cannot be safely inferred from import text alone.
-    }
+    return result;
   }
 
-  for (const { source, statement } of moduleReferences) {
-    if (isTypeOnlyModuleStatement(statement)) {
-      continue;
-    }
+  function recordModuleReference(source: string, statement: string): void {
     switch (source) {
       case 'void/db':
         result.needsD1 = true;
@@ -131,37 +93,28 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
     }
   }
 
-  // If imports resolved every binding the AST tier could still discover, we're
-  // done. `needsEmail` is deliberately not part of this predicate: it has no
-  // env-binding form (see ENV_BINDING_RE above), so it is already final here
-  // and requiring it would only suppress an otherwise-valid early exit.
-  if (
-    result.needsD1 &&
-    result.needsKV &&
-    result.needsR2 &&
-    result.needsAI &&
-    result.needsSandbox &&
-    result.needsLive
-  ) {
-    return result;
+  for (const reference of staticModuleReferences(parsed, code)) {
+    recordModuleReference(reference.source, code.slice(reference.start, reference.end));
   }
 
-  // Tier 2: Regex check for env.DB/KV/STORAGE
+  for (const reference of parsed.module.dynamicImports) {
+    // Parse just the argument so literal decoding does not materialize the whole file's AST.
+    const argument = code.slice(reference.moduleRequest.start, reference.moduleRequest.end);
+    const expression = parseSync(filename, `(${argument})`).program.body[0];
+    const source =
+      expression?.type === 'ExpressionStatement'
+        ? staticLiteral(expression.expression as AstNode)
+        : undefined;
+    if (typeof source === 'string') {
+      recordModuleReference(source, code.slice(reference.start, reference.end));
+    }
+  }
+
   if (!ENV_BINDING_RE.test(code)) {
     return result;
   }
 
-  // Tier 3: Full AST walk to confirm member expressions
-  let program = parsedProgram;
-  if (!program) {
-    try {
-      program = parseSync(filename, code).program as unknown as AstProgram;
-    } catch {
-      return result;
-    }
-  }
-
-  walk(program as unknown as Parameters<typeof walk>[0], {
+  walk(parsed.program as unknown as Parameters<typeof walk>[0], {
     enter(node) {
       const current = node as AstNode;
       if (!isMemberExpression(current)) {
@@ -211,30 +164,6 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
   });
 
   return result;
-}
-
-function isTypeOnlyModuleStatement(statement: string): boolean {
-  if (/^\s*(?:import|export)\s+type\b/.test(statement)) {
-    return true;
-  }
-
-  const specifierStart = statement.indexOf('{');
-  const specifierEnd = statement.lastIndexOf('}');
-  if (specifierStart === -1 || specifierEnd === -1 || specifierEnd < specifierStart) {
-    return false;
-  }
-
-  const beforeSpecifiers = statement.slice(0, specifierStart);
-  if (!/^\s*(?:import|export)\s*$/.test(beforeSpecifiers)) {
-    return false;
-  }
-
-  const specifiers = statement
-    .slice(specifierStart + 1, specifierEnd)
-    .split(',')
-    .map((specifier) => specifier.trim())
-    .filter(Boolean);
-  return specifiers.length > 0 && specifiers.every((specifier) => specifier.startsWith('type '));
 }
 
 /**

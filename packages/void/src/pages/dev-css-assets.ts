@@ -1,4 +1,3 @@
-import { init, parse } from 'es-module-lexer';
 import {
   normalizePath,
   parseSync,
@@ -6,6 +5,7 @@ import {
   type Plugin,
   type ViteDevServer,
 } from 'vite';
+import { staticModuleReferences } from '../shared/module-references.ts';
 import type { DevCssAsset } from './types.ts';
 
 export const DEV_CSS_ASSET_MODULE_ID = 'virtual:void-pages-dev-assets';
@@ -576,19 +576,19 @@ export async function getVoidPagesDevCss(request, env, payload) {
         if (id.includes('/node_modules/.vite/')) {
           return;
         }
-        await init;
-        let imports: ReturnType<typeof parse>[0];
+        let parsed: ReturnType<typeof parseSync>;
         try {
-          [imports] = parse(code);
+          // Client transforms have already compiled TS, JSX, and framework components.
+          parsed = parseSync(id, code, { lang: 'js' });
+          if (parsed.errors.length > 0) {
+            return;
+          }
         } catch {
           return;
         }
         const edges: Array<string> = [];
-        for (const item of imports) {
-          if ((item.type !== 'static' && item.type !== 'reexport-star') || !item.specifier) {
-            continue;
-          }
-          const resolved = await this.resolve(item.specifier, id, { skipSelf: true });
+        for (const { source } of staticModuleReferences(parsed, code)) {
+          const resolved = await this.resolve(source, id, { skipSelf: true });
           if (resolved?.id) {
             edges.push(normalizeDevCssUrl(resolved.id, root));
           }
