@@ -36,7 +36,7 @@ export default defineNuxtConfig({
     alias: {
       // Nitro has its own bundler that doesn't use Vite aliases.
       // Duplicate @schema here so Nitro can resolve it.
-      '@schema': resolve(__dirname, 'db/schema.ts'),
+      '@schema': resolve(import.meta.dirname, 'db/schema.ts'),
     },
   },
   vite: { plugins: [voidPlugin()] },
