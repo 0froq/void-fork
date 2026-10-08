@@ -80,29 +80,18 @@ peerDependencyRules:
     vite: '*'
 
 minimumReleaseAgeExclude:
+  - '@cloudflare/*'
   - '@nkzw/*'
   - '@void/*'
+  - '@voidzero-dev/*'
+  - 'miniflare'
+  - 'workerd'
+  - 'wrangler'
   - cf
+  - hono
   - react-fate
   - void
   - void-fate
-  # Keep the cf and Workers SDK release batch aligned, with exact age exceptions.
-  - '@cloudflare/build-output-utils@0.8.6'
-  - '@cloudflare/codemods@0.4.1'
-  - '@cloudflare/config@0.24.0'
-  - '@cloudflare/runtime-types@0.1.8'
-  - '@cloudflare/vite-plugin@1.63.0'
-  - '@cloudflare/workerd-darwin-64@1.20261006.1'
-  - '@cloudflare/workerd-darwin-arm64@1.20261006.1'
-  - '@cloudflare/workerd-linux-64@1.20261006.1'
-  - '@cloudflare/workerd-linux-arm64@1.20261006.1'
-  - '@cloudflare/workerd-windows-64@1.20261006.1'
-  - 'miniflare@5.20261006.0-alpha'
-  - 'workerd@1.20261006.1'
-  - 'wrangler@4.148.0'
-  - hono@4.13.13
-  - lucide-react@1.52.0
-  - '@voidzero-dev/vite-plus-prompts@1.1.0'
 
 patchedDependencies:
   # Remove when upgrading to the next prompts release containing the one-space output fix.
