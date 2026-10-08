@@ -595,14 +595,9 @@ describe('generated handleEmail on a native ForwardableEmailMessage', () => {
   });
 
   it('hands the native setReject() the reason the platform router would send', async () => {
-    // A reason built from the parsed message carries what the remote sender
-    // put there — a CRLF and a NUL smuggled through an RFC 2047 encoded-word
-    // here. The platform router slices the reason to 1000 characters and
-    // strips controls before it reaches the SMTP reply; this replay used to
-    // pass the recorded string to the native `setReject()` verbatim, so the
-    // same handler injected a line into the SMTP reply on your own account
-    // and was clean on the platform. The proxy now records the normalized
-    // reason, so the two deployments send the same string.
+    // The parser unfolds the encoded CRLF, but the decoded subject still
+    // contains a NUL. The proxy must bound and normalize the reason before
+    // replaying it through native setReject(), matching the platform router.
     const handleEmail = buildHandleEmail(async (message) => {
       const parsed = await parseEmail(message);
       message.setReject(`unwanted: ${parsed.subject}${'!'.repeat(2000)}`);
@@ -620,9 +615,9 @@ describe('generated handleEmail on a native ForwardableEmailMessage', () => {
 
     const actions = await handleEmail(message, {}, {});
 
-    // 23 characters of prefix plus 977 "!" fill the 1000-character window;
-    // the CRLF pair then collapses to one space and the NUL to another.
-    const expected = `unwanted: spam Bcc: x ${'!'.repeat(977)}`;
+    // The parsed prefix is 22 characters, leaving room for 978 "!".
+    // Replacing the remaining NUL with a space preserves the window's length.
+    const expected = `unwanted: spam Bcc: x ${'!'.repeat(978)}`;
     expect(calls.rejects).toEqual([expected]);
     expect(actions).toEqual([{ type: 'reject', reason: expected }]);
   });

@@ -41,10 +41,10 @@ Add both plugins to your Vite config:
 ::: code-group
 
 ```ts [React]
+import { voidReact } from '@void/react/plugin';
 // vite.config.ts
 import { defineConfig } from 'vite';
 import { voidPlugin } from 'void';
-import { voidReact } from '@void/react/plugin';
 
 export default defineConfig({
   plugins: [voidPlugin(), voidReact()],
@@ -52,10 +52,10 @@ export default defineConfig({
 ```
 
 ```ts [Vue]
+import { voidVue } from '@void/vue/plugin';
 // vite.config.ts
 import { defineConfig } from 'vite';
 import { voidPlugin } from 'void';
-import { voidVue } from '@void/vue/plugin';
 
 export default defineConfig({
   plugins: [voidPlugin(), voidVue()],
@@ -63,10 +63,10 @@ export default defineConfig({
 ```
 
 ```ts [Svelte]
+import { voidSvelte } from '@void/svelte/plugin';
 // vite.config.ts
 import { defineConfig } from 'vite';
 import { voidPlugin } from 'void';
-import { voidSvelte } from '@void/svelte/plugin';
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSvelte()],
@@ -74,10 +74,10 @@ export default defineConfig({
 ```
 
 ```ts [Solid]
+import { voidSolid } from '@void/solid/plugin';
 // vite.config.ts
 import { defineConfig } from 'vite';
 import { voidPlugin } from 'void';
-import { voidSolid } from '@void/solid/plugin';
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSolid()],

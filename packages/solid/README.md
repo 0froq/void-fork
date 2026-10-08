@@ -13,9 +13,9 @@ npm install @void/solid
 Add the adapter to your Vite config. It includes the framework's Vite plugin:
 
 ```ts
+import { voidSolid } from '@void/solid/plugin';
 import { defineConfig } from 'vite';
 import { voidPlugin } from 'void';
-import { voidSolid } from '@void/solid/plugin';
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSolid()],

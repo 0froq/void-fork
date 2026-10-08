@@ -28,7 +28,7 @@
   },
   "devDependencies": {
     "@void/platform": "workspace:*",
-    "playwright": "^1.63.0",
+    "playwright": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:"

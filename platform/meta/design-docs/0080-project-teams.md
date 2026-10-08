@@ -45,7 +45,7 @@ Cloudflare.
 ## Terminology
 
 - **Installation administrator**: a user whose account has `users.role =
-'admin'`. They use the browser admin UI or `/operator/v1` API.
+  'admin'`. They use the browser admin UI or `/operator/v1` API.
 - **Project administrator**: a project member with role `admin`. This role has
   no installation-wide authority.
 - **Owner**: the user referenced by `projects.user_id`. The column retains its

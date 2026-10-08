@@ -24,9 +24,9 @@ npm install -D void
 ### 3. Configure `vite.config.ts`
 
 ```ts
-import { defineConfig } from 'vite';
 import { tanstackStart } from '@tanstack/react-start/plugin';
 import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite';
 import { voidPlugin } from 'void';
 
 export default defineConfig({
@@ -54,9 +54,9 @@ Void-managed auth is not supported in framework mode yet. Use Better Auth's offi
 ### Database
 
 ```tsx
+import { users } from '@schema';
 import { createServerFn } from '@tanstack/react-start';
 import { db } from 'void/db';
-import { users } from '@schema';
 
 const getUsers = createServerFn().handler(async () => {
   return db.select().from(users);

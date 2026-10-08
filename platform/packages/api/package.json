@@ -28,7 +28,7 @@
     "@astryxdesign/theme-neutral": "catalog:",
     "@cloudflare/containers": "0.3.7",
     "@cloudflare/sandbox": "1.0.0",
-    "@nkzw/fate": "1.7.5",
+    "@nkzw/fate": "catalog:",
     "@stylexjs/stylex": "catalog:",
     "@void/deploy-core": "workspace:*",
     "@void/edge": "workspace:*",
@@ -48,7 +48,7 @@
     "pg": "8.23.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "react-fate": "1.7.5",
+    "react-fate": "catalog:",
     "void": "workspace:*"
   },
   "devDependencies": {

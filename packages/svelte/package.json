@@ -45,7 +45,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "pathslash": "catalog:",
-    "svelte": "^5.57.1",
+    "svelte": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "void": "workspace:*"

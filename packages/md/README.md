@@ -13,10 +13,10 @@ npm install @void/md
 Add `voidMarkdown()` after the adapter in your Vite config. For example, with Vue:
 
 ```ts
+import { voidMarkdown } from '@void/md/plugin';
+import { voidVue } from '@void/vue/plugin';
 import { defineConfig } from 'vite';
 import { voidPlugin } from 'void';
-import { voidVue } from '@void/vue/plugin';
-import { voidMarkdown } from '@void/md/plugin';
 
 export default defineConfig({
   plugins: [voidPlugin(), voidVue(), voidMarkdown()],

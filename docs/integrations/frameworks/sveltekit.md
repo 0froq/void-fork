@@ -91,9 +91,9 @@ Void-managed auth is not supported in framework mode yet. Use Better Auth's offi
 ### Database
 
 ```ts
+import { users } from '@schema';
 // src/routes/users/+page.server.ts
 import { db } from 'void/db';
-import { users } from '@schema';
 
 export async function load() {
   return { users: await db.select().from(users) };

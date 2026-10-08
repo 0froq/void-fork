@@ -11,8 +11,8 @@ Imported from `"void/db"`. The `db` export is a [Drizzle ORM](https://orm.drizzl
 Default Drizzle instance, pre-wired with your schema from `db/schema.ts`.
 
 ```ts
-import { db } from 'void/db';
 import { users } from '@schema';
+import { db } from 'void/db';
 
 const allUsers = await db.select().from(users).all();
 ```
@@ -30,8 +30,8 @@ Creates a Drizzle instance for the active dialect.
 For D1 projects, pass a specific D1 binding. Use this when you have multiple D1 databases or need a non-default binding.
 
 ```ts
-import { createDb } from 'void/db';
 import { env } from 'cloudflare:workers';
+import { createDb } from 'void/db';
 
 const db = createDb(env.MY_OTHER_DB);
 ```

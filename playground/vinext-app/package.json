@@ -7,7 +7,7 @@
     "dev": "vp dev"
   },
   "dependencies": {
-    "@vitejs/plugin-rsc": "^0.5.35",
+    "@vitejs/plugin-rsc": "catalog:",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-server-dom-webpack": "19.3.0",

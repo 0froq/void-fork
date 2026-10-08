@@ -24,8 +24,8 @@ npm install -D void
 ### 3. Configure `vite.config.ts`
 
 ```ts
-import { defineConfig } from 'vite';
 import { reactRouter } from '@react-router/dev/vite';
+import { defineConfig } from 'vite';
 import { voidPlugin } from 'void';
 
 export default defineConfig({
@@ -52,9 +52,9 @@ Void-managed auth is not supported in framework mode yet. Use Better Auth's offi
 ### Database
 
 ```tsx
-import type { Route } from './+types/users';
-import { db } from 'void/db';
 import { users } from '@schema';
+import { db } from 'void/db';
+import type { Route } from './+types/users';
 
 export async function loader({}: Route.LoaderArgs) {
   return { users: await db.select().from(users) };

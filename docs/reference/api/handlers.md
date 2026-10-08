@@ -41,8 +41,8 @@ Creates a handler with input validation using any [Standard Schema](https://gith
 Validated input is passed as the second argument to the handler.
 
 ```ts
-import { defineHandler } from 'void';
 import * as v from 'valibot';
+import { defineHandler } from 'void';
 
 export const POST = defineHandler.withValidator({
   body: v.object({

@@ -10,7 +10,7 @@ Use Void with [Astro](https://astro.build/) for resource detection, typed databa
 
 - [Astro 6+](https://astro.build/blog/astro-6/) is required to use `import { x } from "void/x"` helpers in Astro apps.
 - You also need to enable `"nodejs_als"` under `compatibility_flags` in your Cloudflare config.
-  :::
+:::
 
 ## Setup
 
@@ -30,8 +30,8 @@ npm install -D @astrojs/cloudflare void
 ### 3. Configure `astro.config.mjs`
 
 ```js
-import { defineConfig } from 'astro/config';
 import cloudflare from '@astrojs/cloudflare';
+import { defineConfig } from 'astro/config';
 import { voidPlugin } from 'void';
 
 export default defineConfig({
@@ -85,9 +85,9 @@ export const prerender = false;
 Use `void/db` in API routes and server-side code:
 
 ```ts
+import { users } from '@schema';
 import type { APIRoute } from 'astro';
 import { db } from 'void/db';
-import { users } from '@schema';
 
 export const GET: APIRoute = async () => {
   const rows = await db.select().from(users);

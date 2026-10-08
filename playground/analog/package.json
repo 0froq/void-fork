@@ -21,7 +21,7 @@
   "devDependencies": {
     "@analogjs/platform": "^2.8.0",
     "@analogjs/vite-plugin-angular": "^2.8.0",
-    "@angular/build": "^22.2.1",
+    "@angular/build": "catalog:",
     "@angular/compiler-cli": "^22.2.1",
     "nitro-cloudflare-dev": "^0.2.2",
     "pathslash": "catalog:",

@@ -135,10 +135,10 @@ let { posts } = $props();
 ```
 
 ```tsx [Solid]
+import { For } from 'solid-js';
 // pages/blog/index.island.tsx
 import Counter from './_Counter' with { island: 'load' };
 import PostForm from './_PostForm' with { island: 'visible' };
-import { For } from 'solid-js';
 
 export default function BlogIndex(props) {
   return (
@@ -181,9 +181,9 @@ The `island` attribute value controls _when_ the component hydrates:
 | `"media:(query)"` | CSS media query matches     | Responsive components (e.g., mobile-only)  |
 
 ```tsx
+import Comments from './_Comments' with { island: 'visible' };
 import CookieBanner from './_CookieBanner' with { island: 'idle' };
 import MobileMenu from './_MobileMenu' with { island: 'media:(max-width: 768px)' };
-import Comments from './_Comments' with { island: 'visible' };
 ```
 
 ## Server Handlers

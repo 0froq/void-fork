@@ -1392,12 +1392,9 @@ describe('harness enforces the proxy action bounds, like production', () => {
   });
 
   it('reports the reject reason the router sends: sliced to 1000 and stripped of controls', async () => {
-    // A reason built from the parsed message carries what the remote sender
-    // put there — here a CRLF and a NUL smuggled through an RFC 2047
-    // encoded-word, which `parseEmail` decodes. The managed router
-    // normalizes the reason (`validateActions`) before it reaches the SMTP
-    // reply; the harness must report that string, not the verbatim one a
-    // native replay used to hand `setReject()`.
+    // The parser unfolds the encoded CRLF, but the decoded subject still
+    // contains a NUL. The harness must report the bounded, normalized reason
+    // that the managed router and native replay send to the SMTP client.
     const harness = harnessFor(async (message) => {
       const parsed = await parseEmail(message);
       message.setReject(`unwanted: ${parsed.subject}${'!'.repeat(2000)}`);
@@ -1412,12 +1409,10 @@ describe('harness enforces the proxy action bounds, like production', () => {
         'body\r\n',
     });
     expect(harness.rejects).toHaveLength(1);
-    // "unwanted: spam\r\nBcc: x\0" is 23 characters, so the 1000-character
-    // window holds it plus 977 "!". The CRLF pair then collapses to ONE
-    // space and the NUL to another, and the window is not refilled from
-    // beyond the cut — 999 characters, the router's own trade.
-    expect(harness.rejects[0]).toBe(`unwanted: spam Bcc: x ${'!'.repeat(977)}`);
-    expect(harness.rejects[0]).toHaveLength(999);
+    // "unwanted: spam Bcc: x\0" is 22 characters after parsing. The window
+    // holds 978 "!", and normalizing the NUL to a space preserves its length.
+    expect(harness.rejects[0]).toBe(`unwanted: spam Bcc: x ${'!'.repeat(978)}`);
+    expect(harness.rejects[0]).toHaveLength(1000);
   });
 
   it('reply() refuses a native EmailMessage with the proxy error', async () => {

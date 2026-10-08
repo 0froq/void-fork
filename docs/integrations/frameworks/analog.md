@@ -27,8 +27,8 @@ Void provides the local Cloudflare binding runtime. `nitro-cloudflare-dev` creat
 
 ```ts
 import { resolve } from 'node:path';
-import { defineConfig } from 'vite';
 import analog from '@analogjs/platform';
+import { defineConfig } from 'vite';
 import { voidPlugin } from 'void';
 
 export default defineConfig({
@@ -90,8 +90,8 @@ Void-managed auth is not supported in framework mode yet. Use Better Auth's offi
 ```ts
 // src/app/pages/users.server.ts
 import type { PageServerLoad } from '@analogjs/router';
-import { db } from 'void/db';
 import { users } from '@schema';
+import { db } from 'void/db';
 
 export const load = async ({ event }: PageServerLoad) => {
   return { users: await db.select().from(users) };
@@ -117,9 +117,9 @@ Declare variables in `env.ts` and read them with `import { env } from "void/env"
 You can also access raw Cloudflare bindings via the H3 event context or the `cloudflare:workers` module:
 
 ```ts
+import { env } from 'cloudflare:workers';
 // src/server/routes/api/users.ts
 import { eventHandler } from 'h3';
-import { env } from 'cloudflare:workers';
 
 export default eventHandler(async () => {
   const { results } = await env.DB.prepare('SELECT * FROM users').all();

@@ -43,7 +43,7 @@
     "typecheck": "tsc --noEmit --rootDir ../.."
   },
   "dependencies": {
-    "@vitejs/plugin-react": "^6.1.1"
+    "@vitejs/plugin-react": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

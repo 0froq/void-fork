@@ -58,7 +58,7 @@ consumes them — the main `test` job carries no creds at all. Two layers keep t
 untrusted code:
 
 - The `live-e2e` job runs only on a direct push to `main` (`github.event_name == 'push' && github.ref
-== 'refs/heads/main'`), so `pull_request` runs, tag pushes, and `workflow_call` (release) skip it.
+  == 'refs/heads/main'`), so `pull_request` runs, tag pushes, and `workflow_call` (release) skip it.
 - The `cloudflare-e2e` environment's deployment branch policy allows `main` **only**, enforced by
   GitHub server-side on the run's ref. A `pull_request` run's ref is `refs/pull/<n>/merge`, so it can
   never reach the secret **even if a PR edits this workflow** — the expression-level gate alone would

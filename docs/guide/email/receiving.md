@@ -100,13 +100,13 @@ There is no local inbound trigger yet — `void dev` serves the outbound dev inb
 
 ## Testing inbound handlers {#testing-inbound-handlers}
 
-Use `createInboundTestHarness` to capture replies, forwards, and rejections. For shared platform mail, pass the full address including the project prefix, such as `acme+support+abc-123@acme.dev`. For direct Cloudflare mail, set `slug: null` and use `support+abc-123@mail.acme.com`.
+Use `createInboundTestHarness` to capture replies, forwards, and rejections. For shared platform mail, pass the full address including the project prefix, such as [`acme+support+abc-123@acme.dev`](mailto:acme+support+abc-123@acme.dev). For direct Cloudflare mail, set `slug: null` and use [`support+abc-123@mail.acme.com`](mailto:support+abc-123@mail.acme.com).
 
 ```ts
 import { describe, it, expect } from 'vitest';
 import { createInboundTestHarness } from 'void/email/testing';
-import support from './email/support+[ticket]';
 import defaultHandler from './email/_default';
+import support from './email/support+[ticket]';
 
 describe('email handlers', () => {
   it('routes to support+[ticket] and extracts the tag', async () => {

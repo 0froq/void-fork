@@ -15,9 +15,9 @@ npm install @void/svelte
 Add the adapter to your Vite config. It includes the framework's Vite plugin:
 
 ```ts
+import { voidSvelte } from '@void/svelte/plugin';
 import { defineConfig } from 'vite';
 import { voidPlugin } from 'void';
-import { voidSvelte } from '@void/svelte/plugin';
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSvelte()],

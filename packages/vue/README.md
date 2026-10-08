@@ -13,9 +13,9 @@ npm install @void/vue
 Add the adapter to your Vite config. It includes the framework's Vite plugin:
 
 ```ts
+import { voidVue } from '@void/vue/plugin';
 import { defineConfig } from 'vite';
 import { voidPlugin } from 'void';
-import { voidVue } from '@void/vue/plugin';
 
 export default defineConfig({
   plugins: [voidPlugin(), voidVue()],
