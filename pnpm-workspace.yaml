@@ -36,8 +36,8 @@ catalog:
   vite: npm:@voidzero-dev/vite-plus-core@1.0.0
   vite-plus: 1.0.0
   vitest: 5.0.3
-  wrangler: 4.148.0
-  cf: 1.0.0-beta.13
+  wrangler: ^4.148.0
+  cf: ^1.0.0-beta.13
   oauth4webapi: ^3.8.8
   '@astryxdesign/core': 0.6.5
   '@astryxdesign/theme-neutral': 0.6.5
