@@ -108,6 +108,36 @@ describe('processCronFiresBatch', () => {
     }
   });
 
+  it.each([401, 403])(
+    'invokes the cron handler once when the worker rejects the token with %i',
+    async (status) => {
+      // The Worker's own middleware runs before the cron route checks the
+      // token, so a rejected fire is never sent again with another token.
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const fetchSpy = vi.fn(async () => Response.json({ error: 'unauthorized' }, { status }));
+        const msg = makeMessage({
+          workerName: 'user-foo-dpl_a',
+          cron: '* * * * *',
+          scheduledTime: 1_700_000_000_000,
+          proxyToken: 'tok',
+        });
+
+        await processCronFiresBatch(makeBatch([msg]), makeEnv(fetchSpy));
+
+        expect(fetchSpy).toHaveBeenCalledOnce();
+        expect(msg.ack).toHaveBeenCalledOnce();
+        expect(msg.retry).not.toHaveBeenCalled();
+        const drift = errSpy.mock.calls.filter((args) =>
+          typeof args[0] === 'string' ? args[0].includes('AUTH_DRIFT') : false,
+        );
+        expect(drift).toHaveLength(1);
+      } finally {
+        errSpy.mockRestore();
+      }
+    },
+  );
+
   it('acks 5xx responses and does not retry the user worker', async () => {
     // A Response (any status) means the user worker received the request.
     // The user's handler ran or made a routing decision — the queue is not

@@ -1,7 +1,18 @@
+import {
+  deriveProxyInternalAuth,
+  PROXY_INTERNAL_AUTH_HEADER,
+  ProxyTokenStateError,
+} from '@voidcloud/api/proxy-token';
 import { hmacSign } from './hmac.ts';
+import { tenantSendToken } from './proxy-token.ts';
 import type { Env } from './types.ts';
 
-type WorkerResolution = Readonly<{ workerName: string; deploymentId: string }>;
+type WorkerResolution = Readonly<{
+  workerName: string;
+  deploymentId: string;
+  /** Generation of the token the active Worker holds, when the API reports it. */
+  proxyTokenGen?: number;
+}>;
 
 type DispatchOptions = Readonly<{
   /** Read-only operations may retry through their REST fallback after a transport failure. */
@@ -19,12 +30,17 @@ async function resolveWorker(
   jwtSecret: string,
   projectId: string,
 ): Promise<WorkerResolution | null> {
-  const token = await hmacSign(projectId, jwtSecret);
   const res = await api.fetch(`https://api/internal/resolve-worker/${projectId}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-void-internal': token,
+      // Legacy header for an API that predates the proxy credential.
+      'x-void-internal': await hmacSign(projectId, jwtSecret),
+      [PROXY_INTERNAL_AUTH_HEADER]: await deriveProxyInternalAuth(
+        jwtSecret,
+        'resolve-worker',
+        projectId,
+      ),
     },
   });
 
@@ -35,11 +51,18 @@ async function resolveWorker(
     throw new Error(`worker resolution failed with status ${res.status}`);
   }
 
-  const data = await res.json<Partial<WorkerResolution>>();
+  const data = await res.json<Partial<Record<keyof WorkerResolution, unknown>>>();
   if (typeof data.workerName !== 'string' || typeof data.deploymentId !== 'string') {
     throw new Error('worker resolution returned an invalid response');
   }
-  return { workerName: data.workerName, deploymentId: data.deploymentId };
+  const resolution = { workerName: data.workerName, deploymentId: data.deploymentId };
+  return isGeneration(data.proxyTokenGen)
+    ? { ...resolution, proxyTokenGen: data.proxyTokenGen }
+    : resolution;
+}
+
+function isGeneration(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
 /**
@@ -68,7 +91,19 @@ export async function dispatchToWorker(
     return null;
   }
 
-  const proxyToken = await hmacSign(projectId, env.JWT_SECRET);
+  let token: string;
+  try {
+    token = await tenantSendToken(env, projectId, resolution.proxyTokenGen);
+  } catch (error) {
+    if (!(error instanceof ProxyTokenStateError)) {
+      throw error;
+    }
+    console.error('[proxy-token] state unavailable', { projectId, error });
+    return options.fallbackOnDispatchError
+      ? null
+      : Response.json({ error: 'project token state unavailable' }, { status: 502 });
+  }
+
   let worker: Fetcher;
   try {
     worker = env.DISPATCH.get(resolution.workerName);
@@ -77,11 +112,14 @@ export async function dispatchToWorker(
   }
 
   try {
+    // Sent exactly once. The Worker's own middleware runs before its
+    // `/__void/*` handler checks the token, so a rejected request is not free
+    // to replay.
     const res = await worker.fetch(`https://worker/__void${path}`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-void-internal': proxyToken,
+        'x-void-internal': token,
       },
       body: JSON.stringify(body),
     });

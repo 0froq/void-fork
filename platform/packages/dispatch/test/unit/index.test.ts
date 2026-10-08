@@ -4555,6 +4555,34 @@ describe('queue relay', () => {
     }
   });
 
+  it.each([401, 403])(
+    'relays once and retries the batch when the Worker rejects the token with %i',
+    async (status) => {
+      const routing = JSON.stringify({
+        workerName: 'user-app',
+        projectId: 'proj-1',
+        queueName: 'emails',
+        proxyToken: 'tok',
+      });
+      const batch = createMockBatch('test-queue', [{ id: 'm1', body: 'hello' }]);
+      const { env, workerFetch } = createQueueEnv({ routingRaw: routing });
+      workerFetch.mockImplementation(async () =>
+        Response.json({ error: 'unauthorized' }, { status }),
+      );
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        await app.queue(batch, env);
+      } finally {
+        errSpy.mockRestore();
+      }
+
+      expect(workerFetch).toHaveBeenCalledOnce();
+      expect(batch.retryAll).toHaveBeenCalledOnce();
+      expect(batch.ackAll).not.toHaveBeenCalled();
+    },
+  );
+
   it('forwards x-void-internal on legacy /__queue fallback too', async () => {
     const routing = JSON.stringify({
       workerName: 'user-app',
