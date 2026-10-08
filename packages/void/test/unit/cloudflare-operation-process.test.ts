@@ -1055,6 +1055,16 @@ it.each([
     let proxied = 0;
     let inspected = 0;
     const proxyAuthorizations: Array<string | undefined> = [];
+    // Node passes only one case variant of each environment key on Windows.
+    // Clear inherited variants so the lowercase case does not lose to an empty uppercase value.
+    const proxyEnvironment = Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([key]) =>
+          !['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'NODE_USE_ENV_PROXY'].includes(
+            key.toUpperCase(),
+          ),
+      ),
+    );
     const api = createServer((request, response) => {
       inspected++;
       expect(request.headers.authorization).toBe('Bearer synthetic-token');
@@ -1143,16 +1153,12 @@ syncBuiltinESMExports();
               encoding: 'utf8',
               timeout: 10_000,
               env: {
-                ...process.env,
+                ...proxyEnvironment,
                 CLOUDFLARE_ACCOUNT_ID: 'test-account',
                 CLOUDFLARE_API_TOKEN: 'synthetic-token',
                 CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${(api.address() as AddressInfo).port}/client/v4`,
-                HTTP_PROXY: lowercase ? '' : proxyUrl,
-                http_proxy: lowercase ? proxyUrl : '',
-                HTTPS_PROXY: '',
-                https_proxy: '',
-                NO_PROXY: !lowercase && bypass ? '127.0.0.1' : '',
-                no_proxy: lowercase && bypass ? '127.0.0.1' : '',
+                [lowercase ? 'http_proxy' : 'HTTP_PROXY']: proxyUrl,
+                [lowercase ? 'no_proxy' : 'NO_PROXY']: bypass ? '127.0.0.1' : '',
                 NODE_USE_ENV_PROXY: '',
               },
             },
