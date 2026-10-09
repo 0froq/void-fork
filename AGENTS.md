@@ -101,9 +101,7 @@ packaging commands. Node supports TypeScript stripping without `tsx`.
 The Analog playground's TypeScript version follows Angular's compiler
 compatibility range independently of the workspace compiler.
 
-Dependency compatibility pins: Analog and SvelteKit use TypeScript 6. Workers types
-must be 5.20261009.1 or newer for the Node global declaration fix. Keep Vitest
-and its companion packages on the same patch.
+Dependency compatibility pins: Analog and SvelteKit use TypeScript 6.
 
 ## Testing
 
