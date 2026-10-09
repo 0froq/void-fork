@@ -64,7 +64,7 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
                   <pre>void platform config auth protection disable --installation &lt;id&gt;</pre>
                 </AdminCard>
               </div>
-              <p className="void-admin-auth-note">
+              <p>
                 Either change revokes human sessions. Access applications remain for deliberate
                 cleanup; login methods and deployed applications keep their own settings.
               </p>

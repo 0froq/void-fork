@@ -56,7 +56,11 @@ export function AdminCard({
         (description != null || children != null) && (
           <LayoutContent>
             <div className="void-admin-card-content">
-              {description != null && <Text type="supporting">{description}</Text>}
+              {description != null && (
+                <Text as="p" type="body">
+                  {description}
+                </Text>
+              )}
               {children}
             </div>
           </LayoutContent>

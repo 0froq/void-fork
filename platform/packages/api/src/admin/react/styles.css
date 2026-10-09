@@ -122,9 +122,6 @@ body {
 .void-platform-status-heading h1 {
   margin: 0;
 }
-.void-platform-status p {
-  line-height: 1.6;
-}
 .void-platform-status-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -263,6 +260,16 @@ body {
   display: grid;
   gap: var(--spacing-4);
   min-width: 0;
+}
+.void-admin-card-content,
+.void-admin-card-footer {
+  color: var(--color-text-primary);
+  font-size: var(--text-body-size);
+  font-weight: var(--text-body-weight);
+  line-height: var(--text-body-leading);
+}
+.void-admin-card-content p {
+  margin: 0;
 }
 .void-admin-card-content > .astryx-button {
   justify-self: start;
@@ -445,8 +452,7 @@ body {
   gap: var(--spacing-2);
 }
 .void-admin-auth-intro p,
-.void-admin-auth-method-type,
-.void-admin-auth-note {
+.void-admin-auth-method-type {
   color: var(--color-text-secondary);
 }
 .void-admin-auth-protection-details {
@@ -550,8 +556,7 @@ body {
   display: grid;
   gap: var(--spacing-2);
 }
-.void-admin-zero-trust-intro p,
-.void-admin-zero-trust .astryx-card p {
+.void-admin-zero-trust-intro p {
   color: var(--color-text-secondary);
 }
 .void-admin-zero-trust-details {
@@ -614,8 +619,7 @@ body {
   display: grid;
   gap: var(--spacing-3);
 }
-.void-admin-access-intro p,
-.void-admin-access-muted {
+.void-admin-access-intro p {
   color: var(--color-text-secondary);
 }
 .void-admin-access-form {
@@ -628,7 +632,6 @@ body {
   display: grid;
   gap: var(--spacing-3);
 }
-.void-admin-access-inline-form,
 .void-admin-access-fields {
   display: flex;
   flex-wrap: wrap;

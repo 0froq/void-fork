@@ -1239,6 +1239,13 @@ describe('GET /admin/ (dashboard)', () => {
           await page.locator('[data-hydrated="true"]').waitFor({ timeout: 5000 });
           const cards = page.locator('.void-admin-card');
           expect(await cards.count()).toBeGreaterThan(0);
+          const copyStyles = await cards.locator('p').evaluateAll((paragraphs) =>
+            paragraphs.map((paragraph) => {
+              const { color, fontSize, fontWeight, lineHeight } = getComputedStyle(paragraph);
+              return JSON.stringify({ color, fontSize, fontWeight, lineHeight });
+            }),
+          );
+          expect(new Set(copyStyles).size).toBe(1);
           expect(
             await cards.evaluateAll((elements) =>
               elements.every((element) => {
@@ -1248,6 +1255,11 @@ describe('GET /admin/ (dashboard)', () => {
             ),
           ).toBe(true);
           if (path === '/admin/signup-control') {
+            const policy = page.getByRole('region', { name: 'Who can join?', exact: true });
+            const toggle = policy.locator('form[action="/admin/signup-control/toggle"]');
+            const signupCopy = await toggle.locator('p').boundingBox();
+            const signupButton = await toggle.getByRole('button').boundingBox();
+            expect(signupButton!.y).toBeGreaterThan(signupCopy!.y + signupCopy!.height);
             const invite = page.getByRole('region', { name: 'Invite people', exact: true });
             const command = page.getByRole('textbox', { name: 'Void CLI connection command' });
             expect(await command.inputValue()).toBe("void connect 'localhost'");

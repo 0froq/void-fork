@@ -145,7 +145,7 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                   ]}
                   width={420}
                 />
-                <p className="void-admin-access-muted">
+                <p>
                   {mode === 'restricted'
                     ? 'An invitation or direct grant is required before someone can create an account.'
                     : mode === 'company'
@@ -186,7 +186,7 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                     )}
                   </div>
                 </AdminCard>
-                <p className="void-admin-access-muted">
+                <p>
                   New accounts are ordinary users. Changing this policy does not change Cloudflare
                   Access protection.
                 </p>
@@ -201,15 +201,15 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                 <form
                   method="post"
                   action="/admin/signup-control/toggle"
-                  className="void-admin-access-inline-form"
+                  className="void-admin-access-form"
                 >
-                  <span>
+                  <p>
                     Signup is{' '}
                     {enabled
                       ? 'restricted to approved people'
                       : 'open to anyone with an enabled login'}
                     .
-                  </span>
+                  </p>
                   <Button
                     type="submit"
                     label={enabled ? 'Open signup' : 'Restrict signup'}
@@ -224,15 +224,6 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
         <section aria-labelledby="access-invite-heading">
           <AdminCard
             title="Invite people"
-            footer={
-              <div className="void-admin-access-share">
-                <h3>
-                  {emailEnabled ? 'Share connection details' : 'Share these details manually'}
-                </h3>
-                <CopyValue label="Platform invitation page" value={inviteUrl} />
-                <CopyValue label="Void CLI connection command" value={connectCommand} />
-              </div>
-            }
             titleId="access-invite-heading"
             description={
               mode === 'public'
@@ -269,7 +260,7 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                   rows={3}
                   width={440}
                 />
-                <p className="void-admin-access-muted">
+                <p>
                   Each person must sign in with a login method that supplies the same verified email
                   address.
                 </p>
@@ -279,6 +270,11 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                 />
               </form>
             )}
+            <div className="void-admin-access-share">
+              <h3>{emailEnabled ? 'Share connection details' : 'Share these details manually'}</h3>
+              <CopyValue label="Platform invitation page" value={inviteUrl} />
+              <CopyValue label="Void CLI connection command" value={connectCommand} />
+            </div>
           </AdminCard>
         </section>
 
@@ -350,7 +346,7 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                 <Button type="submit" label="Add identity" />
               </form>
             )}
-            <p className="void-admin-access-muted">
+            <p>
               Identity grants match the selected login connection and provider subject exactly,
               including case. Email is not inferred or linked.
             </p>
@@ -399,9 +395,7 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                 </TableBody>
               </Table>
             </div>
-            {directEntries.length === 0 && (
-              <p className="void-admin-access-muted">No direct grants yet.</p>
-            )}
+            {directEntries.length === 0 && <p>No direct grants yet.</p>}
           </AdminCard>
         </section>
 
@@ -490,9 +484,7 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                 </TableBody>
               </Table>
             </div>
-            {invitations.length === 0 && (
-              <p className="void-admin-access-muted">No invitations yet.</p>
-            )}
+            {invitations.length === 0 && <p>No invitations yet.</p>}
           </AdminCard>
         </section>
       </div>

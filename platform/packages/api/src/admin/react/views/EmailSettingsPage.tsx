@@ -2,6 +2,7 @@
 
 import { Button } from '@astryxdesign/core/Button';
 import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList';
+import { Text } from '@astryxdesign/core/Text';
 import { useState } from 'react';
 import { useRequest, useView } from 'react-fate';
 import type { EmailDomainManagement, EmailRecipientPolicy } from '../../../email/settings.ts';
@@ -11,7 +12,6 @@ import { AdminCard } from './AdminCard.tsx';
 import { FormTextArea } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 
-const META = 'font-size: 0.8rem; color: #666';
 const EMAIL_SETUP_GUIDE = 'https://void.cloud/guide/platform/installation/credentials#enable-email';
 
 export function EmailSettingsPage({
@@ -58,10 +58,10 @@ function EnabledEmailSettingsPage({ path, platformName, username }: AdminPagePro
   return (
     <Layout platformName={platformName} title="Email" username={username}>
       <h1>Email</h1>
-      <p style={META}>
+      <Text as="p" type="body" color="secondary">
         Installation-wide settings. Per-project usage, caps and domains live on each project's email
         page (Projects → project → Email).
-      </p>
+      </Text>
 
       <div className="void-admin-settings-cards">
         <AdminCard title="Recipient policy">
@@ -110,7 +110,7 @@ function EnabledEmailSettingsPage({ path, platformName, username }: AdminPagePro
             />
             <Button type="submit" label="Save policy" />
           </form>
-          <p style={META}>
+          <p>
             With <code>domains</code> or <code>any</code>, Cloudflare still refuses a destination it
             has not verified unless the platform mail domain is onboarded for Email Sending (Workers
             Paid). Those refusals arrive as per-recipient <code>UNVERIFIED_DESTINATION</code>{' '}
