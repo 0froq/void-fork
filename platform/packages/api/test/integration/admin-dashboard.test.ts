@@ -1086,7 +1086,7 @@ describe('GET /admin/ (dashboard)', () => {
     vi.restoreAllMocks();
   });
 
-  test('keeps deployment columns readable and long errors compact across list views', async () => {
+  test('keeps user and deployment tables readable across list views', async () => {
     const admin = await createTestUser(
       env.db,
       'deployment-layout-admin',
@@ -1102,6 +1102,8 @@ describe('GET /admin/ (dashboard)', () => {
     );
     const error = 'Worker upload failed: upstream rejected the deployment.\n'.repeat(20);
     const failed = await createTestDeployment(env.db, project.id, 'failed', 'cli', error);
+    const email = `${'long-email-address-'.repeat(5)}@example.com`;
+    await env.db.update(users).set({ email }).where(eq(users.id, admin.id));
     const client = await readFile(
       new URL('../../dist/admin-assets/admin/client.js', import.meta.url),
     );
@@ -1151,13 +1153,21 @@ describe('GET /admin/ (dashboard)', () => {
             body: Buffer.from(await response.arrayBuffer()),
           });
         });
-        for (const path of ['/admin/', '/admin/deployments', `/admin/projects/${project.id}`]) {
+        for (const path of [
+          '/admin/',
+          '/admin/deployments',
+          `/admin/projects/${project.id}`,
+          '/admin/users',
+        ]) {
           await page.goto(`http://localhost${path}`);
           await page.locator('[data-hydrated="true"]').waitFor();
-          const table = page.locator('.void-admin-deployments-table');
-          const row = table
-            .getByRole('row')
-            .filter({ has: page.getByRole('link', { name: failed.id, exact: true }) });
+          const isUsers = path === '/admin/users';
+          const table = page.locator(
+            isUsers ? '.void-admin-users-table' : '.void-admin-deployments-table',
+          );
+          const row = table.getByRole('row').filter({
+            has: page.getByRole('link', { name: isUsers ? admin.login : failed.id, exact: true }),
+          });
           expect((await row.boundingBox())!.height).toBeLessThan(55);
           const columns = await table.locator('th').evaluateAll((headers) =>
             headers.map((header) => ({
@@ -1169,6 +1179,40 @@ describe('GET /admin/ (dashboard)', () => {
             (await table.boundingBox())!.width / 3,
           );
           expect(columns.every((column) => column.width >= 64)).toBe(true);
+          if (isUsers) {
+            const emailCell = row.getByRole('cell').nth(2);
+            expect(await emailCell.textContent()).toBe(email);
+            await emailCell.hover();
+            await page.getByRole('tooltip').filter({ hasText: email }).waitFor();
+            const deleteButton = row.getByRole('button', { name: 'Delete', exact: true });
+            expect(
+              await deleteButton.evaluate((button) => {
+                const form = (button as HTMLButtonElement).form;
+                return {
+                  action: form?.getAttribute('action'),
+                  confirmation: form?.dataset.confirm,
+                };
+              }),
+            ).toEqual({
+              action: `/admin/users/${admin.id}/delete`,
+              confirmation: `Delete user "${admin.login}" and all their projects?`,
+            });
+            expect(
+              await deleteButton.evaluate((button) =>
+                Array.from(button.querySelectorAll('span'))
+                  .filter(
+                    (label) =>
+                      label.textContent === 'Delete' &&
+                      getComputedStyle(label).display !== 'contents',
+                  )
+                  .every((label) => label.scrollWidth <= label.clientWidth),
+              ),
+            ).toBe(true);
+            expect(
+              await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+            ).toBe(true);
+            continue;
+          }
           const message = row.locator('.void-admin-deployment-error-message');
           expect(await message.textContent()).toBe(error);
           expect((await message.boundingBox())!.height).toBeLessThan(30);
