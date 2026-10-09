@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { formatPlatformPageTitle } from '../../../platform-identity.ts';
+import { VoidLogo } from './VoidLogo.tsx';
 
 let isSideNavCollapsed = false;
 
@@ -65,7 +66,13 @@ export function Layout({
       topNav={
         <TopNav
           label="Platform administration"
-          heading={<TopNavHeading heading={platformName} subheading="Admin" />}
+          heading={
+            <TopNavHeading
+              className="void-admin-brand"
+              logo={<VoidLogo />}
+              heading={platformName}
+            />
+          }
           endContent={
             <DropdownMenu
               button={{ label: username ?? 'Account', variant: 'ghost' }}

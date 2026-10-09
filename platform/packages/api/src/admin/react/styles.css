@@ -52,6 +52,18 @@ body {
   width: 100%;
 }
 
+.void-admin-brand {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--spacing-2);
+}
+
+.void-admin-logo {
+  display: block;
+  width: 80px;
+  height: auto;
+}
+
 .void-platform-status {
   display: grid;
   gap: var(--spacing-6);
