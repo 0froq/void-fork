@@ -1,6 +1,6 @@
 {
   "name": "@void/vue",
-  "version": "0.26.0",
+  "version": "0.26.1",
   "description": "Vue pages, server rendering, forms, and navigation for Void.",
   "homepage": "https://void.cloud",
   "bugs": {

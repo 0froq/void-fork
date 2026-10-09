@@ -1,6 +1,6 @@
 {
   "name": "@void/react",
-  "version": "0.26.0",
+  "version": "0.26.1",
   "description": "React pages, server rendering, forms, and navigation for Void.",
   "homepage": "https://void.cloud",
   "bugs": {
