@@ -44,7 +44,7 @@ Start a local PostgreSQL server and make `psql` and `pg_isready` available on yo
 
 ```sh
 vp run --filter @voidcloud/api setup --admin-email dev@example.com
-vp run --filter @voidcloud/api dev --local --enable-containers=false --host localhost --port 8787
+vp run --filter @voidcloud/api dev:admin
 ```
 
 The command disables the optional build containers, so basic API and admin work
@@ -54,6 +54,8 @@ API with containers enabled.
 Open `http://localhost:8787/admin/`. Setup writes the API's local database connection and development authentication bypass to `platform/packages/api/.dev.vars`. It configures `platform/packages/dashboard/.env` for the separate dashboard. Both files are ignored by Git. Production installations get separate credentials through the installer.
 
 The API's development bypass lets you work on the browser admin UI without setting up OAuth. Operator CLI sessions still require administrator authentication; they do not use the browser bypass.
+
+`dev:admin` watches source files and automatically reloads the browser after edits. Keep it running while working on the admin dashboard's React components and styles; no platform deployment is needed. The setup includes sample users, projects, and deployments for trying each view locally.
 
 ## Running the Dashboard Locally
 

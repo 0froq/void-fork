@@ -187,7 +187,7 @@ function showNextSteps(): void {
   p.note(
     [
       'From the repository root:',
-      '  1. vp run --filter @voidcloud/api dev --local --enable-containers=false --host localhost --port 8787',
+      '  1. vp run --filter @voidcloud/api dev:admin',
       '  2. Open http://localhost:8787/admin/',
       '  3. For the separate user dashboard: vp run --filter @voidcloud/dashboard dev',
     ].join('\n'),

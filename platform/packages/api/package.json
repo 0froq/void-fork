@@ -18,6 +18,7 @@
     "deploy": "node ../../scripts/wrangler-deploy.ts",
     "deploy:github-webhook-ingress": "node ../../scripts/wrangler-deploy.ts --config wrangler.github-webhook-ingress.jsonc",
     "dev": "wrangler dev",
+    "dev:admin": "wrangler dev --local --enable-containers=false --live-reload --host localhost --port 8787",
     "migrate": "drizzle-kit migrate",
     "migrate:staging": "DATABASE_URL=$STAGING_DATABASE_URL drizzle-kit migrate",
     "setup": "node scripts/setup-local.ts",
