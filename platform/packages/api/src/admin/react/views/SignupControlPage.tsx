@@ -2,6 +2,8 @@
 
 import { Badge } from '@astryxdesign/core/Badge';
 import { Button } from '@astryxdesign/core/Button';
+import { useClipboard } from '@astryxdesign/core/hooks';
+import { InputGroup } from '@astryxdesign/core/InputGroup';
 import {
   Table,
   TableBody,
@@ -11,7 +13,9 @@ import {
   TableRow,
 } from '@astryxdesign/core/Table';
 import { Heading } from '@astryxdesign/core/Text';
-import { useState, type FocusEvent } from 'react';
+import { TextInput } from '@astryxdesign/core/TextInput';
+import { Check, Copy } from 'lucide-react';
+import { createElement, useState, type FocusEvent } from 'react';
 import { useRequest, useView } from 'react-fate';
 import { SignupView, signupRequest } from '../../fate/views.ts';
 import { type AdminPageProps } from '../page-utils.ts';
@@ -26,34 +30,28 @@ function BooleanBadge({ value }: { value: boolean }) {
 }
 
 function CopyValue({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
+  const { copy, isCopied } = useClipboard({ announce: `${label} copied` });
   const [failed, setFailed] = useState(false);
   return (
     <div className="void-admin-access-copy-value">
-      <label>
-        <span>{label}</span>
-        <input
-          aria-label={label}
-          readOnly
+      <InputGroup label={label}>
+        <TextInput
+          label=""
+          isReadOnly
           value={value}
           onFocus={(event: FocusEvent<HTMLInputElement>) => event.currentTarget.select()}
         />
-      </label>
-      <Button
-        type="button"
-        label={copied ? 'Copied' : 'Copy'}
-        variant="secondary"
-        size="sm"
-        onClick={async () => {
-          try {
-            await navigator.clipboard.writeText(value);
-            setCopied(true);
-            setFailed(false);
-          } catch {
-            setFailed(true);
-          }
-        }}
-      />
+        <Button
+          type="button"
+          label={`${isCopied ? 'Copied' : 'Copy'} ${label}`}
+          tooltip={isCopied ? 'Copied' : 'Copy'}
+          icon={createElement(isCopied ? Check : Copy, { size: 16, 'aria-hidden': true })}
+          isIconOnly
+          variant="ghost"
+          size="sm"
+          onClick={async () => setFailed(!(await copy(value)))}
+        />
+      </InputGroup>
       {failed && <span role="status">Select the value to copy it manually.</span>}
     </div>
   );

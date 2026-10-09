@@ -1261,18 +1261,29 @@ describe('GET /admin/ (dashboard)', () => {
             const signupButton = await toggle.getByRole('button').boundingBox();
             expect(signupButton!.y).toBeGreaterThan(signupCopy!.y + signupCopy!.height);
             const invite = page.getByRole('region', { name: 'Invite people', exact: true });
-            const command = page.getByRole('textbox', { name: 'Void CLI connection command' });
-            expect(await command.inputValue()).toBe("void connect 'localhost'");
-            await invite
-              .locator('.void-admin-access-copy-value')
-              .filter({ has: command })
-              .getByRole('button', { name: 'Copy', exact: true })
-              .click();
-            await expect
-              .poll(() =>
-                page.evaluate(() => (window as unknown as { copiedError?: string }).copiedError),
-              )
-              .toBe("void connect 'localhost'");
+            for (const [label, value] of [
+              ['Platform invitation page', 'http://localhost/invite'],
+              ['Void CLI connection command', "void connect 'localhost'"],
+            ]) {
+              const field = invite.getByRole('group', { name: label, exact: true });
+              const input = field.getByRole('textbox', { name: label, exact: true });
+              expect(await input.inputValue()).toBe(value);
+              const copy = field.getByRole('button', { name: `Copy ${label}`, exact: true });
+              const fieldBox = (await field.boundingBox())!;
+              const copyBox = (await copy.boundingBox())!;
+              expect(fieldBox.width).toBeLessThanOrEqual(576);
+              expect(copyBox.x).toBeGreaterThan(fieldBox.x + fieldBox.width / 2);
+              expect(copyBox.x + copyBox.width).toBeLessThanOrEqual(fieldBox.x + fieldBox.width);
+              expect(copyBox.y).toBeGreaterThanOrEqual(fieldBox.y);
+              expect(copyBox.y + copyBox.height).toBeLessThanOrEqual(fieldBox.y + fieldBox.height);
+              await copy.click();
+              await field.getByRole('button', { name: `Copied ${label}`, exact: true }).waitFor();
+              await expect
+                .poll(() =>
+                  page.evaluate(() => (window as unknown as { copiedError?: string }).copiedError),
+                )
+                .toBe(value);
+            }
           }
         }
         expect(errors).toEqual([]);
