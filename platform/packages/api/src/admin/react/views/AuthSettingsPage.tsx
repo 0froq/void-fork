@@ -65,9 +65,14 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
                 </AdminCard>
               </div>
               <p>
-                Either change revokes human sessions. Access applications remain for deliberate
-                cleanup; login methods and deployed applications keep their own settings.
+                Enabling or disabling platform protection signs out users and administrators.
+                They’ll need to sign in again.
               </p>
+              <p>
+                Disabling protection leaves the Cloudflare Access applications in place. Delete them
+                in Cloudflare when you no longer need them.
+              </p>
+              <p>Login methods and protection for individual apps are configured separately.</p>
             </div>
           </AdminCard>
         </section>
@@ -164,7 +169,6 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
                         </div>
                         <div className="void-admin-auth-actions">
                           <Button
-                            as="a"
                             href={`${HOME}/connections/${encodeURIComponent(method.id)}`}
                             label="Edit"
                             variant="secondary"
@@ -208,7 +212,6 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
                     {LOGIN_KINDS.map(({ kind, label }) => (
                       <Button
                         key={kind}
-                        as="a"
                         href={`${HOME}/new?kind=${kind}`}
                         label={label}
                         variant="secondary"
@@ -227,7 +230,7 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
             titleId="account-access-heading"
             description="Set the signup policy, invite people, and manage individual grants on Access."
           >
-            <Button as="a" href="/admin/signup-control" label="Manage access" variant="secondary" />
+            <Button href="/admin/signup-control" label="Manage access" variant="secondary" />
           </AdminCard>
         </section>
       </div>
