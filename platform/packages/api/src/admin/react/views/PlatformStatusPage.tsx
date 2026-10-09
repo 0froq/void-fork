@@ -219,10 +219,10 @@ export function PlatformStatusPage({
             aria-live="polite"
           >
             {connection === 'expired' ? (
-              <p>
-                Your administrator session needs attention. <a href="/admin/login">Sign in again</a>{' '}
-                to confirm the current status.
-              </p>
+              <div className="void-admin-auth-recovery">
+                <p>Sign in again to confirm the current status.</p>
+                <Button as="a" href="/admin/login" label="Sign in again" size="sm" />
+              </div>
             ) : connection === 'unavailable' ? (
               <p>
                 Live status is unavailable.{' '}

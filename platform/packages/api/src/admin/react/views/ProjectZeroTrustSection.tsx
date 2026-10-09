@@ -44,33 +44,15 @@ function platformLabel(zeroTrust: ProjectZeroTrust): string {
 
 function unavailableReason(zeroTrust: ProjectZeroTrust) {
   if (zeroTrust.invalid) {
-    return (
-      <>
-        The saved Zero Trust configuration is invalid. <a href={REVIEW}>Review it</a>.
-      </>
-    );
+    return 'The saved Zero Trust configuration is invalid.';
   }
   if (!zeroTrust.configured || (!zeroTrust.enabled && !zeroTrust.operation)) {
-    return (
-      <>
-        Project Zero Trust is not enabled. <a href={REVIEW}>Configure it</a>.
-      </>
-    );
+    return 'Project Zero Trust is not enabled.';
   }
   if (zeroTrust.operation) {
-    return (
-      <>
-        A Zero Trust {zeroTrust.operation} operation is running. Project changes are available after
-        it finishes. <a href={REVIEW}>View status</a>.
-      </>
-    );
+    return `A Zero Trust ${zeroTrust.operation} operation is running. Project changes are available after it finishes.`;
   }
-  return (
-    <>
-      Platform Zero Trust status: {zeroTrust.status ? statusLabel(zeroTrust.status) : 'not ready'}.{' '}
-      <a href={REVIEW}>Review it</a>.
-    </>
-  );
+  return `Platform Zero Trust status: ${zeroTrust.status ? statusLabel(zeroTrust.status) : 'not ready'}.`;
 }
 
 export function ProjectZeroTrustSection({
@@ -136,7 +118,21 @@ export function ProjectZeroTrustSection({
           </form>
         </div>
       ) : (
-        <p>{unavailableReason(zeroTrust)}</p>
+        <div className="void-admin-auth-recovery">
+          <p>{unavailableReason(zeroTrust)}</p>
+          <Button
+            href={REVIEW}
+            label={
+              zeroTrust.operation
+                ? 'View status'
+                : !zeroTrust.configured || !zeroTrust.enabled
+                  ? 'Configure Zero Trust'
+                  : 'Review configuration'
+            }
+            variant="secondary"
+            size="sm"
+          />
+        </div>
       )}
     </section>
   );

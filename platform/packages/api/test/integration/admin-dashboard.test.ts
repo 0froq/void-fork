@@ -628,7 +628,7 @@ describe('auth middleware', () => {
       expect(res.status).toBe(403);
       expect(res.headers.get('content-type')).toContain('text/html');
       const html = await res.text();
-      expect(html).toContain('Return to the admin page, refresh it, and try again.');
+      expect(html).toContain('Refresh the dashboard and try again.');
       expect(html).toContain('href="/admin/"');
       expect(html).not.toContain(origin);
       expect(await env.db.select().from(operatorEvents)).toHaveLength(0);
@@ -2249,7 +2249,7 @@ describe('GET /admin/projects/:id', () => {
     expect(html).toContain(`/admin/projects/${project.id}/team/add`);
     expect(html).toContain('name="userId"');
     expect(html).toContain('Search by login, email, or ID');
-    expect(html).toContain('Transfer ownership to change the owner');
+    expect(html).toContain('Transfer ownership');
   });
 
   test('admin can add, change a member role, and remove a member without changing the owner', async () => {
@@ -3469,7 +3469,7 @@ describe('POST /admin/signup-control/add + delete', () => {
     expect(res.status).toBe(400);
     const html = await res.text();
     expect(html).toContain('href="/admin/"');
-    expect(html).toContain('Return to admin');
+    expect(html).toContain('Refresh dashboard');
   });
 
   test('rejects delete with out-of-bounds index', async () => {

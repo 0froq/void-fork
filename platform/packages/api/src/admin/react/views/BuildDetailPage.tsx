@@ -1,5 +1,5 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
-
+import { Button } from '@astryxdesign/core/Button';
 import { Table, TableBody, TableCell, TableHeaderCell, TableRow } from '@astryxdesign/core/Table';
 import { useRequest, useView } from 'react-fate';
 import { BuildDetailView, buildDetailRequest } from '../../fate/views.ts';
@@ -96,11 +96,14 @@ export function BuildDetailPage({ path, platformName, username }: AdminPageProps
         <>
           <h2>Build Logs</h2>
           {build.logs_url ? (
-            <p>
-              <a href={build.logs_url} target="_blank" rel="noopener noreferrer">
-                View logs on GitHub ↗
-              </a>
-            </p>
+            <Button
+              as="a"
+              href={build.logs_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              label="View logs on GitHub ↗"
+              variant="secondary"
+            />
           ) : (
             <p>
               <em>No external logs available.</em>

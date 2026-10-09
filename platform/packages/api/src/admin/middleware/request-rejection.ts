@@ -27,14 +27,14 @@ export function adminRequestRejected(
   error: string,
   format: 'json' | 'text',
 ): Response {
-  const message = 'Return to the admin page, refresh it, and try again.';
+  const message = 'Refresh the dashboard and try again.';
   if (context.req.header('Accept')?.includes('text/html')) {
     return platformBrowserPage(
       context,
       'Request could not be verified',
       browserPageStatus('error') +
         browserPageLead('Request could not be verified', message) +
-        '<a class="void-auth-button void-auth-button-primary" href="/admin/">Return to admin</a>',
+        '<a class="void-auth-button void-auth-button-primary" href="/admin/">Refresh dashboard</a>',
       403,
     );
   }

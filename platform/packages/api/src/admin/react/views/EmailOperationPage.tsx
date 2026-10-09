@@ -6,7 +6,6 @@ export function EmailOperationPage({
   status,
   error,
   operationId,
-  projectId,
   platformName,
   username,
 }: {
@@ -27,7 +26,6 @@ export function EmailOperationPage({
       <p>
         Operation ID: <code>{operationId ?? 'unavailable'}</code>
       </p>
-      <a href={`/admin/email/${projectId}`}>Back to email settings</a>
     </Layout>
   );
 }

@@ -137,17 +137,17 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
               </div>
               <div>
                 <dt>Live application</dt>
-                <dd>
-                  {liveLabel(enabled, checked, live)}
-                  {enabled && !checked && (
-                    <>
-                      {' '}
-                      <a href={`${HOME}?check=1`}>Check with Cloudflare</a>
-                    </>
-                  )}
-                </dd>
+                <dd>{liveLabel(enabled, checked, live)}</dd>
               </div>
             </dl>
+            {enabled && !checked && (
+              <Button
+                href={`${HOME}?check=1`}
+                label="Check with Cloudflare"
+                variant="secondary"
+                size="sm"
+              />
+            )}
           </AdminCard>
         </section>
 

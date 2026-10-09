@@ -1,4 +1,5 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import { Button } from '@astryxdesign/core/Button';
 import { Layout } from './Layout.tsx';
 
 export function AuthErrorPage({
@@ -14,10 +15,7 @@ export function AuthErrorPage({
     <Layout platformName={platformName} title="Authentication settings" username={username}>
       <h1>Authentication settings</h1>
       <p>{message}</p>
-      <p>
-        <a href="/admin/config/auth">Return to settings</a> |{' '}
-        <a href="/admin/logout">Sign in again</a>
-      </p>
+      <Button as="a" href="/admin/logout" label="Sign in again" />
     </Layout>
   );
 }

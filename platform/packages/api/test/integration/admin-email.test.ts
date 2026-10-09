@@ -212,7 +212,7 @@ describe('admin write guard (cross-origin)', () => {
     expect(res.status).toBe(403);
     expect((await res.json()) as { error: string }).toEqual({
       error: 'cross-site request blocked',
-      message: 'Return to the admin page, refresh it, and try again.',
+      message: 'Refresh the dashboard and try again.',
     });
     // The guard must run before the handler, not merely alongside it.
     expect(await env.ROUTING.get(`email-suspended:${projectId}`)).toBeNull();

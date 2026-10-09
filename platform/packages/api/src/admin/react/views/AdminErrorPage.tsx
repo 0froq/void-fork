@@ -22,7 +22,7 @@ export function AdminErrorPage({
         className="void-auth-button void-auth-button-primary"
         href={status === 401 ? '/admin/logout' : '/admin/'}
       >
-        {status === 401 ? 'Sign in again' : 'Return to admin'}
+        {status === 401 ? 'Sign in again' : 'Refresh dashboard'}
       </a>
     </AuthPage>
   );

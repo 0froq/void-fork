@@ -206,6 +206,14 @@ body {
   color: inherit;
   font: inherit;
 }
+.void-admin-auth-recovery {
+  display: grid;
+  justify-items: start;
+  gap: var(--spacing-3);
+}
+.void-admin-auth-recovery > * {
+  margin: 0;
+}
 .void-platform-status-notice[data-state='unavailable'],
 .void-platform-status-notice[data-state='expired'] {
   color: var(--color-text-red);

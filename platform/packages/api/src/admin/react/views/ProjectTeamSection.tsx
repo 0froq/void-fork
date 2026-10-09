@@ -78,7 +78,13 @@ export function ProjectTeamSection({
               <TableCell>Owner</TableCell>
               <TableCell>—</TableCell>
               <TableCell>
-                <a href="#owner-transfer">Transfer ownership to change the owner</a>
+                <Button
+                  as="a"
+                  href="#owner-transfer"
+                  label="Transfer ownership"
+                  variant="secondary"
+                  size="sm"
+                />
               </TableCell>
             </TableRow>
             {members.map(({ user, role, createdAt }) => (

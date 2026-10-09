@@ -99,7 +99,7 @@ export function PlansPage({ path, platformName, username }: AdminPageProps) {
     <Layout platformName={platformName} username={username} title="Plans">
       <div className="void-admin-plan-heading">
         <h1>Plans</h1>
-        <a href={`${HOME}/new`}>Add plan</a>
+        <Button href={`${HOME}/new`} label="Add plan" />
       </div>
       <p>
         Default for new accounts:{' '}
@@ -155,7 +155,12 @@ export function PlansPage({ path, platformName, username }: AdminPageProps) {
                 {plan.buildInstanceType === 'standard-3' ? 'Standard' : 'Large'}
               </TableCell>
               <TableCell>
-                <a href={`${HOME}/${plan.id}/edit`}>Edit</a>
+                <Button
+                  href={`${HOME}/${plan.id}/edit`}
+                  label="Edit"
+                  variant="secondary"
+                  size="sm"
+                />
               </TableCell>
             </TableRow>
           ))}
@@ -326,9 +331,6 @@ export function PlanEditPage({ path, platformName, username }: AdminPageProps) {
           )}
         </>
       )}
-      <p>
-        <a href={HOME}>Back to plans</a>
-      </p>
     </Layout>
   );
 }
@@ -452,7 +454,7 @@ export function PlanPreviewPage({
         Recorded usage and billing periods are preserved. Lowering quotas can restrict existing
         apps. Raising quotas leaves manual administrator suspensions in place.
       </p>
-      <form method="post" action={`${HOME}/apply`}>
+      <form method="post" action={`${HOME}/apply`} className="void-admin-plan-actions">
         <input type="hidden" name="action" value={preview.action} />
         <input type="hidden" name="id" value={target} />
         <input type="hidden" name="revision" value={preview.expectedRevision} />
@@ -462,10 +464,8 @@ export function PlanPreviewPage({
           label="Apply changes"
           variant={preview.action === 'remove' ? 'destructive' : 'primary'}
         />
+        <Button href={HOME} label="Cancel" variant="secondary" />
       </form>
-      <p>
-        <a href={HOME}>Cancel</a>
-      </p>
     </Layout>
   );
 }
@@ -567,9 +567,6 @@ export function PlanResultPage({
       <p>
         Usage totals and billing periods are preserved. If you leave this page, you can continue any
         pending updates from Plans.
-      </p>
-      <p>
-        <a href={HOME}>Back to plans</a>
       </p>
     </Layout>
   );

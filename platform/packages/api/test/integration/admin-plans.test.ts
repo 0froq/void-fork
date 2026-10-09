@@ -382,7 +382,11 @@ describe('administrator plan dashboard', () => {
       await page.evaluate(() => {
         document.documentElement.dataset.plansNavigation = 'ready';
       });
-      await page.getByRole('link', { name: 'free', exact: true }).click();
+      await page
+        .getByRole('row')
+        .filter({ has: page.getByRole('link', { name: 'free', exact: true }) })
+        .getByRole('link', { name: 'Edit', exact: true })
+        .click();
       await page.getByRole('heading', { name: 'Edit free', exact: true }).waitFor();
       expect(await page.evaluate(() => document.documentElement.dataset.plansNavigation)).toBe(
         'ready',
@@ -399,7 +403,10 @@ describe('administrator plan dashboard', () => {
         expect.objectContaining({ processed: 6, complete: true, revision: 1 }),
       ]);
       expect(new Set(reevaluated).size).toBe(31);
-      await page.getByRole('link', { name: 'Back to plans', exact: true }).click();
+      await page
+        .getByRole('navigation', { name: 'Side navigation', exact: true })
+        .getByRole('link', { name: 'Plans', exact: true })
+        .click();
       await page.getByRole('link', { name: 'Starter', exact: true }).waitFor();
       expect(errors).toEqual([]);
     } finally {

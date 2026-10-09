@@ -16,7 +16,7 @@ export function Pagination({
   return (
     <nav aria-label="Pagination" className="void-admin-pagination">
       {page > 1 ? (
-        <Button as="a" href={`${baseUrl}?page=${page - 1}`} label="Previous" variant="secondary" />
+        <Button href={`${baseUrl}?page=${page - 1}`} label="Previous" variant="secondary" />
       ) : (
         <Button label="Previous" variant="secondary" isDisabled />
       )}
@@ -24,7 +24,7 @@ export function Pagination({
         {page} / {totalPages}
       </span>
       {page < totalPages ? (
-        <Button as="a" href={`${baseUrl}?page=${page + 1}`} label="Next" variant="secondary" />
+        <Button href={`${baseUrl}?page=${page + 1}`} label="Next" variant="secondary" />
       ) : (
         <Button label="Next" variant="secondary" isDisabled />
       )}

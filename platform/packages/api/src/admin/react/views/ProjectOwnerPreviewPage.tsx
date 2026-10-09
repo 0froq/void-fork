@@ -131,13 +131,18 @@ export function ProjectOwnerPreviewPage({
       )}
 
       {!operationBlocked ? (
-        <form method="post" action={`/admin/projects/${projectId}/owner`}>
+        <form
+          method="post"
+          action={`/admin/projects/${projectId}/owner`}
+          className="void-admin-team-actions"
+        >
           <input type="hidden" name="userId" value={userId} />
           <Button
             type="submit"
             label={convergenceOnly ? 'Apply Convergence' : 'Apply Ownership Transfer'}
             variant="destructive"
           />
+          <Button href={`/admin/projects/${projectId}`} label="Cancel" variant="secondary" />
         </form>
       ) : (
         <p>
@@ -146,9 +151,6 @@ export function ProjectOwnerPreviewPage({
             : 'Resolve or cancel all active work before applying this transfer.'}
         </p>
       )}
-      <p>
-        <a href={`/admin/projects/${projectId}`}>Back to project</a>
-      </p>
     </Layout>
   );
 }

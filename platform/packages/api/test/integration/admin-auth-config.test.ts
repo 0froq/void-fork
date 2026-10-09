@@ -54,6 +54,25 @@ function request(path: string, form?: Record<string, string>, requestOrigin = or
   );
 }
 describe('browser authentication configuration', () => {
+  it('offers sign-in recovery without bypassing the uncached authentication database requirement', async () => {
+    await clearTables(env.db);
+    const admin = await createTestUser(env.db, 'setup-admin', 'github', '456', 'custom', 'admin');
+    const response = await app.fetch(
+      new Request(`${origin}${home}/initialize`, {
+        method: 'POST',
+        headers: { Cookie: `admin_token=${admin.adminJwt}`, Origin: origin },
+      }),
+      { ...env, PLATFORM_AUTH_DATABASE_UNCACHED: 'false' },
+    );
+    expect(response.status).toBe(503);
+    const html = await response.text();
+    expect(html).toContain('Platform authentication requires an uncached database connection.');
+    expect(html).toMatch(
+      /<a\b(?=[^>]*class="[^"]*astryx-button)(?=[^>]*href="\/admin\/logout")[^>]*>[\s\S]*?Sign in again[\s\S]*?<\/a>/,
+    );
+    expect(html).not.toContain('Return to settings');
+  });
+
   it.each([home, `${home}/new?kind=oidc`, `${home}/connections/google`])(
     'keeps form-compatible origin-only referrers on %s and page navigation',
     async (path) => {

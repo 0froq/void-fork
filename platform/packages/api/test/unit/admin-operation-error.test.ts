@@ -5,7 +5,7 @@ import type { ApiEnv } from '../../src/env.ts';
 import { OperatorError } from '../../src/operator/common.ts';
 
 describe('admin operation rejection rendering', () => {
-  it('preserves the explanation and status while escaping text and offering a safe return link', async () => {
+  it('preserves the explanation and status while escaping text and offering a recovery button', async () => {
     const app = new Hono<ApiEnv>().onError(renderOperationError).post('/action', () => {
       throw new OperatorError(409, 'Cannot remove <script>owner</script>.', 'conflict', {
         privateDetail: 'not public',
@@ -16,6 +16,7 @@ describe('admin operation rejection rendering', () => {
     const html = await response.text();
     expect(html).toContain('Cannot remove &lt;script&gt;owner&lt;/script&gt;.');
     expect(html).toContain('href="/admin/"');
+    expect(html).toContain('Refresh dashboard');
     expect(html).not.toContain('<script>');
     expect(html).not.toContain('not public');
   });
