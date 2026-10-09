@@ -318,10 +318,19 @@ describe('auth middleware', () => {
       const checks = html.split('id="health-checks"')[1]?.split('</div>')[0];
       expect(checks).toBeDefined();
       expect(checks?.match(/class="void-admin-health-check"/g)).toHaveLength(names.length);
+      const labels: Record<string, string> = {
+        api: 'API',
+        proxy: 'Proxy',
+        dashboard: 'Dashboard',
+        dispatch: 'Dispatch',
+        db: 'Database',
+      };
       for (const name of names) {
-        expect(checks).toContain(`>${name}</span>`);
+        expect(checks).toContain(`>${labels[name]}</span>`);
+        expect(checks).toContain(`aria-label="${labels[name]}: Pending"`);
       }
       expect(checks).not.toContain('Checking…');
+      expect(html).not.toContain('All health checks passed');
     },
   );
 
@@ -874,6 +883,47 @@ describe('admin Zero Trust', () => {
 });
 
 describe('GET /admin/ (dashboard)', () => {
+  test('includes the actual probe time in Fate health data', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'health-time-admin',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    const startedAt = Date.now();
+    const response = await req(
+      '/admin/fate',
+      admin.adminJwt,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          version: 1,
+          operations: [
+            { id: 'health', kind: 'query', name: 'health', select: ['id', 'checks', 'checkedAt'] },
+          ],
+        }),
+      },
+      { DEV_AUTH_BYPASS: 'true' },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      results: Array<{
+        ok: boolean;
+        data: { checkedAt: number; checks: Array<{ name: string; ok: boolean }> };
+      }>;
+    };
+    expect(body.results[0]?.ok).toBe(true);
+    const health = body.results[0]!.data;
+    expect(health.checkedAt).toBeGreaterThanOrEqual(startedAt);
+    expect(health.checkedAt).toBeLessThanOrEqual(Date.now());
+    expect(health.checks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'api', ok: true })]),
+    );
+  });
+
   test('renders dashboard with stats and projects', async () => {
     const admin = await createTestUser(env.db, 'admin1', 'github', undefined, 'free', 'admin');
     await createTestUser(env.db, 'user1');

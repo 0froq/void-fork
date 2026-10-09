@@ -54,6 +54,7 @@ export const HealthView = view<AdminHealth>()({
   id: true,
   allOk: true,
   checks: true,
+  checkedAt: true,
 });
 export const healthRequest = { health: { view: HealthView } } as const;
 

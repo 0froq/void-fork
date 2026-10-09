@@ -262,30 +262,55 @@ body {
 }
 .void-admin-health-checks {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
   gap: var(--spacing-2) var(--spacing-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
-.void-admin-health-summary {
-  display: block;
-  min-height: calc(var(--text-supporting-size) * var(--text-supporting-leading));
-  overflow: hidden;
-  text-overflow: ellipsis;
+.void-admin-health-checked-at {
+  flex-shrink: 0;
+  min-width: 9rem;
+  min-height: 1lh;
+  color: var(--color-text-secondary);
+  font-size: var(--text-supporting-size);
+  font-weight: normal;
+  text-align: right;
   white-space: nowrap;
+}
+.void-admin-health-checked-at[data-unavailable],
+.void-admin-health-check[data-state='error'],
+.void-admin-health-detail {
+  color: var(--color-text-red);
 }
 .void-admin-health-check {
-  display: flex;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-content: start;
+  align-items: center;
   min-width: 0;
-  gap: var(--spacing-2);
-  white-space: nowrap;
+  gap: var(--spacing-1) var(--spacing-2);
 }
 .void-admin-health-indicator {
-  flex: 0 0 1ch;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-secondary);
+}
+.void-admin-health-check[data-state='healthy'] .void-admin-health-indicator {
+  color: var(--color-icon-green);
+}
+.void-admin-health-check[data-state='error'] .void-admin-health-indicator {
+  color: var(--color-icon-red);
+}
+.void-admin-health-label {
+  white-space: nowrap;
 }
 .void-admin-health-detail {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  grid-column: 2;
+  font-size: var(--text-supporting-size);
+  overflow-wrap: anywhere;
 }
 .void-admin-auth {
   max-width: 480px;

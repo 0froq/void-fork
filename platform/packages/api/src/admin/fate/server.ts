@@ -59,12 +59,13 @@ type DashboardRecord = Awaited<ReturnType<typeof systemOverviewBase>> & {
   tz: string | undefined;
   topProjects?: Array<TopProjectRecord>;
 };
-type HealthRecord = Awaited<ReturnType<typeof systemHealth>> & { id: string };
+type HealthRecord = Awaited<ReturnType<typeof systemHealth>> & { id: string; checkedAt: number };
 
 export const healthDataView = dataView<HealthRecord>('AdminHealth')({
   id: true,
   allOk: true,
   checks: true,
+  checkedAt: true,
 });
 
 export const topProjectDataView = dataView<TopProjectRecord>('AdminTopProject')({
@@ -163,10 +164,13 @@ registry.set(dashboardSource, {
 });
 registry.set(topProjectSource, {});
 registry.set(healthSource, {
-  byIds: async ({ ctx, ids }) =>
-    ids.includes('health')
-      ? [{ id: 'health', ...(await systemHealth(ctx.get('db'), ctx.env, ctx.req.url)) }]
-      : [],
+  byIds: async ({ ctx, ids }) => {
+    if (!ids.includes('health')) {
+      return [];
+    }
+    const health = await systemHealth(ctx.get('db'), ctx.env, ctx.req.url);
+    return [{ id: 'health', ...health, checkedAt: Date.now() }];
+  },
 });
 
 const sources = {

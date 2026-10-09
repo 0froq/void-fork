@@ -10,11 +10,13 @@ export function DashboardCard({
   title,
   description,
   href,
+  headerAccessory,
   children,
 }: {
   title: string;
   description?: string;
   href?: string;
+  headerAccessory?: ReactNode;
   children: ReactNode;
 }) {
   const content = (
@@ -25,6 +27,7 @@ export function DashboardCard({
           <div className="void-admin-dashboard-card-heading">
             <div className="void-admin-dashboard-card-title">
               <Heading level={2}>{title}</Heading>
+              {headerAccessory}
               {href && (
                 <ChevronRight
                   className="void-admin-dashboard-card-arrow"

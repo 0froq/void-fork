@@ -1,5 +1,4 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
-import { Banner } from '@astryxdesign/core/Banner';
 import { Skeleton } from '@astryxdesign/core/Skeleton';
 import {
   Table,
@@ -10,35 +9,16 @@ import {
   TableRow,
 } from '@astryxdesign/core/Table';
 import { Heading, Text } from '@astryxdesign/core/Text';
-import {
-  Suspense,
-  useEffect,
-  useState,
-  useSyncExternalStore,
-  type ReactElement,
-  type ReactNode,
-} from 'react';
-import {
-  useFateClient,
-  useListView,
-  useRequest,
-  useView,
-  type Deferred,
-  type ViewRef,
-} from 'react-fate';
-import {
-  DashboardView,
-  dashboardRequest,
-  TopProjectView,
-  HealthView,
-  healthRequest,
-} from '../../fate/views.ts';
+import { Suspense, useSyncExternalStore, type ReactElement, type ReactNode } from 'react';
+import { useListView, useRequest, useView, type Deferred, type ViewRef } from 'react-fate';
+import { DashboardView, dashboardRequest, TopProjectView } from '../../fate/views.ts';
 import { DashboardCard } from './DashboardCard.tsx';
 import { DeploymentTable } from './DeploymentTable.tsx';
 import { formatDateTime, formatNumber } from './format.ts';
 import { Layout } from './Layout.tsx';
 import { ProjectsTable } from './ProjectsTable.tsx';
 import { ProjectUrlLink } from './ProjectUrlLink.tsx';
+import { SystemStatusCard } from './SystemStatusCard.tsx';
 
 const AdminSuspense = Suspense as unknown as (props: {
   children: ReactNode;
@@ -66,99 +46,6 @@ function formatBytes(bytes: number) {
     unitIndex++;
   }
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
-}
-
-function HealthStatusBanner({ checkNames }: { checkNames: ReadonlyArray<string> }) {
-  const client = useFateClient();
-  const [healthRef, setHealthRef] = useState<ViewRef<'AdminHealth'> | null>(null);
-  const [status, setStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
-  const health = useView(HealthView, healthRef);
-  useEffect(() => {
-    let active = true;
-    const retained = client.retain(healthRequest);
-    const poll = async (mode: 'stale-while-revalidate' | 'network-only') => {
-      try {
-        const { health: ref } = await client.request(healthRequest, { mode });
-        if (!ref) {
-          throw new Error('Health data is unavailable.');
-        }
-        if (active) {
-          setHealthRef(ref);
-          setStatus('ready');
-        }
-      } catch {
-        if (active) {
-          setStatus('unavailable');
-        }
-      }
-    };
-    void poll('stale-while-revalidate');
-    const interval = setInterval(() => void poll('network-only'), 30_000);
-    return () => {
-      active = false;
-      clearInterval(interval);
-      retained.dispose();
-    };
-  }, [client]);
-  const failed = health?.checks.filter((check) => !check.ok).length ?? 0;
-  const checksByName = new Map(health?.checks.map((check) => [check.name, check]));
-  const summary =
-    status === 'loading'
-      ? ''
-      : status === 'unavailable' || !health
-        ? 'Unable to check system status'
-        : health.allOk
-          ? 'All health checks passed'
-          : `${failed} health check${failed === 1 ? '' : 's'} failed`;
-  return (
-    <div id="health-status">
-      <Banner
-        status={
-          status === 'unavailable'
-            ? 'error'
-            : status === 'loading'
-              ? 'info'
-              : health?.allOk
-                ? 'success'
-                : 'error'
-        }
-        title="System Status"
-        description={
-          <span id="health-summary" className="void-admin-health-summary">
-            {summary}
-          </span>
-        }
-        collapsible={false}
-      >
-        <div id="health-checks" className="void-admin-health-checks">
-          {checkNames.map((name) => {
-            const check = status === 'ready' ? checksByName.get(name) : undefined;
-            const detail =
-              status === 'loading'
-                ? ''
-                : !check
-                  ? 'Unavailable'
-                  : !check.ok
-                    ? (check.error ?? 'Health check failed.')
-                    : check.latencyMs > 0
-                      ? `${check.latencyMs}ms`
-                      : 'Healthy';
-            return (
-              <span key={name} className="void-admin-health-check">
-                <span className="void-admin-health-indicator" aria-hidden="true">
-                  {check ? (check.ok ? '✓' : '✗') : null}
-                </span>
-                <span>{name}</span>
-                <span className="void-admin-health-detail" title={detail || undefined}>
-                  {detail}
-                </span>
-              </span>
-            );
-          })}
-        </div>
-      </Banner>
-    </div>
-  );
 }
 
 function TopProjectsWidget({
@@ -289,7 +176,7 @@ export function DashboardPage({ platformName, username, healthCheckNames }: Dash
   return (
     <Layout platformName={platformName} title="Dashboard" username={username}>
       <Heading level={1}>Dashboard</Heading>
-      <HealthStatusBanner checkNames={healthCheckNames} />
+      <SystemStatusCard checkNames={healthCheckNames} />
       <div className="void-admin-metrics">
         <DashboardCard title="Users" href="/admin/users">
           <Text type="display-3" display="block" hasTabularNumbers>
