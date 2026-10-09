@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { Check, Minus, X } from 'lucide-react';
+import { Activity, Check, CircleCheck, CircleHelp, CircleX, Minus, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useFateClient, useView, type ViewRef } from 'react-fate';
 import { HealthView, healthRequest } from '../../fate/views.ts';
@@ -79,10 +79,39 @@ export function SystemStatusCard({ checkNames }: { checkNames: ReadonlyArray<str
     };
   }, [client]);
   const checksByName = new Map(health?.checks.map((check) => [check.name, check]));
+  const overallState =
+    status !== 'ready'
+      ? status
+      : !health || checkNames.some((name) => !checksByName.has(name))
+        ? 'unavailable'
+        : health.allOk
+          ? 'healthy'
+          : 'error';
+  const overallLabel =
+    overallState === 'healthy'
+      ? 'All services healthy'
+      : overallState === 'error'
+        ? 'System checks failed'
+        : overallState === 'loading'
+          ? 'Checking system status'
+          : 'System status unavailable';
   return (
-    <div id="health-status">
+    <div id="health-status" data-state={overallState}>
       <DashboardCard
         title="System Status"
+        titleIcon={
+          <span className="void-admin-health-overall-icon" role="img" aria-label={overallLabel}>
+            {overallState === 'healthy' ? (
+              <CircleCheck size={20} aria-hidden="true" />
+            ) : overallState === 'error' ? (
+              <CircleX size={20} aria-hidden="true" />
+            ) : overallState === 'loading' ? (
+              <Activity size={20} aria-hidden="true" />
+            ) : (
+              <CircleHelp size={20} aria-hidden="true" />
+            )}
+          </span>
+        }
         headerAccessory={
           <LastCheckedTime checkedAt={health?.checkedAt} unavailable={status === 'unavailable'} />
         }

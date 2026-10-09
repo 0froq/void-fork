@@ -252,6 +252,11 @@ body {
   justify-content: space-between;
   gap: var(--spacing-3);
 }
+.void-admin-dashboard-card-label {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
 .void-admin-dashboard-card-arrow {
   flex-shrink: 0;
   color: var(--color-text-secondary);
@@ -259,6 +264,46 @@ body {
 .void-admin-dashboard-card-loading {
   display: grid;
   gap: var(--spacing-4);
+}
+#health-status .void-admin-dashboard-card {
+  overflow: hidden;
+}
+#health-status[data-state='healthy'] .void-admin-dashboard-card {
+  border-color: var(--color-border-green);
+}
+#health-status[data-state='error'] .void-admin-dashboard-card {
+  border-color: var(--color-border-red);
+}
+#health-status[data-state='healthy'] .astryx-layout-header {
+  background-color: color-mix(
+    in srgb,
+    var(--color-background-green) 50%,
+    var(--color-background-card)
+  );
+}
+#health-status[data-state='error'] .astryx-layout-header {
+  background-color: color-mix(
+    in srgb,
+    var(--color-background-red) 50%,
+    var(--color-background-card)
+  );
+}
+#health-status[data-state='healthy'] .astryx-heading {
+  color: var(--color-text-green);
+}
+#health-status[data-state='error'] .astryx-heading {
+  color: var(--color-text-red);
+}
+.void-admin-health-overall-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  color: var(--color-text-secondary);
+}
+#health-status[data-state='healthy'] .void-admin-health-overall-icon,
+#health-status[data-state='error'] .void-admin-health-overall-icon {
+  color: inherit;
 }
 .void-admin-health-checks {
   display: grid;

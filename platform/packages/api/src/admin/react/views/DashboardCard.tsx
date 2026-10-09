@@ -8,12 +8,14 @@ import type { ReactNode } from 'react';
 
 export function DashboardCard({
   title,
+  titleIcon,
   description,
   href,
   headerAccessory,
   children,
 }: {
   title: string;
+  titleIcon?: ReactNode;
   description?: string;
   href?: string;
   headerAccessory?: ReactNode;
@@ -26,7 +28,16 @@ export function DashboardCard({
         <LayoutHeader hasDivider padding={0}>
           <div className="void-admin-dashboard-card-heading">
             <div className="void-admin-dashboard-card-title">
-              <Heading level={2}>{title}</Heading>
+              <Heading level={2}>
+                {titleIcon ? (
+                  <span className="void-admin-dashboard-card-label">
+                    {titleIcon}
+                    {title}
+                  </span>
+                ) : (
+                  title
+                )}
+              </Heading>
               {headerAccessory}
               {href && (
                 <ChevronRight
