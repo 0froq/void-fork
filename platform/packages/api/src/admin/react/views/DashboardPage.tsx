@@ -172,7 +172,7 @@ function TopProjectsWidget({
 }) {
   const [projects] = useListView({ items: { node: TopProjectView } }, topProjects);
   return (
-    <DashboardCard title="Top 10 Projects by traffic, one hour">
+    <DashboardCard title="Top Projects by Traffic (last hour)">
       {projects.length > 0 ? (
         <Table className="void-admin-top-projects-table" hasHover>
           <TableHeader>
@@ -261,7 +261,7 @@ function DeferredTopProjects({
 }) {
   const mounted = useSyncExternalStore(subscribeToClientRender, isClientRender, isServerRender);
   const fallback = (
-    <DashboardCard title="Top 10 Projects by traffic, one hour">
+    <DashboardCard title="Top Projects by Traffic (last hour)">
       <div className="void-admin-dashboard-card-loading">
         <Skeleton width="100%" height={48} />
         <Skeleton width="100%" height={48} index={1} />

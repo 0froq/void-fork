@@ -887,7 +887,7 @@ describe('GET /admin/ (dashboard)', () => {
     expect(html).toContain('Users');
     expect(html).toContain('Projects');
     expect(html).toContain('dash-proj');
-    expect(html).toContain('Top 10 Projects');
+    expect(html).toContain('Top Projects by Traffic (last hour)');
     vi.restoreAllMocks();
   });
 
@@ -907,7 +907,7 @@ describe('GET /admin/ (dashboard)', () => {
     });
     const response = await req('/admin/', admin.adminJwt);
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain('Top 10 Projects');
+    expect(await response.text()).toContain('Top Projects by Traffic (last hour)');
     expect(
       fetchMock.mock.calls.some(([url]) => String(url).includes('/analytics_engine/sql')),
     ).toBe(false);
