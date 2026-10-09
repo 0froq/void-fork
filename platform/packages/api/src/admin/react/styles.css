@@ -288,6 +288,7 @@ body {
 }
 .void-admin-access-page,
 .void-admin-auth-settings,
+.void-admin-email-settings,
 .void-admin-zero-trust,
 .void-admin-settings-cards,
 .void-platform-status {
@@ -510,7 +511,8 @@ body {
   gap: var(--spacing-3);
   margin-block-start: var(--spacing-5);
 }
-.void-admin-auth-settings {
+.void-admin-auth-settings,
+.void-admin-email-settings {
   display: grid;
   gap: var(--spacing-5);
   max-width: 960px;
@@ -518,18 +520,22 @@ body {
 .void-admin-auth-settings h1,
 .void-admin-auth-settings h2,
 .void-admin-auth-settings h3,
-.void-admin-auth-settings p {
+.void-admin-auth-settings p,
+.void-admin-email-settings h1,
+.void-admin-email-settings p {
   margin: 0;
 }
 .void-admin-auth-settings h3 {
   font-size: var(--text-body-size);
   font-weight: 600;
 }
-.void-admin-auth-intro {
+.void-admin-auth-intro,
+.void-admin-email-intro {
   display: grid;
-  gap: var(--spacing-2);
+  gap: var(--spacing-3);
 }
 .void-admin-auth-intro p,
+.void-admin-email-intro p,
 .void-admin-auth-method-type {
   color: var(--color-text-secondary);
 }
@@ -601,16 +607,10 @@ body {
   display: grid;
   gap: var(--spacing-3);
 }
-.void-admin-email-disabled-content {
-  display: grid;
-  gap: 4px;
-  justify-items: start;
-}
 .void-admin-email-choice-form {
   display: grid;
   justify-items: start;
   gap: var(--spacing-4);
-  padding-block-start: var(--spacing-4);
 }
 .void-admin-email-choice-form .astryx-radio-indicator {
   width: 1rem;

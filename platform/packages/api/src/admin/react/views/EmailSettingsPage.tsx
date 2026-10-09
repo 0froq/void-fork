@@ -2,7 +2,7 @@
 
 import { Button } from '@astryxdesign/core/Button';
 import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList';
-import { Text } from '@astryxdesign/core/Text';
+import { Heading } from '@astryxdesign/core/Text';
 import { useState } from 'react';
 import { useRequest, useView } from 'react-fate';
 import type { EmailDomainManagement, EmailRecipientPolicy } from '../../../email/settings.ts';
@@ -14,6 +14,18 @@ import { Layout } from './Layout.tsx';
 
 const EMAIL_SETUP_GUIDE = 'https://void.cloud/guide/platform/installation/credentials#enable-email';
 
+function EmailSettingsHeader() {
+  return (
+    <header className="void-admin-email-intro">
+      <Heading level={1}>Email</Heading>
+      <p>
+        Manage email settings for the platform. Each project’s email page contains its usage,
+        limits, and domains.
+      </p>
+    </header>
+  );
+}
+
 export function EmailSettingsPage({
   path,
   platformName,
@@ -23,19 +35,17 @@ export function EmailSettingsPage({
   if (emailEnabled === false) {
     return (
       <Layout platformName={platformName} title="Email" username={username}>
-        <h1>Email</h1>
-        <div className="void-admin-settings-cards">
+        <div className="void-admin-email-settings">
+          <EmailSettingsHeader />
           <AdminCard title="Enable email">
-            <div className="void-admin-email-disabled-content">
-              <p>Email is not enabled on this platform.</p>
-              <p>Set up a shared sender domain and Cloudflare zone, then upgrade the platform.</p>
-              <Button
-                as="a"
-                href={EMAIL_SETUP_GUIDE}
-                label="How to enable email"
-                variant="secondary"
-              />
-            </div>
+            <p>Email is not enabled on this platform.</p>
+            <p>Set up a shared sender domain and Cloudflare zone, then upgrade the platform.</p>
+            <Button
+              as="a"
+              href={EMAIL_SETUP_GUIDE}
+              label="How to enable email"
+              variant="secondary"
+            />
           </AdminCard>
         </div>
       </Layout>
@@ -57,13 +67,8 @@ function EnabledEmailSettingsPage({ path, platformName, username }: AdminPagePro
   const [domainManagement, setDomainManagement] = useState(management);
   return (
     <Layout platformName={platformName} title="Email" username={username}>
-      <h1>Email</h1>
-      <Text as="p" type="body" color="secondary">
-        Installation-wide settings. Per-project usage, caps and domains live on each project's email
-        page (Projects → project → Email).
-      </Text>
-
-      <div className="void-admin-settings-cards">
+      <div className="void-admin-email-settings">
+        <EmailSettingsHeader />
         <AdminCard title="Recipient policy">
           <p>
             Choose which recipients can receive email sent from the shared sender
