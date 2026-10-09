@@ -647,7 +647,14 @@ body {
 }
 .void-admin-projects-table,
 .void-admin-top-projects-table {
-  table-layout: fixed;
+  table-layout: auto;
+}
+.void-admin-date-time {
+  white-space: nowrap;
+}
+.void-admin-content td:has(.void-admin-date-time) {
+  max-width: none;
+  white-space: nowrap;
 }
 .void-admin-projects-table {
   min-width: 58rem;

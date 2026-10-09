@@ -1685,7 +1685,7 @@ describe('POST /admin/users/:id/delete', () => {
 });
 
 describe('GET /admin/projects', () => {
-  test('uses the same timestamp format as deployments and project detail', async () => {
+  test('uses the same year-free timestamp format as deployments and project detail', async () => {
     const admin = await createTestUser(env.db, 'date-admin', 'github', undefined, 'free', 'admin');
     const project = await createTestProject(env.db, admin.id, 'dated-project');
     const deployment = await createTestDeployment(env.db, project.id, 'live');
@@ -1701,7 +1701,7 @@ describe('GET /admin/projects', () => {
       req(`/admin/projects/${project.id}`, admin.adminJwt),
       req('/admin/deployments', admin.adminJwt),
     ]);
-    const displayedTime = 'Jan 2, 2026, 3:04 AM';
+    const displayedTime = 'Jan 2, 3:04 AM';
     for (const response of [projectsResponse, projectResponse, deploymentsResponse]) {
       expect(response.status).toBe(200);
       expect(visibleMarkup(await response.text())).toContain(displayedTime);

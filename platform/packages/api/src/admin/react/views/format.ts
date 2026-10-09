@@ -10,7 +10,6 @@ export function formatAbsoluteDate(iso: string): string {
     timeZone: 'UTC',
     month: 'short',
     day: 'numeric',
-    year: 'numeric',
   });
 }
 
@@ -23,7 +22,6 @@ export function formatDateTime(iso: string, tz?: string) {
     timeZone: tz || 'UTC',
     month: 'short',
     day: 'numeric',
-    year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
   });
@@ -40,7 +38,11 @@ export function formatDateTime(iso: string, tz?: string) {
   }
   // The relative age may tick between SSR and hydration. Preserve the server
   // text until the next React render without treating that tick as a mismatch.
-  return createElement('span', { suppressHydrationWarning: true }, `${formatted} (${ago})`);
+  return createElement(
+    'span',
+    { className: 'void-admin-date-time', suppressHydrationWarning: true },
+    `${formatted} (${ago})`,
+  );
 }
 
 export function formatBytes(n: number): string {
