@@ -126,37 +126,94 @@ body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--spacing-6);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--spacing-4);
 }
-.void-platform-status-card {
+.void-platform-status-grid section,
+.void-platform-status-recovery {
+  display: grid;
+  align-content: start;
+  gap: var(--spacing-3);
   min-width: 0;
+}
+.void-platform-status .astryx-heading {
+  margin: 0;
+}
+.void-platform-status-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.void-platform-status-summary li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--spacing-2);
+}
+.void-platform-status-summary li > span:last-child {
+  display: grid;
+  gap: var(--spacing-1);
+}
+.void-platform-status-summary .void-admin-health-indicator {
+  margin-top: 2px;
+}
+.void-platform-status-summary-label {
+  color: var(--color-text-secondary);
+}
+.void-platform-status-summary li[data-state='healthy'] .void-admin-health-indicator {
+  color: var(--color-icon-green);
+}
+.void-platform-status-summary li[data-state='waiting'] .void-admin-health-indicator {
+  color: var(--color-icon-yellow);
+}
+.void-platform-status-summary li[data-state='error'] .void-admin-health-indicator {
+  color: var(--color-icon-red);
+}
+.void-platform-status-recovery {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--spacing-4);
+}
+.void-platform-status-recovery .astryx-heading {
+  color: var(--color-text-accent);
 }
 .void-platform-status-version {
   font-size: 1.5rem;
   overflow-wrap: anywhere;
 }
-.void-platform-status-card dl {
+.void-platform-status-grid dl {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: var(--spacing-3) var(--spacing-4);
   font-size: 0.875rem;
+  margin: 0;
 }
-.void-platform-status-card dt,
+.void-platform-status-grid dt,
 .void-platform-status-timestamp {
   color: var(--color-text-secondary);
 }
-.void-platform-status-card dd {
+.void-platform-status-grid dd {
   margin: 0;
   overflow-wrap: anywhere;
 }
 .void-platform-status-notice {
-  border-inline-start: 3px solid var(--color-text-accent);
-  padding-inline-start: var(--spacing-4);
+  color: var(--color-text-secondary);
+  font-size: var(--text-supporting-size);
 }
 .void-platform-status-notice p {
   margin: 0;
+  color: inherit;
+  font: inherit;
+}
+.void-platform-status-notice[data-state='unavailable'],
+.void-platform-status-notice[data-state='expired'] {
+  color: var(--color-text-red);
 }
 @media (max-width: 700px) {
-  .void-platform-status-grid {
+  .void-platform-status-grid,
+  .void-platform-status-summary {
     grid-template-columns: 1fr;
   }
 }
@@ -292,20 +349,20 @@ body {
   display: grid;
   gap: var(--spacing-4);
 }
-#health-status {
+.void-admin-status-card {
   container-type: inline-size;
 }
-#health-status .void-admin-card {
+.void-admin-status-card .void-admin-card {
   overflow: hidden;
 }
-#health-status .astryx-layout-header {
+.void-admin-status-card .astryx-layout-header {
   background-color: color-mix(
     in srgb,
     var(--color-background-gray) 50%,
     var(--color-background-card)
   );
 }
-#health-status .void-admin-card-title {
+.void-admin-status-card .void-admin-card-title {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 9rem;
 }
@@ -314,39 +371,52 @@ body {
 }
 /* Reserve the timestamp row even before the first response on narrow cards. */
 @container (max-width: 21rem) {
-  #health-status .void-admin-card-title {
+  .void-admin-status-card .void-admin-card-title {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--spacing-1);
   }
-  #health-status .void-admin-health-checked-at {
+  .void-admin-status-card .void-admin-health-checked-at {
     width: 100%;
     text-align: left;
   }
 }
-#health-status[data-state='healthy'] .void-admin-card {
+.void-admin-status-card[data-state='healthy'] .void-admin-card {
   border-color: var(--color-border-green);
 }
-#health-status[data-state='error'] .void-admin-card {
+.void-admin-status-card[data-state='error'] .void-admin-card {
   border-color: var(--color-border-red);
 }
-#health-status[data-state='healthy'] .astryx-layout-header {
+.void-admin-status-card[data-state='waiting'] .void-admin-card {
+  border-color: var(--color-border-yellow);
+}
+.void-admin-status-card[data-state='waiting'] .astryx-layout-header {
+  background-color: color-mix(
+    in srgb,
+    var(--color-background-yellow) 50%,
+    var(--color-background-card)
+  );
+}
+.void-admin-status-card[data-state='waiting'] .astryx-layout-header .astryx-heading {
+  color: var(--color-text-yellow);
+}
+.void-admin-status-card[data-state='healthy'] .astryx-layout-header {
   background-color: color-mix(
     in srgb,
     var(--color-background-green) 50%,
     var(--color-background-card)
   );
 }
-#health-status[data-state='error'] .astryx-layout-header {
+.void-admin-status-card[data-state='error'] .astryx-layout-header {
   background-color: color-mix(
     in srgb,
     var(--color-background-red) 50%,
     var(--color-background-card)
   );
 }
-#health-status[data-state='healthy'] .astryx-heading {
+.void-admin-status-card[data-state='healthy'] .astryx-layout-header .astryx-heading {
   color: var(--color-text-green);
 }
-#health-status[data-state='error'] .astryx-heading {
+.void-admin-status-card[data-state='error'] .astryx-layout-header .astryx-heading {
   color: var(--color-text-red);
 }
 .void-admin-health-overall-icon {
@@ -356,8 +426,9 @@ body {
   height: 20px;
   color: var(--color-text-secondary);
 }
-#health-status[data-state='healthy'] .void-admin-health-overall-icon,
-#health-status[data-state='error'] .void-admin-health-overall-icon {
+.void-admin-status-card[data-state='healthy'] .void-admin-health-overall-icon,
+.void-admin-status-card[data-state='error'] .void-admin-health-overall-icon,
+.void-admin-status-card[data-state='waiting'] .void-admin-health-overall-icon {
   color: inherit;
 }
 .void-admin-health-checks {

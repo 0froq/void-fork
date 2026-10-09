@@ -1,12 +1,13 @@
-/** @jsxImportSource @voidcloud/api/admin-jsx */
+/** @jsxImportSource react */
 import { Button } from '@astryxdesign/core/Button';
 import { Heading } from '@astryxdesign/core/Text';
 import type { PlatformLifecycleOperation } from '@void/platform';
+import { Activity, Check, Clock, Minus, Pause, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { PlatformStatusSnapshot } from '../../platform-status.ts';
-import { AdminCard } from './AdminCard.tsx';
 import { formatDateTime } from './format.ts';
 import { Layout } from './Layout.tsx';
+import { LastCheckedTime, StatusCard, type StatusCardState } from './StatusCard.tsx';
 
 const PHASE_LABELS: Record<PlatformLifecycleOperation['phase'], string> = {
   preparing: 'Preparing the platform',
@@ -109,6 +110,37 @@ export function PlatformStatusPage({
       : current?.checkpoint
         ? `Saved installation state: ${current.checkpoint.status}`
         : 'No saved operation';
+  const lifecycleState: StatusCardState = failed
+    ? 'error'
+    : waiting
+      ? 'waiting'
+      : operation?.phase === 'complete' ||
+          (!operation && current?.checkpoint?.status === 'installed')
+        ? 'healthy'
+        : operation || current?.checkpoint
+          ? 'loading'
+          : 'unavailable';
+  const state: StatusCardState =
+    connection !== 'current'
+      ? 'unavailable'
+      : failed
+        ? 'error'
+        : waiting || current?.traffic === 'paused'
+          ? 'waiting'
+          : lifecycleState === 'loading'
+            ? 'loading'
+            : 'healthy';
+  const LifecycleIcon =
+    lifecycleState === 'error'
+      ? X
+      : lifecycleState === 'waiting'
+        ? Clock
+        : lifecycleState === 'healthy'
+          ? Check
+          : lifecycleState === 'loading'
+            ? Activity
+            : Minus;
+  const TrafficIcon = !current ? Minus : current.traffic === 'paused' ? Pause : Check;
 
   return (
     <Layout platformName={platformName} username={username} title="Platform status">
@@ -127,38 +159,84 @@ export function PlatformStatusPage({
           />
         </div>
 
-        <div className="void-platform-status-notice" role="status" aria-live="polite">
-          {connection === 'expired' ? (
-            <p>
-              Your administrator session needs attention. <a href="/admin/login">Sign in again</a>{' '}
-              to confirm the current status.
-            </p>
-          ) : connection === 'unavailable' ? (
-            <p>
-              Live status is unavailable.{' '}
-              {current
-                ? 'Showing the last confirmed snapshot; it may be out of date.'
-                : 'The current operation and traffic state could not be confirmed.'}{' '}
-              Progress is saved independently of this page.
-            </p>
-          ) : (
-            <p>
-              Updates every 5 seconds while this page is visible. A saved checkpoint may remain
-              unchanged while a phase runs.
-            </p>
-          )}
-        </div>
-
-        <div className="void-platform-status-grid">
-          <section
-            className="void-platform-status-card"
-            aria-labelledby="platform-operation-heading"
-          >
-            <AdminCard
-              title={phaseLabel}
-              titleId="platform-operation-heading"
-              description={operation ? ACTION_LABELS[operation.action] : 'Lifecycle'}
+        <StatusCard
+          title="Current status"
+          state={state}
+          statusLabel={
+            connection !== 'current'
+              ? 'Live status unavailable'
+              : needsAttention || lifecycleState === 'loading'
+                ? phaseLabel
+                : trafficLabel
+          }
+          headerAccessory={
+            <LastCheckedTime
+              checkedAt={current ? Date.parse(current.checkedAt) : undefined}
+              unavailable={connection !== 'current'}
+            />
+          }
+        >
+          <ul className="void-platform-status-summary" aria-label="Lifecycle and traffic">
+            <li data-state={connection !== 'current' ? 'unavailable' : lifecycleState}>
+              <span className="void-admin-health-indicator" aria-hidden="true">
+                <LifecycleIcon size={16} />
+              </span>
+              <span>
+                <span className="void-platform-status-summary-label">Lifecycle</span>
+                <strong>{phaseLabel}</strong>
+              </span>
+            </li>
+            <li
+              data-state={
+                connection !== 'current' || !current
+                  ? 'unavailable'
+                  : current.traffic === 'paused'
+                    ? 'waiting'
+                    : 'healthy'
+              }
             >
+              <span className="void-admin-health-indicator" aria-hidden="true">
+                <TrafficIcon size={16} />
+              </span>
+              <span>
+                <span className="void-platform-status-summary-label">Application traffic</span>
+                <strong>
+                  {trafficLabel}
+                  {current && connection !== 'current' ? ' (last confirmed)' : ''}
+                </strong>
+              </span>
+            </li>
+          </ul>
+
+          <div
+            className="void-platform-status-notice"
+            data-state={connection}
+            role="status"
+            aria-live="polite"
+          >
+            {connection === 'expired' ? (
+              <p>
+                Your administrator session needs attention. <a href="/admin/login">Sign in again</a>{' '}
+                to confirm the current status.
+              </p>
+            ) : connection === 'unavailable' ? (
+              <p>
+                Live status is unavailable.{' '}
+                {current
+                  ? 'Showing the last confirmed snapshot; it may be out of date.'
+                  : 'The current operation and traffic state could not be confirmed.'}{' '}
+                Progress is saved independently of this page.
+              </p>
+            ) : (
+              <p>Refreshes every 5 seconds. Saved progress may remain unchanged during a phase.</p>
+            )}
+          </div>
+
+          <div className="void-platform-status-grid">
+            <section aria-labelledby="platform-operation-heading">
+              <Heading level={3} id="platform-operation-heading">
+                {operation ? ACTION_LABELS[operation.action] : 'Installation'}
+              </Heading>
               {operation ? (
                 <>
                   <p className="void-platform-status-version">
@@ -193,17 +271,12 @@ export function PlatformStatusPage({
                   operation.
                 </p>
               )}
-            </AdminCard>
-          </section>
+            </section>
 
-          <section className="void-platform-status-card" aria-labelledby="platform-traffic-heading">
-            <AdminCard
-              title={
-                trafficLabel + (current && connection !== 'current' ? ' (last confirmed)' : '')
-              }
-              titleId="platform-traffic-heading"
-              description="Traffic state reported by the API"
-            >
+            <section aria-labelledby="platform-traffic-heading">
+              <Heading level={3} id="platform-traffic-heading">
+                Traffic availability
+              </Heading>
               <p>
                 {!current
                   ? 'Traffic state is not currently available.'
@@ -217,16 +290,17 @@ export function PlatformStatusPage({
                 </p>
               )}
               <p>This state does not replace service or project health checks.</p>
-            </AdminCard>
-          </section>
-        </div>
+            </section>
+          </div>
 
-        {needsAttention && (
-          <section
-            className="void-platform-status-card void-platform-status-recovery"
-            aria-labelledby="platform-recovery-heading"
-          >
-            <AdminCard title="Next step" titleId="platform-recovery-heading">
+          {needsAttention && (
+            <section
+              className="void-platform-status-recovery"
+              aria-labelledby="platform-recovery-heading"
+            >
+              <Heading level={3} id="platform-recovery-heading">
+                Next step
+              </Heading>
               <p>
                 {operation?.phase === 'waiting-for-dns'
                   ? 'Wait for the zone to become active, then rerun the lifecycle command.'
@@ -239,9 +313,9 @@ export function PlatformStatusPage({
                 {operation?.action === 'rollback' ? ', including the rollback source runtime' : ''}.
                 Reloading this page does not resume an operation.
               </p>
-            </AdminCard>
-          </section>
-        )}
+            </section>
+          )}
+        </StatusCard>
       </div>
     </Layout>
   );

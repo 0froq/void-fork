@@ -206,78 +206,104 @@ it('allows administrator sign-in callbacks without allowing other login attempts
   ).toBe(503);
 });
 
-it('retains the last confirmed snapshot when polling fails and refreshes without a write', async () => {
-  const browser = await chromium.launch();
-  let unavailable = true;
-  const methods: Array<string> = [];
-  const errors: Array<string> = [];
-  try {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-    await context.addCookies([
-      { name: 'admin_token', value: admin.adminJwt, url: 'http://localhost' },
-    ]);
-    const page = await context.newPage();
-    page.on('pageerror', (error) => errors.push(error.message));
-    await page.route('**/*', async (route) => {
-      const incoming = route.request();
-      const url = new URL(incoming.url());
-      if (url.origin !== 'http://localhost') {
-        await route.abort();
-        return;
-      }
-      methods.push(incoming.method());
-      if (url.pathname === '/admin/client.js' || url.pathname === '/admin/style.css') {
-        const asset = url.pathname.endsWith('.js')
-          ? PLATFORM_ADMIN_CLIENT_ASSET_PATH
-          : PLATFORM_ADMIN_STYLE_ASSET_PATH;
+it.each([390, 1280])(
+  'retains the last confirmed snapshot and refreshes without a write at %ipx',
+  async (width) => {
+    const browser = await chromium.launch();
+    let unavailable = true;
+    let trafficState = 'staging';
+    const methods: Array<string> = [];
+    const errors: Array<string> = [];
+    try {
+      const context = await browser.newContext({ viewport: { width, height: 844 } });
+      await context.addCookies([
+        { name: 'admin_token', value: admin.adminJwt, url: 'http://localhost' },
+      ]);
+      const page = await context.newPage();
+      page.on('pageerror', (error) => errors.push(error.message));
+      await page.route('**/*', async (route) => {
+        const incoming = route.request();
+        const url = new URL(incoming.url());
+        if (url.origin !== 'http://localhost') {
+          await route.abort();
+          return;
+        }
+        methods.push(incoming.method());
+        if (url.pathname === '/admin/client.js' || url.pathname === '/admin/style.css') {
+          const asset = url.pathname.endsWith('.js')
+            ? PLATFORM_ADMIN_CLIENT_ASSET_PATH
+            : PLATFORM_ADMIN_STYLE_ASSET_PATH;
+          await route.fulfill({
+            status: 200,
+            contentType: url.pathname.endsWith('.js') ? 'text/javascript' : 'text/css',
+            body: await readFile(join(getPlatformRuntimeDirectory(), asset)),
+          });
+          return;
+        }
+        if (url.pathname === '/admin/status.json' && unavailable) {
+          await route.fulfill({
+            status: 503,
+            contentType: 'application/json',
+            body: '{"error":"unavailable"}',
+          });
+          return;
+        }
+        const response = await request(
+          url.pathname + url.search,
+          admin.adminJwt,
+          {
+            headers: await incoming.allHeaders(),
+          },
+          trafficState,
+        );
         await route.fulfill({
-          status: 200,
-          contentType: url.pathname.endsWith('.js') ? 'text/javascript' : 'text/css',
-          body: await readFile(join(getPlatformRuntimeDirectory(), asset)),
+          status: response.status,
+          headers: Object.fromEntries(response.headers),
+          body: Buffer.from(await response.arrayBuffer()),
         });
-        return;
-      }
-      if (url.pathname === '/admin/status.json' && unavailable) {
-        await route.fulfill({
-          status: 503,
-          contentType: 'application/json',
-          body: '{"error":"unavailable"}',
-        });
-        return;
-      }
-      const response = await request(url.pathname + url.search, admin.adminJwt, {
-        headers: await incoming.allHeaders(),
       });
-      await route.fulfill({
-        status: response.status,
-        headers: Object.fromEntries(response.headers),
-        body: Buffer.from(await response.arrayBuffer()),
-      });
-    });
-    await page.goto('http://localhost/admin/status');
-    await page.getByText('Showing the last confirmed snapshot', { exact: false }).waitFor();
-    expect(await page.getByRole('heading', { name: 'Waiting for Sandbox drain' }).count()).toBe(1);
-    expect(
-      await page.getByRole('heading', { name: 'Traffic paused (last confirmed)' }).count(),
-    ).toBe(1);
-    manifest = {
-      ...manifest,
-      status: 'installed',
-      operation: { ...manifest.operation!, phase: 'complete' },
-    };
-    await save();
-    unavailable = false;
-    await page.getByRole('button', { name: 'Refresh status' }).click();
-    await page.getByRole('heading', { name: 'Operation complete' }).waitFor();
-    expect(await page.getByRole('heading', { name: 'Traffic paused', exact: true }).count()).toBe(
-      1,
-    );
-    expect(
-      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-    ).toBe(true);
-    expect(methods.every((method) => method === 'GET')).toBe(true);
-    expect(errors).toEqual([]);
-  } finally {
-    await browser.close();
-  }
-});
+      await page.goto('http://localhost/admin/status');
+      await page.getByText('Showing the last confirmed snapshot', { exact: false }).waitFor();
+      const summary = page.getByRole('list', { name: 'Lifecycle and traffic' });
+      const card = page.locator('.void-admin-status-card');
+      expect(await card.count()).toBe(1);
+      expect(await card.getAttribute('data-state')).toBe('unavailable');
+      expect(await summary.getByText('Waiting for Sandbox drain', { exact: true }).count()).toBe(1);
+      expect(
+        await summary.getByText('Traffic paused (last confirmed)', { exact: true }).count(),
+      ).toBe(1);
+      manifest = {
+        ...manifest,
+        status: 'installed',
+        operation: { ...manifest.operation!, phase: 'complete' },
+      };
+      await save();
+      unavailable = false;
+      await page.getByRole('button', { name: 'Refresh status' }).click();
+      await summary.getByText('Operation complete', { exact: true }).waitFor();
+      expect(await summary.getByText('Traffic paused', { exact: true }).count()).toBe(1);
+      expect(await card.getAttribute('data-state')).toBe('waiting');
+      trafficState = '';
+      await page.getByRole('button', { name: 'Refresh status' }).click();
+      await summary.getByText('Traffic enabled', { exact: true }).waitFor();
+      expect(await card.getAttribute('data-state')).toBe('healthy');
+      manifest = {
+        ...manifest,
+        status: 'failed',
+        operation: { ...manifest.operation!, phase: 'failed' },
+      };
+      await save();
+      await page.getByRole('button', { name: 'Refresh status' }).click();
+      await summary.getByText('Operation needs attention', { exact: true }).waitFor();
+      expect(await card.getAttribute('data-state')).toBe('error');
+      await page.getByRole('heading', { name: 'Next step', exact: true }).waitFor();
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      expect(methods.every((method) => method === 'GET')).toBe(true);
+      expect(errors).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  },
+);
