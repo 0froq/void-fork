@@ -1,14 +1,7 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableHeaderCell,
-  TableRow,
-} from '@astryxdesign/core/Table';
-import { Heading } from '@astryxdesign/core/Text';
+import { Table, pixel, proportional, type TableColumn } from '@astryxdesign/core/Table';
+import { Heading, Text } from '@astryxdesign/core/Text';
 import { useRequest, useView } from 'react-fate';
 import type { CliVersionDeploymentStats } from '../../../db.ts';
 import { CliVersionsView, cliVersionsRequest } from '../../fate/views.ts';
@@ -25,6 +18,46 @@ function CliVersionTable({
   title: string;
   tz?: string;
 }) {
+  const columns: Array<TableColumn<CliVersionDeploymentStats>> = [
+    {
+      key: 'cli_version',
+      header: 'Version',
+      width: proportional(2, { minWidth: 160 }),
+      renderCell: (row: CliVersionDeploymentStats) => (
+        <Text maxLines={1}>{row.cli_version ?? 'unknown'}</Text>
+      ),
+    },
+    {
+      key: 'deployments',
+      header: 'Deploys',
+      width: proportional(1, { minWidth: 96 }),
+      renderCell: (row: CliVersionDeploymentStats) => formatNumber(row.deployments),
+    },
+    {
+      key: 'projects',
+      header: 'Projects',
+      width: proportional(1, { minWidth: 96 }),
+      renderCell: (row: CliVersionDeploymentStats) => formatNumber(row.projects),
+    },
+    {
+      key: 'users',
+      header: 'Users',
+      width: proportional(1, { minWidth: 96 }),
+      renderCell: (row: CliVersionDeploymentStats) => formatNumber(row.users),
+    },
+    {
+      key: 'first_seen',
+      header: 'First Seen',
+      width: pixel(220),
+      renderCell: (row: CliVersionDeploymentStats) => formatDateTime(row.first_seen, tz),
+    },
+    {
+      key: 'last_seen',
+      header: 'Last Seen',
+      width: pixel(220),
+      renderCell: (row: CliVersionDeploymentStats) => formatDateTime(row.last_seen, tz),
+    },
+  ];
   return (
     <>
       <Heading level={2}>{title}</Heading>
@@ -33,30 +66,13 @@ function CliVersionTable({
           <em>No deployments found.</em>
         </p>
       ) : (
-        <Table hasHover>
-          <TableHeader>
-            <TableRow>
-              <TableHeaderCell>Version</TableHeaderCell>
-              <TableHeaderCell>Deploys</TableHeaderCell>
-              <TableHeaderCell>Projects</TableHeaderCell>
-              <TableHeaderCell>Users</TableHeaderCell>
-              <TableHeaderCell>First Seen</TableHeaderCell>
-              <TableHeaderCell>Last Seen</TableHeaderCell>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.cli_version ?? 'unknown'}>
-                <TableCell>{row.cli_version ?? 'unknown'}</TableCell>
-                <TableCell>{formatNumber(row.deployments)}</TableCell>
-                <TableCell>{formatNumber(row.projects)}</TableCell>
-                <TableCell>{formatNumber(row.users)}</TableCell>
-                <TableCell>{formatDateTime(row.first_seen, tz)}</TableCell>
-                <TableCell>{formatDateTime(row.last_seen, tz)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <Table
+          data={[...rows]}
+          columns={columns}
+          idKey={(row: CliVersionDeploymentStats) => row.cli_version ?? 'unknown'}
+          textOverflow="truncate"
+          hasHover
+        />
       )}
     </>
   );
