@@ -297,27 +297,21 @@ export function DashboardPage({ platformName, username, healthCheckNames }: Dash
       <Heading level={1}>Dashboard</Heading>
       <HealthStatusBanner checkNames={healthCheckNames} />
       <div className="void-admin-metrics">
-        <a href="/admin/users">
-          <DashboardCard title="Users">
-            <Text type="display-3" display="block" hasTabularNumbers>
-              {formatNumber(dashboard.userCount)}
-            </Text>
-          </DashboardCard>
-        </a>
-        <a href="/admin/projects">
-          <DashboardCard title="Projects">
-            <Text type="display-3" display="block" hasTabularNumbers>
-              {formatNumber(dashboard.projectCount)}
-            </Text>
-          </DashboardCard>
-        </a>
-        <a href="/admin/deployments">
-          <DashboardCard title="Deployments">
-            <Text type="display-3" display="block" hasTabularNumbers>
-              {formatNumber(dashboard.deploymentCount)}
-            </Text>
-          </DashboardCard>
-        </a>
+        <DashboardCard title="Users" href="/admin/users">
+          <Text type="display-3" display="block" hasTabularNumbers>
+            {formatNumber(dashboard.userCount)}
+          </Text>
+        </DashboardCard>
+        <DashboardCard title="Projects" href="/admin/projects">
+          <Text type="display-3" display="block" hasTabularNumbers>
+            {formatNumber(dashboard.projectCount)}
+          </Text>
+        </DashboardCard>
+        <DashboardCard title="Deployments" href="/admin/deployments">
+          <Text type="display-3" display="block" hasTabularNumbers>
+            {formatNumber(dashboard.deploymentCount)}
+          </Text>
+        </DashboardCard>
       </div>
       <div className="void-admin-dashboard-sections">
         <DeferredTopProjects

@@ -231,10 +231,6 @@ body {
   margin-block: var(--spacing-6);
 }
 
-.void-admin-metrics > a {
-  color: inherit;
-  text-decoration: none;
-}
 .void-admin-dashboard-sections {
   display: grid;
   gap: var(--spacing-6);
@@ -248,6 +244,16 @@ body {
 }
 .void-admin-dashboard-card-heading h2 {
   margin: 0;
+}
+.void-admin-dashboard-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+}
+.void-admin-dashboard-card-arrow {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
 }
 .void-admin-dashboard-card-loading {
   display: grid;
