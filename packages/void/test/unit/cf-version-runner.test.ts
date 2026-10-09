@@ -39,6 +39,9 @@ const roots: Array<string> = [];
 const pinnedCfVersion = JSON.parse(
   readFileSync(fileURLToPath(import.meta.resolve('cf/package.json')), 'utf8'),
 ).version as string;
+const voidVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
+  .version as string;
+const cfUserAgent = `cf-cli/${pinnedCfVersion} void/${voidVersion}`;
 // Each real cf subprocess loads cf's bundle before it does any work. That takes about half a
 // second when idle and several seconds on a busy machine, which can pass Vitest's 5s default.
 const REAL_CF_TIMEOUT_MS = process.platform === 'win32' ? 20_000 : 15_000;
@@ -49,8 +52,10 @@ it(
     const prepared = await output();
     const draft = voidSecretDraftVersion();
     const requests: Array<string> = [];
+    const userAgents: Array<string | undefined> = [];
     const server = createServer((request, response) => {
       requests.push(request.url ?? '');
+      userAgents.push(request.headers['user-agent']);
       request.resume();
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({ success: true, errors: [], messages: [], result: draft }));
@@ -67,6 +72,7 @@ it(
           SYSTEMROOT: process.env.SYSTEMROOT,
           WINDIR: process.env.WINDIR,
           CI: 'true',
+          CLI_VERSION: 'inherited-version void/stale',
           CLOUDFLARE_API_TOKEN: 'synthetic-token',
           CLOUDFLARE_ACCOUNT_ID: 'test-account',
           CLOUDFLARE_API_BASE_URL: apiBaseUrl,
@@ -99,6 +105,7 @@ it(
         `/client/v4/accounts/test-account/workers/workers/void-test/versions/${draft.id}?include=modules`,
       ]);
       expect(commands).toHaveLength(1);
+      expect(userAgents).toEqual([cfUserAgent]);
       expect(commands[0]!.bounds).toMatchObject({ timeoutMs: 30_000, maxOutputBytes: 1024 * 1024 });
       expect(JSON.stringify(result)).not.toContain('synthetic-token');
     } finally {
@@ -208,8 +215,10 @@ it(
   async () => {
     const prepared = await output();
     const requests: Array<string> = [];
+    const userAgents: Array<string | undefined> = [];
     const server = createServer((request, response) => {
       requests.push(request.url ?? '');
+      userAgents.push(request.headers['user-agent']);
       request.resume();
       response.writeHead(404, { 'Content-Type': 'application/json' });
       response.end(
@@ -252,6 +261,7 @@ it(
       // cf deliberately omits the API code from this local error.
       expect(result.errorCode).toBeUndefined();
       expect(requests).toEqual(['/client/v4/accounts/account-id/workers/services/void-test']);
+      expect(userAgents).toEqual([cfUserAgent]);
     } finally {
       prepared.dispose();
       await new Promise<void>((resolve, reject) =>
@@ -835,7 +845,12 @@ async function verifyPinnedUpload(atomic: boolean): Promise<void> {
         { name: 'KEY', type: 'secret_key' },
       ],
     });
-    const requests: Array<{ url: string; body: string; authorization: string | undefined }> = [];
+    const requests: Array<{
+      url: string;
+      body: string;
+      authorization: string | undefined;
+      userAgent: string | undefined;
+    }> = [];
     let uploadedBatches = 0;
     const server = createServer(async (request, response) => {
       const chunks: Array<Buffer> = [];
@@ -846,6 +861,7 @@ async function verifyPinnedUpload(atomic: boolean): Promise<void> {
         url: request.url ?? '',
         body: Buffer.concat(chunks).toString('utf8'),
         authorization: request.headers.authorization,
+        userAgent: request.headers['user-agent'],
       });
       response.writeHead(200, { 'Content-Type': 'application/json' });
       const path = request.url ?? '';
@@ -896,6 +912,9 @@ async function verifyPinnedUpload(atomic: boolean): Promise<void> {
         verifyUploader: () => true,
       });
       expect(uploaded.id).toBe('22222222-2222-4222-8222-222222222222');
+      expect(requests.map(({ userAgent }) => userAgent)).toEqual(
+        requests.map(() => `void/${voidVersion}`),
+      );
       const upload = requests.find(({ url }) =>
         url.endsWith(atomic ? '/versions?deploy=true' : '/versions'),
       );
@@ -1919,16 +1938,23 @@ it(
       JSON.stringify({ name: 'cf', version: '0.0.0', bin: { cf: 'fake.cjs' } }),
     );
     writeFileSync(join(local, 'fake.cjs'), 'console.log("UNPINNED_PROJECT_CF_EXECUTED");');
+    const env = {
+      PATH: process.env.PATH,
+      CI: 'true',
+      CLI_VERSION: 'inherited-version void/stale',
+      CLOUDFLARE_API_TOKEN: 'synthetic-token',
+    };
     const command = createCfCommand({
       accountId: 'test-account',
       apiBaseUrl: 'https://api.cloudflare.com/client/v4',
       verifyUploader: () => true,
-      env: () => ({ PATH: process.env.PATH, CI: 'true', CLOUDFLARE_API_TOKEN: 'synthetic-token' }),
+      env: () => env,
     });
     const result = await command(['--version'], { cwd: root, capture: true });
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).not.toContain('UNPINNED_PROJECT_CF_EXECUTED');
-    expect(result.stdout).toContain(pinnedCfVersion);
+    expect(result.stdout.trim()).toBe(`${pinnedCfVersion} void/${voidVersion}`);
+    expect(env.CLI_VERSION).toBe('inherited-version void/stale');
   },
   REAL_CF_TIMEOUT_MS,
 );

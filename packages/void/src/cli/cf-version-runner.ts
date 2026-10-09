@@ -13,6 +13,7 @@ import { isRecord as record } from '@void/deploy-core';
 import { dirname, join } from 'pathslash';
 import type { CfBuildOutput } from './cf-build-output.ts';
 import { migrateBuiltWranglerConfig } from './cf-config-migrate.ts';
+import { getCfCliVersion } from './cf-user-agent.ts';
 import {
   isSecretBindingType,
   uploadPinnedCloudflareVersion,
@@ -248,6 +249,7 @@ export function createCfCommand(options: {
     const env: NodeJS.ProcessEnv = {
       ...options.env(options.accountId, options.apiBaseUrl),
       CF_DELEGATION: '1',
+      CLI_VERSION: getCfCliVersion(),
       // Void owns the terminal UI. Keep cf's notices, progress, and telemetry out
       // of successful deploys; retain its complete output for error diagnosis.
       CF_QUIET: '1',

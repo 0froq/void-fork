@@ -18,12 +18,19 @@ import {
 import { Buffer } from '../../src/cli/node-buffer.ts';
 import { resolveCloudflareOperationArgv } from '../../src/cli/preset.ts';
 
+const voidVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
+  .version as string;
+const cfVersion = JSON.parse(readFileSync(new URL(import.meta.resolve('cf/package.json')), 'utf8'))
+  .version as string;
+
 it('requests immutable version source explicitly without loading or provisioning build output', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'void-cf-secret-source-'));
   const draft = voidSecretDraftVersion();
   const requests: Array<string> = [];
+  const userAgents: Array<string | undefined> = [];
   const server = createServer((request, response) => {
     requests.push(request.url ?? '');
+    userAgents.push(request.headers['user-agent']);
     request.resume();
     response.writeHead(200, { 'Content-Type': 'application/json' });
     response.end(JSON.stringify({ success: true, errors: [], messages: [], result: draft }));
@@ -55,6 +62,7 @@ it('requests immutable version source explicitly without loading or provisioning
             SYSTEMROOT: process.env.SYSTEMROOT,
             WINDIR: process.env.WINDIR,
             CI: 'true',
+            CLI_VERSION: 'inherited-version void/stale',
             CLOUDFLARE_API_TOKEN: 'synthetic-token',
             CLOUDFLARE_ACCOUNT_ID: 'test-account',
             CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`,
@@ -70,6 +78,7 @@ it('requests immutable version source explicitly without loading or provisioning
       `/client/v4/accounts/test-account/workers/workers/test-worker/versions/${draft.id}?include=modules`,
     ]);
     expect(captured).not.toContain('synthetic-token');
+    expect(userAgents).toEqual([`cf-cli/${cfVersion} void/${voidVersion}`]);
   } finally {
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
@@ -166,6 +175,7 @@ it.each(['clear-crons', 'clear-domains'])(
         `/client/v4/accounts/test-account/workers/scripts/test-worker/${operation === 'clear-crons' ? 'schedules' : 'domains/records'}`,
       );
       expect(request.headers.authorization).toBe('Bearer synthetic-token');
+      expect(request.headers['user-agent']).toBe(`void/${voidVersion}`);
       let body = '';
       for await (const chunk of request) {
         body += chunk;

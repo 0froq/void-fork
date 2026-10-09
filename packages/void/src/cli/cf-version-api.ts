@@ -14,6 +14,7 @@ import mime from 'mime';
 import { extname, join, relative } from 'pathslash';
 import type { CfBuildOutput } from './cf-build-output.ts';
 import { record as object } from './cf-config-migrate.ts';
+import { getVoidUserAgent } from './cf-user-agent.ts';
 
 type Json = Record<string, unknown>;
 export type CfCommand = (
@@ -402,6 +403,7 @@ async function apiResult(
   const response = await fetch(url, {
     method,
     headers: {
+      'User-Agent': getVoidUserAgent(),
       Authorization: `Bearer ${token}`,
       ...(body && !form ? { 'Content-Type': 'application/json' } : {}),
     },

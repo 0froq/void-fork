@@ -12,6 +12,7 @@ import type { CloudflareOperation } from '@void/deploy-cloudflare';
 import { parse } from 'jsonc-parser';
 import { dirname, join, resolve } from 'pathslash';
 import { persistCfKeyringPreference, readCfSessionCredential } from './cf-session.ts';
+import { getCfCliVersion, getVoidUserAgent } from './cf-user-agent.ts';
 import {
   cloudflareDeviceCode,
   cloudflareVerificationUrl,
@@ -64,6 +65,7 @@ function cfEnvironment(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     CF_DELEGATION: '1',
+    CLI_VERSION: getCfCliVersion(),
     CF_SEND_TELEMETRY: 'false',
     CF_NO_OSC_PROGRESS: '1',
     CLOUDFLARE_AUTH_USE_KEYRING: process.env.CLOUDFLARE_AUTH_USE_KEYRING,
@@ -480,13 +482,13 @@ async function apiHeaders(): Promise<Record<string, string>> {
   const key = process.env.CLOUDFLARE_API_KEY ?? process.env.CF_API_KEY;
   const email = process.env.CLOUDFLARE_EMAIL ?? process.env.CF_EMAIL;
   if (key && email) {
-    return { 'X-Auth-Key': key, 'X-Auth-Email': email };
+    return { 'User-Agent': getVoidUserAgent(), 'X-Auth-Key': key, 'X-Auth-Email': email };
   }
   const credential = await sessionCredential();
   if (!credential) {
     throw new Error('Cloudflare session bearer is unavailable.');
   }
-  return { Authorization: `Bearer ${credential.token}` };
+  return { 'User-Agent': getVoidUserAgent(), Authorization: `Bearer ${credential.token}` };
 }
 
 async function withSecretFile(
