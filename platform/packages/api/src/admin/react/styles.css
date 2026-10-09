@@ -638,6 +638,12 @@ body {
   align-items: end;
   gap: var(--spacing-3);
 }
+.void-admin-autogrow-textarea textarea {
+  min-height: calc(var(--size-element-md) - 2px);
+  padding-block: calc(var(--spacing-1) + 1px);
+  overflow-y: hidden;
+  resize: none;
+}
 .void-admin-access-fields + .void-admin-access-fields {
   padding-top: var(--spacing-4);
   border-top: 1px solid var(--color-border);

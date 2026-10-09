@@ -104,7 +104,6 @@ function EnabledEmailSettingsPage({ path, platformName, username }: AdminPagePro
               label="Allowed domains"
               name="domains"
               initialValue={policy.domains.join('\n')}
-              rows={3}
               width={360}
               placeholder="example.com, corp.example.net"
             />

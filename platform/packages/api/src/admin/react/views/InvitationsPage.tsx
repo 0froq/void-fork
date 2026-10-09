@@ -52,7 +52,6 @@ export function InvitationsPage({ path, platformName, username }: AdminPageProps
           name="email"
           placeholder="user@example.com, teammate@example.com"
           required
-          rows={3}
           width={360}
         />
         <Button type="submit" label="Send Invites" />

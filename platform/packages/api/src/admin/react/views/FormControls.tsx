@@ -4,7 +4,7 @@ import { NumberInput } from '@astryxdesign/core/NumberInput';
 import { Selector } from '@astryxdesign/core/Selector';
 import { TextArea } from '@astryxdesign/core/TextArea';
 import { TextInput } from '@astryxdesign/core/TextInput';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 export function FormTextInput({
   label,
@@ -59,7 +59,6 @@ export function FormTextArea({
   initialValue = '',
   required = false,
   placeholder,
-  rows = 3,
   width,
 }: {
   label: string;
@@ -67,13 +66,40 @@ export function FormTextArea({
   initialValue?: string;
   required?: boolean;
   placeholder?: string;
-  rows?: number;
   width?: number;
 }) {
   const [value, setValue] = useState(initialValue);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => setValue(initialValue), [initialValue]);
+  const resizeToFit = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      if (textarea.value) {
+        textarea.style.height = `${textarea.scrollHeight}px`;
+      }
+    }
+  }, []);
+  useLayoutEffect(resizeToFit, [value, resizeToFit]);
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+    let width = textarea.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (textarea.clientWidth !== width) {
+        width = textarea.clientWidth;
+        resizeToFit();
+      }
+    });
+    observer.observe(textarea);
+    return () => observer.disconnect();
+  }, [resizeToFit]);
   return (
     <TextArea
+      ref={textareaRef}
+      className="void-admin-autogrow-textarea"
       label={label}
       htmlName={name}
       value={value}
@@ -81,7 +107,7 @@ export function FormTextArea({
       isRequired={required}
       required={required}
       placeholder={placeholder}
-      rows={rows}
+      rows={1}
       width={width}
     />
   );

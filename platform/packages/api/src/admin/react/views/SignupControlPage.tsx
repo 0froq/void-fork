@@ -255,7 +255,6 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                   name="email"
                   placeholder="person@example.com, teammate@example.com"
                   required
-                  rows={3}
                   width={440}
                 />
                 <p>
@@ -308,7 +307,6 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                 name="pattern"
                 placeholder="username, person@example.com, *@company.com"
                 required
-                rows={3}
                 width={360}
               />
               <FormTextInput label="Note" name="note" placeholder="Optional" width={180} />

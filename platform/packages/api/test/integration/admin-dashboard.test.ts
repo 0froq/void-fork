@@ -1255,6 +1255,45 @@ describe('GET /admin/ (dashboard)', () => {
             ),
           ).toBe(true);
           if (path === '/admin/signup-control') {
+            const pattern = page.getByRole('textbox', { name: 'Pattern Required', exact: true });
+            const patternHeight = await pattern.evaluate(
+              (input) => input.parentElement!.getBoundingClientRect().height,
+            );
+            const noteHeight = await page
+              .getByRole('textbox', { name: 'Note', exact: true })
+              .evaluate((input) => input.parentElement!.getBoundingClientRect().height);
+            expect(Math.abs(patternHeight - noteHeight)).toBeLessThan(1);
+            await pattern.fill('alice\nbob\ncarol');
+            await expect
+              .poll(() => pattern.evaluate((input) => input.getBoundingClientRect().height))
+              .toBeGreaterThan(patternHeight + 30);
+            await pattern.fill('alice');
+            await expect
+              .poll(() =>
+                pattern.evaluate((input) => input.parentElement!.getBoundingClientRect().height),
+              )
+              .toBeCloseTo(patternHeight, 0);
+            await pattern.fill('a-very-long-company-domain.example.com, '.repeat(10));
+            expect(
+              await pattern.evaluate((input) => input.scrollHeight <= input.clientHeight),
+            ).toBe(true);
+            if (width === 390) {
+              const wrappedHeight = (await pattern.boundingBox())!.height;
+              await page.setViewportSize({ width: 320, height: 844 });
+              await expect
+                .poll(() => pattern.evaluate((input) => input.getBoundingClientRect().height))
+                .toBeGreaterThan(wrappedHeight);
+              expect(
+                await pattern.evaluate((input) => input.scrollHeight <= input.clientHeight),
+              ).toBe(true);
+              await page.setViewportSize({ width, height: 844 });
+            }
+            await pattern.fill('');
+            expect(
+              await pattern.evaluate(
+                (input) => input.parentElement!.getBoundingClientRect().height,
+              ),
+            ).toBeCloseTo(patternHeight, 0);
             const policy = page.getByRole('region', { name: 'Who can join?', exact: true });
             const toggle = policy.locator('form[action="/admin/signup-control/toggle"]');
             const signupCopy = await toggle.locator('p').boundingBox();
