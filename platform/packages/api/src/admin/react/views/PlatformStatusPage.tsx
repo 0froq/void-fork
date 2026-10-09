@@ -242,11 +242,6 @@ export function PlatformStatusPage({
             </AdminCard>
           </section>
         )}
-        {current?.traffic === 'enabled' && connection === 'current' && (
-          <p>
-            <a href="/admin/">Return to dashboard</a>
-          </p>
-        )}
       </div>
     </Layout>
   );
