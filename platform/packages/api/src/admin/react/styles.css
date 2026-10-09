@@ -105,19 +105,6 @@ body {
 .void-platform-status p {
   line-height: 1.6;
 }
-.void-platform-status-refresh {
-  font: inherit;
-  color: var(--color-text-primary);
-  background: var(--color-background-body);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-element);
-  padding: 10px 16px;
-  cursor: pointer;
-}
-.void-platform-status-refresh:focus-visible {
-  outline: 2px solid var(--color-text-accent);
-  outline-offset: 3px;
-}
 .void-platform-status-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

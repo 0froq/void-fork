@@ -1,4 +1,5 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
+import { Button } from '@astryxdesign/core/Button';
 import { Heading } from '@astryxdesign/core/Text';
 import type { PlatformLifecycleOperation } from '@void/platform';
 import { useEffect, useState } from 'react';
@@ -116,13 +117,13 @@ export function PlatformStatusPage({
             <Heading level={1}>Platform status</Heading>
             <p>Follow upgrade and rollback progress. This page is read-only during maintenance.</p>
           </div>
-          <button
+          <Button
             type="button"
-            className="void-platform-status-refresh"
+            label="Refresh status"
+            size="sm"
+            variant="secondary"
             onClick={() => setRefresh((value) => value + 1)}
-          >
-            Refresh status
-          </button>
+          />
         </div>
 
         <div className="void-platform-status-notice" role="status" aria-live="polite">
