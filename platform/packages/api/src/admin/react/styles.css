@@ -228,9 +228,23 @@ body {
   color: inherit;
   text-decoration: none;
 }
-.void-admin-metrics .astryx-card {
+.void-admin-dashboard-sections {
   display: grid;
-  gap: var(--spacing-2);
+  gap: var(--spacing-6);
+}
+.void-admin-dashboard-card {
+  min-width: 0;
+}
+.void-admin-dashboard-card-heading {
+  display: grid;
+  gap: var(--spacing-1);
+}
+.void-admin-dashboard-card-heading h2 {
+  margin: 0;
+}
+.void-admin-dashboard-card-loading {
+  display: grid;
+  gap: var(--spacing-4);
 }
 .void-admin-health-checks {
   display: grid;
@@ -648,17 +662,6 @@ body {
 }
 .void-admin-top-projects-table {
   min-width: 54rem;
-}
-.void-admin-top-projects {
-  display: grid;
-  gap: var(--spacing-4);
-}
-.void-admin-top-projects-header {
-  display: grid;
-  gap: var(--spacing-1);
-}
-.void-admin-top-projects-header h2 {
-  margin: 0;
 }
 .void-admin-deployments-table {
   min-width: 52rem;

@@ -1,6 +1,5 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import { Banner } from '@astryxdesign/core/Banner';
-import { Card } from '@astryxdesign/core/Card';
 import { Skeleton } from '@astryxdesign/core/Skeleton';
 import {
   Table,
@@ -34,6 +33,7 @@ import {
   HealthView,
   healthRequest,
 } from '../../fate/views.ts';
+import { DashboardCard } from './DashboardCard.tsx';
 import { DeploymentTable } from './DeploymentTable.tsx';
 import { formatDateTime, formatNumber } from './format.ts';
 import { Layout } from './Layout.tsx';
@@ -172,47 +172,38 @@ function TopProjectsWidget({
 }) {
   const [projects] = useListView({ items: { node: TopProjectView } }, topProjects);
   return (
-    <Card>
-      <div className="void-admin-top-projects">
-        <TopProjectsHeader />
-        {projects.length > 0 ? (
-          <Table className="void-admin-top-projects-table" hasHover>
-            <TableHeader>
-              <TableRow>
-                <TableHeaderCell>#</TableHeaderCell>
-                <TableHeaderCell>Project</TableHeaderCell>
-                <TableHeaderCell>Owner</TableHeaderCell>
-                <TableHeaderCell>Requests</TableHeaderCell>
-                <TableHeaderCell>Bandwidth</TableHeaderCell>
-                <TableHeaderCell>Last Seen</TableHeaderCell>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {projects.map(({ node }, index) => (
-                <TopProjectTableRow
-                  key={node.id}
-                  projectRef={node}
-                  index={index}
-                  siteDomain={siteDomain}
-                  tz={tz}
-                />
-              ))}
-            </TableBody>
-          </Table>
-        ) : (
-          <Text type="supporting">No recent project traffic in the last hour.</Text>
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function TopProjectsHeader() {
-  return (
-    <div className="void-admin-top-projects-header">
-      <Heading level={2}>Top 10 Projects</Heading>
-      <Text type="supporting">Last hour, site traffic only (static / ssr / isr)</Text>
-    </div>
+    <DashboardCard
+      title="Top 10 Projects"
+      description="Last hour, site traffic only (static / ssr / isr)"
+    >
+      {projects.length > 0 ? (
+        <Table className="void-admin-top-projects-table" hasHover>
+          <TableHeader>
+            <TableRow>
+              <TableHeaderCell>#</TableHeaderCell>
+              <TableHeaderCell>Project</TableHeaderCell>
+              <TableHeaderCell>Owner</TableHeaderCell>
+              <TableHeaderCell>Requests</TableHeaderCell>
+              <TableHeaderCell>Bandwidth</TableHeaderCell>
+              <TableHeaderCell>Last Seen</TableHeaderCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {projects.map(({ node }, index) => (
+              <TopProjectTableRow
+                key={node.id}
+                projectRef={node}
+                index={index}
+                siteDomain={siteDomain}
+                tz={tz}
+              />
+            ))}
+          </TableBody>
+        </Table>
+      ) : (
+        <Text type="supporting">No recent project traffic in the last hour.</Text>
+      )}
+    </DashboardCard>
   );
 }
 
@@ -273,13 +264,15 @@ function DeferredTopProjects({
 }) {
   const mounted = useSyncExternalStore(subscribeToClientRender, isClientRender, isServerRender);
   const fallback = (
-    <Card>
-      <div className="void-admin-top-projects">
-        <TopProjectsHeader />
+    <DashboardCard
+      title="Top 10 Projects"
+      description="Last hour, site traffic only (static / ssr / isr)"
+    >
+      <div className="void-admin-dashboard-card-loading">
         <Skeleton width="100%" height={48} />
         <Skeleton width="100%" height={48} index={1} />
       </div>
-    </Card>
+    </DashboardCard>
   );
   if (!mounted) {
     return fallback;
@@ -305,51 +298,44 @@ export function DashboardPage({ platformName, username, healthCheckNames }: Dash
       <HealthStatusBanner checkNames={healthCheckNames} />
       <div className="void-admin-metrics">
         <a href="/admin/users">
-          <Card>
-            <Text type="supporting" display="block">
-              Users
-            </Text>
+          <DashboardCard title="Users">
             <Text type="display-3" display="block" hasTabularNumbers>
               {formatNumber(dashboard.userCount)}
             </Text>
-          </Card>
+          </DashboardCard>
         </a>
         <a href="/admin/projects">
-          <Card>
-            <Text type="supporting" display="block">
-              Projects
-            </Text>
+          <DashboardCard title="Projects">
             <Text type="display-3" display="block" hasTabularNumbers>
               {formatNumber(dashboard.projectCount)}
             </Text>
-          </Card>
+          </DashboardCard>
         </a>
         <a href="/admin/deployments">
-          <Card>
-            <Text type="supporting" display="block">
-              Deployments
-            </Text>
+          <DashboardCard title="Deployments">
             <Text type="display-3" display="block" hasTabularNumbers>
               {formatNumber(dashboard.deploymentCount)}
             </Text>
-          </Card>
+          </DashboardCard>
         </a>
       </div>
-      <DeferredTopProjects
-        topProjects={dashboard.topProjects}
-        siteDomain={dashboard.siteDomain}
-        tz={dashboard.tz}
-      />
-
-      <Heading level={2}>Latest Projects</Heading>
-      <ProjectsTable
-        projects={dashboard.projects}
-        siteDomain={dashboard.siteDomain}
-        tz={dashboard.tz}
-      />
-
-      <Heading level={2}>Latest Deployments</Heading>
-      <DeploymentTable deployments={dashboard.deployments} showProject tz={dashboard.tz} />
+      <div className="void-admin-dashboard-sections">
+        <DeferredTopProjects
+          topProjects={dashboard.topProjects}
+          siteDomain={dashboard.siteDomain}
+          tz={dashboard.tz}
+        />
+        <DashboardCard title="Latest Projects">
+          <ProjectsTable
+            projects={dashboard.projects}
+            siteDomain={dashboard.siteDomain}
+            tz={dashboard.tz}
+          />
+        </DashboardCard>
+        <DashboardCard title="Latest Deployments">
+          <DeploymentTable deployments={dashboard.deployments} showProject tz={dashboard.tz} />
+        </DashboardCard>
+      </div>
     </Layout>
   );
 }
