@@ -15,6 +15,7 @@ import {
   decodeCloudflareOperationResult,
   encodeCloudflareOperation,
 } from '../../src/cli/cloudflare-process.ts';
+import { Buffer } from '../../src/cli/node-buffer.ts';
 import { resolveCloudflareOperationArgv } from '../../src/cli/preset.ts';
 
 it('requests immutable version source explicitly without loading or provisioning build output', async () => {

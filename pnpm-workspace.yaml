@@ -23,11 +23,7 @@ allowBuilds:
   workerd: true
 
 catalog:
-  # Stays on 4.x on purpose: Wrangler lists workers-types ^5 as an OPTIONAL peer, and
-  # every 5.x since 5.20260807.2 declares global `Buffer`/`process` as `any`, which collides
-  # with `@types/node` under packages/void's `types: ["node", "@cloudflare/workers-types"]`
-  # (Buffer loses its members; ~30 typecheck errors). Revisit when upstream drops those globals.
-  '@cloudflare/workers-types': ^4.20260702.1
+  '@cloudflare/workers-types': ^5.20261009.1
   '@types/node': ^26.6.4
   '@voidzero-dev/vite-plus-prompts': 1.1.0
   typescript: 7.0.2
@@ -68,7 +64,7 @@ catalogs:
   angular:
     typescript: 6.0.3
   platform:
-    '@cloudflare/workers-types': ^5.20260929.1
+    '@cloudflare/workers-types': ^5.20261009.1
     hono: 4.13.13
     wrangler: ^4.149.0
   sveltekit:

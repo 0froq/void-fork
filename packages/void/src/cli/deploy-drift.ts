@@ -19,6 +19,7 @@ import { readProjectPaths } from '../project-paths.ts';
 import { buildEnv } from '../shared/untrusted-env.ts';
 import { log, getErrorMessage } from './deploy-helpers.ts';
 import { scrubWranglerAuthCredentials } from './deploy-transport.ts';
+import { Buffer } from './node-buffer.ts';
 
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
 
