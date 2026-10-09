@@ -124,7 +124,7 @@ body {
 }
 .void-platform-status-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
   gap: var(--spacing-6);
   border-top: 1px solid var(--color-border);
   padding-top: var(--spacing-4);
@@ -141,7 +141,7 @@ body {
 }
 .void-platform-status-summary {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
   gap: var(--spacing-4);
   margin: 0;
   padding: 0;

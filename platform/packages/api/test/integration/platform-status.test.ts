@@ -170,6 +170,21 @@ it('reports unavailable checkpoints without exposing database errors or inventin
   expect(html).not.toContain('waiting-for-sandbox-drain');
 });
 
+it('omits empty operation details when no installation checkpoint is configured', async () => {
+  const response = await app.fetch(
+    new Request('http://localhost/admin/status', {
+      headers: { Cookie: `admin_token=${admin.adminJwt}` },
+    }),
+    { ...env, PLATFORM_INSTALLATION_ID: undefined, PLATFORM_TRAFFIC_STATE: '' },
+  );
+  expect(response.status).toBe(200);
+  const html = await response.text();
+  expect(html).toContain('Traffic enabled');
+  expect(html).not.toContain('No saved operation');
+  expect(html).not.toContain('platform-operation-heading');
+  expect(html).not.toContain('Detailed progress is available');
+});
+
 it('shows installation failure even when the last recorded operation completed', async () => {
   manifest = {
     ...manifest,
@@ -264,7 +279,7 @@ it.each([390, 1280])(
       });
       await page.goto('http://localhost/admin/status');
       await page.getByText('Showing the last confirmed snapshot', { exact: false }).waitFor();
-      const summary = page.getByRole('list', { name: 'Lifecycle and traffic' });
+      const summary = page.getByRole('list', { name: 'Installation and traffic' });
       const card = page.locator('.void-admin-status-card');
       expect(await card.count()).toBe(1);
       expect(await card.getAttribute('data-state')).toBe('unavailable');

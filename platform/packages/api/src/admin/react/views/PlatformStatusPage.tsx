@@ -108,8 +108,8 @@ export function PlatformStatusPage({
     : operation
       ? PHASE_LABELS[operation.phase]
       : current?.checkpoint
-        ? `Saved installation state: ${current.checkpoint.status}`
-        : 'No saved operation';
+        ? `Installation ${current.checkpoint.status}`
+        : 'Installation status unavailable';
   const lifecycleState: StatusCardState = failed
     ? 'error'
     : waiting
@@ -176,16 +176,20 @@ export function PlatformStatusPage({
             />
           }
         >
-          <ul className="void-platform-status-summary" aria-label="Lifecycle and traffic">
-            <li data-state={connection !== 'current' ? 'unavailable' : lifecycleState}>
-              <span className="void-admin-health-indicator" aria-hidden="true">
-                <LifecycleIcon size={16} />
-              </span>
-              <span>
-                <span className="void-platform-status-summary-label">Lifecycle</span>
-                <strong>{phaseLabel}</strong>
-              </span>
-            </li>
+          <ul className="void-platform-status-summary" aria-label="Installation and traffic">
+            {(operation || failed) && (
+              <li data-state={connection !== 'current' ? 'unavailable' : lifecycleState}>
+                <span className="void-admin-health-indicator" aria-hidden="true">
+                  <LifecycleIcon size={16} />
+                </span>
+                <span>
+                  <span className="void-platform-status-summary-label">
+                    {operation ? ACTION_LABELS[operation.action] : 'Installation'}
+                  </span>
+                  <strong>{phaseLabel}</strong>
+                </span>
+              </li>
+            )}
             <li
               data-state={
                 connection !== 'current' || !current
@@ -228,50 +232,56 @@ export function PlatformStatusPage({
                 Progress is saved independently of this page.
               </p>
             ) : (
-              <p>Refreshes every 5 seconds. Saved progress may remain unchanged during a phase.</p>
+              <p>
+                Refreshes every 5 seconds.
+                {operation && ' Saved progress may remain unchanged during a phase.'}
+              </p>
             )}
           </div>
 
           <div className="void-platform-status-grid">
-            <section aria-labelledby="platform-operation-heading">
-              <Heading level={3} id="platform-operation-heading">
-                {operation ? ACTION_LABELS[operation.action] : 'Installation'}
-              </Heading>
-              {operation ? (
-                <>
-                  <p className="void-platform-status-version">
-                    {operation.fromVersion ?? 'New installation'} <span aria-label="to">→</span>{' '}
-                    {operation.toVersion}
-                  </p>
+            {current?.checkpoint && (
+              <section aria-labelledby="platform-operation-heading">
+                <Heading level={3} id="platform-operation-heading">
+                  {operation ? ACTION_LABELS[operation.action] : 'Installation'}
+                </Heading>
+                {operation ? (
+                  <>
+                    <p className="void-platform-status-version">
+                      {operation.fromVersion ?? 'New installation'} <span aria-label="to">→</span>{' '}
+                      {operation.toVersion}
+                    </p>
+                    <dl>
+                      <dt>Started</dt>
+                      <dd>{formatDateTime(operation.startedAt)}</dd>
+                      <dt>Progress saved</dt>
+                      <dd>{formatDateTime(operation.updatedAt)}</dd>
+                      <dt>Installation state</dt>
+                      <dd>{current?.checkpoint?.status}</dd>
+                    </dl>
+                  </>
+                ) : (
                   <dl>
-                    <dt>Started</dt>
-                    <dd>{formatDateTime(operation.startedAt)}</dd>
-                    <dt>Progress saved</dt>
-                    <dd>{formatDateTime(operation.updatedAt)}</dd>
-                    <dt>Installation state</dt>
-                    <dd>{current?.checkpoint?.status}</dd>
+                    <dt>Version</dt>
+                    <dd>{current.checkpoint.platformVersion}</dd>
+                    <dt>Updated</dt>
+                    <dd>{formatDateTime(current.checkpoint.updatedAt)}</dd>
                   </dl>
-                </>
-              ) : (
-                <p>
-                  {current?.checkpoint
-                    ? `Saved runtime: ${current.checkpoint.platformVersion}. This operation has no detailed progress record.`
-                    : 'Detailed progress is available for installations managed by the Void lifecycle CLI.'}
-                </p>
-              )}
-              {operation?.phase === 'complete' && !failed && (
-                <p>
-                  The lifecycle operation completed. Use the traffic state alongside health checks
-                  to assess availability.
-                </p>
-              )}
-              {operation && !needsAttention && operation.phase !== 'complete' && (
-                <p>
-                  Keep the lifecycle command running. Refreshing this page does not interrupt the
-                  operation.
-                </p>
-              )}
-            </section>
+                )}
+                {operation?.phase === 'complete' && !failed && (
+                  <p>
+                    The lifecycle operation completed. Use the traffic state alongside health checks
+                    to assess availability.
+                  </p>
+                )}
+                {operation && !needsAttention && operation.phase !== 'complete' && (
+                  <p>
+                    Keep the lifecycle command running. Refreshing this page does not interrupt the
+                    operation.
+                  </p>
+                )}
+              </section>
+            )}
 
             <section aria-labelledby="platform-traffic-heading">
               <Heading level={3} id="platform-traffic-heading">
