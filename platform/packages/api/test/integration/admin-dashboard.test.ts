@@ -1086,6 +1086,112 @@ describe('GET /admin/ (dashboard)', () => {
     vi.restoreAllMocks();
   });
 
+  test('keeps deployment columns readable and long errors compact across list views', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'deployment-layout-admin',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    const project = await createTestProject(
+      env.db,
+      admin.id,
+      'a-project-with-a-long-name-for-truncation',
+    );
+    const error = 'Worker upload failed: upstream rejected the deployment.\n'.repeat(20);
+    const failed = await createTestDeployment(env.db, project.id, 'failed', 'cli', error);
+    const client = await readFile(
+      new URL('../../dist/admin-assets/admin/client.js', import.meta.url),
+    );
+    const css = await readFile(new URL('../../dist/admin-assets/admin/style.css', import.meta.url));
+    const browser = await chromium.launch();
+    try {
+      for (const width of [1280, 390]) {
+        const context = await browser.newContext({ viewport: { width, height: 844 } });
+        await context.addCookies([
+          { name: 'admin_token', value: admin.adminJwt, url: 'http://localhost' },
+        ]);
+        await context.addInitScript(() => {
+          Object.defineProperty(navigator, 'clipboard', {
+            value: {
+              writeText: async (text: string) => {
+                (window as unknown as { copiedError: string }).copiedError = text;
+              },
+            },
+          });
+        });
+        const page = await context.newPage();
+        const errors: Array<string> = [];
+        page.on('pageerror', (error) => errors.push(error.message));
+        await page.route('**/*', async (route) => {
+          const incoming = route.request();
+          const url = new URL(incoming.url());
+          if (url.origin !== 'http://localhost') {
+            return route.abort();
+          }
+          if (url.pathname === '/admin/client.js' || url.pathname === '/admin/style.css') {
+            return route.fulfill({
+              contentType: url.pathname.endsWith('.js') ? 'text/javascript' : 'text/css',
+              body: url.pathname.endsWith('.js') ? client : css,
+            });
+          }
+          const response = await app.fetch(
+            new Request(incoming.url(), {
+              method: incoming.method(),
+              headers: await incoming.allHeaders(),
+              ...(incoming.method() === 'POST' ? { body: incoming.postData() ?? '' } : {}),
+            }),
+            { ...env, DEV_AUTH_BYPASS: 'true' },
+          );
+          await route.fulfill({
+            status: response.status,
+            headers: Object.fromEntries(response.headers),
+            body: Buffer.from(await response.arrayBuffer()),
+          });
+        });
+        for (const path of ['/admin/', '/admin/deployments', `/admin/projects/${project.id}`]) {
+          await page.goto(`http://localhost${path}`);
+          await page.locator('[data-hydrated="true"]').waitFor();
+          const table = page.locator('.void-admin-deployments-table');
+          const row = table
+            .getByRole('row')
+            .filter({ has: page.getByRole('link', { name: failed.id, exact: true }) });
+          expect((await row.boundingBox())!.height).toBeLessThan(55);
+          const columns = await table.locator('th').evaluateAll((headers) =>
+            headers.map((header) => ({
+              title: header.textContent,
+              width: header.getBoundingClientRect().width,
+            })),
+          );
+          expect(columns.find((column) => column.title === 'Created')!.width).toBeLessThan(
+            (await table.boundingBox())!.width / 3,
+          );
+          expect(columns.every((column) => column.width >= 64)).toBe(true);
+          const message = row.locator('.void-admin-deployment-error-message');
+          expect(await message.textContent()).toBe(error);
+          expect((await message.boundingBox())!.height).toBeLessThan(30);
+          await message.hover();
+          await page.getByRole('tooltip').filter({ hasText: 'Worker upload failed' }).waitFor();
+          await row.getByRole('button', { name: 'Copy', exact: true }).click();
+          await expect
+            .poll(() =>
+              page.evaluate(() => (window as unknown as { copiedError?: string }).copiedError),
+            )
+            .toBe(error);
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          ).toBe(true);
+        }
+        expect(errors).toEqual([]);
+        await context.close();
+      }
+    } finally {
+      await browser.close();
+    }
+  }, 30_000);
+
   test('does not query Analytics Engine during the initial dashboard render', async () => {
     const admin = await createTestUser(
       env.db,

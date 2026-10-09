@@ -1,15 +1,14 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableHeaderCell,
-  TableRow,
-} from '@astryxdesign/core/Table';
+import { Table, pixel, proportional, type TableColumn } from '@astryxdesign/core/Table';
+import { Text } from '@astryxdesign/core/Text';
 import type { Deployment } from '../../../types.ts';
 import { CopyButton } from './CopyButton.tsx';
 import { formatDateTime } from './format.ts';
+
+type DeploymentRow = Deployment & {
+  project_slug?: string | null;
+  active_deployment_id?: string | null;
+};
 
 export function displayStatus(
   d: Deployment,
@@ -54,12 +53,7 @@ export function DeploymentTable({
   showProject,
   tz,
 }: {
-  deployments: ReadonlyArray<
-    Deployment & {
-      project_slug?: string | null;
-      active_deployment_id?: string | null;
-    }
-  >;
+  deployments: ReadonlyArray<DeploymentRow>;
   activeDeploymentId?: string | null;
   showProject?: boolean;
   tz?: string;
@@ -71,64 +65,95 @@ export function DeploymentTable({
       </p>
     );
   }
+  const columns: Array<TableColumn<DeploymentRow>> = [
+    {
+      key: 'id',
+      header: 'ID',
+      width: proportional(1, { minWidth: 115 }),
+      renderCell: (d: DeploymentRow) => (
+        <a className="void-admin-deployment-link" href={`/admin/deployments/${d.id}`} title={d.id}>
+          {d.id}
+        </a>
+      ),
+    },
+  ];
+  if (showProject) {
+    columns.push({
+      key: 'project_slug',
+      header: 'Project',
+      width: proportional(1, { minWidth: 115 }),
+      renderCell: (d: DeploymentRow) =>
+        d.project_slug ? (
+          <a
+            className="void-admin-deployment-link"
+            href={`/admin/projects/${d.project_id}`}
+            title={d.project_slug}
+          >
+            {d.project_slug}
+          </a>
+        ) : (
+          '-'
+        ),
+    });
+  }
+  columns.push(
+    {
+      key: 'status',
+      header: 'Status',
+      width: pixel(88),
+      renderCell: (d: DeploymentRow) => {
+        const status = displayStatus(d, activeDeploymentId ?? d.active_deployment_id);
+        return <span style={statusColor(status)}>{status}</span>;
+      },
+    },
+    {
+      key: 'source',
+      header: 'Source',
+      width: pixel(84),
+      renderCell: (d: DeploymentRow) => d.source ?? '-',
+    },
+    {
+      key: 'cli_version',
+      header: 'CLI',
+      width: pixel(64),
+      renderCell: (d: DeploymentRow) => d.cli_version ?? '-',
+    },
+    {
+      key: 'commit',
+      header: 'Commit',
+      width: pixel(90),
+      renderCell: (d: DeploymentRow) => d.commit?.slice(0, 7) ?? '-',
+    },
+    {
+      key: 'error_message',
+      header: 'Error',
+      width: proportional(1.8, { minWidth: 180 }),
+      renderCell: (d: DeploymentRow) =>
+        d.error_message ? (
+          <div className="void-admin-deployment-error">
+            <Text className="void-admin-deployment-error-message" maxLines={1}>
+              {d.error_message}
+            </Text>
+            <CopyButton text={d.error_message} />
+          </div>
+        ) : (
+          '-'
+        ),
+    },
+    {
+      key: 'created_at',
+      header: 'Created',
+      width: pixel(200),
+      renderCell: (d: DeploymentRow) => formatDateTime(d.created_at, tz),
+    },
+  );
   return (
-    <Table className="void-admin-deployments-table" hasHover>
-      <TableHeader>
-        <TableRow>
-          <TableHeaderCell>ID</TableHeaderCell>
-          {showProject && <TableHeaderCell>Project</TableHeaderCell>}
-          <TableHeaderCell>Status</TableHeaderCell>
-          <TableHeaderCell>Source</TableHeaderCell>
-          <TableHeaderCell>CLI</TableHeaderCell>
-          <TableHeaderCell>Commit</TableHeaderCell>
-          <TableHeaderCell>Error</TableHeaderCell>
-          <TableHeaderCell>Created</TableHeaderCell>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {deployments.map((d) => {
-          const activeId = activeDeploymentId ?? d.active_deployment_id;
-          const status = displayStatus(d, activeId);
-          return (
-            <TableRow key={d.id}>
-              <TableCell>
-                <a href={`/admin/deployments/${d.id}`}>{d.id}</a>
-              </TableCell>
-              {showProject && (
-                <TableCell>
-                  {d.project_slug ? (
-                    <a href={`/admin/projects/${d.project_id}`}>{d.project_slug}</a>
-                  ) : (
-                    '-'
-                  )}
-                </TableCell>
-              )}
-              <TableCell>
-                <span style={statusColor(status)}>{status}</span>
-              </TableCell>
-              <TableCell>{d.source ?? '-'}</TableCell>
-              <TableCell>{d.cli_version ?? '-'}</TableCell>
-              <TableCell>{d.commit ? d.commit.slice(0, 7) : '-'}</TableCell>
-              <TableCell>
-                {d.error_message ? (
-                  <>
-                    <span style="color: red; max-width: 400px; display: inline-block; word-break: break-word">
-                      {d.error_message}
-                    </span>
-                    <br />
-                    <span style="float: right; margin-top: 5px">
-                      <CopyButton text={d.error_message} />
-                    </span>
-                  </>
-                ) : (
-                  '-'
-                )}
-              </TableCell>
-              <TableCell>{formatDateTime(d.created_at, tz)}</TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+    <Table
+      className="void-admin-deployments-table"
+      data={[...deployments]}
+      columns={columns}
+      textOverflow="truncate"
+      hasHover
+    />
   );
 }
