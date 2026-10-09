@@ -268,16 +268,10 @@ export function PlatformStatusPage({
                     <dd>{formatDateTime(current.checkpoint.updatedAt)}</dd>
                   </dl>
                 )}
-                {operation?.phase === 'complete' && !failed && (
-                  <p>
-                    The lifecycle operation completed. Use the traffic state alongside health checks
-                    to assess availability.
-                  </p>
-                )}
                 {operation && !needsAttention && operation.phase !== 'complete' && (
                   <p>
-                    Keep the lifecycle command running. Refreshing this page does not interrupt the
-                    operation.
+                    Keep the CLI command running until it finishes. Refreshing this page won’t
+                    interrupt it.
                   </p>
                 )}
               </section>
@@ -289,17 +283,16 @@ export function PlatformStatusPage({
               </Heading>
               <p>
                 {!current
-                  ? 'Traffic state is not currently available.'
+                  ? 'Traffic status is unavailable. Try refreshing.'
                   : current.traffic === 'paused'
-                    ? 'Application requests may receive a temporary-unavailability response. Platform changes stay paused for administrators except for sign-in and this status page.'
-                    : 'The API traffic gate is open. Individual projects and other services may still be affected while Workers roll out.'}
+                    ? 'App traffic and dashboard changes are paused for maintenance. You can still sign in and follow progress here.'
+                    : 'Maintenance mode is off. The platform is allowing requests to your apps.'}
               </p>
-              {current && (
-                <p className="void-platform-status-timestamp">
-                  Confirmed {formatDateTime(current.checkedAt)}
-                </p>
-              )}
-              <p>This state does not replace service or project health checks.</p>
+              {current?.traffic === 'enabled' &&
+                operation &&
+                ['deploying', 'verifying', 'enabling'].includes(operation.phase) && (
+                  <p>Some apps may be temporarily unavailable while services are being updated.</p>
+                )}
             </section>
           </div>
 

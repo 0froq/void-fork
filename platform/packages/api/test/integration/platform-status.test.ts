@@ -180,6 +180,11 @@ it('omits empty operation details when no installation checkpoint is configured'
   expect(response.status).toBe(200);
   const html = await response.text();
   expect(html).toContain('Traffic enabled');
+  expect(html).toContain(
+    'Maintenance mode is off. The platform is allowing requests to your apps.',
+  );
+  expect(html).not.toContain('Confirmed ');
+  expect(html).not.toContain('Some apps may be temporarily unavailable');
   expect(html).not.toContain('No saved operation');
   expect(html).not.toContain('platform-operation-heading');
   expect(html).not.toContain('Detailed progress is available');

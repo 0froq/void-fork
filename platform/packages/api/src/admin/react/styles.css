@@ -190,8 +190,7 @@ body {
   font-size: 0.875rem;
   margin: 0;
 }
-.void-platform-status-grid dt,
-.void-platform-status-timestamp {
+.void-platform-status-grid dt {
   color: var(--color-text-secondary);
 }
 .void-platform-status-grid dd {
