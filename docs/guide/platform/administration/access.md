@@ -11,7 +11,7 @@ For the browser admin UI, open `<API URL>/admin` and use the administrator login
 Connect to your platform's API URL, then sign in as an administrator:
 
 ```sh
-void connect https://platform.example.com --no-login
+void connect platform.example.com --no-login
 void platform auth login
 ```
 

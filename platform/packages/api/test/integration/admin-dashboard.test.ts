@@ -3151,7 +3151,7 @@ describe('GET /admin/signup-control', () => {
     expect(visibleMarkup(html)).toContain('>Access</h1>');
     expect(visibleMarkup(html)).toContain('Signup is open to anyone with an enabled login');
     expect(html).toContain('Share these details manually');
-    expect(html).toContain("void connect 'http://localhost'");
+    expect(html).toContain("void connect 'localhost'");
     expect(html).toContain('Email not enabled');
   });
 

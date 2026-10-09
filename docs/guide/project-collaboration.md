@@ -54,7 +54,7 @@ Connect to the platform from your invitation, then see invitations addressed to
 your account and respond using the invitation ID:
 
 ```sh
-void connect https://api.example.com
+void connect api.example.com
 void project team pending
 void project team accept <invitation-id>
 # or

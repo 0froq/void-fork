@@ -31,7 +31,7 @@ describe('platform onboarding pages', () => {
     expect(html).toContain('<h1 id="void-auth-title">Welcome to &lt;Example Platform&gt;</h1>');
     expect(html).toContain('<title>Welcome · &lt;Example Platform&gt; · Void</title>');
     expect(html).toContain('npm install -g void');
-    expect(html).toContain('void connect &#39;https://api.example.com&#39;');
+    expect(html).toContain('void connect &#39;api.example.com&#39;');
     expect(html).toContain('href="/admin/"');
     expect(html).toContain('href="https://void.cloud/guide/quickstart"');
     expect(html).not.toContain('<Example Platform>');
@@ -76,7 +76,7 @@ describe('platform onboarding pages', () => {
     expect(html).toContain('<title>Get Started · &lt;Example Platform&gt; · Void</title>');
     expect(html).not.toContain('<Example Platform>');
     // `escapeHtml` escapes the quotes too; the browser renders them back.
-    expect(html).toContain('void connect &#39;https://api.example.com&#39;');
+    expect(html).toContain('void connect &#39;api.example.com&#39;');
     expect(html).not.toContain('attacker.example');
     expect(html).not.toContain('alias.example.com');
     expect(html).not.toContain('void auth login');
@@ -95,7 +95,7 @@ describe('platform onboarding pages', () => {
     const html = await response.text();
     expect(html).toContain('Get Started with Void Platform');
     // `escapeHtml` escapes the quotes too; the browser renders them back.
-    expect(html).toContain('void connect &#39;https://api.example.com&#39;');
+    expect(html).toContain('void connect &#39;api.example.com&#39;');
     expect(html).not.toContain('attacker.example');
   });
 
@@ -112,7 +112,7 @@ describe('platform onboarding pages', () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain('<title>Accept Project Invitation · Void Platform</title>');
-    expect(html).toContain('void connect &#39;https://api.example.com&#39;');
+    expect(html).toContain('void connect &#39;api.example.com&#39;');
     expect(html).toContain('void project team accept pinv_a1b2c3d4e5f6');
     expect(html).toContain('The CLI checks that it is still valid');
     expect(html).toContain('run <code>void project link</code> if it is not linked yet');
@@ -155,7 +155,7 @@ describe('platform onboarding pages', () => {
       expect(html).toContain('Void Platform');
       expect(html).not.toContain('Void Cloud');
       if (path === '/') {
-        expect(html).toContain('void connect &#39;https://api.example.com&#39;');
+        expect(html).toContain('void connect &#39;api.example.com&#39;');
       }
     },
   );

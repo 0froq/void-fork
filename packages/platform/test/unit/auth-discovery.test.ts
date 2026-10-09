@@ -33,6 +33,19 @@ const modern = {
   },
 };
 describe('authentication discovery compatibility', () => {
+  it.each(['http://localhost:8787', 'http://127.0.0.1:8787', 'http://[::1]:8787'])(
+    'supports loopback discovery at %s',
+    (apiUrl) => {
+      const discovery = createPlatformDiscoveryDocument({ ...base, apiUrl, proxyUrl: apiUrl });
+      expect(parsePlatformDiscoveryDocument(discovery).apiUrl).toBe(apiUrl);
+    },
+  );
+  it.each(['http://localhost.example.com', 'http://127.0.0.2', 'http://example.com'])(
+    'rejects insecure remote discovery at %s',
+    (apiUrl) => {
+      expect(() => createPlatformDiscoveryDocument({ ...base, apiUrl })).toThrow('HTTPS');
+    },
+  );
   it('retains the legacy document for unchanged installations', () => {
     const discovery = createPlatformDiscoveryDocument(base);
     expect(discovery.schemaVersion).toBe(1);

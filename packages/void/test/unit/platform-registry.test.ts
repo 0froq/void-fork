@@ -107,6 +107,7 @@ describe('platform registry', () => {
       'https://platform.example.com',
     );
     expect(normalizePlatformApiUrl('http://localhost:8787')).toBe('http://localhost:8787');
+    expect(normalizePlatformApiUrl('http://[::1]:8787')).toBe('http://[::1]:8787');
     expect(() => normalizePlatformApiUrl('http://platform.example.com')).toThrow('HTTPS');
     expect(() => normalizePlatformApiUrl('https://user@example.com')).toThrow('credentials');
     expect(() => normalizePlatformApiUrl('https://example.com/api')).toThrow(

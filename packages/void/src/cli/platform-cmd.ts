@@ -22,7 +22,10 @@ import {
 
 function normalizePlatformInputUrl(input: string): string {
   const value = input.trim();
-  return normalizePlatformApiUrl(value.includes('://') ? value : `https://${value}`);
+  const protocol = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?\/?$/i.test(value)
+    ? 'http'
+    : 'https';
+  return normalizePlatformApiUrl(value.includes('://') ? value : `${protocol}://${value}`);
 }
 
 export async function discoverPlatform(

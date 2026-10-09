@@ -17,7 +17,7 @@ void platform system health
 Administrator login is separate from the credentials used to deploy apps. In a new or unlinked Void app directory, connect using the installed API URL and deploy your first project:
 
 ```sh
-void connect https://void-company-api.example.workers.dev
+void connect void-company-api.example.workers.dev
 void deploy --platform void --project my-first-app
 ```
 

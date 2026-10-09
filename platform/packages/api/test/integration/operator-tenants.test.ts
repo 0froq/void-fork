@@ -1501,7 +1501,7 @@ describe('operator signup access and invitations', () => {
       expect.objectContaining({
         from: 'Example Platform <platform@example.com>',
         subject: "You're invited to Example Platform",
-        text: expect.stringContaining("void connect 'https://api.example.com'"),
+        text: expect.stringContaining("void connect 'api.example.com'"),
       }),
     );
     const listed = (await (await req('/invitations?limit=1')).json()) as {

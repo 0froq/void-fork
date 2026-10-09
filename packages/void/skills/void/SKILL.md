@@ -22,8 +22,9 @@ Use `void` and `@void/*` in imports, examples, and package manifests. Follow the
 project's existing framework and deployment destination. Deploying to a Void
 platform requires an explicit `void connect <url>` first; never infer a platform
 from old examples, tokens, or project IDs.
-Platform hostnames passed to `void connect` default to HTTPS; include `http://`
-explicitly when connecting to a local HTTP platform.
+Platform hostnames passed to `void connect` default to HTTPS. Loopback hosts
+(`localhost`, `127.0.0.1`, and `[::1]`) default to HTTP: `void connect localhost:8787`.
+An explicit scheme overrides the default.
 For a one-time deployment elsewhere, connect to that platform, then set
 `VOID_API_URL` for the deploy command and pass `--project <slug>`. This preserves
 the app's existing saved destination, including when the target project is new.

@@ -240,6 +240,11 @@ describe('platform discovery', () => {
     [' api.example.com/ ', 'https://api.example.com'],
     ['api.example.com:8443', 'https://api.example.com:8443'],
     ['http://localhost:8787', 'http://localhost:8787'],
+    ['localhost', 'http://localhost'],
+    [' localhost:8787/ ', 'http://localhost:8787'],
+    ['127.0.0.1:8787', 'http://127.0.0.1:8787'],
+    ['[::1]:8787', 'http://[::1]:8787'],
+    ['https://localhost:8787', 'https://localhost:8787'],
   ])('discovers %s at %s', async (input, apiUrl) => {
     const response = new Response(JSON.stringify({ ...document, apiUrl }));
     Object.defineProperty(response, 'url', {
@@ -259,6 +264,8 @@ describe('platform discovery', () => {
 
   it.each([
     'http://api.example.com',
+    'http://localhost.example.com',
+    'http://127.0.0.2',
     'ftp://api.example.com',
     'user@api.example.com',
     'api.example.com/api',

@@ -67,8 +67,7 @@ export function normalizePlatformApiUrl(value: string): string {
     throw new Error(`platform: Invalid platform URL ${JSON.stringify(value)}.`);
   }
   const localHttp =
-    url.protocol === 'http:' &&
-    (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1');
+    url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
   if ((!localHttp && url.protocol !== 'https:') || url.username || url.password) {
     throw new Error('platform: Platform URLs must use HTTPS and must not contain credentials.');
   }

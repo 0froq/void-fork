@@ -62,7 +62,7 @@ If no project is linked and no override is provided, CLI prompts to link or crea
 To deploy to another connected Void platform for one invocation:
 
 ```sh
-void connect https://second.example.com
+void connect second.example.com
 VOID_API_URL=https://second.example.com void deploy --platform void --project my-app
 ```
 

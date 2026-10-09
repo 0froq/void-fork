@@ -130,7 +130,7 @@ describe('platform email identity', () => {
       expect(msg.from).toBe(identity.EMAIL_FROM);
       expect(msg.html).toContain('Example &lt;Platform&gt;');
       expect(msg.html).not.toContain('Example <Platform>');
-      expect(msg.text).toContain("void connect 'https://api.example.com'");
+      expect(msg.text).toContain("void connect 'api.example.com'");
       expect(msg.html + msg.text).not.toContain('void auth login');
       expect(msg.html + msg.text).not.toContain('void deploy');
       expect(msg.html).toContain('https://api.example.com/invite');
@@ -154,7 +154,7 @@ describe('platform email identity', () => {
       },
     );
 
-    expect(sent[0].html + sent[0].text).toContain("void connect 'https://api.example.com'");
+    expect(sent[0].html + sent[0].text).toContain("void connect 'api.example.com'");
     expect(sent[0].html + sent[0].text).toContain('void project team accept pinv_a1b2c3d4e5f6');
     expect(sent[0].html + sent[0].text).toContain(
       'https://api.example.com/invite?project-invitation=pinv_a1b2c3d4e5f6',
@@ -170,7 +170,7 @@ describe('platform email identity', () => {
     for (const msg of sent) {
       expect(msg.from).toBe(identity.EMAIL_FROM);
       expect(msg.html).toContain('Example &lt;Platform&gt;');
-      expect(msg.text).toContain("void connect 'https://api.example.com'");
+      expect(msg.text).toContain("void connect 'api.example.com'");
       expect(msg.html + msg.text).not.toContain('void.cloud');
       expect(msg.html).not.toContain('View Project');
     }
@@ -219,7 +219,7 @@ describe('platform email identity', () => {
     );
     expect(sent[0].subject).toBe("You're invited to Void Platform");
     expect(sent[0].html + sent[0].text).not.toContain('Void Cloud');
-    expect(sent[0].text).toContain("void connect 'https://api.example.com'");
+    expect(sent[0].text).toContain("void connect 'api.example.com'");
   });
 
   it('preserves the Void Cloud sender only for its hosted deployment', async () => {
@@ -227,6 +227,6 @@ describe('platform email identity', () => {
     await sendInvitationEmail(binding, 'member@example.com');
     expect(sent[0].from).toBe('Void <noreply@void.cloud>');
     expect(sent[0].subject).toBe("You're invited to Void Cloud");
-    expect(sent[0].text).toContain("void connect 'https://api.void.cloud'");
+    expect(sent[0].text).toContain("void connect 'api.void.cloud'");
   });
 });

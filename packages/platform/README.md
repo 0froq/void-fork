@@ -16,7 +16,7 @@ npx void platform install
 Once the platform is installed, developers connect and deploy:
 
 ```sh
-npx void connect https://api.example.com
+npx void connect api.example.com
 npx void deploy
 ```
 

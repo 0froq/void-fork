@@ -73,7 +73,7 @@ If CI runs typechecking before deploy, run `void prepare` after installing depen
 Use the API URL from your administrator. In a new or unlinked app:
 
 ```sh
-void connect https://platform.example.com
+void connect platform.example.com
 void deploy --platform void --project my-app
 ```
 
@@ -86,7 +86,7 @@ Project owners can [share access](./project-collaboration.md). To install a plat
 For a single deployment to a different platform, connect and name its project:
 
 ```sh
-void connect https://second.example.com
+void connect second.example.com
 VOID_API_URL=https://second.example.com void deploy --platform void --project my-app
 ```
 

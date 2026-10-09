@@ -13,7 +13,7 @@ void connect --platform void
 
 Connect a project to its deployment destination. With no arguments, choose Cloudflare or a Void platform interactively. A URL selects a Void platform directly. `--platform void` offers saved platforms and an option to enter another URL.
 
-You can omit `https://` from a platform URL: `void connect platform.example.com` connects to `https://platform.example.com`. This also works in the interactive prompt. For a local HTTP platform, include the scheme, such as `http://localhost:8787`.
+You can use a hostname: `void connect platform.example.com` connects over HTTPS. Loopback hosts (`localhost`, `127.0.0.1`, and `[::1]`) default to HTTP, so use `void connect localhost:8787` for a local platform. This also works in the interactive prompt. Include a scheme to override the default, for example `void connect https://localhost:8787`.
 
 For Cloudflare, Void signs in through the browser when needed, selects an accessible account, and saves `cloudflare.account_id` in `void.config.ts` or resolved state in `void.lock.json`. It shares this setup with `void init`. An existing account selection is preserved; conflicting or inaccessible account settings must be resolved before continuing.
 
