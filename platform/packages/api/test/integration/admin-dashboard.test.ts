@@ -1,4 +1,6 @@
+import { readFile } from 'node:fs/promises';
 import { eq } from 'drizzle-orm';
+import { chromium } from 'playwright';
 import {
   describe,
   test,
@@ -12,6 +14,7 @@ import {
 import { respondToProjectInvitation } from '../../src/db.ts';
 import type { ApiEnv } from '../../src/env.ts';
 import { app } from '../../src/index.ts';
+import * as systemOperations from '../../src/operator/system-operations.ts';
 import {
   deployments,
   domains,
@@ -315,7 +318,7 @@ describe('auth middleware', () => {
       );
       expect(response.status).toBe(200);
       const html = visibleMarkup(await response.text());
-      const checks = html.split('id="health-checks"')[1]?.split('</div>')[0];
+      const checks = html.split('id="health-checks"')[1]?.split('</ul>')[0];
       expect(checks).toBeDefined();
       expect(checks?.match(/class="void-admin-health-check"/g)).toHaveLength(names.length);
       const labels: Record<string, string> = {
@@ -353,6 +356,148 @@ describe('auth middleware', () => {
     expect(navigation.headers.get('Cache-Control')).toBe('private, no-store');
     expect(((await navigation.json()) as { component: string }).component).toBe('users');
   });
+
+  test('keeps system-status geometry stable through loading, errors and failed refreshes', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'health-layout-admin',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    const client = await readFile(
+      new URL('../../dist/admin-assets/admin/client.js', import.meta.url),
+    );
+    const css = await readFile(new URL('../../dist/admin-assets/admin/style.css', import.meta.url));
+    const browser = await chromium.launch();
+    const detail =
+      'The upstream service did not respond before the health-check deadline. Please retry later.';
+    let state: 'loading' | 'healthy' | 'error' | 'unavailable' = 'loading';
+    let releaseHealth: (() => void) | undefined;
+    vi.spyOn(systemOperations, 'systemHealth').mockImplementation(async () => {
+      if (state === 'loading') {
+        await new Promise<void>((resolve) => {
+          releaseHealth = resolve;
+        });
+      }
+      if (state === 'unavailable') {
+        throw new Error('Health endpoint unavailable');
+      }
+      return {
+        allOk: state !== 'error',
+        checks: ['api', 'proxy', 'dashboard', 'dispatch', 'db'].map((name) => ({
+          name,
+          ok: state !== 'error' || name !== 'proxy',
+          latencyMs: 1,
+          ...(state === 'error' && name === 'proxy' ? { error: detail } : {}),
+        })),
+      };
+    });
+    try {
+      for (const width of [1280, 390, 320]) {
+        state = 'loading';
+        releaseHealth = undefined;
+        const context = await browser.newContext({ viewport: { width, height: 844 } });
+        await context.addCookies([
+          { name: 'admin_token', value: admin.adminJwt, url: 'http://localhost' },
+        ]);
+        const page = await context.newPage();
+        const errors: Array<string> = [];
+        page.on('pageerror', (error) => errors.push(error.message));
+        await page.clock.install();
+        await page.route('**/*', async (route) => {
+          const incoming = route.request();
+          const url = new URL(incoming.url());
+          if (url.origin !== 'http://localhost') {
+            return route.abort();
+          }
+          if (url.pathname === '/admin/client.js' || url.pathname === '/admin/style.css') {
+            return route.fulfill({
+              contentType: url.pathname.endsWith('.js') ? 'text/javascript' : 'text/css',
+              body: url.pathname.endsWith('.js') ? client : css,
+            });
+          }
+          const response = await app.fetch(
+            new Request(incoming.url(), {
+              method: incoming.method(),
+              headers: await incoming.allHeaders(),
+              ...(incoming.method() === 'POST' ? { body: incoming.postData() ?? '' } : {}),
+            }),
+            { ...env, DEV_AUTH_BYPASS: 'true' },
+          );
+          await route.fulfill({
+            status: response.status,
+            headers: Object.fromEntries(response.headers),
+            body: Buffer.from(await response.arrayBuffer()),
+          });
+        });
+        await page.goto('http://localhost/admin/');
+        await page.locator('[data-hydrated="true"]').waitFor();
+        await expect.poll(() => releaseHealth !== undefined).toBe(true);
+        const sizes: Array<{ width: number; height: number }> = [];
+        await page.exposeFunction('recordHealthSize', (width: number, height: number) => {
+          sizes.push({ width, height });
+        });
+        await page.evaluate(() => {
+          const record = (
+            window as unknown as {
+              recordHealthSize: (width: number, height: number) => void;
+            }
+          ).recordHealthSize;
+          new ResizeObserver(([entry]) => {
+            record(entry.contentRect.width, entry.contentRect.height);
+          }).observe(document.querySelector('#health-status')!);
+        });
+        const geometry = () =>
+          page.evaluate(() =>
+            ['#health-status', '#health-status .astryx-layout-header', '#health-checks'].map(
+              (selector) => {
+                const { x, y, width, height } = document
+                  .querySelector(selector)!
+                  .getBoundingClientRect();
+                return { x, y, width, height };
+              },
+            ),
+          );
+        const loading = await geometry();
+        expect(
+          await page
+            .locator('#health-status .astryx-layout-header')
+            .evaluate((element) => getComputedStyle(element).backgroundColor),
+        ).not.toBe('rgba(0, 0, 0, 0)');
+        state = 'healthy';
+        releaseHealth!();
+        await page.locator('#health-status[data-state="healthy"]').waitFor();
+        expect(await geometry()).toEqual(loading);
+        state = 'error';
+        await page.clock.runFor(30_000);
+        await page.locator('#health-status[data-state="error"]').waitFor();
+        expect(await geometry()).toEqual(loading);
+        const failedService = page
+          .locator('.void-admin-health-service')
+          .filter({ hasText: detail });
+        await failedService.focus();
+        await page.getByRole('tooltip').filter({ hasText: detail }).waitFor();
+        expect(await geometry()).toEqual(loading);
+        state = 'unavailable';
+        await page.clock.runFor(30_000);
+        await page.locator('#health-status[data-state="unavailable"]').waitFor();
+        expect(await geometry()).toEqual(loading);
+        state = 'healthy';
+        await page.clock.runFor(30_000);
+        await page.locator('#health-status[data-state="healthy"]').waitFor();
+        expect(await geometry()).toEqual(loading);
+        await expect.poll(() => sizes.length).toBeGreaterThan(0);
+        expect(new Set(sizes.map((size) => JSON.stringify(size))).size).toBe(1);
+        expect(errors).toEqual([]);
+        await context.close();
+      }
+    } finally {
+      releaseHealth?.();
+      await browser.close();
+    }
+  }, 30_000);
 
   test('does not expose the retired platform operations pages', async () => {
     const admin = await createTestUser(env.db, 'admin', 'github', undefined, 'free', 'admin');

@@ -265,8 +265,36 @@ body {
   display: grid;
   gap: var(--spacing-4);
 }
+#health-status {
+  container-type: inline-size;
+}
 #health-status .void-admin-dashboard-card {
   overflow: hidden;
+}
+#health-status .astryx-layout-header {
+  background-color: color-mix(
+    in srgb,
+    var(--color-background-gray) 50%,
+    var(--color-background-card)
+  );
+}
+#health-status .void-admin-dashboard-card-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 9rem;
+}
+#health-status .astryx-heading {
+  white-space: nowrap;
+}
+/* Reserve the timestamp row even before the first response on narrow cards. */
+@container (max-width: 21rem) {
+  #health-status .void-admin-dashboard-card-title {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--spacing-1);
+  }
+  #health-status .void-admin-health-checked-at {
+    width: 100%;
+    text-align: left;
+  }
 }
 #health-status[data-state='healthy'] .void-admin-dashboard-card {
   border-color: var(--color-border-green);
@@ -314,9 +342,8 @@ body {
   list-style: none;
 }
 .void-admin-health-checked-at {
-  flex-shrink: 0;
-  min-width: 9rem;
-  min-height: 1lh;
+  width: 9rem;
+  height: 1lh;
   color: var(--color-text-secondary);
   font-size: var(--text-supporting-size);
   font-weight: normal;
@@ -350,12 +377,21 @@ body {
   color: var(--color-icon-red);
 }
 .void-admin-health-label {
+  flex-shrink: 0;
   white-space: nowrap;
 }
+.void-admin-health-service {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: var(--spacing-2);
+}
 .void-admin-health-detail {
-  grid-column: 2;
+  min-width: 0;
   font-size: var(--text-supporting-size);
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .void-admin-auth {
   max-width: 480px;

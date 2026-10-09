@@ -1,4 +1,5 @@
 /** @jsxImportSource react */
+import { Tooltip } from '@astryxdesign/core/Tooltip';
 import { Activity, Check, CircleCheck, CircleHelp, CircleX, Minus, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useFateClient, useView, type ViewRef } from 'react-fate';
@@ -160,8 +161,12 @@ export function SystemStatusCard({ checkNames }: { checkNames: ReadonlyArray<str
                     <Minus size={16} />
                   ) : null}
                 </span>
-                <span className="void-admin-health-label">{label}</span>
-                {detail && <span className="void-admin-health-detail">{detail}</span>}
+                <Tooltip content={detail} isEnabled={!!detail} hasHoverIndication={false}>
+                  <span className="void-admin-health-service" tabIndex={detail ? 0 : undefined}>
+                    <span className="void-admin-health-label">{label}</span>
+                    {detail && <span className="void-admin-health-detail">{detail}</span>}
+                  </span>
+                </Tooltip>
               </li>
             );
           })}
