@@ -4,6 +4,7 @@ import { Heading } from '@astryxdesign/core/Text';
 import type { PlatformLifecycleOperation } from '@void/platform';
 import { useEffect, useState } from 'react';
 import type { PlatformStatusSnapshot } from '../../platform-status.ts';
+import { AdminCard } from './AdminCard.tsx';
 import { formatDateTime } from './format.ts';
 import { Layout } from './Layout.tsx';
 
@@ -153,67 +154,70 @@ export function PlatformStatusPage({
             className="void-platform-status-card"
             aria-labelledby="platform-operation-heading"
           >
-            <span className="void-platform-status-eyebrow">
-              {operation ? ACTION_LABELS[operation.action] : 'Lifecycle'}
-            </span>
-            <Heading level={2} id="platform-operation-heading">
-              {phaseLabel}
-            </Heading>
-            {operation ? (
-              <>
-                <p className="void-platform-status-version">
-                  {operation.fromVersion ?? 'New installation'} <span aria-label="to">→</span>{' '}
-                  {operation.toVersion}
+            <AdminCard
+              title={phaseLabel}
+              titleId="platform-operation-heading"
+              description={operation ? ACTION_LABELS[operation.action] : 'Lifecycle'}
+            >
+              {operation ? (
+                <>
+                  <p className="void-platform-status-version">
+                    {operation.fromVersion ?? 'New installation'} <span aria-label="to">→</span>{' '}
+                    {operation.toVersion}
+                  </p>
+                  <dl>
+                    <dt>Started</dt>
+                    <dd>{formatDateTime(operation.startedAt)}</dd>
+                    <dt>Progress saved</dt>
+                    <dd>{formatDateTime(operation.updatedAt)}</dd>
+                    <dt>Installation state</dt>
+                    <dd>{current?.checkpoint?.status}</dd>
+                  </dl>
+                </>
+              ) : (
+                <p>
+                  {current?.checkpoint
+                    ? `Saved runtime: ${current.checkpoint.platformVersion}. This operation has no detailed progress record.`
+                    : 'Detailed progress is available for installations managed by the Void lifecycle CLI.'}
                 </p>
-                <dl>
-                  <dt>Started</dt>
-                  <dd>{formatDateTime(operation.startedAt)}</dd>
-                  <dt>Progress saved</dt>
-                  <dd>{formatDateTime(operation.updatedAt)}</dd>
-                  <dt>Installation state</dt>
-                  <dd>{current?.checkpoint?.status}</dd>
-                </dl>
-              </>
-            ) : (
-              <p>
-                {current?.checkpoint
-                  ? `Saved runtime: ${current.checkpoint.platformVersion}. This operation has no detailed progress record.`
-                  : 'Detailed progress is available for installations managed by the Void lifecycle CLI.'}
-              </p>
-            )}
-            {operation?.phase === 'complete' && !failed && (
-              <p>
-                The lifecycle operation completed. Use the traffic state alongside health checks to
-                assess availability.
-              </p>
-            )}
-            {operation && !needsAttention && operation.phase !== 'complete' && (
-              <p>
-                Keep the lifecycle command running. Refreshing this page does not interrupt the
-                operation.
-              </p>
-            )}
+              )}
+              {operation?.phase === 'complete' && !failed && (
+                <p>
+                  The lifecycle operation completed. Use the traffic state alongside health checks
+                  to assess availability.
+                </p>
+              )}
+              {operation && !needsAttention && operation.phase !== 'complete' && (
+                <p>
+                  Keep the lifecycle command running. Refreshing this page does not interrupt the
+                  operation.
+                </p>
+              )}
+            </AdminCard>
           </section>
 
           <section className="void-platform-status-card" aria-labelledby="platform-traffic-heading">
-            <span className="void-platform-status-eyebrow">Traffic state reported by the API</span>
-            <Heading level={2} id="platform-traffic-heading">
-              {trafficLabel}
-              {current && connection !== 'current' ? ' (last confirmed)' : ''}
-            </Heading>
-            <p>
-              {!current
-                ? 'Traffic state is not currently available.'
-                : current.traffic === 'paused'
-                  ? 'Application requests may receive a temporary-unavailability response. Platform changes stay paused for administrators except for sign-in and this status page.'
-                  : 'The API traffic gate is open. Individual projects and other services may still be affected while Workers roll out.'}
-            </p>
-            {current && (
-              <p className="void-platform-status-timestamp">
-                Confirmed {formatDateTime(current.checkedAt)}
+            <AdminCard
+              title={
+                trafficLabel + (current && connection !== 'current' ? ' (last confirmed)' : '')
+              }
+              titleId="platform-traffic-heading"
+              description="Traffic state reported by the API"
+            >
+              <p>
+                {!current
+                  ? 'Traffic state is not currently available.'
+                  : current.traffic === 'paused'
+                    ? 'Application requests may receive a temporary-unavailability response. Platform changes stay paused for administrators except for sign-in and this status page.'
+                    : 'The API traffic gate is open. Individual projects and other services may still be affected while Workers roll out.'}
               </p>
-            )}
-            <p>This state does not replace service or project health checks.</p>
+              {current && (
+                <p className="void-platform-status-timestamp">
+                  Confirmed {formatDateTime(current.checkedAt)}
+                </p>
+              )}
+              <p>This state does not replace service or project health checks.</p>
+            </AdminCard>
           </section>
         </div>
 
@@ -222,21 +226,20 @@ export function PlatformStatusPage({
             className="void-platform-status-card void-platform-status-recovery"
             aria-labelledby="platform-recovery-heading"
           >
-            <Heading level={2} id="platform-recovery-heading">
-              Next step
-            </Heading>
-            <p>
-              {operation?.phase === 'waiting-for-dns'
-                ? 'Wait for the zone to become active, then rerun the lifecycle command.'
-                : operation?.phase === 'waiting-for-sandbox-drain'
-                  ? 'Complete the remaining Sandbox drain work using the CLI, then rerun the lifecycle command. Traffic stays paused until the cutover is verified.'
-                  : 'Review the CLI error and saved installation state. Resolve the error before resuming the same lifecycle command.'}
-            </p>
-            <p>
-              Use the recovery commands printed by the CLI and keep the same runtime files
-              {operation?.action === 'rollback' ? ', including the rollback source runtime' : ''}.
-              Reloading this page does not resume an operation.
-            </p>
+            <AdminCard title="Next step" titleId="platform-recovery-heading">
+              <p>
+                {operation?.phase === 'waiting-for-dns'
+                  ? 'Wait for the zone to become active, then rerun the lifecycle command.'
+                  : operation?.phase === 'waiting-for-sandbox-drain'
+                    ? 'Complete the remaining Sandbox drain work using the CLI, then rerun the lifecycle command. Traffic stays paused until the cutover is verified.'
+                    : 'Review the CLI error and saved installation state. Resolve the error before resuming the same lifecycle command.'}
+              </p>
+              <p>
+                Use the recovery commands printed by the CLI and keep the same runtime files
+                {operation?.action === 'rollback' ? ', including the rollback source runtime' : ''}.
+                Reloading this page does not resume an operation.
+              </p>
+            </AdminCard>
           </section>
         )}
         {current?.traffic === 'enabled' && connection === 'current' && (

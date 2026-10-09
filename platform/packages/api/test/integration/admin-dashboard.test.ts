@@ -1086,7 +1086,7 @@ describe('GET /admin/ (dashboard)', () => {
     vi.restoreAllMocks();
   });
 
-  test('keeps user and deployment tables readable across list views', async () => {
+  test('keeps tables readable and settings cards within the viewport', async () => {
     const admin = await createTestUser(
       env.db,
       'deployment-layout-admin',
@@ -1159,6 +1159,7 @@ describe('GET /admin/ (dashboard)', () => {
           `/admin/projects/${project.id}`,
           '/admin/users',
         ]) {
+          page.setDefaultTimeout(5000);
           await page.goto(`http://localhost${path}`);
           await page.locator('[data-hydrated="true"]').waitFor();
           const isUsers = path === '/admin/users';
@@ -1227,6 +1228,40 @@ describe('GET /admin/ (dashboard)', () => {
           expect(
             await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
           ).toBe(true);
+        }
+        for (const path of [
+          '/admin/signup-control',
+          '/admin/config/auth',
+          '/admin/zero-trust',
+          '/admin/email',
+        ]) {
+          await page.goto(`http://localhost${path}`);
+          await page.locator('[data-hydrated="true"]').waitFor({ timeout: 5000 });
+          const cards = page.locator('.void-admin-card');
+          expect(await cards.count()).toBeGreaterThan(0);
+          expect(
+            await cards.evaluateAll((elements) =>
+              elements.every((element) => {
+                const { left, right } = element.getBoundingClientRect();
+                return left >= 0 && right <= window.innerWidth;
+              }),
+            ),
+          ).toBe(true);
+          if (path === '/admin/signup-control') {
+            const invite = page.getByRole('region', { name: 'Invite people', exact: true });
+            const command = page.getByRole('textbox', { name: 'Void CLI connection command' });
+            expect(await command.inputValue()).toBe("void connect 'localhost'");
+            await invite
+              .locator('.void-admin-access-copy-value')
+              .filter({ has: command })
+              .getByRole('button', { name: 'Copy', exact: true })
+              .click();
+            await expect
+              .poll(() =>
+                page.evaluate(() => (window as unknown as { copiedError?: string }).copiedError),
+              )
+              .toBe("void connect 'localhost'");
+          }
         }
         expect(errors).toEqual([]);
         await context.close();

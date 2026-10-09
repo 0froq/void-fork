@@ -4,7 +4,7 @@ import { Activity, Check, CircleCheck, CircleHelp, CircleX, Minus, X } from 'luc
 import { useEffect, useState } from 'react';
 import { useFateClient, useView, type ViewRef } from 'react-fate';
 import { HealthView, healthRequest } from '../../fate/views.ts';
-import { DashboardCard } from './DashboardCard.tsx';
+import { AdminCard } from './AdminCard.tsx';
 
 const serviceLabels: Record<string, string> = {
   api: 'API',
@@ -98,7 +98,7 @@ export function SystemStatusCard({ checkNames }: { checkNames: ReadonlyArray<str
           : 'System status unavailable';
   return (
     <div id="health-status" data-state={overallState}>
-      <DashboardCard
+      <AdminCard
         title="System Status"
         titleIcon={
           <span className="void-admin-health-overall-icon" role="img" aria-label={overallLabel}>
@@ -171,7 +171,7 @@ export function SystemStatusCard({ checkNames }: { checkNames: ReadonlyArray<str
             );
           })}
         </ul>
-      </DashboardCard>
+      </AdminCard>
     </div>
   );
 }

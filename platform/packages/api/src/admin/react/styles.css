@@ -131,20 +131,7 @@ body {
   gap: var(--spacing-6);
 }
 .void-platform-status-card {
-  padding: var(--spacing-6);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-container);
-  background: var(--color-background-body);
   min-width: 0;
-}
-.void-platform-status-card h2 {
-  margin-block: var(--spacing-3);
-}
-.void-platform-status-eyebrow {
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--color-text-secondary);
 }
 .void-platform-status-version {
   font-size: 1.5rem;
@@ -235,40 +222,73 @@ body {
   display: grid;
   gap: var(--spacing-6);
 }
-.void-admin-dashboard-card {
+.void-admin-card {
   min-width: 0;
 }
-.void-admin-dashboard-card-heading {
+.void-admin-access-page,
+.void-admin-auth-settings,
+.void-admin-zero-trust,
+.void-admin-settings-cards,
+.void-platform-status {
+  grid-template-columns: minmax(0, 1fr);
+}
+.void-admin-card-content > * {
+  min-width: 0;
+}
+.void-admin-card-heading {
   display: grid;
   gap: var(--spacing-1);
   padding: var(--spacing-2) var(--spacing-3) var(--spacing-1-5);
 }
-.void-admin-dashboard-card-heading h2 {
+.void-admin-card-heading :is(h2, h3) {
   margin: 0;
 }
-.void-admin-dashboard-card-title {
+.void-admin-card-title {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--spacing-3);
 }
-.void-admin-dashboard-card-label {
+.void-admin-card-label {
   display: flex;
   align-items: center;
   gap: var(--spacing-2);
 }
-.void-admin-dashboard-card-arrow {
+.void-admin-card-arrow {
   flex-shrink: 0;
   color: var(--color-text-secondary);
 }
-.void-admin-dashboard-card-loading {
+.void-admin-card-content {
+  display: grid;
+  gap: var(--spacing-4);
+  min-width: 0;
+}
+.void-admin-card-content > .astryx-button {
+  justify-self: start;
+}
+.void-admin-card-footer .void-admin-pagination {
+  margin: 0;
+}
+.void-admin-card-title .astryx-badge {
+  white-space: nowrap;
+}
+.void-admin-settings-cards {
+  display: grid;
+  gap: var(--spacing-5);
+  max-width: 1120px;
+}
+.void-admin-settings-cards p {
+  margin: 0;
+}
+.void-admin-card-loading {
   display: grid;
   gap: var(--spacing-4);
 }
 #health-status {
   container-type: inline-size;
 }
-#health-status .void-admin-dashboard-card {
+#health-status .void-admin-card {
   overflow: hidden;
 }
 #health-status .astryx-layout-header {
@@ -278,7 +298,7 @@ body {
     var(--color-background-card)
   );
 }
-#health-status .void-admin-dashboard-card-title {
+#health-status .void-admin-card-title {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 9rem;
 }
@@ -287,7 +307,7 @@ body {
 }
 /* Reserve the timestamp row even before the first response on narrow cards. */
 @container (max-width: 21rem) {
-  #health-status .void-admin-dashboard-card-title {
+  #health-status .void-admin-card-title {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--spacing-1);
   }
@@ -296,10 +316,10 @@ body {
     text-align: left;
   }
 }
-#health-status[data-state='healthy'] .void-admin-dashboard-card {
+#health-status[data-state='healthy'] .void-admin-card {
   border-color: var(--color-border-green);
 }
-#health-status[data-state='error'] .void-admin-dashboard-card {
+#health-status[data-state='error'] .void-admin-card {
   border-color: var(--color-border-red);
 }
 #health-status[data-state='healthy'] .astryx-layout-header {
@@ -425,49 +445,18 @@ body {
   gap: var(--spacing-2);
 }
 .void-admin-auth-intro p,
-.void-admin-auth-section-header p,
 .void-admin-auth-method-type,
 .void-admin-auth-note {
   color: var(--color-text-secondary);
 }
-.void-admin-auth-settings .astryx-card {
-  display: grid;
-  gap: var(--spacing-5);
-}
-.void-admin-auth-section-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--spacing-3);
-}
-.void-admin-auth-section-header > div {
-  display: grid;
-  gap: var(--spacing-2);
-}
-.void-admin-auth-section-header .astryx-badge {
-  white-space: nowrap;
-}
 .void-admin-auth-protection-details {
   display: grid;
   gap: var(--spacing-4);
-  border-top: 1px solid var(--color-border);
-  padding-top: var(--spacing-4);
 }
 .void-admin-auth-protection-steps {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
   gap: var(--spacing-3);
-}
-.void-admin-auth-protection-steps > div {
-  display: grid;
-  align-content: start;
-  gap: var(--spacing-3);
-  min-width: 0;
-  padding: var(--spacing-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-element);
-  background: var(--color-background-body);
 }
 .void-admin-auth-protection-details pre {
   margin: 0;
@@ -497,7 +486,7 @@ body {
   font-weight: 600;
 }
 .void-admin-auth-method-list {
-  border-block: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
 }
 .void-admin-auth-method {
   display: flex;
@@ -534,6 +523,9 @@ body {
   justify-items: start;
 }
 .void-admin-email-choice-form {
+  display: grid;
+  justify-items: start;
+  gap: var(--spacing-4);
   padding-block-start: var(--spacing-4);
 }
 .void-admin-email-choice-form .astryx-radio-indicator {
@@ -561,17 +553,6 @@ body {
 .void-admin-zero-trust-intro p,
 .void-admin-zero-trust .astryx-card p {
   color: var(--color-text-secondary);
-}
-.void-admin-zero-trust .astryx-card {
-  display: grid;
-  gap: var(--spacing-4);
-}
-.void-admin-zero-trust-section-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--spacing-3);
 }
 .void-admin-zero-trust-details {
   display: grid;
@@ -627,40 +608,21 @@ body {
   font-size: var(--text-body-size);
   font-weight: 600;
 }
-.void-admin-access-page .astryx-card {
-  display: grid;
-  gap: var(--spacing-5);
-}
 .void-admin-access-intro,
-.void-admin-access-section-header > div,
 .void-admin-access-form,
-.void-admin-access-company-policy,
 .void-admin-access-share {
   display: grid;
   gap: var(--spacing-3);
 }
 .void-admin-access-intro p,
-.void-admin-access-section-header p,
-.void-admin-access-muted,
-.void-admin-access-company-policy p {
+.void-admin-access-muted {
   color: var(--color-text-secondary);
-}
-.void-admin-access-section-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--spacing-3);
 }
 .void-admin-access-form {
   justify-items: start;
 }
-.void-admin-access-company-policy {
-  box-sizing: border-box;
+.void-admin-access-form > .void-admin-card {
   width: 100%;
-  padding: var(--spacing-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-element);
 }
 .void-admin-access-checkboxes {
   display: grid;
@@ -681,10 +643,6 @@ body {
   padding: var(--spacing-3) var(--spacing-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-element);
-}
-.void-admin-access-share {
-  padding-top: var(--spacing-4);
-  border-top: 1px solid var(--color-border);
 }
 .void-admin-access-copy-value {
   display: flex;

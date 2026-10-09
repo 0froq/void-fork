@@ -3,7 +3,6 @@
 import { Badge } from '@astryxdesign/core/Badge';
 import { Banner } from '@astryxdesign/core/Banner';
 import { Button } from '@astryxdesign/core/Button';
-import { Card } from '@astryxdesign/core/Card';
 import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList';
 import {
   Table,
@@ -18,6 +17,7 @@ import { useState } from 'react';
 import { useRequest, useView } from 'react-fate';
 import { ZeroTrustView, zeroTrustRequest } from '../../fate/views.ts';
 import { type AdminPageProps } from '../page-utils.ts';
+import { AdminCard } from './AdminCard.tsx';
 import { FormCheckbox, FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 
@@ -113,13 +113,11 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
         {lastError && <Banner status="error" title="Last error" description={lastError} />}
 
         <section aria-labelledby="zero-trust-status-heading">
-          <Card>
-            <div className="void-admin-zero-trust-section-header">
-              <Heading level={2} id="zero-trust-status-heading">
-                Status
-              </Heading>
-              <Badge label={badge.label} variant={badge.variant} />
-            </div>
+          <AdminCard
+            title="Status"
+            titleId="zero-trust-status-heading"
+            headerAccessory={<Badge label={badge.label} variant={badge.variant} />}
+          >
             <dl className="void-admin-zero-trust-details">
               <div>
                 <dt>Current operation</dt>
@@ -150,14 +148,11 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
                 </dd>
               </div>
             </dl>
-          </Card>
+          </AdminCard>
         </section>
 
         <section aria-labelledby="zero-trust-projects-heading">
-          <Card>
-            <Heading level={2} id="zero-trust-projects-heading">
-              Project states
-            </Heading>
+          <AdminCard title="Project states" titleId="zero-trust-projects-heading">
             {projects.length > 0 ? (
               <Table>
                 <TableHeader>
@@ -184,26 +179,22 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
             ) : (
               <p>No project protection state has been recorded.</p>
             )}
-          </Card>
+          </AdminCard>
         </section>
 
         <section aria-labelledby="zero-trust-configure-heading">
-          <Card>
-            <div>
-              <Heading level={2} id="zero-trust-configure-heading">
-                Configure
-              </Heading>
+          <AdminCard
+            title="Configure"
+            titleId="zero-trust-configure-heading"
+            description="The token needs Access Apps and Policies Write plus Organizations, Identity Providers, and Groups Read on the Cloudflare account that hosts this platform."
+          >
+            {operation && (
               <p>
-                The token needs Access Apps and Policies Write plus Organizations, Identity
-                Providers, and Groups Read on the Cloudflare account that hosts this platform.
+                To replace an expired or revoked token, keep the saved settings and submit a new
+                token. The pending operation will resume.
               </p>
-              {operation && (
-                <p>
-                  To replace an expired or revoked token, keep the saved settings and submit a new
-                  token. The pending operation will resume.
-                </p>
-              )}
-            </div>
+            )}
+
             <form method="post" action={`${HOME}/configure`} className="void-admin-zero-trust-form">
               {publicOnly && (
                 <p>
@@ -263,15 +254,12 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
               )}
               <Button type="submit" label="Save and reconcile" />
             </form>
-          </Card>
+          </AdminCard>
         </section>
 
         {configured && (
           <section aria-labelledby="zero-trust-maintenance-heading">
-            <Card>
-              <Heading level={2} id="zero-trust-maintenance-heading">
-                Maintenance
-              </Heading>
+            <AdminCard title="Maintenance" titleId="zero-trust-maintenance-heading">
               <div className="void-admin-zero-trust-actions">
                 <form method="post" action={`${HOME}/reconcile`}>
                   <Button type="submit" label="Reconcile drift" variant="secondary" />
@@ -290,7 +278,7 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
                   </form>
                 )}
               </div>
-            </Card>
+            </AdminCard>
           </section>
         )}
       </div>

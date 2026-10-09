@@ -2,12 +2,12 @@
 
 import { Badge } from '@astryxdesign/core/Badge';
 import { Button } from '@astryxdesign/core/Button';
-import { Card } from '@astryxdesign/core/Card';
 import { Heading } from '@astryxdesign/core/Text';
 import type { PlatformLoginConfiguration } from '@void/platform';
 import { useRequest, useView } from 'react-fate';
 import { AuthSettingsView, authSettingsRequest } from '../../fate/views.ts';
 import { type AdminPageProps } from '../page-utils.ts';
+import { AdminCard } from './AdminCard.tsx';
 import { Layout } from './Layout.tsx';
 
 const HOME = '/admin/config/auth';
@@ -36,49 +36,44 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
         </header>
 
         <section aria-labelledby="platform-protection-heading">
-          <Card>
-            <div className="void-admin-auth-section-header">
-              <div>
-                <Heading level={2} id="platform-protection-heading">
-                  Platform protection
-                </Heading>
-                <p>Control access to the platform before visitors reach a login page.</p>
-              </div>
+          <AdminCard
+            title="Platform protection"
+            titleId="platform-protection-heading"
+            description="Control access to the platform before visitors reach a login page."
+            headerAccessory={
               <Badge
                 label={
                   data.protection ? 'Cloudflare Access enabled' : 'Cloudflare Access not enabled'
                 }
                 variant={data.protection ? 'success' : 'neutral'}
               />
-            </div>
+            }
+          >
             <div className="void-admin-auth-protection-details">
               <div className="void-admin-auth-protection-steps">
-                <div>
-                  <h3>Enable Cloudflare Access</h3>
+                <AdminCard title="Enable Cloudflare Access" headingLevel={3}>
                   <p>
                     Create or connect an Access application and verify every platform origin. The
                     installing CLI needs the installation's recovery credentials and Access setup
                     permission.
                   </p>
                   <pre>void platform config auth protection enable --installation &lt;id&gt;</pre>
-                </div>
-                <div>
-                  <h3>Disable Cloudflare Access</h3>
+                </AdminCard>
+                <AdminCard title="Disable Cloudflare Access" headingLevel={3}>
                   <p>First change any signup policy that relies on Access.</p>
                   <pre>void platform config auth protection disable --installation &lt;id&gt;</pre>
-                </div>
+                </AdminCard>
               </div>
               <p className="void-admin-auth-note">
                 Either change revokes human sessions. Access applications remain for deliberate
                 cleanup; login methods and deployed applications keep their own settings.
               </p>
             </div>
-          </Card>
+          </AdminCard>
         </section>
 
         {!data.initialized ? (
-          <Card>
-            <Heading level={2}>Set up authentication settings</Heading>
+          <AdminCard title="Set up authentication settings">
             <p>
               Initialize settings to manage your existing login methods here. Their configuration is
               preserved; you will sign in again.
@@ -86,21 +81,17 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
             <form method="post" action={`${HOME}/initialize`}>
               <Button type="submit" label="Initialize settings" />
             </form>
-          </Card>
+          </AdminCard>
         ) : (
           <>
             {tested && (
               <section aria-labelledby="verified-login-heading">
-                <Card>
-                  <div className="void-admin-auth-section-header">
-                    <div>
-                      <Heading level={2} id="verified-login-heading">
-                        Login verified
-                      </Heading>
-                      <p>Review this identity before linking or enabling the tested method.</p>
-                    </div>
-                    <Badge label="Ready to review" variant="success" />
-                  </div>
+                <AdminCard
+                  title="Login verified"
+                  titleId="verified-login-heading"
+                  description="Review this identity before linking or enabling the tested method."
+                  headerAccessory={<Badge label="Ready to review" variant="success" />}
+                >
                   <dl className="void-admin-auth-identity">
                     <div>
                       <dt>Account</dt>
@@ -134,24 +125,22 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
                       </form>
                     ))}
                   </div>
-                </Card>
+                </AdminCard>
               </section>
             )}
 
             <section aria-labelledby="login-methods-heading">
-              <Card>
-                <div className="void-admin-auth-section-header">
-                  <div>
-                    <Heading level={2} id="login-methods-heading">
-                      Login methods
-                    </Heading>
-                    <p>Choose the identity providers people can use to sign in.</p>
-                  </div>
+              <AdminCard
+                title="Login methods"
+                titleId="login-methods-heading"
+                description="Choose the identity providers people can use to sign in."
+                headerAccessory={
                   <Badge
                     label={`${data.methods.filter((method) => method.enabled).length} active`}
                     variant="neutral"
                   />
-                </div>
+                }
+              >
                 {data.methods.length ? (
                   <div className="void-admin-auth-method-list">
                     {data.methods.map((method) => (
@@ -228,27 +217,18 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
                     ))}
                   </div>
                 </div>
-              </Card>
+              </AdminCard>
             </section>
           </>
         )}
         <section aria-labelledby="account-access-heading">
-          <Card>
-            <div className="void-admin-auth-section-header">
-              <div>
-                <Heading level={2} id="account-access-heading">
-                  Who can join?
-                </Heading>
-                <p>Set the signup policy, invite people, and manage individual grants on Access.</p>
-              </div>
-              <Button
-                as="a"
-                href="/admin/signup-control"
-                label="Manage access"
-                variant="secondary"
-              />
-            </div>
-          </Card>
+          <AdminCard
+            title="Who can join?"
+            titleId="account-access-heading"
+            description="Set the signup policy, invite people, and manage individual grants on Access."
+          >
+            <Button as="a" href="/admin/signup-control" label="Manage access" variant="secondary" />
+          </AdminCard>
         </section>
       </div>
     </Layout>

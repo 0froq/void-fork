@@ -12,7 +12,7 @@ import { Heading, Text } from '@astryxdesign/core/Text';
 import { Suspense, useSyncExternalStore, type ReactElement, type ReactNode } from 'react';
 import { useListView, useRequest, useView, type Deferred, type ViewRef } from 'react-fate';
 import { DashboardView, dashboardRequest, TopProjectView } from '../../fate/views.ts';
-import { DashboardCard } from './DashboardCard.tsx';
+import { AdminCard } from './AdminCard.tsx';
 import { DeploymentTable } from './DeploymentTable.tsx';
 import { formatDateTime, formatNumber } from './format.ts';
 import { Layout } from './Layout.tsx';
@@ -59,7 +59,7 @@ function TopProjectsWidget({
 }) {
   const [projects] = useListView({ items: { node: TopProjectView } }, topProjects);
   return (
-    <DashboardCard title="Top Projects by Traffic (last hour)">
+    <AdminCard title="Top Projects by Traffic (last hour)">
       {projects.length > 0 ? (
         <Table className="void-admin-top-projects-table" hasHover>
           <TableHeader>
@@ -87,7 +87,7 @@ function TopProjectsWidget({
       ) : (
         <Text type="supporting">No recent project traffic in the last hour.</Text>
       )}
-    </DashboardCard>
+    </AdminCard>
   );
 }
 
@@ -148,12 +148,12 @@ function DeferredTopProjects({
 }) {
   const mounted = useSyncExternalStore(subscribeToClientRender, isClientRender, isServerRender);
   const fallback = (
-    <DashboardCard title="Top Projects by Traffic (last hour)">
-      <div className="void-admin-dashboard-card-loading">
+    <AdminCard title="Top Projects by Traffic (last hour)">
+      <div className="void-admin-card-loading">
         <Skeleton width="100%" height={48} />
         <Skeleton width="100%" height={48} index={1} />
       </div>
-    </DashboardCard>
+    </AdminCard>
   );
   if (!mounted) {
     return fallback;
@@ -178,21 +178,21 @@ export function DashboardPage({ platformName, username, healthCheckNames }: Dash
       <Heading level={1}>Dashboard</Heading>
       <SystemStatusCard checkNames={healthCheckNames} />
       <div className="void-admin-metrics">
-        <DashboardCard title="Users" href="/admin/users">
+        <AdminCard title="Users" href="/admin/users">
           <Text type="display-3" display="block" hasTabularNumbers>
             {formatNumber(dashboard.userCount)}
           </Text>
-        </DashboardCard>
-        <DashboardCard title="Projects" href="/admin/projects">
+        </AdminCard>
+        <AdminCard title="Projects" href="/admin/projects">
           <Text type="display-3" display="block" hasTabularNumbers>
             {formatNumber(dashboard.projectCount)}
           </Text>
-        </DashboardCard>
-        <DashboardCard title="Deployments" href="/admin/deployments">
+        </AdminCard>
+        <AdminCard title="Deployments" href="/admin/deployments">
           <Text type="display-3" display="block" hasTabularNumbers>
             {formatNumber(dashboard.deploymentCount)}
           </Text>
-        </DashboardCard>
+        </AdminCard>
       </div>
       <div className="void-admin-dashboard-sections">
         <DeferredTopProjects
@@ -200,16 +200,16 @@ export function DashboardPage({ platformName, username, healthCheckNames }: Dash
           siteDomain={dashboard.siteDomain}
           tz={dashboard.tz}
         />
-        <DashboardCard title="Latest Projects">
+        <AdminCard title="Latest Projects">
           <ProjectsTable
             projects={dashboard.projects}
             siteDomain={dashboard.siteDomain}
             tz={dashboard.tz}
           />
-        </DashboardCard>
-        <DashboardCard title="Latest Deployments">
+        </AdminCard>
+        <AdminCard title="Latest Deployments">
           <DeploymentTable deployments={dashboard.deployments} showProject tz={dashboard.tz} />
-        </DashboardCard>
+        </AdminCard>
       </div>
     </Layout>
   );

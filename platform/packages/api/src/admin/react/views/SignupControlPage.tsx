@@ -2,7 +2,6 @@
 
 import { Badge } from '@astryxdesign/core/Badge';
 import { Button } from '@astryxdesign/core/Button';
-import { Card } from '@astryxdesign/core/Card';
 import {
   Table,
   TableBody,
@@ -16,6 +15,7 @@ import { useState, type FocusEvent } from 'react';
 import { useRequest, useView } from 'react-fate';
 import { SignupView, signupRequest } from '../../fate/views.ts';
 import { type AdminPageProps } from '../page-utils.ts';
+import { AdminCard } from './AdminCard.tsx';
 import { formatDateTime } from './format.ts';
 import { FormCheckbox, FormSelector, FormTextArea, FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
@@ -110,14 +110,11 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
         </header>
 
         <section aria-labelledby="access-policy-heading">
-          <Card>
-            <div className="void-admin-access-section-header">
-              <div>
-                <Heading level={2} id="access-policy-heading">
-                  Who can join?
-                </Heading>
-                <p>These rules apply when someone creates a platform account.</p>
-              </div>
+          <AdminCard
+            title="Who can join?"
+            titleId="access-policy-heading"
+            description="These rules apply when someone creates a platform account."
+            headerAccessory={
               <Badge
                 label={
                   mode === 'public'
@@ -128,7 +125,8 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                 }
                 variant={mode === 'public' ? 'warning' : 'neutral'}
               />
-            </div>
+            }
+          >
             {initialized ? (
               <form
                 method="post"
@@ -154,12 +152,11 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                       ? 'People who meet a selected company policy or have an individual grant can join.'
                       : 'Anyone with an enabled login method can join. Individual invitations are unnecessary.'}
                 </p>
-                <div className="void-admin-access-company-policy">
-                  <h3>Company-approved methods</h3>
-                  <p>
-                    Select which existing login checks qualify someone when company signup is
-                    chosen.
-                  </p>
+                <AdminCard
+                  title="Company-approved methods"
+                  headingLevel={3}
+                  description="Select which existing login checks qualify someone when company signup is chosen."
+                >
                   <div className="void-admin-access-checkboxes">
                     {companyMethods.map((method) => (
                       <FormCheckbox
@@ -188,7 +185,7 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                       </p>
                     )}
                   </div>
-                </div>
+                </AdminCard>
                 <p className="void-admin-access-muted">
                   New accounts are ordinary users. Changing this policy does not change Cloudflare
                   Access protection.
@@ -221,29 +218,36 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                 </form>
               </div>
             )}
-          </Card>
+          </AdminCard>
         </section>
 
         <section aria-labelledby="access-invite-heading">
-          <Card>
-            <div className="void-admin-access-section-header">
-              <div>
-                <Heading level={2} id="access-invite-heading">
-                  Invite people
-                </Heading>
-                <p>
-                  {mode === 'public'
-                    ? 'Signup is public. Share the platform address with anyone you want to join.'
-                    : emailEnabled
-                      ? "Create an invitation for each email address. We'll email them connection instructions."
-                      : 'Create an invitation for each email address. Since email is off, share the platform link below yourself.'}
-                </p>
+          <AdminCard
+            title="Invite people"
+            footer={
+              <div className="void-admin-access-share">
+                <h3>
+                  {emailEnabled ? 'Share connection details' : 'Share these details manually'}
+                </h3>
+                <CopyValue label="Platform invitation page" value={inviteUrl} />
+                <CopyValue label="Void CLI connection command" value={connectCommand} />
               </div>
+            }
+            titleId="access-invite-heading"
+            description={
+              mode === 'public'
+                ? 'Signup is public. Share the platform address with anyone you want to join.'
+                : emailEnabled
+                  ? "Create an invitation for each email address. We'll email them connection instructions."
+                  : 'Create an invitation for each email address. Since email is off, share the platform link below yourself.'
+            }
+            headerAccessory={
               <Badge
                 label={emailEnabled ? 'Email enabled' : 'Email not enabled'}
                 variant={emailEnabled ? 'success' : 'neutral'}
               />
-            </div>
+            }
+          >
             {result === 'invited' && (
               <p role="status" className="void-admin-access-notice">
                 {emailEnabled
@@ -275,29 +279,21 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                 />
               </form>
             )}
-            <div className="void-admin-access-share">
-              <h3>{emailEnabled ? 'Share connection details' : 'Share these details manually'}</h3>
-              <CopyValue label="Platform invitation page" value={inviteUrl} />
-              <CopyValue label="Void CLI connection command" value={connectCommand} />
-            </div>
-          </Card>
+          </AdminCard>
         </section>
 
         <section aria-labelledby="access-grants-heading">
-          <Card>
-            <div className="void-admin-access-section-header">
-              <div>
-                <Heading level={2} id="access-grants-heading">
-                  Direct grants
-                </Heading>
-                <p>
-                  Allow a GitHub username, email address or domain, or login identity to sign up.
-                  These rules do not create invitations or send email.
-                  {mode === 'public' &&
-                    ' While signup is public, grants do not limit who can join.'}
-                </p>
-              </div>
-            </div>
+          <AdminCard
+            title="Direct grants"
+            titleId="access-grants-heading"
+            description={
+              <>
+                Allow a GitHub username, email address or domain, or login identity to sign up.
+                These rules do not create invitations or send email.
+                {mode === 'public' && ' While signup is public, grants do not limit who can join.'}
+              </>
+            }
+          >
             <form
               method="post"
               action="/admin/signup-control/add"
@@ -406,22 +402,20 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
             {directEntries.length === 0 && (
               <p className="void-admin-access-muted">No direct grants yet.</p>
             )}
-          </Card>
+          </AdminCard>
         </section>
 
         <section aria-labelledby="access-history-heading">
-          <Card>
-            <div className="void-admin-access-section-header">
-              <div>
-                <Heading level={2} id="access-history-heading">
-                  Invitation history
-                </Heading>
-                <p>
-                  Invitation status and email delivery are tracked separately. Invitations do not
-                  expire.
-                </p>
-              </div>
-            </div>
+          <AdminCard
+            title="Invitation history"
+            titleId="access-history-heading"
+            description="Invitation status and email delivery are tracked separately. Invitations do not expire."
+            footer={
+              totalPages > 1 ? (
+                <Pagination page={page} totalPages={totalPages} baseUrl="/admin/signup-control" />
+              ) : undefined
+            }
+          >
             <div className="void-admin-access-table">
               <Table hasHover>
                 <TableHeader>
@@ -499,8 +493,7 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
             {invitations.length === 0 && (
               <p className="void-admin-access-muted">No invitations yet.</p>
             )}
-            <Pagination page={page} totalPages={totalPages} baseUrl="/admin/signup-control" />
-          </Card>
+          </AdminCard>
         </section>
       </div>
     </Layout>
