@@ -21,7 +21,7 @@ export function DashboardCard({
     <Layout
       height="auto"
       header={
-        <LayoutHeader hasDivider>
+        <LayoutHeader hasDivider padding={0}>
           <div className="void-admin-dashboard-card-heading">
             <div className="void-admin-dashboard-card-title">
               <Heading level={2}>{title}</Heading>
