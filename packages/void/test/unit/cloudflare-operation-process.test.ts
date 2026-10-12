@@ -699,77 +699,114 @@ it.each([401, 403, 404, 503])(
   30_000,
 );
 
-it('allows a prebuilt platform upload when named resources already exist', async () => {
-  const directory = temporaryDirectory('void-cf-platform-resource-preflight-');
-  const requests: Array<string> = [];
-  const jurisdictions: Array<string | undefined> = [];
-  const api = await listen(
-    createServer((request, response) => {
-      const path = request.url ?? '';
-      requests.push(`${request.method} ${path}`);
-      if (path.includes('/r2/buckets/')) {
-        jurisdictions.push(request.headers['cf-r2-jurisdiction'] as string | undefined);
-      }
-      response.setHeader('Content-Type', 'application/json');
-      response.end(
-        JSON.stringify({
-          success: true,
-          result:
-            path.endsWith('/queues') || path.includes('/queues?page=')
-              ? [{ queue_id: 'queue-id', queue_name: 'existing-queue' }]
-              : {},
-          ...(path.includes('/queues?page=') ? { result_info: { page: 1, total_pages: 1 } } : {}),
-        }),
-      );
-    }),
-  );
-  const configPath = join(directory, 'wrangler.json');
-  writeFileSync(
-    join(directory, 'index.js'),
-    'export default { fetch() { return new Response("ok") } };',
-  );
-  writeFileSync(
-    configPath,
-    JSON.stringify({
-      name: 'test-worker',
-      account_id: 'test-account',
-      compatibility_date: '2026-09-29',
-      main: 'index.js',
-      no_bundle: true,
-      r2_buckets: [{ binding: 'ASSETS', bucket_name: 'existing-bucket', jurisdiction: 'eu' }],
-      queues: { producers: [{ binding: 'JOBS', queue: 'existing-queue' }] },
-      dispatch_namespaces: [{ binding: 'DISPATCH', namespace: 'existing-namespace' }],
-    }),
-  );
-  const preload = join(directory, 'mock-version-upload.mjs');
-  writeFileSync(
-    preload,
-    `import child from 'node:child_process';
+it.each(['ordinary', 'versions.upload', 'worker.deploy'] as const)(
+  'allows a prebuilt %s upload and scopes installation attribution to the cf child',
+  async (uploadType) => {
+    const directory = temporaryDirectory('void-cf-platform-resource-preflight-');
+    const requests: Array<string> = [];
+    const jurisdictions: Array<string | undefined> = [];
+    const api = await listen(
+      createServer((request, response) => {
+        const path = request.url ?? '';
+        requests.push(`${request.method} ${path}`);
+        if (path.includes('/r2/buckets/')) {
+          jurisdictions.push(request.headers['cf-r2-jurisdiction'] as string | undefined);
+        }
+        response.setHeader('Content-Type', 'application/json');
+        response.end(
+          JSON.stringify({
+            success: true,
+            result:
+              path.endsWith('/queues') || path.includes('/queues?page=')
+                ? [{ queue_id: 'queue-id', queue_name: 'existing-queue' }]
+                : {},
+            ...(path.includes('/queues?page=') ? { result_info: { page: 1, total_pages: 1 } } : {}),
+          }),
+        );
+      }),
+    );
+    const configPath = join(directory, 'wrangler.json');
+    writeFileSync(
+      join(directory, 'index.js'),
+      'export default { fetch() { return new Response("ok") } };',
+    );
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        name: 'test-worker',
+        account_id: 'test-account',
+        compatibility_date: '2026-09-29',
+        main: 'index.js',
+        no_bundle: true,
+        r2_buckets: [{ binding: 'ASSETS', bucket_name: 'existing-bucket', jurisdiction: 'eu' }],
+        queues: { producers: [{ binding: 'JOBS', queue: 'existing-queue' }] },
+        dispatch_namespaces: [{ binding: 'DISPATCH', namespace: 'existing-namespace' }],
+        ...(uploadType === 'ordinary'
+          ? {}
+          : {
+              vars: {
+                PLATFORM_VERSION: '0.27.0',
+                PLATFORM_OWNERSHIP_MARKER: JSON.stringify({
+                  schemaVersion: 1,
+                  accountId: 'test-account',
+                  installationId: 'installation-one',
+                  ownershipNonce: 'private-ownership-proof',
+                  resourceId: 'test-worker',
+                  resourceName: 'test-worker',
+                  resourceKey: 'api-worker',
+                  resourceKind: 'worker',
+                }),
+              },
+            }),
+      }),
+    );
+    const preload = join(directory, 'mock-version-upload.mjs');
+    writeFileSync(
+      preload,
+      `import child from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 const actualSpawnSync=child.spawnSync;
 child.spawnSync = (binary, args, options) => {
-  if(args.slice(1,4).join(' ') !== 'workers versions create') return actualSpawnSync(binary,args,options);
+  if(args.slice(1,4).join(' ') !== 'workers versions create' && args[1] !== 'deploy') return actualSpawnSync(binary,args,options);
+  writeFileSync(${JSON.stringify(join(directory, 'upload-environment.json'))}, JSON.stringify({version:options.env.CLI_VERSION,telemetry:options.env.CF_SEND_TELEMETRY}));
   return { status:0, stdout:JSON.stringify({id:'11111111-1111-4111-8111-111111111111'}), stderr:'' };
 };
 syncBuiltinESMExports();`,
-  );
-  const output = await runOperation(
-    directory,
-    { type: 'versions.upload', configPath },
-    unproxiedEnv(api),
-    preload,
-  );
-  expect(output.status, output.stderr).toBe(0);
-  expect(JSON.parse(output.stdout).data).toEqual({
-    versionId: '11111111-1111-4111-8111-111111111111',
-  });
-  expect(requests).toEqual([
-    'GET /client/v4/accounts/test-account/r2/buckets/existing-bucket',
-    'GET /client/v4/accounts/test-account/workers/dispatch/namespaces/existing-namespace',
-    'GET /client/v4/accounts/test-account/queues?page=1',
-  ]);
-  expect(jurisdictions).toEqual(['eu']);
-}, 30_000);
+    );
+    const output = await runOperation(
+      directory,
+      { type: uploadType === 'ordinary' ? 'versions.upload' : uploadType, configPath },
+      unproxiedEnv(api),
+      preload,
+    );
+    expect(output.status, output.stderr).toBe(0);
+    expect(JSON.parse(output.stdout).data).toEqual({
+      versionId: '11111111-1111-4111-8111-111111111111',
+    });
+    expect(requests).toEqual([
+      'GET /client/v4/accounts/test-account/r2/buckets/existing-bucket',
+      'GET /client/v4/accounts/test-account/workers/dispatch/namespaces/existing-namespace',
+      'GET /client/v4/accounts/test-account/queues?page=1',
+    ]);
+    expect(jurisdictions).toEqual(['eu']);
+    const uploadEnvironment = JSON.parse(
+      readFileSync(join(directory, 'upload-environment.json'), 'utf8'),
+    );
+    expect(uploadEnvironment).toEqual({
+      version:
+        cfVersion +
+        ' void/' +
+        voidVersion +
+        (uploadType === 'ordinary'
+          ? ''
+          : ' void-platform-install/0.27.0 void-role/api-worker void-installation/installation-one'),
+      telemetry: 'false',
+    });
+    expect(JSON.stringify(uploadEnvironment)).not.toContain('private-ownership-proof');
+  },
+  30_000,
+);
 
 it.each([
   { label: 'uppercase proxy variables', lowercase: false, bypass: false, authenticated: false },

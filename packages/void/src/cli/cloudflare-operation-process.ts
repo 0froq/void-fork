@@ -23,6 +23,7 @@ import {
   printCloudflareLoginLink,
   printCloudflareLoginPrompt,
 } from './cloudflare-login-output.ts';
+import { platformWorkerUploadAttribution } from './platform-worker-user-agent.ts';
 import { sanitizeTerminalLogText } from './terminal-log-text.ts';
 
 type Json = Record<string, unknown>;
@@ -59,7 +60,11 @@ function cfEnvironment(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     CF_DELEGATION: '1',
-    CLI_VERSION: getCfCliVersion(),
+    CLI_VERSION: getCfCliVersion(
+      operation.type === 'versions.upload' || operation.type === 'worker.deploy'
+        ? platformWorkerUploadAttribution(config())
+        : undefined,
+    ),
     CF_SEND_TELEMETRY: 'false',
     CF_NO_OSC_PROGRESS: '1',
     CLOUDFLARE_AUTH_USE_KEYRING: process.env.CLOUDFLARE_AUTH_USE_KEYRING,
