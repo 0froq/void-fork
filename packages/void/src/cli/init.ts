@@ -46,6 +46,7 @@ import {
   SCAFFOLD_FRAMEWORK_OPTIONS,
   SCAFFOLD_GITIGNORE_LINES,
   SCAFFOLD_TOOLCHAIN_OPTIONS,
+  SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES,
   type ScaffoldFramework,
   type ScaffoldStarterMode,
   type ScaffoldToolchain,
@@ -1971,19 +1972,55 @@ function ensurePnpmAllowBuilds(root: string, pkg: JsonObject): void {
   }
 }
 
-function installProjectDependencies(
+export function installProjectDependencies(
   root: string,
   packageManager: ProjectState['packageManager'],
 ): void {
-  log.step(`Installing dependencies with ${packageManager}`);
+  const pkg = readPackageJson(root);
+  const useVitePlus = pkg !== null && hasPackageDependency(pkg, 'vite-plus');
+  const installer = useVitePlus ? 'vp' : packageManager;
+  log.step(`Installing dependencies with ${installer}`);
 
   // Init has just changed the manifest. Refresh the lockfile even when pnpm
   // detects a CI host; subsequent CI builds can use frozen installs normally.
-  const args = packageManager === 'pnpm' ? ['install', '--no-frozen-lockfile'] : ['install'];
-  const result = spawnSync(packageManager, args, {
+  let command: string = installer;
+  let args =
+    useVitePlus || packageManager === 'pnpm' ? ['install', '--no-frozen-lockfile'] : ['install'];
+  if (useVitePlus) {
+    let localBin: string | undefined;
+    try {
+      const require = createRequire(join(root, 'package.json'));
+      localBin = join(dirname(require.resolve('vite-plus/package.json')), 'bin/vp');
+    } catch {
+      // The starter's Vite+ dependency has not been installed yet.
+    }
+    if (localBin) {
+      command = process.execPath;
+      args = [localBin, ...args];
+    } else {
+      const probe = spawnSync('vp', ['--version'], {
+        cwd: root,
+        stdio: 'ignore',
+        shell: process.platform === 'win32',
+        timeout: 5_000,
+      });
+      if (probe.status !== 0) {
+        // npx void init must also work without a globally installed vp. Avoid
+        // asking an older pnpm to switch itself to a pinned native pnpm 12.
+        command = 'npx';
+        args = [
+          '--yes',
+          `--package=vite-plus@${SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES['vite-plus']}`,
+          'vp',
+          ...args,
+        ];
+      }
+    }
+  }
+  const result = spawnSync(command, args, {
     cwd: root,
     stdio: 'inherit',
-    shell: process.platform === 'win32',
+    shell: command !== process.execPath && process.platform === 'win32',
   });
 
   if (result.error) {
@@ -1991,12 +2028,10 @@ function installProjectDependencies(
   }
 
   if (result.status !== 0) {
-    throw new Error(
-      `${packageManager} install failed with exit code ${result.status ?? 'unknown'}`,
-    );
+    throw new Error(`${installer} install failed with exit code ${result.status ?? 'unknown'}`);
   }
 
-  log.step(`Installed dependencies with ${packageManager}`);
+  log.step(`Installed dependencies with ${installer}`);
 }
 
 export function generateStarterMigration(
@@ -2121,16 +2156,8 @@ function scaffoldPagesApp(
 
   // `detectProjectState` reads only local markers; `isPnpmProject` also covers
   // pnpm workspace members, which need the root `allowBuilds`.
-  if (isPnpmProject(root, pkg)) {
+  if (packageManager === 'pnpm' || isPnpmProject(root, pkg)) {
     ensurePnpmAllowBuilds(root, pkg);
-  }
-  // Workspace members keep their Corepack pin on the workspace root.
-  if (
-    packageManager === 'pnpm' &&
-    resolveWorkspaceDeferral(root, pkg) === undefined &&
-    (!pkg.packageManager || typeof pkg.packageManager !== 'string')
-  ) {
-    pkg.packageManager = 'pnpm@12.4.1';
   }
 
   writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n');
@@ -2523,8 +2550,16 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
       scaffoldedPagesFramework = await promptScaffoldFramework();
     }
     const starterMode = await promptStarterMode();
+    const existingPackageJson = readPackageJson(root);
+    const hasPackageManager =
+      hasLocalLockfile(root) ||
+      existsSync(join(root, 'pnpm-workspace.yaml')) ||
+      parsePackageManagerField(existingPackageJson) !== undefined ||
+      resolveWorkspaceDeferral(root, existingPackageJson) !== undefined;
     const scaffoldPackageManager =
-      scaffoldToolchain === 'vite-plus' ? 'pnpm' : preScaffoldState.packageManager;
+      scaffoldToolchain === 'vite-plus' && !hasPackageManager
+        ? 'pnpm'
+        : preScaffoldState.packageManager;
     const scaffoldWroteDeps = scaffoldPagesApp(
       root,
       scaffoldPackageManager,

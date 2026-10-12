@@ -1381,7 +1381,10 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.devDependencies.void).toBeDefined();
       expect(pkg.devDependencies['@void/react']).toBeDefined();
       expect(pkg.devDependencies['vite-plus']).toBe('^0.1.21');
-      expect(pkg.packageManager).toBe('pnpm@12.4.1');
+      expect(pkg.packageManager).toBeUndefined();
+      expectPnpmAllowBuilds(root);
+      expect(detectProjectState(root).packageManager).toBe('pnpm');
+      expect(installCalls()[0][0]).toBe('vp');
       expect(pkg.scripts.dev).toBe('vp dev');
 
       expect(readFileSync(join(root, 'pages', 'index.tsx'), 'utf-8')).toContain(
@@ -1404,6 +1407,62 @@ describe('isScaffoldableEmptyProject', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it.each(['npm@11.20.0', 'pnpm@10.34.4', 'yarn@4.5.3', 'bun@1.1.42'])(
+    'preserves %s when scaffolding with Vite+',
+    async (packageManager) => {
+      const root = mkdtempSync(join(tmpdir(), 'void-init-'));
+      try {
+        writeFileSync(
+          join(root, 'package.json'),
+          JSON.stringify({ private: true, packageManager }),
+        );
+        mockSelect
+          .mockResolvedValueOnce('vite-plus')
+          .mockResolvedValueOnce('react')
+          .mockResolvedValueOnce('static');
+        mockConfirm.mockResolvedValueOnce(false);
+
+        await runInitCommand(root);
+
+        expect(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).packageManager).toBe(
+          packageManager,
+        );
+        expect(detectProjectState(root).packageManager).toBe(packageManager.split('@')[0]);
+        expect(existsSync(join(root, 'pnpm-workspace.yaml'))).toBe(
+          packageManager.startsWith('pnpm@'),
+        );
+        expect(installCalls()[0][0]).toBe('vp');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(['package-lock.json', 'yarn.lock', 'bun.lock'])(
+    'preserves %s without switching a Vite+ starter to pnpm',
+    async (lockfile) => {
+      const root = mkdtempSync(join(tmpdir(), 'void-init-'));
+      try {
+        writeFileSync(join(root, lockfile), '');
+        mockSelect
+          .mockResolvedValueOnce('vite-plus')
+          .mockResolvedValueOnce('react')
+          .mockResolvedValueOnce('static');
+        mockConfirm.mockResolvedValueOnce(false);
+
+        await runInitCommand(root);
+
+        expect(
+          JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).packageManager,
+        ).toBeUndefined();
+        expect(existsSync(join(root, 'pnpm-workspace.yaml'))).toBe(false);
+        expect(installCalls()[0][0]).toBe('vp');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('prompts for the scaffold toolchain after pnpm add -D void creates pnpm-workspace.yaml', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));
@@ -1508,7 +1567,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(folderPrompt.validate('')).toBe('That folder already exists.');
       expect(folderPrompt.validate('another-app')).toBeUndefined();
       expect(mockSpawnSync).toHaveBeenCalledWith(
-        'pnpm',
+        'vp',
         ['install', '--no-frozen-lockfile'],
         expect.objectContaining({
           cwd: toSlash(appRoot),
@@ -2564,7 +2623,7 @@ export default config;
         expect.objectContaining({ message: 'Choose a Pages framework to scaffold:' }),
       );
       expect(mockSpawnSync).toHaveBeenCalledWith(
-        'pnpm',
+        'vp',
         ['install', '--no-frozen-lockfile'],
         expect.objectContaining({
           cwd: root,
@@ -3401,7 +3460,10 @@ export default config;
 
       const installs = installCalls();
       expect(installs.length).toBeGreaterThan(0);
-      expect(installs[0][0]).toBe('bun');
+      expect(installs[0][0]).toBe('vp');
+      expect(
+        JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf8')).packageManager,
+      ).toBe('bun@1.1.42');
       expect(workspaceNotes()).toHaveLength(0);
     } finally {
       rmSync(wsroot, { recursive: true, force: true });
@@ -3514,7 +3576,7 @@ export default config;
     }
   });
 
-  it('writes BOTH pnpm allowBuilds AND packageManager pin in a standalone pnpm project', async () => {
+  it('writes pnpm allowBuilds without adding a packageManager pin in a standalone pnpm project', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));
     try {
       writeFileSync(join(root, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n");
@@ -3529,7 +3591,7 @@ export default config;
 
       const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
       expectPnpmAllowBuilds(root);
-      expect(pkg.packageManager).toBe('pnpm@12.4.1');
+      expect(pkg.packageManager).toBeUndefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

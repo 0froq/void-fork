@@ -20,7 +20,7 @@ npx void init
 npm run dev
 ```
 
-Choose your UI framework and starter, then select Cloudflare to deploy to your account:
+Vite+ is the default toolchain; setup installs it for you and keeps your existing package-manager configuration. Choose your UI framework and starter, then select Cloudflare to deploy to your account:
 
 ```sh
 npx void deploy
