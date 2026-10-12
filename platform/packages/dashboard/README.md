@@ -108,7 +108,6 @@ lib/
   api.ts                    # Typed authentication API fetch helpers
 ui/
   components/               # Dashboard header and footer
-  context/                  # Logo configuration
   styles/                   # Design tokens, reset, and shell styles
   assets/                   # Void logos
   fonts/                    # APK Protocol, KH Teka Mono, and Inter

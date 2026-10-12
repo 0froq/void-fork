@@ -4,9 +4,7 @@ import { useNavigation, useShared } from '@void/react';
 import { useEffect, type ReactNode } from 'react';
 import preventDragging from '../lib/preventDragging.ts';
 import type { DashboardShared } from '../middleware/01.auth.ts';
-import logoDark from '../ui/assets/logos/void-dark.svg';
-import logoLight from '../ui/assets/logos/void-light.svg';
-import { AppHeader, FooterNav, ThemeContextProvider } from '../ui/index.ts';
+import { AppHeader, FooterNav } from '../ui/index.ts';
 import '../app.css';
 
 const footerConfig = {
@@ -57,27 +55,19 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <>
       {isLoading && <div className="nav-progress loading" />}
-      <ThemeContextProvider
-        value={{
-          logoAlt: 'Void',
-          logoDark,
-          logoLight,
-        }}
-      >
-        <Theme theme={neutralTheme}>
-          <div className="dashboard-layout">
-            <AppHeader
-              accountMenuLabel={user.login}
-              accountMenuItems={[{ icon: 'lucide:log-out', link: '/logout', text: 'Logout' }]}
-            />
-            <div className="dashboard-content">
-              {children}
-              <FlexibleFooterSpacer />
-            </div>
-            <FooterNav footer={footerConfig} />
+      <Theme theme={neutralTheme}>
+        <div className="dashboard-layout">
+          <AppHeader
+            accountMenuLabel={user.login}
+            accountMenuItems={[{ icon: 'lucide:log-out', link: '/logout', text: 'Logout' }]}
+          />
+          <div className="dashboard-content">
+            {children}
+            <FlexibleFooterSpacer />
           </div>
-        </Theme>
-      </ThemeContextProvider>
+          <FooterNav footer={footerConfig} />
+        </div>
+      </Theme>
     </>
   );
 }

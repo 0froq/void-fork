@@ -1,6 +1,7 @@
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu';
 import { Icon } from '@iconify/react';
-import { useThemeContext } from '../context/ThemeContext.tsx';
+import logoDark from '../assets/logos/void-dark.svg';
+import logoLight from '../assets/logos/void-light.svg';
 
 const EXTERNAL_URL_RE = /^(?:[a-z]+:|\/\/)/i;
 
@@ -21,8 +22,6 @@ export default function AppHeader({
   accountMenuItems = [],
   accountMenuLabel = 'Account',
 }: AppHeaderProps) {
-  const { logoAlt, logoDark, logoLight } = useThemeContext();
-
   return (
     <header className="wrapper dashboard-header">
       <div className="dashboard-brand">
@@ -30,7 +29,7 @@ export default function AppHeader({
           <div className="dashboard-brand-spacer" />
           <picture>
             <source media="(prefers-color-scheme: dark)" srcSet={logoLight} />
-            <img alt={logoAlt} className="dashboard-logo" src={logoDark} />
+            <img alt="Void" className="dashboard-logo" src={logoDark} />
           </picture>
         </a>
       </div>
