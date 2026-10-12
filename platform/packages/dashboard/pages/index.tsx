@@ -1,25 +1,23 @@
-import Stack, { VStack } from '@nkzw/stack';
+import { Button } from '@astryxdesign/core/Button';
+import { HStack } from '@astryxdesign/core/HStack';
+import { VStack } from '@astryxdesign/core/VStack';
 import type { Props } from './index.server.ts';
 
 export default function AuthenticatedPage({ user }: Props) {
   return (
     <main className="dashboard-main">
       <section className="wrapper wrapper--ticks dashboard-page dashboard-home">
-        <VStack gap={20}>
-          <VStack gap={8}>
+        <VStack gap={5}>
+          <VStack gap={2}>
             <h1 className="dashboard-heading">You’re signed in.</h1>
             <p className="dashboard-description">
               Authenticated as <strong className="dashboard-identity">{user.login}</strong>.
             </p>
           </VStack>
-          <Stack>
-            <a className="button" href="/account">
-              Manage login methods
-            </a>
-            <a className="button" href="/logout">
-              Sign out
-            </a>
-          </Stack>
+          <HStack gap={2} wrap="wrap">
+            <Button href="/account" label="Manage login methods" />
+            <Button href="/logout" label="Sign out" variant="secondary" />
+          </HStack>
         </VStack>
       </section>
     </main>

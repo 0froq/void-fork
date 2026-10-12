@@ -10,7 +10,7 @@ mode app. The administrator UI is served by the API Worker.
   stored in an httpOnly cookie (`void_token`). Middleware validates the token with
   `GET /me`.
 - **Styling** - Dashboard-local CSS, fonts, assets, and React components in `ui/`,
-  with Astryx's neutral theme for the account menu.
+  with Astryx's neutral theme for buttons, stacks, and the account menu.
 
 ## Pages
 
@@ -109,7 +109,7 @@ lib/
 ui/
   components/               # Dashboard header and footer
   context/                  # Logo configuration
-  styles/                   # Design tokens, reset, shell and button styles
+  styles/                   # Design tokens, reset, and shell styles
   assets/                   # Void logos
   fonts/                    # APK Protocol, KH Teka Mono, and Inter
 middleware/

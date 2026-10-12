@@ -1,6 +1,4 @@
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu';
-import { Theme } from '@astryxdesign/core/theme';
-import { neutralTheme } from '@astryxdesign/theme-neutral/built';
 import { Icon } from '@iconify/react';
 import { useThemeContext } from '../context/ThemeContext.tsx';
 
@@ -39,38 +37,36 @@ export default function AppHeader({
 
       {accountMenuItems.length ? (
         <div className="dashboard-account">
-          <Theme theme={neutralTheme}>
-            <DropdownMenu
-              alignment="end"
-              button={{
-                label: accountMenuLabel,
-                variant: 'ghost',
-                title: accountMenuLabel,
-                icon: (
-                  <Icon
-                    aria-hidden="true"
-                    className="dashboard-account-icon"
-                    icon="lucide:circle-user-round"
-                  />
-                ),
-              }}
-              hasChevron={false}
-              items={accountMenuItems.map((item) => ({
-                id: item.link,
-                label: item.text,
-                icon: item.icon ? (
-                  <Icon aria-hidden="true" className="dashboard-account-icon" icon={item.icon} />
-                ) : undefined,
-                onClick: () => {
-                  if (isExternalLink(item.link)) {
-                    window.open(item.link, '_blank', 'noopener,noreferrer');
-                  } else {
-                    window.location.assign(item.link);
-                  }
-                },
-              }))}
-            />
-          </Theme>
+          <DropdownMenu
+            alignment="end"
+            button={{
+              label: accountMenuLabel,
+              variant: 'ghost',
+              title: accountMenuLabel,
+              icon: (
+                <Icon
+                  aria-hidden="true"
+                  className="dashboard-account-icon"
+                  icon="lucide:circle-user-round"
+                />
+              ),
+            }}
+            hasChevron={false}
+            items={accountMenuItems.map((item) => ({
+              id: item.link,
+              label: item.text,
+              icon: item.icon ? (
+                <Icon aria-hidden="true" className="dashboard-account-icon" icon={item.icon} />
+              ) : undefined,
+              onClick: () => {
+                if (isExternalLink(item.link)) {
+                  window.open(item.link, '_blank', 'noopener,noreferrer');
+                } else {
+                  window.location.assign(item.link);
+                }
+              },
+            }))}
+          />
         </div>
       ) : (
         <div className="dashboard-account-spacer" />

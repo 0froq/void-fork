@@ -1,3 +1,4 @@
+import { Button } from '@astryxdesign/core/Button';
 import type { Props } from './account.server.ts';
 
 export default function AccountPage({ methods, error }: Props) {
@@ -12,9 +13,7 @@ export default function AccountPage({ methods, error }: Props) {
       {methods.map((method) => (
         <form key={method.id} method="post">
           <input type="hidden" name="connectionId" value={method.id} />
-          <button className="button" type="submit">
-            Link {method.label}
-          </button>
+          <Button label={`Link ${method.label}`} type="submit" />
         </form>
       ))}
       <a href="/">Back to account</a>

@@ -945,9 +945,6 @@ importers:
       '@iconify/react':
         specifier: ^6.0.2
         version: 6.0.2(react@19.3.0)
-      '@nkzw/stack':
-        specifier: 2.3.2
-        version: 2.3.2(react@19.3.0)
       '@stylexjs/stylex':
         specifier: 'catalog:'
         version: 0.19.1
@@ -3534,18 +3531,6 @@ packages:
       graphql-sse:
         optional: true
       vite:
-        optional: true
-
-  '@nkzw/stack@2.3.2':
-    resolution: {integrity: sha512-bEjpqHMzdE/AqWMqEuizZYBy8h/UGd6v71hw6yoBNB2Ajmb9eI2LT59JJ5CR7cyF5NSXMkHDPOIFlg05qQBWQw==}
-    peerDependencies:
-      nativewind: ^4.1.23
-      react: '>=17.0.0'
-      react-native: '>=0.67.0'
-    peerDependenciesMeta:
-      nativewind:
-        optional: true
-      react-native:
         optional: true
 
   '@noble/ciphers@2.2.0':
@@ -12446,10 +12431,6 @@ snapshots:
       graphql: 17.0.2
       graphql-sse: 2.6.2(graphql@17.0.2)
       vite: '@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1)'
-
-  '@nkzw/stack@2.3.2(react@19.3.0)':
-    dependencies:
-      react: 19.3.0
 
   '@noble/ciphers@2.2.0': {}
 

@@ -15,7 +15,6 @@
     "@astryxdesign/core": "catalog:",
     "@astryxdesign/theme-neutral": "catalog:",
     "@iconify/react": "^6.0.2",
-    "@nkzw/stack": "2.3.2",
     "@stylexjs/stylex": "catalog:",
     "@void/platform": "workspace:*",
     "hono": "catalog:platform",

@@ -1,3 +1,5 @@
+import { Theme } from '@astryxdesign/core/theme';
+import { neutralTheme } from '@astryxdesign/theme-neutral/built';
 import { useNavigation, useShared } from '@void/react';
 import { useEffect, type ReactNode } from 'react';
 import preventDragging from '../lib/preventDragging.ts';
@@ -62,17 +64,19 @@ export default function Layout({ children }: { children: ReactNode }) {
           logoLight,
         }}
       >
-        <div className="dashboard-layout">
-          <AppHeader
-            accountMenuLabel={user.login}
-            accountMenuItems={[{ icon: 'lucide:log-out', link: '/logout', text: 'Logout' }]}
-          />
-          <div className="dashboard-content">
-            {children}
-            <FlexibleFooterSpacer />
+        <Theme theme={neutralTheme}>
+          <div className="dashboard-layout">
+            <AppHeader
+              accountMenuLabel={user.login}
+              accountMenuItems={[{ icon: 'lucide:log-out', link: '/logout', text: 'Logout' }]}
+            />
+            <div className="dashboard-content">
+              {children}
+              <FlexibleFooterSpacer />
+            </div>
+            <FooterNav footer={footerConfig} />
           </div>
-          <FooterNav footer={footerConfig} />
-        </div>
+        </Theme>
       </ThemeContextProvider>
     </>
   );
