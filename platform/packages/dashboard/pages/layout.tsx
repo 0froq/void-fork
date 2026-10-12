@@ -33,7 +33,7 @@ const footerConfig = {
 };
 
 function FlexibleFooterSpacer() {
-  return <div aria-hidden="true" className="wrapper min-h-0 flex-1 bg-white dark:bg-primary" />;
+  return <div aria-hidden="true" className="wrapper dashboard-footer-spacer" />;
 }
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -62,12 +62,12 @@ export default function Layout({ children }: { children: ReactNode }) {
           logoLight,
         }}
       >
-        <div className="marketing-layout flex min-h-screen flex-col bg-white text-primary dark:bg-primary dark:text-white">
+        <div className="dashboard-layout">
           <AppHeader
             accountMenuLabel={user.login}
             accountMenuItems={[{ icon: 'lucide:log-out', link: '/logout', text: 'Logout' }]}
           />
-          <div className="flex flex-1 flex-col">
+          <div className="dashboard-content">
             {children}
             <FlexibleFooterSpacer />
           </div>

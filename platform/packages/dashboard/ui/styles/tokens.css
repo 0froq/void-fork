@@ -1,19 +1,15 @@
 /**
  * Design System Tokens - Single Source of Truth
- * All design tokens, theme configuration, and CSS variable mappings
+ * Dashboard fonts, colors, and light/dark theme mappings
  */
 
-@import 'tailwindcss';
-
-@theme {
+:root {
   /* Typography tokens */
-  --font-*: initial;
   --font-heading: 'APK Protocol', sans-serif;
   --font-sans: Inter, sans-serif;
   --font-mono: 'KH Teka Mono', monospace;
 
   /* Color palette */
-  --color-*: initial;
   --color-white: #ffffff;
   --color-primary: #16171d;
   --color-beige: #f4f3ec;

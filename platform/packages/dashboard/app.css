@@ -1,7 +1,5 @@
 @import './ui/styles/index.css';
 
-@source './ui/**/*.{ts,tsx}';
-
 /* Navigation progress bar */
 .nav-progress {
   position: fixed;

@@ -5,7 +5,16 @@
 
 @layer marketing {
   .wrapper {
-    @apply relative mx-auto w-full max-w-[calc(100vw-2rem)] divide-stroke overflow-x-clip border-r border-l border-stroke min-[90rem]:max-w-[90rem] dark:divide-nickel dark:border-nickel;
+    position: relative;
+    width: 100%;
+    max-width: calc(100vw - 2rem);
+    margin-inline: auto;
+    overflow-x: clip;
+    border-inline: 1px solid var(--color-border);
+
+    @media (min-width: 90rem) {
+      max-width: 90rem;
+    }
   }
 
   .wrapper--ticks::before {
@@ -55,16 +64,70 @@
   }
 
   .button {
-    @apply inline-flex items-center justify-center gap-2 overflow-hidden squircle bg-white px-4 py-2 font-medium text-primary outline outline-stroke transition-all select-none hover:scale-105 hover:shadow-md dark:bg-transparent dark:text-white dark:outline-nickel dark:hover:bg-white dark:hover:text-primary;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    overflow: hidden;
+    border-radius: 6px;
+    background: var(--color-bg);
+    padding: 0.5rem 1rem;
+    font-weight: 500;
+    color: var(--color-text-1);
+    outline: 1px solid var(--color-border);
+    transition-property: all;
     transition-duration: 250ms;
     transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+    user-select: none;
+
+    @supports (corner-shape: squircle) {
+      border-radius: 32px;
+      corner-shape: squircle;
+    }
+
+    @media (hover: hover) {
+      &:hover {
+        scale: 1.05;
+        box-shadow:
+          0 4px 6px -1px #0000001a,
+          0 2px 4px -2px #0000001a;
+      }
+    }
+
+    @media (prefers-color-scheme: dark) {
+      background: transparent;
+
+      @media (hover: hover) {
+        &:hover {
+          background: var(--color-white);
+          color: var(--color-primary);
+        }
+      }
+    }
 
     &:active {
       scale: 0.95;
     }
 
     &.button--primary {
-      @apply relative transform-gpu overflow-visible text-white transition-transform outline-none hover:scale-105 hover:text-white dark:hover:bg-transparent dark:hover:text-white;
+      position: relative;
+      transform: translateZ(0);
+      overflow: visible;
+      color: var(--color-white);
+      transition-property: transform, translate, scale, rotate;
+      outline: none;
+
+      &:hover {
+        color: var(--color-white);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        @media (hover: hover) {
+          &:hover {
+            background: transparent;
+          }
+        }
+      }
 
       & > * {
         position: relative;

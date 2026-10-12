@@ -2,7 +2,7 @@ import type { Props } from './account.server.ts';
 
 export default function AccountPage({ methods, error }: Props) {
   return (
-    <main className="wrapper px-10 py-12">
+    <main className="wrapper dashboard-page">
       <h1>Linked login methods</h1>
       <p>
         Sign in to your existing account again before linking another method. You will review and

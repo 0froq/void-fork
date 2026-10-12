@@ -24,56 +24,59 @@ export default function AppHeader({
   const { logoAlt, logoDark, logoLight } = useThemeContext();
 
   return (
-    <header className="wrapper relative flex items-center justify-between px-6 py-7">
-      <div className="relative flex h-11 items-center gap-2 px-2 py-1">
-        <a className="flex items-center gap-2" href="/">
-          <div className="relative -ml-6 flex h-6 w-6 items-center justify-center" />
+    <header className="wrapper dashboard-header">
+      <div className="dashboard-brand">
+        <a className="dashboard-brand-link" href="/">
+          <div className="dashboard-brand-spacer" />
           <picture>
             <source media="(prefers-color-scheme: dark)" srcSet={logoLight} />
-            <img
-              alt={logoAlt}
-              className="block h-4 w-auto"
-              src={logoDark}
-              style={{ height: '1rem', width: 'auto' }}
-            />
+            <img alt={logoAlt} className="dashboard-logo" src={logoDark} />
           </picture>
         </a>
       </div>
 
       {accountMenuItems.length ? (
         <Menu.Root modal={false}>
-          <div className="relative flex w-56 max-w-[calc(100vw-10rem)] justify-end">
+          <div className="dashboard-account">
             <Menu.Trigger
               aria-label={accountMenuLabel}
-              className="inline-grid max-w-full min-w-0 cursor-pointer grid-cols-[1rem_minmax(0,1fr)] items-center gap-1.5 text-left text-primary transition-opacity hover:opacity-70 dark:text-white"
+              className="dashboard-account-trigger"
               title={accountMenuLabel}
             >
-              <span className="flex size-4 items-center justify-center">
-                <Icon aria-hidden="true" className="size-4" icon="lucide:circle-user-round" />
+              <span className="dashboard-account-icon">
+                <Icon
+                  aria-hidden="true"
+                  className="dashboard-account-icon"
+                  icon="lucide:circle-user-round"
+                />
               </span>
-              <span className="min-w-0 truncate">{accountMenuLabel}</span>
+              <span className="dashboard-account-label">{accountMenuLabel}</span>
             </Menu.Trigger>
             <Menu.Portal>
               <Menu.Positioner
                 align="end"
-                className="z-50"
+                className="dashboard-menu-positioner"
                 collisionPadding={16}
                 side="bottom"
                 sideOffset={6}
               >
-                <Menu.Popup className="min-w-40 border border-stroke bg-white p-1 shadow-md dark:border-nickel dark:bg-primary">
+                <Menu.Popup className="dashboard-menu">
                   {accountMenuItems.map((item) => (
                     <Menu.LinkItem
-                      className="grid grid-cols-[1rem_minmax(0,1fr)] items-center gap-1.5 rounded-xl px-3 py-2 text-sm text-primary transition-colors [corner-shape:squircle] hover:bg-primary/5 focus:bg-primary/5 focus:outline-none dark:text-white dark:hover:bg-white/10 dark:focus:bg-white/10"
+                      className="dashboard-menu-item"
                       closeOnClick
                       href={item.link}
                       key={item.link}
                       rel={isExternalLink(item.link) ? 'noreferrer' : undefined}
                       target={isExternalLink(item.link) ? '_blank' : undefined}
                     >
-                      <span className="flex size-4 items-center justify-center">
+                      <span className="dashboard-account-icon">
                         {item.icon ? (
-                          <Icon aria-hidden="true" className="size-4" icon={item.icon} />
+                          <Icon
+                            aria-hidden="true"
+                            className="dashboard-account-icon"
+                            icon={item.icon}
+                          />
                         ) : null}
                       </span>
                       <span>{item.text}</span>
@@ -85,7 +88,7 @@ export default function AppHeader({
           </div>
         </Menu.Root>
       ) : (
-        <div className="h-11 w-11" />
+        <div className="dashboard-account-spacer" />
       )}
     </header>
   );

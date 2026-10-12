@@ -9,7 +9,7 @@ mode app. The administrator UI is served by the API Worker.
 - **Auth** - enabled platform login methods via the API's `/auth/login` flow. The JWT is
   stored in an httpOnly cookie (`void_token`). Middleware validates the token with
   `GET /me`.
-- **Styling** - Tailwind CSS v4 with dashboard-local styles, fonts, assets,
+- **Styling** - Plain CSS with dashboard-local styles, fonts, assets,
   and React components in `ui/`.
 
 ## Pages
@@ -68,7 +68,7 @@ separate copy in `playground-local/my-dashboard`, keeping the app’s source,
 assets, package manifest and TypeScript configuration. Exclude local environment
 files, dependencies and generated output. Give the copied package a unique
 private name and keep its `build: vp build` script. In the copied Vite config,
-keep `tailwind()`, `voidPlugin()` and `voidReact()`, and remove the local API
+keep `voidPlugin()` and `voidReact()`, and remove the local API
 `persistTo` option.
 
 Replace the copied `cloudflare` configuration with your deployment settings:
