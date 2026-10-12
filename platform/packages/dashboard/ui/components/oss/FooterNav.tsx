@@ -1,4 +1,3 @@
-import { Icon } from '@iconify/react';
 import type {
   FooterColumn,
   FooterConfig,
@@ -9,22 +8,6 @@ import type {
 type FooterNavProps = Readonly<{
   footer?: FooterConfig;
 }>;
-
-const socialIconName = (icon: string) => {
-  const key = icon.toLowerCase();
-  return key === 'twitter' || key === 'x' ? 'simple-icons:x' : `simple-icons:${key}`;
-};
-
-const socialLabelMap: Record<string, string> = {
-  bluesky: 'Bluesky',
-  discord: 'Discord',
-  github: 'GitHub',
-  twitter: 'X.com',
-  x: 'X.com',
-};
-
-const getSocialLabel = (social: FooterSocialLink) =>
-  social.label ? social.label : socialLabelMap[social.icon.toLowerCase()] || social.icon;
 
 export default function FooterNav({ footer }: FooterNavProps) {
   const footerNav: ReadonlyArray<FooterColumn> = footer?.nav ?? [];
@@ -64,12 +47,12 @@ export default function FooterNav({ footer }: FooterNavProps) {
                       rel="noopener noreferrer"
                       target="_blank"
                     >
-                      <Icon
+                      <span
                         aria-hidden="true"
                         className="dashboard-social-icon"
-                        icon={socialIconName(social.icon)}
+                        style={{ maskImage: `url("${social.icon}")` }}
                       />
-                      {getSocialLabel(social)}
+                      {social.label}
                     </a>
                   </li>
                 ))}

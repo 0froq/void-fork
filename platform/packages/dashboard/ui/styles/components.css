@@ -151,6 +151,11 @@
   }
 
   .dashboard-social-icon {
+    display: block;
+    background-color: currentColor;
+    mask-position: center;
+    mask-repeat: no-repeat;
+    mask-size: contain;
     width: 18px;
     height: 18px;
   }

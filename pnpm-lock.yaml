@@ -942,9 +942,6 @@ importers:
       '@astryxdesign/theme-neutral':
         specifier: 'catalog:'
         version: 0.6.5(@astryxdesign/core@0.6.5(@stylexjs/stylex@0.19.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(@types/react@19.3.0)(react@19.3.0)
-      '@iconify/react':
-        specifier: ^6.0.2
-        version: 6.0.2(react@19.3.0)
       '@stylexjs/stylex':
         specifier: 'catalog:'
         version: 0.19.1
@@ -954,6 +951,9 @@ importers:
       hono:
         specifier: catalog:platform
         version: 4.13.13
+      lucide-react:
+        specifier: 1.52.0
+        version: 1.52.0(@types/react@19.3.0)(react@19.3.0)
       react:
         specifier: ^19.3.0
         version: 19.3.0
@@ -2967,11 +2967,6 @@ packages:
 
   '@iconify-json/vscode-icons@1.2.77':
     resolution: {integrity: sha512-yl8e3KlFfLLhiL9CH6YwX6syePeSLLwH2dL4cKGYC27SgdNHL3TRpheAyOjO3fw2+Ovp3tOSF5oj3AhSv4MQ8Q==}
-
-  '@iconify/react@6.0.2':
-    resolution: {integrity: sha512-SMmC2sactfpJD427WJEDN6PMyznTFMhByK9yLW0gOTtnjzzbsi/Ke/XqsumsavFPwNiXs8jSiYeZTmLCLwO+Fg==}
-    peerDependencies:
-      react: '>=16'
 
   '@iconify/types@2.0.0':
     resolution: {integrity: sha512-+wluvCrRhXrhyOmRDJ3q8mux9JkKy5SJ/v8ol2tu4FVjyYvtEzkc/3pK15ET6RKg4b4w4BmTk1+gsCUhf21Ykg==}
@@ -11966,11 +11961,6 @@ snapshots:
   '@iconify-json/vscode-icons@1.2.77':
     dependencies:
       '@iconify/types': 2.0.0
-
-  '@iconify/react@6.0.2(react@19.3.0)':
-    dependencies:
-      '@iconify/types': 2.0.0
-      react: 19.3.0
 
   '@iconify/types@2.0.0': {}
 

@@ -1,12 +1,13 @@
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu';
-import { Icon } from '@iconify/react';
+import { CircleUserRound } from 'lucide-react';
+import type { ReactNode } from 'react';
 import logoDark from '../assets/logos/void-dark.svg';
 import logoLight from '../assets/logos/void-light.svg';
 
 const EXTERNAL_URL_RE = /^(?:[a-z]+:|\/\/)/i;
 
 type HeaderActionItem = Readonly<{
-  icon?: string;
+  icon?: ReactNode;
   link: string;
   text: string;
 }>;
@@ -42,21 +43,13 @@ export default function AppHeader({
               label: accountMenuLabel,
               variant: 'ghost',
               title: accountMenuLabel,
-              icon: (
-                <Icon
-                  aria-hidden="true"
-                  className="dashboard-account-icon"
-                  icon="lucide:circle-user-round"
-                />
-              ),
+              icon: <CircleUserRound aria-hidden="true" className="dashboard-account-icon" />,
             }}
             hasChevron={false}
             items={accountMenuItems.map((item) => ({
               id: item.link,
               label: item.text,
-              icon: item.icon ? (
-                <Icon aria-hidden="true" className="dashboard-account-icon" icon={item.icon} />
-              ) : undefined,
+              icon: item.icon,
               onClick: () => {
                 if (isExternalLink(item.link)) {
                   window.open(item.link, '_blank', 'noopener,noreferrer');

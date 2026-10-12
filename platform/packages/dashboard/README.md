@@ -109,7 +109,7 @@ lib/
 ui/
   components/               # Dashboard header and footer
   styles/                   # Design tokens, reset, and shell styles
-  assets/                   # Void logos
+  assets/                   # Void logos and bundled social icons
   fonts/                    # APK Protocol, KH Teka Mono, and Inter
 middleware/
   01.auth.ts                # void_token validation through /me

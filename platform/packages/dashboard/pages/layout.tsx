@@ -1,9 +1,14 @@
 import { Theme } from '@astryxdesign/core/theme';
 import { neutralTheme } from '@astryxdesign/theme-neutral/built';
 import { useNavigation, useShared } from '@void/react';
+import { LogOut } from 'lucide-react';
 import { useEffect, type ReactNode } from 'react';
 import preventDragging from '../lib/preventDragging.ts';
 import type { DashboardShared } from '../middleware/01.auth.ts';
+import blueskyIcon from '../ui/assets/icons/bluesky.svg';
+import discordIcon from '../ui/assets/icons/discord.svg';
+import githubIcon from '../ui/assets/icons/github.svg';
+import xIcon from '../ui/assets/icons/x.svg';
 import { AppHeader, FooterNav } from '../ui/index.ts';
 import '../app.css';
 
@@ -25,10 +30,10 @@ const footerConfig = {
     },
   ],
   social: [
-    { icon: 'github', link: 'https://github.com/voidzero-dev' },
-    { icon: 'bluesky', link: 'https://bsky.app/profile/voidzero.dev' },
-    { icon: 'discord', link: 'https://discord.gg/cC6TEVFKSx' },
-    { icon: 'x', link: 'https://x.com/voidzerodev' },
+    { icon: githubIcon, label: 'GitHub', link: 'https://github.com/voidzero-dev' },
+    { icon: blueskyIcon, label: 'Bluesky', link: 'https://bsky.app/profile/voidzero.dev' },
+    { icon: discordIcon, label: 'Discord', link: 'https://discord.gg/cC6TEVFKSx' },
+    { icon: xIcon, label: 'X.com', link: 'https://x.com/voidzerodev' },
   ],
 };
 
@@ -59,7 +64,13 @@ export default function Layout({ children }: { children: ReactNode }) {
         <div className="dashboard-layout">
           <AppHeader
             accountMenuLabel={user.login}
-            accountMenuItems={[{ icon: 'lucide:log-out', link: '/logout', text: 'Logout' }]}
+            accountMenuItems={[
+              {
+                icon: <LogOut aria-hidden="true" className="dashboard-account-icon" />,
+                link: '/logout',
+                text: 'Logout',
+              },
+            ]}
           />
           <div className="dashboard-content">
             {children}
