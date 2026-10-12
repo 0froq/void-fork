@@ -93,38 +93,6 @@ function mockGitHubApi() {
 }
 
 describe('dashboard auth code exchange', () => {
-  it('requires S256 and exact registration for companion login', async () => {
-    const configured = {
-      ...env,
-      COMPANION_CALLBACK_URLS: JSON.stringify(['https://vibe.example.com/auth/callback']),
-    };
-    const redirect = 'https://vibe.example.com/auth/callback?state=companion-state';
-    const launch = (params: string) =>
-      app.fetch(
-        new Request(
-          'http://localhost/auth/login?provider=github&redirect=' +
-            encodeURIComponent(redirect) +
-            params,
-        ),
-        configured,
-        executionCtx,
-      );
-    expect((await launch('')).status).toBe(400);
-    expect((await launch('&code_challenge=bad&code_challenge_method=S256')).status).toBe(400);
-    const response = await launch(
-      '&code_challenge=' + codeChallengeFor('v'.repeat(43)) + '&code_challenge_method=S256',
-    );
-    expect(response.status).toBe(302);
-    const state = new URL(response.headers.get('Location')!).searchParams.get('state')!;
-    const decoded = JSON.parse(atob(state.slice(0, state.lastIndexOf('.'))));
-    expect(decoded).toMatchObject({
-      redirect,
-      cliState: 'companion-state',
-      codeChallenge: codeChallengeFor('v'.repeat(43)),
-      codeChallengeMethod: 'S256',
-    });
-  });
-
   it('preserves CLI PKCE fields through the OAuth provider state', async () => {
     const redirect = 'http://localhost:9999/callback?state=cli-state';
     const loginRes = await app.fetch(

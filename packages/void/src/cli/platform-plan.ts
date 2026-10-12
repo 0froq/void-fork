@@ -67,7 +67,6 @@ type PlatformInstallPlanInput = Readonly<{
   applicationDomain: string;
   controlPlaneDomain: string;
   dashboardUrl?: string;
-  companionCallbackUrls?: ReadonlyArray<string>;
   dedicatedZone: boolean;
   displayName: string;
   externalHyperdrive?: PlatformExternalHyperdrive;
@@ -217,12 +216,7 @@ export async function createPlatformInstallPlan(
     );
   }
   const deployment = createPlatformDeploymentManifest({
-    authentication: {
-      ...(input.authentication ?? existing?.deployment.authentication),
-      ...(input.companionCallbackUrls !== undefined
-        ? { companionCallbackUrls: input.companionCallbackUrls }
-        : {}),
-    },
+    authentication: input.authentication ?? existing?.deployment.authentication,
     appAccess: input.appAccess ?? existing?.deployment.appAccess,
     ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
     application: {

@@ -101,7 +101,6 @@ export async function prepareInstallationAuthentication(input: {
     state.plan = {
       ...state.plan,
       deployment: withAuthentication(state.plan.deployment, {
-        ...state.plan.deployment.authentication,
         providers: state.plan.deployment.authentication.providers,
         configurable: true,
       }),

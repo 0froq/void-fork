@@ -4,7 +4,7 @@ export function isAllowedRedirect(
   url: string,
   dashboardUrl?: string,
   platformInstallationId?: string,
-  companionCallbacks?: string,
+  authorizationCallback?: string,
 ): boolean {
   let parsed: URL;
   try {
@@ -13,7 +13,7 @@ export function isAllowedRedirect(
     return false;
   }
 
-  if (isCompanionRedirect(url, companionCallbacks)) {
+  if (isAuthorizationRedirect(url, authorizationCallback)) {
     return true;
   }
 
@@ -34,44 +34,23 @@ export function isAllowedRedirect(
   }
 }
 
-export function isLocalhostRedirect(url: URL): boolean {
-  return url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
-}
-
-/** Administrator-registered exact callback URLs; only the PKCE state query is variable. */
-export function isCompanionRedirect(url: string, callbacks?: string): boolean {
-  if (!callbacks) {
+/** Void's own OAuth browser callback. External apps never receive an account token. */
+export function isAuthorizationRedirect(value: string, authenticationCallback?: string): boolean {
+  if (!authenticationCallback) {
     return false;
   }
   try {
-    const registered: unknown = JSON.parse(callbacks);
-    const candidate = new URL(url);
-    if (
-      candidate.protocol !== 'https:' ||
-      candidate.username ||
-      candidate.password ||
-      candidate.hash
-    ) {
+    const candidate = new URL(value);
+    if (candidate.username || candidate.password || candidate.hash) {
       return false;
     }
     candidate.searchParams.delete('state');
-    return (
-      Array.isArray(registered) &&
-      registered.some((value) => {
-        if (typeof value !== 'string') {
-          return false;
-        }
-        const callback = new URL(value);
-        return (
-          callback.protocol === 'https:' &&
-          !callback.username &&
-          !callback.password &&
-          !callback.hash &&
-          callback.href === candidate.href
-        );
-      })
-    );
+    return candidate.href === new URL('/oauth/login/callback', authenticationCallback).href;
   } catch {
     return false;
   }
+}
+
+export function isLocalhostRedirect(url: URL): boolean {
+  return url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
 }

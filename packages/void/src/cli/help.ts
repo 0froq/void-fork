@@ -528,10 +528,6 @@ const HELP_TREE: HelpTree = {
             command: '--dashboard-url <origin>',
             description: 'HTTPS origin of a separately deployed dashboard',
           },
-          {
-            command: '--companion-callbacks <json>',
-            description: 'Exact HTTPS companion callback URL array',
-          },
           { command: '--plan', description: 'Print the exact plan without changing Cloudflare' },
           { command: '--resume', description: 'Resume the matching local installation' },
           {
@@ -1378,7 +1374,7 @@ function lifecycleHelp(
   return {
     summary,
     usage: [
-      `void platform ${command} [id] [--plan]${command === 'disable' ? '' : ' [--runtime <path>]'}${command === 'upgrade' || command === 'repair' ? ' [--dashboard-url <origin>] [--companion-callbacks <json>]' : ''} [--yes]`,
+      `void platform ${command} [id] [--plan]${command === 'disable' ? '' : ' [--runtime <path>]'}${command === 'upgrade' || command === 'repair' ? ' [--dashboard-url <origin>]' : ''} [--yes]`,
     ],
     options: [
       { command: '--plan', description: 'Print the exact plan without making changes' },
@@ -1396,10 +1392,6 @@ function lifecycleHelp(
               command: '--dashboard-url <origin>',
               description:
                 'Configure a separately deployed dashboard; omission keeps its saved origin',
-            },
-            {
-              command: '--companion-callbacks <json>',
-              description: 'Replace companion callbacks; [] removes them, omission preserves them',
             },
           ]
         : []),

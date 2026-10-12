@@ -144,9 +144,6 @@ export function mergePlatformLiveAuthenticationDeployment(
   return createPlatformDeploymentManifest({
     ...deployment,
     authentication: {
-      ...(deployment.authentication.companionCallbackUrls !== undefined
-        ? { companionCallbackUrls: deployment.authentication.companionCallbackUrls }
-        : {}),
       providers,
       ...(live.sessionsRequired ? { configurable: true as const } : {}),
       ...(live.protectedByAccess ? { accessProtection: true as const } : {}),

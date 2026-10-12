@@ -89,31 +89,3 @@ describe('isAllowedRedirect', () => {
     expect(isAllowedRedirect('https://attacker.com/callback')).toBe(false);
   });
 });
-
-describe('companion callbacks', () => {
-  const callbacks = JSON.stringify(['https://vibe.example.com/auth/callback']);
-  it('allows only the registered route and state query', () => {
-    expect(
-      isAllowedRedirect(
-        'https://vibe.example.com/auth/callback?state=random',
-        undefined,
-        'self',
-        callbacks,
-      ),
-    ).toBe(true);
-    for (const url of [
-      'https://vibe.example.com/other',
-      'https://vibe.example.com/auth/callback?next=evil',
-      'http://vibe.example.com/auth/callback',
-      'https://user@vibe.example.com/auth/callback',
-      'https://vibe.example.com/auth/callback#evil',
-    ]) {
-      expect(isAllowedRedirect(url, undefined, 'self', callbacks)).toBe(false);
-    }
-  });
-  it('fails closed for malformed registration', () => {
-    expect(
-      isAllowedRedirect('https://vibe.example.com/auth/callback', undefined, 'self', 'broken'),
-    ).toBe(false);
-  });
-});

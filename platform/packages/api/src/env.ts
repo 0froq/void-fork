@@ -112,8 +112,6 @@ export type ApiEnv = Env & {
     PLATFORM_APP_ACCESS?: 'public' | 'platform' | 'custom';
     PLATFORM_APP_ACCESS_SETUP_TOKEN?: string;
     DASHBOARD_URL?: string;
-    /** JSON array of exact HTTPS callback URLs for companion applications. */
-    COMPANION_CALLBACK_URLS?: string;
     USAGE_COUNTER: DurableObjectNamespace;
     CRON_SCHEDULER: DurableObjectNamespace;
     ERROR_ALERT_MONITOR: DurableObjectNamespace;
@@ -228,6 +226,7 @@ export type ApiEnv = Env & {
      * credential's project, owner, revocation, and expiry checks pass.
      */
     deployCredential?: string;
+    oauthApproval?: string;
     /** Only set by the Queue executor, never by request authentication. */
     deploymentExecution?: {
       operation: import('./deployment-operation-types.ts').DeploymentOperation;

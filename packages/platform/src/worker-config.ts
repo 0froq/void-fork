@@ -169,13 +169,6 @@ export function createPlatformWorkerConfigs(input: {
     },
     vars: {
       AUTH_REDIRECT_URI: `${apiUrl}/auth/callback`,
-      ...(deployment.authentication.companionCallbackUrls?.length
-        ? {
-            COMPANION_CALLBACK_URLS: JSON.stringify(
-              deployment.authentication.companionCallbackUrls,
-            ),
-          }
-        : {}),
       ...(dashboardUrl ? { DASHBOARD_URL: dashboardUrl } : {}),
       AI_GATEWAY_ID: names.aiGateway,
       CRON_FIRES_QUEUE_NAME: names.cronQueue,

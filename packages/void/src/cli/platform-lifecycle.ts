@@ -225,8 +225,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
           args.accessProtection === undefined &&
           args.appAccess === undefined &&
           !args.dedicatedZoneSpecified &&
-          args.dashboardUrl === undefined &&
-          args.companionCallbackUrls === undefined
+          args.dashboardUrl === undefined
             ? listSavedPlatformInstallPlans().filter(
                 (saved) =>
                   (!args.name || saved.args.name === normalizeInstallationSlug(args.name)) &&
@@ -714,9 +713,6 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       applicationDomain,
       controlPlaneDomain,
       ...(args.dashboardUrl !== undefined ? { dashboardUrl: args.dashboardUrl } : {}),
-      ...(args.companionCallbackUrls !== undefined
-        ? { companionCallbackUrls: args.companionCallbackUrls }
-        : {}),
       dedicatedZone,
       displayName,
       ...(externalHyperdrive ? { externalHyperdrive } : {}),
@@ -747,9 +743,6 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       zoneName,
       controlPlaneDomain,
       ...(args.dashboardUrl !== undefined ? { dashboardUrl: args.dashboardUrl } : {}),
-      ...(args.companionCallbackUrls !== undefined
-        ? { companionCallbackUrls: args.companionCallbackUrls }
-        : {}),
       dedicatedZone,
       workersDev,
       authConfig: args.authConfig,

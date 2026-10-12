@@ -25,6 +25,7 @@ Use this reference to find public imports, signatures, and return types. For set
 | [Durable State and WebSockets](./api/durable.md)   | Persistent objects and typed connections.                       |
 | [Database and seeding](./api/database.md)          | Queries, operators, and seed scripts.                           |
 | [KV, storage, AI, and logging](./api/resources.md) | Resource clients, cache revalidation, and logs.                 |
+| [Deployment artifacts](./api/deploy.md)            | Package built apps for managed deployment.                      |
 | [Types](./api/types.md)                            | Handler context, route types, and head metadata.                |
 | [Environment variables](./api/env.md)              | Validated environment values and binding types.                 |
 | [Pages adapters](./api/pages.md)                   | React, Vue, Svelte, Solid, and Markdown.                        |

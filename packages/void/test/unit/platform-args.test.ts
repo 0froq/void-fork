@@ -3,29 +3,6 @@ import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
 import { assertNoninteractivePlatformMutationAcknowledged } from '../../src/cli/platform-lifecycle.ts';
 
 describe('platform args', () => {
-  it('replaces or clears companion callback registrations only in install, upgrade, and repair', () => {
-    for (const command of ['install', 'upgrade', 'repair']) {
-      expect(
-        parsePlatformArgs([
-          command,
-          '--companion-callbacks',
-          '["https://build.example.com/auth/callback"]',
-        ]),
-      ).toMatchObject({ companionCallbackUrls: ['https://build.example.com/auth/callback'] });
-      expect(parsePlatformArgs([command, '--companion-callbacks', '[]'])).toMatchObject({
-        companionCallbackUrls: [],
-      });
-      expect(parsePlatformArgs([command])).not.toHaveProperty('companionCallbackUrls');
-      expect(() =>
-        parsePlatformArgs([
-          command,
-          '--companion-callbacks',
-          '["http://build.example.com/auth/callback"]',
-        ]),
-      ).toThrow();
-    }
-    expect(() => parsePlatformArgs(['enable', '--companion-callbacks', '[]'])).toThrow();
-  });
   it('accepts explicit planned choices and rejects contradictory configuration', () => {
     expect(
       parsePlatformArgs([
