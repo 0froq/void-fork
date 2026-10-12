@@ -50,7 +50,7 @@ import {
   quoteSqlString,
 } from './db-export-sequences.ts';
 import { formatTimestamp } from './gen.ts';
-import { printSuccess, dim, formatCount, getErrorMessage, pc } from './output.ts';
+import { printSuccess, dim, formatCount, formatUrl, getErrorMessage, pc } from './output.ts';
 import { readDeploymentPlatform, readProjectConfig } from './project.ts';
 import { drizzleKitBin } from './yarn-pnp.ts';
 
@@ -315,7 +315,7 @@ async function runConnect(
     connectionString = result.connectionString;
     log.step(`Provisioned ${adapter.label} database.`);
     if (result.dashboardUrl) {
-      log.info(`Dashboard: ${result.dashboardUrl}`);
+      log.info(`Dashboard: ${formatUrl(result.dashboardUrl)}`);
     }
   }
 

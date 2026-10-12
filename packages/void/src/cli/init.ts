@@ -28,7 +28,7 @@ import { maybeScaffoldEnvTs } from './env-scaffold.ts';
 import { migrateFrameworkAdapterPaths } from './framework-config-migrate.ts';
 import { initialCommitCommand, setupGit } from './init-git.ts';
 import { migrateLegacyVoidConfig } from './migrate.ts';
-import { note, printSuccess } from './output.ts';
+import { formatUrl, note, printSuccess } from './output.ts';
 import { discoverPlatform, saveDiscoveredPlatform } from './platform-cmd.ts';
 import { formatProjectCommand } from './preset.ts';
 import {
@@ -1603,7 +1603,7 @@ export async function ensureVoidPlatformConnection(
   const discovery = await discoverPlatform(selectedApiUrl);
   saveDiscoveredPlatform(discovery);
   if (promptedForPlatform) {
-    log.step(`Connected to ${discovery.displayName} at ${discovery.apiUrl}.`);
+    log.step(`Connected to ${discovery.displayName} at ${formatUrl(discovery.apiUrl)}.`);
   }
   return discovery;
 }

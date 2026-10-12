@@ -2,7 +2,7 @@ import { outro } from '@voidzero-dev/vite-plus-prompts';
 import { getOwnVersion } from './agents.ts';
 import { asciiArts } from './ascii.ts';
 import { operatorCommands, operatorGroups } from './operator-args.ts';
-import { categoryTitle, helpLine, note, pc, sectionTitle } from './output.ts';
+import { categoryTitle, formatUrl, helpLine, note, pc, sectionTitle } from './output.ts';
 
 type HelpCommand = {
   command: string;
@@ -1485,7 +1485,7 @@ export function printGlobalHelp(): void {
     sectionTitle('Environment'),
   );
 
-  outro('https://void.cloud');
+  outro(formatUrl('https://void.cloud'));
 }
 
 export function printVoidHeader(): void {
