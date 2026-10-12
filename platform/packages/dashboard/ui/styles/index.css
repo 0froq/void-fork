@@ -3,7 +3,11 @@
  */
 
 /* Define explicit cascade layer order (left = lowest priority) */
-@layer base, marketing;
+@layer reset, base, astryx-base, astryx-theme, marketing;
+
+@import '@astryxdesign/core/reset.css';
+@import '@astryxdesign/core/astryx.css';
+@import '@astryxdesign/theme-neutral/theme.css';
 
 /* 1. Design tokens */
 @import './tokens.css';

@@ -115,10 +115,13 @@
     font-family: var(--font-heading);
     font-weight: 500;
     line-height: 1.2;
+    color: inherit;
   }
 
   p {
     margin: 0;
+    font: inherit;
+    color: inherit;
   }
 
   strong,

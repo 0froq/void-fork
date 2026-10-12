@@ -1,4 +1,6 @@
-import { Menu } from '@base-ui/react/menu';
+import { DropdownMenu } from '@astryxdesign/core/DropdownMenu';
+import { Theme } from '@astryxdesign/core/theme';
+import { neutralTheme } from '@astryxdesign/theme-neutral/built';
 import { Icon } from '@iconify/react';
 import { useThemeContext } from '../context/ThemeContext.tsx';
 
@@ -36,57 +38,40 @@ export default function AppHeader({
       </div>
 
       {accountMenuItems.length ? (
-        <Menu.Root modal={false}>
-          <div className="dashboard-account">
-            <Menu.Trigger
-              aria-label={accountMenuLabel}
-              className="dashboard-account-trigger"
-              title={accountMenuLabel}
-            >
-              <span className="dashboard-account-icon">
-                <Icon
-                  aria-hidden="true"
-                  className="dashboard-account-icon"
-                  icon="lucide:circle-user-round"
-                />
-              </span>
-              <span className="dashboard-account-label">{accountMenuLabel}</span>
-            </Menu.Trigger>
-            <Menu.Portal>
-              <Menu.Positioner
-                align="end"
-                className="dashboard-menu-positioner"
-                collisionPadding={16}
-                side="bottom"
-                sideOffset={6}
-              >
-                <Menu.Popup className="dashboard-menu">
-                  {accountMenuItems.map((item) => (
-                    <Menu.LinkItem
-                      className="dashboard-menu-item"
-                      closeOnClick
-                      href={item.link}
-                      key={item.link}
-                      rel={isExternalLink(item.link) ? 'noreferrer' : undefined}
-                      target={isExternalLink(item.link) ? '_blank' : undefined}
-                    >
-                      <span className="dashboard-account-icon">
-                        {item.icon ? (
-                          <Icon
-                            aria-hidden="true"
-                            className="dashboard-account-icon"
-                            icon={item.icon}
-                          />
-                        ) : null}
-                      </span>
-                      <span>{item.text}</span>
-                    </Menu.LinkItem>
-                  ))}
-                </Menu.Popup>
-              </Menu.Positioner>
-            </Menu.Portal>
-          </div>
-        </Menu.Root>
+        <div className="dashboard-account">
+          <Theme theme={neutralTheme}>
+            <DropdownMenu
+              alignment="end"
+              button={{
+                label: accountMenuLabel,
+                variant: 'ghost',
+                title: accountMenuLabel,
+                icon: (
+                  <Icon
+                    aria-hidden="true"
+                    className="dashboard-account-icon"
+                    icon="lucide:circle-user-round"
+                  />
+                ),
+              }}
+              hasChevron={false}
+              items={accountMenuItems.map((item) => ({
+                id: item.link,
+                label: item.text,
+                icon: item.icon ? (
+                  <Icon aria-hidden="true" className="dashboard-account-icon" icon={item.icon} />
+                ) : undefined,
+                onClick: () => {
+                  if (isExternalLink(item.link)) {
+                    window.open(item.link, '_blank', 'noopener,noreferrer');
+                  } else {
+                    window.location.assign(item.link);
+                  }
+                },
+              }))}
+            />
+          </Theme>
+        </div>
       ) : (
         <div className="dashboard-account-spacer" />
       )}

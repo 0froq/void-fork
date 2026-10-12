@@ -9,8 +9,8 @@ mode app. The administrator UI is served by the API Worker.
 - **Auth** - enabled platform login methods via the API's `/auth/login` flow. The JWT is
   stored in an httpOnly cookie (`void_token`). Middleware validates the token with
   `GET /me`.
-- **Styling** - Plain CSS with dashboard-local styles, fonts, assets,
-  and React components in `ui/`.
+- **Styling** - Dashboard-local CSS, fonts, assets, and React components in `ui/`,
+  with Astryx's neutral theme for the account menu.
 
 ## Pages
 
