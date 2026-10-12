@@ -146,6 +146,28 @@ describe('inferProjectBindings', () => {
     expect(result.needsLive).toBe(true);
   });
 
+  it('infers resources used only by Durable Object modules', () => {
+    const root = createTempRoot();
+    mkdirSync(join(root, 'durable-objects'), { recursive: true });
+    writeFileSync(
+      join(root, 'durable-objects', 'agent.ts'),
+      `
+      import { createAi } from 'void/ai';
+      import { createStorage } from 'void/storage';
+      export function resources(env) { return [createAi(env), createStorage(env.STORAGE)]; }
+    `,
+    );
+    expect(inferProjectBindings(root)).toMatchObject({
+      needsAI: true,
+      needsR2: true,
+      needsSandbox: false,
+    });
+    expect(inferProjectBindings(root, undefined, ['durable-objects'])).toMatchObject({
+      needsAI: true,
+      needsR2: true,
+    });
+  });
+
   it('detects live from a stream module outside the default directories only when scanned', () => {
     const root = createTempRoot();
     mkdirSync(join(root, 'routes'), { recursive: true });

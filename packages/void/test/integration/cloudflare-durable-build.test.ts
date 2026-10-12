@@ -34,6 +34,14 @@ describe('real Cloudflare Durable Object configuration merge', () => {
   it.each([
     { name: 'combined', websocket: true, live: true, sandbox: true, authoredHistory: true },
     { name: 'sandbox-only', websocket: false, live: false, sandbox: true, authoredHistory: false },
+    {
+      name: 'native',
+      native: true,
+      websocket: false,
+      live: false,
+      sandbox: false,
+      authoredHistory: true,
+    },
     { name: 'free', websocket: true, live: true, sandbox: false, authoredHistory: false },
   ])(
     'emits $name identities and ordered migrations exactly once through the actual provider plugin',
@@ -64,7 +72,12 @@ export const GET = defineHandler(c => stream.connect(c, { owner: 'local', user: 
         if (options.authoredHistory) {
           write(
             'durable-objects/history.ts',
-            `import { defineDurableState } from 'void/durable';
+            'native' in options && options.native
+              ? `import { DurableObject } from 'cloudflare:workers';
+import { defineDurableObject } from 'void/durable';
+class History extends DurableObject { increment() { return 1; } }
+export default defineDurableObject({ class: History });\n`
+              : `import { defineDurableState } from 'void/durable';
 export default defineDurableState({ initialState: { count: 0 }, methods: { increment(c) { return ++c.state.count; } } });\n`,
           );
         }
