@@ -327,6 +327,10 @@
       "types": "./dist/runtime/limits.d.mts",
       "import": "./dist/runtime/limits.mjs",
       "require": "./dist/runtime/limits.mjs"
+    },
+    "./deploy": {
+      "types": "./dist/deploy.d.mts",
+      "import": "./dist/deploy.mjs"
     }
   },
   "scripts": {

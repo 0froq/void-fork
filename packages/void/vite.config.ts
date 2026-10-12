@@ -61,6 +61,7 @@ export default defineConfig({
     entry: [
       'src/index.ts',
       'src/config-entry.ts',
+      'src/deploy.ts',
       'src/prerender-render.ts',
       'src/database-provider.ts',
       'src/edge.ts',
