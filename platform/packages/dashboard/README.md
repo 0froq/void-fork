@@ -109,8 +109,8 @@ lib/
 ui/
   components/               # Dashboard header and footer
   context/                  # Logo configuration
-  styles/                   # Tailwind tokens, reset, shell and button styles
-  assets/                   # Void logos and dashboard backgrounds
+  styles/                   # Design tokens, reset, shell and button styles
+  assets/                   # Void logos
   fonts/                    # APK Protocol, KH Teka Mono, and Inter
 middleware/
   01.auth.ts                # void_token validation through /me

@@ -60,20 +60,6 @@
     color: var(--color-text-1);
   }
 
-  html [img-dark] {
-    display: none;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    html [img-light] {
-      display: none;
-    }
-
-    html [img-dark] {
-      display: initial;
-    }
-  }
-
   /* Custom scrollbar - global */
   * {
     scrollbar-width: thin;
@@ -284,16 +270,6 @@
   /* Vite error overlay */
   vite-error-overlay {
     z-index: 9999;
-  }
-
-  /* Math rendering */
-  mjx-container {
-    overflow-x: auto;
-  }
-
-  mjx-container > svg {
-    display: inline-block;
-    margin: auto;
   }
 
   [hidden]:where(:not([hidden='until-found'])) {
