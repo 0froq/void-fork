@@ -226,6 +226,12 @@ export function platformLifecycleResumeCommand(
   if ('dashboardUrl' in args && args.dashboardUrl) {
     command.push('--dashboard-url', commandArgument(args.dashboardUrl));
   }
+  if ('companionCallbackUrls' in args && args.companionCallbackUrls !== undefined) {
+    command.push(
+      '--companion-callbacks',
+      commandArgument(JSON.stringify(args.companionCallbackUrls)),
+    );
+  }
   if (args.yes) {
     command.push('--yes');
   }
@@ -347,6 +353,9 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       controlPlaneDomain: deployment.controlPlane.apiHostname ?? '',
       ...(args.subcommand !== 'rollback' && args.dashboardUrl !== undefined
         ? { dashboardUrl: args.dashboardUrl }
+        : {}),
+      ...(args.subcommand !== 'rollback' && args.companionCallbackUrls !== undefined
+        ? { companionCallbackUrls: args.companionCallbackUrls }
         : {}),
       dedicatedZone: deployment.application.dedicatedZone,
       displayName: deployment.displayName,

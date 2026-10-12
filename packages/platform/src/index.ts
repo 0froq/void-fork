@@ -39,6 +39,7 @@ export {
   createPlatformResourceNames,
   normalizeApplicationDomain,
   normalizePlatformDashboardUrl,
+  normalizeCompanionCallbackUrls,
   normalizeInstallationSlug,
   platformDashboardUrl,
   parsePlatformDeploymentManifest,

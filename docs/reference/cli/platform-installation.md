@@ -27,6 +27,7 @@ void platform install [options] [--yes]
 | `--control-plane-domain <domain>`         | Optional API custom hostname; defaults to `workers.dev`                              |
 | `--no-control-plane-domain`               | Use the default `workers.dev` API hostname                                           |
 | `--dashboard-url <origin>`                | HTTPS origin of an optional dashboard deployed separately                            |
+| `--companion-callbacks <json>`            | Array of exact HTTPS callback URLs for companion apps                                |
 | `--plan`                                  | Preview Cloudflare changes and save installation choices locally                     |
 | `--resume`                                | Continue the matching checkpointed installation                                      |
 | `--runtime <path>`                        | Deploy a locally built, integrity-checked runtime directory                          |
@@ -142,3 +143,19 @@ Uninstall verifies remote ownership before removing anything. Data resources are
 `--purge-resources` includes `--purge-data` and also deletes every other resource the installation created, including Workers, Queues, R2, AI Gateway, the platform DNS record, routes, custom domains, and installer-created Access resources. It removes only the Email Routing rules that send mail to the platform email gateway, and keeps zones, adopted resources, external PostgreSQL, other Email Routing settings, and API tokens. A route, custom domain, DNS record, or Access resource that no longer matches the installation's record is kept and listed. It refuses before any change while projects remain or resource reads are denied. Use the Edit permissions listed by `--plan`; read checks cannot verify them, so a denied deletion can stop uninstall after changes have begun. Rerun the same command to continue after an interruption, or after a plain or `--purge-data` uninstall stopped.
 
 See [Disable and Uninstall](../../guide/platform/installation/uninstall.md#remove-retained-resources) for the full removal policy and the cleanup order.
+
+### Companion sign-in
+
+Register a companion app's exact callback URL during installation, or replace
+registrations on an existing installation with upgrade or repair:
+
+```sh
+void platform repair team --companion-callbacks '["https://build.example.com/auth/callback"]'
+```
+
+Omitting the option preserves saved registrations. Pass `[]` to remove them.
+Callbacks must use HTTPS and have no credentials, query, or fragment. Companion
+apps start `/auth/login` with the registered callback, a `state` query parameter,
+and an S256 PKCE challenge. After sign-in, the callback receives a single-use
+code. Its server exchanges that code at `/auth/cli/token` with the matching
+`state` and `code_verifier`; keep the resulting account token on the server.

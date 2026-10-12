@@ -38,7 +38,7 @@ import { PlatformOidcProvider, type PlatformOidcIdentity } from './oidc.ts';
 import { createCodeChallenge } from './pkce.ts';
 import { hashLoginProof, randomLoginProof } from './proofs.ts';
 import { validateRecoveryTest } from './recovery.ts';
-import { isAllowedRedirect, isLocalhostRedirect } from './redirects.ts';
+import { isAllowedRedirect, isLocalhostRedirect, isCompanionRedirect } from './redirects.ts';
 import { createHumanSession, validateHumanSession, type CompanyIdentity } from './sessions.ts';
 
 const COOKIE = 'void_platform_auth';
@@ -377,6 +377,7 @@ export async function startPlatformLogin(
           redirect,
           context.env.DASHBOARD_URL,
           context.env.PLATFORM_INSTALLATION_ID,
+          context.env.COMPANION_CALLBACK_URLS,
         ))
     ) {
       throw new AuthenticationConfigurationError(
@@ -395,7 +396,11 @@ export async function startPlatformLogin(
       verifier: '',
       companyIdentity: context.get('companyIdentity'),
     };
-    if (purpose === 'login' && isLocalhostRedirect(new URL(redirect))) {
+    if (
+      purpose === 'login' &&
+      (isLocalhostRedirect(new URL(redirect)) ||
+        isCompanionRedirect(redirect, context.env.COMPANION_CALLBACK_URLS))
+    ) {
       const cliState = new URL(redirect).searchParams.get('state');
       const challenge = context.req.query('code_challenge');
       if (
@@ -719,13 +724,17 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
         saved.redirect,
         context.env.DASHBOARD_URL,
         context.env.PLATFORM_INSTALLATION_ID,
+        context.env.COMPANION_CALLBACK_URLS,
       )
     ) {
       throw new Error('Login redirect no longer allowed');
     }
     const redirect = new URL(saved.redirect);
     const code = crypto.randomUUID();
-    if (isLocalhostRedirect(redirect)) {
+    if (
+      isLocalhostRedirect(redirect) ||
+      isCompanionRedirect(redirect.href, context.env.COMPANION_CALLBACK_URLS)
+    ) {
       if (!saved.codeChallenge || !saved.cliState) {
         throw new Error('Missing CLI proof');
       }

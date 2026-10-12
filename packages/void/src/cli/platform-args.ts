@@ -1,5 +1,6 @@
 import {
   normalizePlatformDashboardUrl,
+  normalizeCompanionCallbackUrls,
   PLATFORM_LOGIN_KINDS,
   type PlatformLoginKind,
   type PlatformAppAccess,
@@ -84,6 +85,7 @@ export type PlatformArgs =
       applicationDomain: string;
       controlPlaneDomain: string;
       dashboardUrl?: string;
+      companionCallbackUrls?: Array<string>;
       dedicatedZone: boolean;
       displayName: string;
       name: string;
@@ -97,6 +99,7 @@ export type PlatformArgs =
   | {
       subcommand: 'upgrade' | 'repair' | 'disable' | 'enable';
       dashboardUrl?: string;
+      companionCallbackUrls?: Array<string>;
       selector: string;
       plan: boolean;
       runtime: string;
@@ -166,11 +169,13 @@ function parseLifecycleSelector(
   fromRuntime: string;
   yes: boolean;
   dashboardUrl?: string;
+  companionCallbackUrls?: Array<string>;
 } {
   const positional: Array<string> = [];
   let runtime = '';
   let fromRuntime = '';
   let dashboardUrl: string | undefined;
+  let companionCallbackUrls: Array<string> | undefined;
   for (let index = 0; index < rest.length; index++) {
     const arg = rest[index]!;
     if (arg === '--runtime') {
@@ -183,6 +188,13 @@ function parseLifecycleSelector(
     } else if (arg === '--dashboard-url' && (subcommand === 'upgrade' || subcommand === 'repair')) {
       const [value, next] = readValue(rest, index, arg);
       dashboardUrl = normalizePlatformDashboardUrl(value);
+      index = next;
+    } else if (
+      arg === '--companion-callbacks' &&
+      (subcommand === 'upgrade' || subcommand === 'repair')
+    ) {
+      const [value, next] = readValue(rest, index, arg);
+      companionCallbackUrls = normalizeCompanionCallbackUrls(JSON.parse(value));
       index = next;
     } else if (arg === '--from-runtime' && subcommand === 'rollback') {
       const [value, next] = readValue(rest, index, arg);
@@ -201,6 +213,7 @@ function parseLifecycleSelector(
     runtime,
     fromRuntime,
     ...(dashboardUrl !== undefined ? { dashboardUrl } : {}),
+    ...(companionCallbackUrls !== undefined ? { companionCallbackUrls } : {}),
   };
 }
 
@@ -311,10 +324,8 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     subcommand === 'disable' ||
     subcommand === 'enable'
   ) {
-    const { selector, plan, runtime, fromRuntime, yes, dashboardUrl } = parseLifecycleSelector(
-      rest,
-      subcommand,
-    );
+    const { selector, plan, runtime, fromRuntime, yes, dashboardUrl, companionCallbackUrls } =
+      parseLifecycleSelector(rest, subcommand);
     return subcommand === 'rollback'
       ? { subcommand, selector, plan, runtime, fromRuntime, yes }
       : {
@@ -324,6 +335,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
           runtime,
           yes,
           ...(dashboardUrl !== undefined ? { dashboardUrl } : {}),
+          ...(companionCallbackUrls !== undefined ? { companionCallbackUrls } : {}),
         };
   }
   if (subcommand === 'uninstall') {
@@ -370,6 +382,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
       '--application-domain',
       '--control-plane-domain',
       '--dashboard-url',
+      '--companion-callbacks',
       '--display-name',
       '--name',
       '--runtime',
@@ -460,6 +473,13 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
       controlPlaneDomain: values.get('--control-plane-domain') ?? '',
       ...(values.has('--dashboard-url')
         ? { dashboardUrl: normalizePlatformDashboardUrl(values.get('--dashboard-url')!) }
+        : {}),
+      ...(values.has('--companion-callbacks')
+        ? {
+            companionCallbackUrls: normalizeCompanionCallbackUrls(
+              JSON.parse(values.get('--companion-callbacks')!),
+            ),
+          }
         : {}),
       dedicatedZone,
       displayName: values.get('--display-name') ?? '',

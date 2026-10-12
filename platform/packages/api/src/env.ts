@@ -112,6 +112,8 @@ export type ApiEnv = Env & {
     PLATFORM_APP_ACCESS?: 'public' | 'platform' | 'custom';
     PLATFORM_APP_ACCESS_SETUP_TOKEN?: string;
     DASHBOARD_URL?: string;
+    /** JSON array of exact HTTPS callback URLs for companion applications. */
+    COMPANION_CALLBACK_URLS?: string;
     USAGE_COUNTER: DurableObjectNamespace;
     CRON_SCHEDULER: DurableObjectNamespace;
     ERROR_ALERT_MONITOR: DurableObjectNamespace;

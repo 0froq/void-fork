@@ -23,7 +23,7 @@ import {
   isValidCodeVerifier,
 } from '../auth/pkce.ts';
 import { updateUserRevokingInheritedDestinations } from '../auth/profile.ts';
-import { isAllowedRedirect, isLocalhostRedirect } from '../auth/redirects.ts';
+import { isAllowedRedirect, isLocalhostRedirect, isCompanionRedirect } from '../auth/redirects.ts';
 import { validateHumanSession } from '../auth/sessions.ts';
 import { acceptsBrowserHtml, platformBrowserError } from '../browser-page.ts';
 import { getPlatformCapabilities } from '../capabilities.ts';
@@ -139,7 +139,12 @@ app.get('/login', async (context) => {
   }
 
   if (
-    !isAllowedRedirect(redirect, context.env.DASHBOARD_URL, context.env.PLATFORM_INSTALLATION_ID)
+    !isAllowedRedirect(
+      redirect,
+      context.env.DASHBOARD_URL,
+      context.env.PLATFORM_INSTALLATION_ID,
+      context.env.COMPANION_CALLBACK_URLS,
+    )
   ) {
     return context.json({ error: 'redirect must be a localhost or dashboard URL' }, 400);
   }
@@ -160,17 +165,29 @@ app.get('/login', async (context) => {
   const codeChallengeMethod = context.req.query('code_challenge_method');
   let cliState: string | null = null;
 
-  if (codeChallenge || codeChallengeMethod) {
+  if (
+    codeChallenge ||
+    codeChallengeMethod ||
+    isCompanionRedirect(redirect, context.env.COMPANION_CALLBACK_URLS)
+  ) {
     const redirectUrl = new URL(redirect);
     cliState = redirectUrl.searchParams.get('state');
 
-    if (!isLocalhostRedirect(redirectUrl)) {
+    if (
+      !isLocalhostRedirect(redirectUrl) &&
+      !isCompanionRedirect(redirect, context.env.COMPANION_CALLBACK_URLS)
+    ) {
       return context.json({ error: 'CLI code exchange requires a localhost redirect' }, 400);
     }
     if (!cliState) {
       return context.json({ error: 'CLI code exchange requires callback state' }, 400);
     }
-    if (!codeChallenge || codeChallengeMethod !== CLI_CODE_CHALLENGE_METHOD) {
+    if (
+      !codeChallenge ||
+      (isCompanionRedirect(redirect, context.env.COMPANION_CALLBACK_URLS) &&
+        !/^[A-Za-z0-9_-]{43}$/.test(codeChallenge)) ||
+      codeChallengeMethod !== CLI_CODE_CHALLENGE_METHOD
+    ) {
       return context.json({ error: 'code_challenge_method must be S256' }, 400);
     }
   }
@@ -327,7 +344,12 @@ app.get('/callback', async (context) => {
 
   // Re-validate redirect after decoding
   if (
-    !isAllowedRedirect(redirect, context.env.DASHBOARD_URL, context.env.PLATFORM_INSTALLATION_ID)
+    !isAllowedRedirect(
+      redirect,
+      context.env.DASHBOARD_URL,
+      context.env.PLATFORM_INSTALLATION_ID,
+      context.env.COMPANION_CALLBACK_URLS,
+    )
   ) {
     return context.json({ error: 'invalid redirect' }, 400);
   }
@@ -508,7 +530,10 @@ app.get('/callback', async (context) => {
 
   const redirectUrl = new URL(redirect);
 
-  if (isLocalhostRedirect(redirectUrl)) {
+  if (
+    isLocalhostRedirect(redirectUrl) ||
+    isCompanionRedirect(redirect, context.env.COMPANION_CALLBACK_URLS)
+  ) {
     if (codeChallenge && codeChallengeMethod === CLI_CODE_CHALLENGE_METHOD && cliState) {
       const authCode = crypto.randomUUID();
       await storeAuthCode(db, authCode, jwt, CLI_AUTH_CODE_TTL_SECONDS, {

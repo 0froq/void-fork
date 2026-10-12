@@ -5,6 +5,42 @@ import {
 } from '../../src/manifest.ts';
 
 describe('configurable authentication deployment manifests', () => {
+  it('round-trips exact companion callbacks and rejects unsafe registrations', () => {
+    const input = {
+      application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+      displayName: 'Team',
+      installationSlug: 'team',
+    };
+    const manifest = createPlatformDeploymentManifest({
+      ...input,
+      authentication: { companionCallbackUrls: ['https://BUILD.example.com/auth/callback'] },
+    });
+    expect(parsePlatformDeploymentManifest(manifest).authentication.companionCallbackUrls).toEqual([
+      'https://build.example.com/auth/callback',
+    ]);
+    for (const url of [
+      'http://build.example.com/auth/callback',
+      'https://user@build.example.com/auth/callback',
+      'https://build.example.com/auth/callback?state=x',
+      'https://build.example.com/auth/callback#x',
+    ]) {
+      expect(() =>
+        createPlatformDeploymentManifest({
+          ...input,
+          authentication: { companionCallbackUrls: [url] },
+        }),
+      ).toThrow();
+    }
+    expect(() =>
+      parsePlatformDeploymentManifest({
+        ...manifest,
+        authentication: {
+          ...manifest.authentication,
+          companionCallbackUrls: 'https://build.example.com',
+        },
+      }),
+    ).toThrow();
+  });
   it.each(['google', 'oidc', 'cloudflare-access'] as const)(
     'round-trips %s without enabling GitHub',
     (kind) => {

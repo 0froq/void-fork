@@ -55,6 +55,7 @@ export type PlatformDeploymentManifest = Readonly<{
   /** Shared sender domain registered for managed email. */
   emailSenderDomain?: string;
   authentication: Readonly<{
+    companionCallbackUrls?: ReadonlyArray<string>;
     providers: ReadonlyArray<PlatformLoginKind>;
     configurable?: true;
     accessProtection?: true;
@@ -79,6 +80,7 @@ export type PlatformDeploymentManifestInput = Readonly<{
   emailSharedZoneId?: string;
   emailSenderDomain?: string;
   authentication?: Readonly<{
+    companionCallbackUrls?: ReadonlyArray<string>;
     providers?: ReadonlyArray<PlatformLoginKind>;
     configurable?: true;
     accessProtection?: true;
@@ -111,6 +113,29 @@ const CONTROL_PLANE_DEFAULTS: PlatformControlPlane = {
   dashboardHostname: null,
   proxyHostname: null,
 };
+
+/** Exact HTTPS callback registrations, without caller-supplied query parameters. */
+export function normalizeCompanionCallbackUrls(value: unknown): Array<string> {
+  if (!Array.isArray(value) || value.length > 20) {
+    throw new Error('Companion callbacks must be an array of at most 20 HTTPS URLs.');
+  }
+  const urls = value.map((entry: unknown) => {
+    if (typeof entry !== 'string') {
+      throw new Error('Companion callbacks must be HTTPS URLs.');
+    }
+    const url = new URL(entry);
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+      throw new Error(
+        'Companion callbacks must be credential-free HTTPS URLs without queries or fragments.',
+      );
+    }
+    return url.href;
+  });
+  if (new Set(urls).size !== urls.length) {
+    throw new Error('Companion callbacks must be unique.');
+  }
+  return urls;
+}
 
 export function normalizeInstallationSlug(value: string): string {
   const slug = value
@@ -304,6 +329,13 @@ export function createPlatformDeploymentManifest(
     },
     authentication: {
       providers: [...providers],
+      ...(input.authentication?.companionCallbackUrls !== undefined
+        ? {
+            companionCallbackUrls: normalizeCompanionCallbackUrls(
+              input.authentication.companionCallbackUrls,
+            ),
+          }
+        : {}),
       ...(configurable ? { configurable: true } : {}),
       ...(input.authentication?.accessProtection ? { accessProtection: true } : {}),
     },
@@ -475,6 +507,13 @@ export function parsePlatformDeploymentManifest(value: unknown): PlatformDeploym
     },
     authentication: {
       providers: providers as Array<PlatformLoginKind>,
+      ...(authentication.companionCallbackUrls !== undefined
+        ? {
+            companionCallbackUrls: normalizeCompanionCallbackUrls(
+              authentication.companionCallbackUrls,
+            ),
+          }
+        : {}),
       ...(authentication.configurable === true ? { configurable: true } : {}),
       ...(authentication.accessProtection === true ? { accessProtection: true } : {}),
     },

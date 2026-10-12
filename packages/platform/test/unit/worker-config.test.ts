@@ -76,13 +76,19 @@ describe('platform usage queue bindings', () => {
       ...deploymentInput,
       emailSharedZoneId: 'mail-zone-id',
       emailSenderDomain: 'mail.example.org',
-      authentication: { accessProtection: true },
+      authentication: {
+        accessProtection: true,
+        companionCallbackUrls: ['https://build.example.org/auth/callback'],
+      },
       capabilities: { email: true },
     });
     const configs = workerConfigs({
       deployment: mailDeployment,
       runtimeApiAssetsDirectory: '/runtime/api/assets',
     });
+    expect(configs.api.vars.COMPANION_CALLBACK_URLS).toBe(
+      '["https://build.example.org/auth/callback"]',
+    );
     const expected = {
       EMAIL_SHARED_ACCOUNT_ID: 'account',
       EMAIL_SHARED_ZONE_ID: 'mail-zone-id',

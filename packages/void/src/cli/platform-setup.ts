@@ -315,6 +315,7 @@ export type PlatformInstallCommandOptions = {
   zoneName: string;
   controlPlaneDomain: string;
   dashboardUrl?: string;
+  companionCallbackUrls?: ReadonlyArray<string>;
   dedicatedZone: boolean;
   workersDev: boolean;
   authConfig?: string;
@@ -370,6 +371,10 @@ export function platformInstallCommandArguments(
     );
   }
   flag('--dashboard-url', options.dashboardUrl ?? '');
+  const callbacks = options.companionCallbackUrls ?? options.authentication?.companionCallbackUrls;
+  if (callbacks !== undefined) {
+    flag('--companion-callbacks', JSON.stringify(callbacks));
+  }
   flag('--runtime', options.runtime);
   if (options.yes) {
     parts.push('--yes');
