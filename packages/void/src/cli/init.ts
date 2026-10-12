@@ -2008,9 +2008,11 @@ export function installProjectDependencies(
         // npx void init must also work without a globally installed vp. Avoid
         // asking an older pnpm to switch itself to a pinned native pnpm 12.
         command = 'npx';
+        const packageArg = `--package=vite-plus@${SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES['vite-plus']}`;
         args = [
           '--yes',
-          `--package=vite-plus@${SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES['vite-plus']}`,
+          // cmd.exe treats the semver caret as an escape outside quotes.
+          process.platform === 'win32' ? `"${packageArg}"` : packageArg,
           'vp',
           ...args,
         ];
