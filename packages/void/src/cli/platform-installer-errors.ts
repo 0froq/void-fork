@@ -19,10 +19,6 @@ export function assertCleanPlatformWrangler(
   }
 }
 
-export function cleanPlatformCommandResult(): CloudflareCommandResult {
-  return { status: 0, stderr: '', stdout: '' };
-}
-
 export function assertPlatformTriggerStabilization(
   result: Awaited<ReturnType<typeof stabilizeCloudflareVersionTriggers>>,
   workerName: string,
@@ -39,8 +35,4 @@ export function assertPlatformTriggerStabilization(
       `platform: Worker ${workerName} was superseded by ${result.activeVersionId} while publishing ${targetVersionId}; its active trigger state was repaired.`,
     );
   }
-}
-
-export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
