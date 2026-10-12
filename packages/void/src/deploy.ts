@@ -3,10 +3,9 @@ import { createDeployArtifact, type DeployArtifact } from '@void/deploy-core';
 import { resolve, join } from 'pathslash';
 import { analyzeApplication } from './application-routing.ts';
 import { resolveAssetConfig, hasApiRoutes, hasDocumentRoutes } from './asset-routing.ts';
+import { resolveDistDir, resolveWorkerDirName } from './cli/build-output-dir.ts';
 import { assertDeploySchemaDriftFree } from './cli/deploy-drift.ts';
 import {
-  resolveDistDir,
-  resolveWorkerDirName,
   resolveDeployWorkerMain,
   resolveDeployWranglerCompat,
   assertWorkerMainUploaded,
@@ -83,7 +82,6 @@ export async function prepareDeployArtifact(
         scan.middleware.length > 0 ||
         websockets.length > 0 ||
         authEnabled,
-      vars: {},
       revalidate: collectRevalidate(config, pages ? scan.pages : null),
       assetConfig: resolveAssetConfig({
         isSsr: ssr,
