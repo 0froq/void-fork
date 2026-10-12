@@ -1,6 +1,8 @@
 import { Button } from '@astryxdesign/core/Button';
 import type { Props } from './account.server.ts';
 
+export const layout = 'dashboard';
+
 export default function AccountPage({ methods, error }: Props) {
   return (
     <main className="wrapper dashboard-page">

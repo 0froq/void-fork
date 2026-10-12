@@ -114,7 +114,8 @@ ui/
 middleware/
   01.auth.ts                # void_token validation through /me
 pages/
-  layout.tsx                # Authenticated shell with logout
+  layout.tsx                # Shared navigation progress
+  _layouts/dashboard.tsx    # Authenticated shell with logout
   login.tsx                 # Enabled login method buttons
   login.server.ts           # Builds configured login URLs
   account.tsx               # Account linking form
