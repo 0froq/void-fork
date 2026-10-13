@@ -845,7 +845,11 @@ body {
   min-width: 54rem;
 }
 .void-admin-resource-link {
+  /* Keep one continuous hit area, including the gaps between wrapped lines. */
+  display: inline-block;
+  max-width: 100%;
   font-weight: 600;
+  cursor: pointer;
 }
 .void-admin-deployment-link,
 .void-admin-user-link {

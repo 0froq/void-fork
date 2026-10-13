@@ -1172,6 +1172,31 @@ describe('GET /admin/ (dashboard)', () => {
           page.setDefaultTimeout(5000);
           await page.goto(`http://localhost${path}`);
           await page.locator('[data-hydrated="true"]').waitFor();
+          if (width === 1280 && path === '/admin/') {
+            const link = page
+              .locator('.void-admin-projects-table .void-admin-resource-link')
+              .first();
+            await link.scrollIntoViewIfNeeded();
+            await link.hover();
+            expect(
+              await link.evaluate((element) => {
+                const rect = element.getBoundingClientRect();
+                for (let y = rect.top + 1; y < rect.bottom; y += 3) {
+                  for (let x = rect.left + 1; x < rect.right; x += 3) {
+                    const target = document.elementFromPoint(x, y);
+                    if (
+                      !target ||
+                      !element.contains(target) ||
+                      getComputedStyle(target).cursor !== 'pointer'
+                    ) {
+                      return false;
+                    }
+                  }
+                }
+                return true;
+              }),
+            ).toBe(true);
+          }
           if (path === `/admin/projects/${project.id}`) {
             const teamTables = page.locator('.void-admin-team-table-scroll');
             expect(await teamTables.count()).toBe(2);
@@ -1241,6 +1266,15 @@ describe('GET /admin/ (dashboard)', () => {
           const message = row.locator('.void-admin-deployment-error-message');
           expect(await message.textContent()).toBe(error);
           expect((await message.boundingBox())!.height).toBeLessThan(30);
+          if (width === 1280 && path === '/admin/') {
+            const url = page.url();
+            await message.dblclick();
+            const selected = await page.evaluate(() => window.getSelection()?.toString() ?? '');
+            expect(selected).not.toBe('');
+            expect(error).toContain(selected);
+            expect(page.url()).toBe(url);
+            await page.mouse.move(0, 0);
+          }
           await message.hover();
           await page.getByRole('tooltip').filter({ hasText: 'Worker upload failed' }).waitFor();
           await row.getByRole('button', { name: 'Copy', exact: true }).click();
