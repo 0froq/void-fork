@@ -72,6 +72,24 @@ body {
   width: 100%;
 }
 
+/* Stack gaps own vertical rhythm, including headings and empty states. */
+.void-admin-stack,
+.void-admin-stack > * {
+  min-width: 0;
+}
+.void-admin-stack > * {
+  margin-block: 0;
+}
+.void-admin-stack > .astryx-button {
+  align-self: flex-start;
+}
+.void-admin-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--spacing-3);
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .void-admin-shell :is(button, .astryx-button):not(:disabled):not([aria-disabled='true']) {
     transform: scale(1);
