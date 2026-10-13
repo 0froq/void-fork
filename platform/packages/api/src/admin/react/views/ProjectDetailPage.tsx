@@ -52,7 +52,7 @@ export function ProjectDetailPage({ path, platformName, username }: AdminPagePro
             <TableCell>{project.id}</TableCell>
           </TableRow>
           <TableRow>
-            <TableHeaderCell>Slug</TableHeaderCell>
+            <TableHeaderCell>Name</TableHeaderCell>
             <TableCell>{project.slug}</TableCell>
           </TableRow>
           <TableRow>

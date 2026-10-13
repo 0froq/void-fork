@@ -296,7 +296,7 @@ export function EmailProjectPage({ path, platformName, username }: AdminPageProp
                     data-confirm={`Remove "${domain.domain}"? This disables its exact assignment. Shared ingress stays while another domain uses it.`}
                   >
                     <FormTextInput
-                      label="Confirm project slug"
+                      label="Confirm project name"
                       name="confirm"
                       placeholder={project.slug}
                       autoComplete="off"

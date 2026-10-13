@@ -112,7 +112,7 @@ describe('administrator plan dashboard', () => {
     expect(html).toContain('Maximum app CPU per request (ms)');
     expect(html).toContain('100,000,000');
     expect(html).toContain('3,000,000');
-    expect(html).toContain('Short project slugs');
+    expect(html).toContain('Short project names');
     expect(html).toContain('Not allowed');
     expect((await readPlanCatalog(env.db)).revision).toBe(0);
   });

@@ -189,7 +189,7 @@ export function UserDetailPage({ path, platformName, username }: AdminPageProps)
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHeaderCell>Slug</TableHeaderCell>
+              <TableHeaderCell>Name</TableHeaderCell>
               <TableHeaderCell>Type</TableHeaderCell>
               <TableHeaderCell>Created</TableHeaderCell>
             </TableRow>

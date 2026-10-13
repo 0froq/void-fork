@@ -75,7 +75,7 @@ function EnabledEmailSettingsPage({ path, platformName, username }: AdminPagePro
             {senderDomain ? (
               <>
                 {' '}
-                (<code>{`<slug>+tag@${senderDomain}`}</code>)
+                (<code>{`<project-name>+tag@${senderDomain}`}</code>)
               </>
             ) : null}
             . This does not affect email sent from custom domains.

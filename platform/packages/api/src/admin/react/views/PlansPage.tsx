@@ -253,7 +253,7 @@ export function PlanEditPage({ path, platformName, username }: AdminPageProps) {
                   ]}
                 />
                 <FormCheckbox
-                  label="Allow short project slugs (five characters or fewer)"
+                  label="Allow short project names (five characters or fewer)"
                   name="allowShortSlugs"
                   submitValue="true"
                   initialValue={plan.allowShortSlugs}
@@ -355,7 +355,7 @@ function differences(
       after: after.buildInstanceType,
     },
     {
-      label: 'Short project slugs',
+      label: 'Short project names',
       before: before ? (before.allowShortSlugs ? 'Allowed' : 'Not allowed') : '—',
       after: after.allowShortSlugs ? 'Allowed' : 'Not allowed',
     },

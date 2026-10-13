@@ -33,7 +33,7 @@ export function ProjectsTable({
       <Table className="void-admin-projects-table" hasHover>
         <TableHeader>
           <TableRow>
-            <TableHeaderCell>Slug</TableHeaderCell>
+            <TableHeaderCell>Name</TableHeaderCell>
             <TableHeaderCell>URL</TableHeaderCell>
             <TableHeaderCell>Owner</TableHeaderCell>
             <TableHeaderCell>Type</TableHeaderCell>
