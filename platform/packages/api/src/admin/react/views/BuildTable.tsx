@@ -85,7 +85,9 @@ export function BuildTable({ builds, tz }: { builds: ReadonlyArray<Build>; tz?: 
           return (
             <TableRow key={b.id} className={active ? 'build-active' : undefined}>
               <TableCell>
-                <a href={`/admin/builds/${b.id}`}>{b.id}</a>
+                <a className="void-admin-resource-link" href={`/admin/builds/${b.id}`}>
+                  {b.id}
+                </a>
               </TableCell>
               <TableCell>
                 <span style={statusColor(b.status)}>{STATUS_SYMBOL[b.status] ?? b.status}</span>

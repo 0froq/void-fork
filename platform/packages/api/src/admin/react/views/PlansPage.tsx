@@ -137,7 +137,9 @@ export function PlansPage({ path, platformName, username }: AdminPageProps) {
           {catalog.plans.map((plan) => (
             <TableRow key={plan.id}>
               <TableCell>
-                <a href={`${HOME}/${plan.id}/edit`}>{plan.name}</a>
+                <a className="void-admin-resource-link" href={`${HOME}/${plan.id}/edit`}>
+                  {plan.name}
+                </a>
                 <div>
                   <code>{plan.id}</code>
                 </div>
@@ -443,8 +445,10 @@ export function PlanPreviewPage({
           <ul>
             {preview.overLimitAccounts.map((a) => (
               <li key={a.id}>
-                <a href={`/admin/users/${a.id}`}>{a.login}</a>:{' '}
-                {a.reasons.map((key) => labels[key as EditablePlanLimit] ?? key).join(', ')}
+                <a className="void-admin-resource-link" href={`/admin/users/${a.id}`}>
+                  {a.login}
+                </a>
+                : {a.reasons.map((key) => labels[key as EditablePlanLimit] ?? key).join(', ')}
               </li>
             ))}
           </ul>

@@ -70,7 +70,9 @@ export function DeploymentDetailPage({ path, platformName, username }: AdminPage
             <TableHeaderCell>Project</TableHeaderCell>
             <TableCell>
               {project ? (
-                <a href={`/admin/projects/${project.id}`}>{project.slug}</a>
+                <a className="void-admin-resource-link" href={`/admin/projects/${project.id}`}>
+                  {project.slug}
+                </a>
               ) : (
                 deployment.project_id
               )}

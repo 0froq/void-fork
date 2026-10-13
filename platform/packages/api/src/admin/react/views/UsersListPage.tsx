@@ -31,7 +31,11 @@ export function UsersListPage({ path, platformName, username }: AdminPageProps) 
       header: 'Login',
       width: proportional(1, { minWidth: 110 }),
       renderCell: (user: UserRow) => (
-        <a className="void-admin-user-link" href={`/admin/users/${user.id}`} title={user.login}>
+        <a
+          className="void-admin-resource-link void-admin-user-link"
+          href={`/admin/users/${user.id}`}
+          title={user.login}
+        >
           {user.login}
         </a>
       ),

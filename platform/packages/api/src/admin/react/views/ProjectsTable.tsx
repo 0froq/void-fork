@@ -45,13 +45,21 @@ export function ProjectsTable({
           {projects.map((p) => (
             <TableRow key={p.id}>
               <TableCell>
-                <a href={`/admin/projects/${p.id}`}>{p.slug}</a>
+                <a className="void-admin-resource-link" href={`/admin/projects/${p.id}`}>
+                  {p.slug}
+                </a>
               </TableCell>
               <TableCell>
                 <ProjectUrlLink url={p.url ?? `https://${p.slug}.${siteDomain}`} />
               </TableCell>
               <TableCell>
-                {p.owner_login ? <a href={`/admin/users/${p.user_id}`}>{p.owner_login}</a> : '-'}
+                {p.owner_login ? (
+                  <a className="void-admin-resource-link" href={`/admin/users/${p.user_id}`}>
+                    {p.owner_login}
+                  </a>
+                ) : (
+                  '-'
+                )}
               </TableCell>
               <TableCell>{p.type}</TableCell>
               <TableCell>{formatDateTime(p.created_at, tz)}</TableCell>

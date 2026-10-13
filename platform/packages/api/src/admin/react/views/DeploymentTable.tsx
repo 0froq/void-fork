@@ -71,7 +71,11 @@ export function DeploymentTable({
       header: 'ID',
       width: proportional(1, { minWidth: 115 }),
       renderCell: (d: DeploymentRow) => (
-        <a className="void-admin-deployment-link" href={`/admin/deployments/${d.id}`} title={d.id}>
+        <a
+          className="void-admin-resource-link void-admin-deployment-link"
+          href={`/admin/deployments/${d.id}`}
+          title={d.id}
+        >
           {d.id}
         </a>
       ),
@@ -85,7 +89,7 @@ export function DeploymentTable({
       renderCell: (d: DeploymentRow) =>
         d.project_slug ? (
           <a
-            className="void-admin-deployment-link"
+            className="void-admin-resource-link void-admin-deployment-link"
             href={`/admin/projects/${d.project_id}`}
             title={d.project_slug}
           >

@@ -110,7 +110,7 @@ function TopProjectTableRow({
         <div className="void-admin-top-project">
           <div className="void-admin-top-project-heading">
             <a
-              className="void-admin-top-project-name"
+              className="void-admin-resource-link void-admin-top-project-name"
               href={`/admin/projects/${project.id}`}
               title={project.slug}
             >
@@ -125,7 +125,9 @@ function TopProjectTableRow({
       </TableCell>
       <TableCell>
         {project.owner_login ? (
-          <a href={`/admin/users/${project.user_id}`}>{project.owner_login}</a>
+          <a className="void-admin-resource-link" href={`/admin/users/${project.user_id}`}>
+            {project.owner_login}
+          </a>
         ) : (
           '-'
         )}

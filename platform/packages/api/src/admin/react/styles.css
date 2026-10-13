@@ -844,6 +844,9 @@ body {
 .void-admin-top-projects-table {
   min-width: 54rem;
 }
+.void-admin-resource-link {
+  font-weight: 600;
+}
 .void-admin-deployment-link,
 .void-admin-user-link {
   display: block;

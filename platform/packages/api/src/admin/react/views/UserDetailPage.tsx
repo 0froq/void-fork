@@ -152,7 +152,9 @@ export function UserDetailPage({ path, platformName, username }: AdminPageProps)
               {usage.projects.map((p) => (
                 <TableRow key={p.projectId}>
                   <TableCell>
-                    <a href={`/admin/projects/${p.projectId}`}>{p.slug}</a>
+                    <a className="void-admin-resource-link" href={`/admin/projects/${p.projectId}`}>
+                      {p.slug}
+                    </a>
                   </TableCell>
                   <TableCell>{formatNumber(p.requests)}</TableCell>
                   <TableCell>{formatBytes(p.bandwidthBytes)}</TableCell>
@@ -198,7 +200,9 @@ export function UserDetailPage({ path, platformName, username }: AdminPageProps)
             {projects.map((p) => (
               <TableRow key={p.id}>
                 <TableCell>
-                  <a href={`/admin/projects/${p.id}`}>{p.slug}</a>
+                  <a className="void-admin-resource-link" href={`/admin/projects/${p.id}`}>
+                    {p.slug}
+                  </a>
                 </TableCell>
                 <TableCell>{p.type}</TableCell>
                 <TableCell>{formatDateTime(p.created_at, tz)}</TableCell>

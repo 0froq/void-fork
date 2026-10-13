@@ -30,7 +30,9 @@ export function BuildDetailPage({ path, platformName, username }: AdminPageProps
           <TableRow>
             <TableHeaderCell>Project</TableHeaderCell>
             <TableCell>
-              <a href={`/admin/projects/${build.project_id}`}>{build.project_id}</a>
+              <a className="void-admin-resource-link" href={`/admin/projects/${build.project_id}`}>
+                {build.project_id}
+              </a>
             </TableCell>
           </TableRow>
           <TableRow>
@@ -53,7 +55,12 @@ export function BuildDetailPage({ path, platformName, username }: AdminPageProps
             <TableHeaderCell>Deployment</TableHeaderCell>
             <TableCell>
               {build.deployment_id ? (
-                <a href={`/admin/deployments/${build.deployment_id}`}>{build.deployment_id}</a>
+                <a
+                  className="void-admin-resource-link"
+                  href={`/admin/deployments/${build.deployment_id}`}
+                >
+                  {build.deployment_id}
+                </a>
               ) : (
                 '-'
               )}

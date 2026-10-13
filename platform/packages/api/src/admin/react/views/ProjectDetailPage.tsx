@@ -83,7 +83,13 @@ export function ProjectDetailPage({ path, platformName, username }: AdminPagePro
           <TableRow>
             <TableHeaderCell>Owner</TableHeaderCell>
             <TableCell>
-              {owner ? <a href={`/admin/users/${owner.id}`}>{owner.login}</a> : project.user_id}
+              {owner ? (
+                <a className="void-admin-resource-link" href={`/admin/users/${owner.id}`}>
+                  {owner.login}
+                </a>
+              ) : (
+                project.user_id
+              )}
             </TableCell>
           </TableRow>
           <TableRow>

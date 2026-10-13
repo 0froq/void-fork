@@ -70,7 +70,9 @@ export function ProjectTeamSection({
             <TableRow>
               <TableCell>
                 {owner ? (
-                  <a href={`/admin/users/${owner.id}`}>{owner.login}</a>
+                  <a className="void-admin-resource-link" href={`/admin/users/${owner.id}`}>
+                    {owner.login}
+                  </a>
                 ) : (
                   'Owner account unavailable'
                 )}
@@ -90,7 +92,9 @@ export function ProjectTeamSection({
             {members.map(({ user, role, createdAt }) => (
               <TableRow key={user.id}>
                 <TableCell>
-                  <a href={`/admin/users/${user.id}`}>{user.login}</a>
+                  <a className="void-admin-resource-link" href={`/admin/users/${user.id}`}>
+                    {user.login}
+                  </a>
                   {user.email && <span className="void-admin-team-email">{user.email}</span>}
                 </TableCell>
                 <TableCell>{role}</TableCell>
