@@ -223,17 +223,17 @@ export function platformSetupPages(plan: PlatformInstallPlan): {
     },
     r2: {
       title: 'R2 upload token',
-      // R2's form accepts the token type but does not read permission/name
-      // prefills. Open creation directly and make the remaining choice explicit.
       url:
         'https://dash.cloudflare.com/?' +
         new URLSearchParams({
           to: '/' + plan.account.id + '/r2/api-tokens/create',
           type: 'account',
+          name: plan.deployment.displayName + ' Uploads',
+          permission: 'object-write',
+          bucketScope: 'all',
         }),
       instructions: [
-        'Select Object Read & Write.',
-        'Keep Apply to all buckets in this account selected.',
+        'Review the preselected Object Read & Write access to all buckets in this account.',
         'Create the token, then copy the Access Key ID and Secret Access Key into the CLI.',
       ].join('\n'),
     },

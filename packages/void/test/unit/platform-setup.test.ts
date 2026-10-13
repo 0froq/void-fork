@@ -286,15 +286,19 @@ describe('platform credential setup links', () => {
       'Create a Cloudflare runtime token that Void can use to manage the platform. Please review the permissions and then paste the token here.',
     );
   });
-  it('opens R2 creation without claiming unsupported permission prefills', () => {
+  it('prefills an R2 upload token with object write access to all current and future buckets', () => {
     const page = platformSetupPages(plan()).r2;
     const url = new URL(page.url);
     expect([...url.searchParams]).toEqual([
       ['to', '/account/r2/api-tokens/create'],
       ['type', 'account'],
+      ['name', 'Test & Team Uploads'],
+      ['permission', 'object-write'],
+      ['bucketScope', 'all'],
     ]);
-    expect(page.instructions).toContain('Select Object Read & Write.');
-    expect(page.instructions).toContain('Keep Apply to all buckets in this account selected.');
+    expect(page.instructions).toContain(
+      'Review the preselected Object Read & Write access to all buckets in this account.',
+    );
     expect(page.instructions).not.toMatch(/[();]/);
     expect(page.instructions).toContain('Access Key ID and Secret Access Key');
     expect(page.instructions).not.toContain('Admin Read');
