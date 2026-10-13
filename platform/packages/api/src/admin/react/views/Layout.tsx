@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { formatPlatformPageTitle } from '../../../platform-identity.ts';
+import { PageStack } from './PageStack.tsx';
 import { VoidLogo } from './VoidLogo.tsx';
 
 let isSideNavCollapsed = false;
@@ -184,7 +185,7 @@ export function Layout({
         </SideNav>
       }
     >
-      <div className="void-admin-content">{children}</div>
+      <PageStack className="void-admin-content">{children}</PageStack>
     </AppShell>
   );
 }

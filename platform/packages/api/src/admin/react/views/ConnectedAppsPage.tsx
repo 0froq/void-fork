@@ -3,6 +3,8 @@ import { Button } from '@astryxdesign/core/Button';
 import { AdminCard } from './AdminCard.tsx';
 import { FormTextInput, FormTextArea, FormCheckbox } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
+import { PageStack } from './PageStack.tsx';
+import { SectionStack } from './SectionStack.tsx';
 
 export function ConnectedAppsPage({
   platformName,
@@ -27,7 +29,7 @@ export function ConnectedAppsPage({
   return (
     <Layout title="Connected apps" platformName={platformName} username={username}>
       <h1>Connected apps</h1>
-      <div style="display: grid; gap: 24px; max-width: 800px">
+      <PageStack maxWidth={800}>
         {error && <p role="alert">{error}</p>}
         {credentials && (
           <AdminCard
@@ -47,7 +49,7 @@ export function ConnectedAppsPage({
           </AdminCard>
         )}
         <AdminCard title="Register application">
-          <form method="post" action="/admin/connected-apps" style="display: grid; gap: 16px">
+          <SectionStack as="form" method="post" action="/admin/connected-apps">
             <FormTextInput label="App name" name="name" required maxLength={80} />
             <FormTextInput label="Operator" name="operator" required maxLength={160} />
             <FormTextArea
@@ -62,7 +64,7 @@ export function ConnectedAppsPage({
               submitValue="true"
             />
             <Button type="submit" label="Register" />
-          </form>
+          </SectionStack>
         </AdminCard>
         {clients.map((client) => (
           <AdminCard key={client.id} title={client.name} description={client.operator}>
@@ -82,7 +84,7 @@ export function ConnectedAppsPage({
             )}
           </AdminCard>
         ))}
-      </div>
+      </PageStack>
     </Layout>
   );
 }

@@ -1136,6 +1136,7 @@ describe('GET /admin/ (dashboard)', () => {
         });
         const page = await context.newPage();
         const errors: Array<string> = [];
+        let emailEnabled = false;
         page.on('pageerror', (error) => errors.push(error.message));
         await page.route('**/*', async (route) => {
           const incoming = route.request();
@@ -1155,7 +1156,13 @@ describe('GET /admin/ (dashboard)', () => {
               headers: await incoming.allHeaders(),
               ...(incoming.method() === 'POST' ? { body: incoming.postData() ?? '' } : {}),
             }),
-            { ...env, DEV_AUTH_BYPASS: 'true' },
+            {
+              ...env,
+              DEV_AUTH_BYPASS: 'true',
+              ...(emailEnabled
+                ? { EMAIL_GATEWAY_ORIGIN: 'https://email-gateway.example.test' }
+                : {}),
+            },
           );
           await route.fulfill({
             status: response.status,
@@ -1172,6 +1179,11 @@ describe('GET /admin/ (dashboard)', () => {
           page.setDefaultTimeout(5000);
           await page.goto(`http://localhost${path}`);
           await page.locator('[data-hydrated="true"]').waitFor();
+          if (path === '/admin/users' || path === '/admin/deployments') {
+            const heading = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
+            const search = (await page.locator('.void-admin-search').boundingBox())!;
+            expect(search.y - (heading.y + heading.height)).toBeCloseTo(16, 0);
+          }
           if (width === 1280 && path === '/admin/') {
             const link = page
               .locator('.void-admin-projects-table .void-admin-resource-link')
@@ -1198,6 +1210,39 @@ describe('GET /admin/ (dashboard)', () => {
             ).toBe(true);
           }
           if (path === `/admin/projects/${project.id}`) {
+            const sectionGaps = await page.evaluate(() => {
+              const builds = Array.from(document.querySelectorAll('h2')).find((heading) =>
+                heading.textContent?.startsWith('Builds ('),
+              )!.parentElement!;
+              const zeroTrust = document.getElementById('zero-trust')!;
+              const team = document.getElementById('team')!;
+              const ownership = document.getElementById('owner-transfer')!;
+              const sections = [builds, zeroTrust, team, ownership];
+              return sections.slice(1).map((section, index) => {
+                const previous = sections[index]!.getBoundingClientRect();
+                return section.getBoundingClientRect().top - previous.bottom;
+              });
+            });
+            for (const gap of sectionGaps) {
+              expect(gap).toBeCloseTo(32, 0);
+            }
+            const zeroTrust = page.locator('#zero-trust');
+            const heading = (await zeroTrust
+              .getByRole('heading', { name: 'Zero Trust' })
+              .boundingBox())!;
+            const state = (await zeroTrust
+              .locator('.void-admin-project-zero-trust-state')
+              .boundingBox())!;
+            expect(state.y - (heading.y + heading.height)).toBeCloseTo(16, 0);
+            const configure = (await zeroTrust
+              .getByRole('link', { name: 'Configure Zero Trust' })
+              .boundingBox())!;
+            const teamHeading = (await page
+              .locator('#team')
+              .getByRole('heading', { name: 'Team members (1)' })
+              .boundingBox())!;
+            expect(teamHeading.y - (configure.y + configure.height)).toBeCloseTo(32, 0);
+            expect(configure.width).toBeLessThan((await zeroTrust.boundingBox())!.width);
             const teamTables = page.locator('.void-admin-team-table-scroll');
             expect(await teamTables.count()).toBe(2);
             for (const teamTable of await teamTables.all()) {
@@ -1287,16 +1332,56 @@ describe('GET /admin/ (dashboard)', () => {
             await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
           ).toBe(true);
         }
-        for (const path of [
-          '/admin/signup-control',
-          '/admin/config/auth',
-          '/admin/zero-trust',
-          '/admin/email',
-        ]) {
+        for (const [path, enabled] of [
+          ['/admin/signup-control', false],
+          ['/admin/config/auth', false],
+          ['/admin/zero-trust', false],
+          ['/admin/email', false],
+          ['/admin/email', true],
+        ] as const) {
+          emailEnabled = enabled;
           await page.goto(`http://localhost${path}`);
           await page.locator('[data-hydrated="true"]').waitFor({ timeout: 5000 });
           const cards = page.locator('.void-admin-card');
           expect(await cards.count()).toBeGreaterThan(0);
+          const gaps = await page
+            .locator('.void-admin-content > .void-admin-stack')
+            .evaluate((stack) => {
+              const sections = Array.from(stack.children).filter(
+                (section) => section.getBoundingClientRect().height > 0,
+              );
+              return sections
+                .slice(1)
+                .map(
+                  (section, index) =>
+                    section.getBoundingClientRect().top -
+                    sections[index]!.getBoundingClientRect().bottom,
+                );
+            });
+          expect(gaps.length).toBeGreaterThan(0);
+          for (const gap of gaps) {
+            expect(gap).toBeCloseTo(32, 0);
+          }
+          const contentGaps = await cards
+            .locator('.void-admin-card-content')
+            .evaluateAll((stacks) =>
+              stacks.flatMap((stack) => {
+                const elements = Array.from(stack.children).filter(
+                  (element) => element.getBoundingClientRect().height > 0,
+                );
+                return elements
+                  .slice(1)
+                  .map(
+                    (element, index) =>
+                      element.getBoundingClientRect().top -
+                      elements[index]!.getBoundingClientRect().bottom,
+                  );
+              }),
+            );
+          expect(contentGaps.length).toBeGreaterThan(0);
+          for (const gap of contentGaps) {
+            expect(gap).toBeCloseTo(16, 0);
+          }
           const copyStyles = await cards.locator('p').evaluateAll((paragraphs) =>
             paragraphs.map((paragraph) => {
               const { color, fontSize, fontWeight, lineHeight } = getComputedStyle(paragraph);
@@ -1354,6 +1439,14 @@ describe('GET /admin/ (dashboard)', () => {
             ).toBeCloseTo(patternHeight, 0);
             const policy = page.getByRole('region', { name: 'Who can join?', exact: true });
             const toggle = policy.locator('form[action="/admin/signup-control/toggle"]');
+            const setupCopy = (await policy
+              .locator('p')
+              .filter({ hasText: 'To use company-approved signup' })
+              .boundingBox())!;
+            expect((await toggle.boundingBox())!.y - (setupCopy.y + setupCopy.height)).toBeCloseTo(
+              16,
+              0,
+            );
             const signupCopy = await toggle.locator('p').boundingBox();
             const signupButton = await toggle.getByRole('button').boundingBox();
             expect(signupButton!.y).toBeGreaterThan(signupCopy!.y + signupCopy!.height);

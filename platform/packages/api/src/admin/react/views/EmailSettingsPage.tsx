@@ -11,18 +11,20 @@ import { type AdminPageProps } from '../page-utils.ts';
 import { AdminCard } from './AdminCard.tsx';
 import { FormTextArea } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
+import { PageStack } from './PageStack.tsx';
+import { SectionStack } from './SectionStack.tsx';
 
 const EMAIL_SETUP_GUIDE = 'https://void.cloud/guide/platform/installation/credentials#enable-email';
 
 function EmailSettingsHeader() {
   return (
-    <header className="void-admin-email-intro">
+    <SectionStack as="header" className="void-admin-email-intro">
       <Heading level={1}>Email</Heading>
       <p>
         Manage email settings for the platform. Each project’s email page contains its usage,
         limits, and domains.
       </p>
-    </header>
+    </SectionStack>
   );
 }
 
@@ -35,7 +37,7 @@ export function EmailSettingsPage({
   if (emailEnabled === false) {
     return (
       <Layout platformName={platformName} title="Email" username={username}>
-        <div className="void-admin-email-settings">
+        <PageStack className="void-admin-email-settings">
           <EmailSettingsHeader />
           <AdminCard title="Enable email">
             <p>Email is not enabled on this platform.</p>
@@ -47,7 +49,7 @@ export function EmailSettingsPage({
               variant="secondary"
             />
           </AdminCard>
-        </div>
+        </PageStack>
       </Layout>
     );
   }
@@ -67,7 +69,7 @@ function EnabledEmailSettingsPage({ path, platformName, username }: AdminPagePro
   const [domainManagement, setDomainManagement] = useState(management);
   return (
     <Layout platformName={platformName} title="Email" username={username}>
-      <div className="void-admin-email-settings">
+      <PageStack className="void-admin-email-settings">
         <EmailSettingsHeader />
         <AdminCard title="Recipient policy">
           <p>
@@ -80,7 +82,12 @@ function EnabledEmailSettingsPage({ path, platformName, username }: AdminPagePro
             ) : null}
             . This does not affect email sent from custom domains.
           </p>
-          <form method="post" action="/admin/email/policy" className="void-admin-email-choice-form">
+          <SectionStack
+            as="form"
+            method="post"
+            action="/admin/email/policy"
+            className="void-admin-email-choice-form"
+          >
             <RadioList
               label="Recipient policy"
               isLabelHidden
@@ -113,7 +120,7 @@ function EnabledEmailSettingsPage({ path, platformName, username }: AdminPagePro
               placeholder="example.com, corp.example.net"
             />
             <Button type="submit" label="Save policy" />
-          </form>
+          </SectionStack>
           <p>
             With <code>domains</code> or <code>any</code>, Cloudflare still refuses a destination it
             has not verified unless the platform mail domain is onboarded for Email Sending (Workers
@@ -123,7 +130,8 @@ function EnabledEmailSettingsPage({ path, platformName, username }: AdminPagePro
         </AdminCard>
         <AdminCard title="Domain management">
           <p>Who registers custom email domains for projects.</p>
-          <form
+          <SectionStack
+            as="form"
             method="post"
             action="/admin/email/settings"
             className="void-admin-email-choice-form"
@@ -148,9 +156,9 @@ function EnabledEmailSettingsPage({ path, platformName, username }: AdminPagePro
               />
             </RadioList>
             <Button type="submit" label="Save" />
-          </form>
+          </SectionStack>
         </AdminCard>
-      </div>
+      </PageStack>
     </Layout>
   );
 }

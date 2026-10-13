@@ -5,6 +5,7 @@ import { Layout, LayoutContent, LayoutFooter, LayoutHeader } from '@astryxdesign
 import { Heading, Text } from '@astryxdesign/core/Text';
 import { ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { SectionStack } from './SectionStack.tsx';
 
 export function AdminCard({
   title,
@@ -55,14 +56,14 @@ export function AdminCard({
       content={
         (description != null || children != null) && (
           <LayoutContent>
-            <div className="void-admin-card-content">
+            <SectionStack as="div" className="void-admin-card-content">
               {description != null && (
                 <Text as="p" type="body">
                   {description}
                 </Text>
               )}
               {children}
-            </div>
+            </SectionStack>
           </LayoutContent>
         )
       }

@@ -3,6 +3,7 @@
 import { Badge } from '@astryxdesign/core/Badge';
 import { Banner } from '@astryxdesign/core/Banner';
 import { Button } from '@astryxdesign/core/Button';
+import { SectionStack } from './SectionStack.tsx';
 
 type ProjectZeroTrust = Readonly<{
   configured: boolean;
@@ -64,7 +65,7 @@ export function ProjectZeroTrustSection({
 }) {
   const { state } = zeroTrust;
   return (
-    <section id="zero-trust" className="void-admin-project-zero-trust">
+    <SectionStack id="zero-trust" className="void-admin-project-zero-trust">
       <h2>Zero Trust</h2>
       <div className="void-admin-project-zero-trust-state">
         <span>Platform: {platformLabel(zeroTrust)}</span>
@@ -118,7 +119,7 @@ export function ProjectZeroTrustSection({
           </form>
         </div>
       ) : (
-        <div className="void-admin-auth-recovery">
+        <SectionStack as="div">
           <p>{unavailableReason(zeroTrust)}</p>
           <Button
             href={REVIEW}
@@ -132,8 +133,8 @@ export function ProjectZeroTrustSection({
             variant="secondary"
             size="sm"
           />
-        </div>
+        </SectionStack>
       )}
-    </section>
+    </SectionStack>
   );
 }

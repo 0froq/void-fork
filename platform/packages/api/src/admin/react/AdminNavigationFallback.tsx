@@ -7,6 +7,7 @@ import type { PageObject } from 'void/pages-protocol';
 import { AdminUiProviders } from './AdminProviders.tsx';
 import { matchAdminRoute, type AdminPageId } from './pages.ts';
 import { Layout } from './views/Layout.tsx';
+import { SectionStack } from './views/SectionStack.tsx';
 
 const TITLES: Partial<Record<AdminPageId, string>> = {
   platformStatus: 'Platform status',
@@ -46,16 +47,16 @@ export function AdminNavigationFallback({ initialPageData }: { initialPageData: 
   return (
     <AdminUiProviders>
       <Layout title={title} platformName={platformName} username={username}>
-        <div className="void-admin-loading" role="status" aria-live="polite">
+        <SectionStack as="div" className="void-admin-loading" role="status" aria-live="polite">
           <Heading level={1}>{title}</Heading>
           <span className="void-admin-sr-only">Loading {title.toLowerCase()}…</span>
-          <div className="void-admin-loading-lines" aria-hidden="true">
+          <SectionStack as="div" className="void-admin-loading-lines" aria-hidden="true">
             <Skeleton width="32%" height={24} />
             <Skeleton width="100%" height={48} index={1} />
             <Skeleton width="100%" height={48} index={2} />
             <Skeleton width="78%" height={48} index={3} />
-          </div>
-        </div>
+          </SectionStack>
+        </SectionStack>
       </Layout>
     </AdminUiProviders>
   );

@@ -3,6 +3,7 @@
 import { Button } from '@astryxdesign/core/Button';
 import type { PlatformLoginConfiguration } from '@void/platform';
 import { FormTextInput } from './FormControls.tsx';
+import { SectionStack } from './SectionStack.tsx';
 const HOME = '/admin/config/auth';
 export function ConnectionForm({
   configuration,
@@ -17,10 +18,11 @@ export function ConnectionForm({
   callbackUrl: string;
 }) {
   return (
-    <form
+    <SectionStack
+      as="form"
       method="post"
       action={`${HOME}/connections/${encodeURIComponent(configuration.id)}/configure`}
-      style="display: grid; gap: 12px; max-width: 700px"
+      maxWidth={700}
     >
       <input type="hidden" name="id" value={configuration.id} />
       <input type="hidden" name="kind" value={configuration.kind} />
@@ -85,6 +87,6 @@ export function ConnectionForm({
       )}
       <p>Save a pending configuration, then test it before enabling it.</p>
       <Button type="submit" label="Save configuration" />
-    </form>
+    </SectionStack>
   );
 }

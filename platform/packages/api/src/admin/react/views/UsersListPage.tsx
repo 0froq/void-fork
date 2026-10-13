@@ -12,6 +12,7 @@ import { formatDateTime } from './format.ts';
 import { Layout } from './Layout.tsx';
 import { Pagination } from './Pagination.tsx';
 import { SearchForm } from './SearchForm.tsx';
+import { SectionStack } from './SectionStack.tsx';
 
 type UserRow = AdminUsersPage['users'][number];
 
@@ -78,40 +79,42 @@ export function UsersListPage({ path, platformName, username }: AdminPageProps) 
   ];
   return (
     <Layout platformName={platformName} title="Users" username={username}>
-      <h1>Users</h1>
-      <SearchForm
-        action="/admin/users"
-        kind="users"
-        label="Search users"
-        value={filter}
-        onChange={setFilter}
-        initialValue={search}
-        initialSelection={
-          selectedUser
-            ? {
-                id: selectedUser.id,
-                label: selectedUser.login,
-                description: [selectedUser.email, selectedUser.id].filter(Boolean).join(' · '),
-              }
-            : undefined
-        }
-      />
-      <Table
-        className="void-admin-users-table"
-        data={[...users]}
-        columns={columns}
-        idKey="id"
-        textOverflow="truncate"
-        hasHover
-      />
-      {users.length === 0 && (
-        <p>
-          <em>No users found.</em>
-        </p>
-      )}
-      {page != null && totalPages != null && (
-        <Pagination page={page} totalPages={totalPages} baseUrl="/admin/users" />
-      )}
+      <SectionStack>
+        <h1>Users</h1>
+        <SearchForm
+          action="/admin/users"
+          kind="users"
+          label="Search users"
+          value={filter}
+          onChange={setFilter}
+          initialValue={search}
+          initialSelection={
+            selectedUser
+              ? {
+                  id: selectedUser.id,
+                  label: selectedUser.login,
+                  description: [selectedUser.email, selectedUser.id].filter(Boolean).join(' · '),
+                }
+              : undefined
+          }
+        />
+        <Table
+          className="void-admin-users-table"
+          data={[...users]}
+          columns={columns}
+          idKey="id"
+          textOverflow="truncate"
+          hasHover
+        />
+        {users.length === 0 && (
+          <p>
+            <em>No users found.</em>
+          </p>
+        )}
+        {page != null && totalPages != null && (
+          <Pagination page={page} totalPages={totalPages} baseUrl="/admin/users" />
+        )}
+      </SectionStack>
     </Layout>
   );
 }

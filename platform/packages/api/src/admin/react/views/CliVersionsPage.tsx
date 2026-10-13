@@ -8,6 +8,7 @@ import { CliVersionsView, cliVersionsRequest } from '../../fate/views.ts';
 import { type AdminPageProps } from '../page-utils.ts';
 import { formatDateTime, formatNumber } from './format.ts';
 import { Layout } from './Layout.tsx';
+import { SectionStack } from './SectionStack.tsx';
 
 function CliVersionTable({
   rows,
@@ -59,7 +60,7 @@ function CliVersionTable({
     },
   ];
   return (
-    <>
+    <SectionStack>
       <Heading level={2}>{title}</Heading>
       {rows.length === 0 ? (
         <p>
@@ -74,7 +75,7 @@ function CliVersionTable({
           hasHover
         />
       )}
-    </>
+    </SectionStack>
   );
 }
 

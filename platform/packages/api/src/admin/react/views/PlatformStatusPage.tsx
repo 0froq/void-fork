@@ -7,6 +7,8 @@ import { useEffect, useState } from 'react';
 import type { PlatformStatusSnapshot } from '../../platform-status.ts';
 import { formatDateTime } from './format.ts';
 import { Layout } from './Layout.tsx';
+import { PageStack } from './PageStack.tsx';
+import { SectionStack } from './SectionStack.tsx';
 import { LastCheckedTime, StatusCard, type StatusCardState } from './StatusCard.tsx';
 
 const PHASE_LABELS: Record<PlatformLifecycleOperation['phase'], string> = {
@@ -144,12 +146,12 @@ export function PlatformStatusPage({
 
   return (
     <Layout platformName={platformName} username={username} title="Platform status">
-      <div className="void-platform-status">
+      <PageStack className="void-platform-status">
         <div className="void-platform-status-heading">
-          <div>
+          <SectionStack as="div">
             <Heading level={1}>Platform status</Heading>
             <p>Follow upgrade and rollback progress. This page is read-only during maintenance.</p>
-          </div>
+          </SectionStack>
           <Button
             type="button"
             label="Refresh status"
@@ -219,10 +221,10 @@ export function PlatformStatusPage({
             aria-live="polite"
           >
             {connection === 'expired' ? (
-              <div className="void-admin-auth-recovery">
+              <SectionStack as="div">
                 <p>Sign in again to confirm the current status.</p>
                 <Button as="a" href="/admin/login" label="Sign in again" size="sm" />
-              </div>
+              </SectionStack>
             ) : connection === 'unavailable' ? (
               <p>
                 Live status is unavailable.{' '}
@@ -241,7 +243,7 @@ export function PlatformStatusPage({
 
           <div className="void-platform-status-grid">
             {current?.checkpoint && (
-              <section aria-labelledby="platform-operation-heading">
+              <SectionStack aria-labelledby="platform-operation-heading">
                 <Heading level={3} id="platform-operation-heading">
                   {operation ? ACTION_LABELS[operation.action] : 'Installation'}
                 </Heading>
@@ -274,10 +276,10 @@ export function PlatformStatusPage({
                     interrupt it.
                   </p>
                 )}
-              </section>
+              </SectionStack>
             )}
 
-            <section aria-labelledby="platform-traffic-heading">
+            <SectionStack aria-labelledby="platform-traffic-heading">
               <Heading level={3} id="platform-traffic-heading">
                 Traffic availability
               </Heading>
@@ -293,11 +295,11 @@ export function PlatformStatusPage({
                 ['deploying', 'verifying', 'enabling'].includes(operation.phase) && (
                   <p>Some apps may be temporarily unavailable while services are being updated.</p>
                 )}
-            </section>
+            </SectionStack>
           </div>
 
           {needsAttention && (
-            <section
+            <SectionStack
               className="void-platform-status-recovery"
               aria-labelledby="platform-recovery-heading"
             >
@@ -316,10 +318,10 @@ export function PlatformStatusPage({
                 {operation?.action === 'rollback' ? ', including the rollback source runtime' : ''}.
                 Reloading this page does not resume an operation.
               </p>
-            </section>
+            </SectionStack>
           )}
         </StatusCard>
-      </div>
+      </PageStack>
     </Layout>
   );
 }

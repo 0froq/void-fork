@@ -126,8 +126,6 @@ body {
 }
 
 .void-platform-status {
-  display: grid;
-  gap: var(--spacing-6);
   max-width: 1120px;
 }
 .void-platform-status-heading {
@@ -146,13 +144,6 @@ body {
   gap: var(--spacing-6);
   border-top: 1px solid var(--color-border);
   padding-top: var(--spacing-4);
-}
-.void-platform-status-grid section,
-.void-platform-status-recovery {
-  display: grid;
-  align-content: start;
-  gap: var(--spacing-3);
-  min-width: 0;
 }
 .void-platform-status .astryx-heading {
   margin: 0;
@@ -224,14 +215,6 @@ body {
   color: inherit;
   font: inherit;
 }
-.void-admin-auth-recovery {
-  display: grid;
-  justify-items: start;
-  gap: var(--spacing-3);
-}
-.void-admin-auth-recovery > * {
-  margin: 0;
-}
 .void-platform-status-notice[data-state='unavailable'],
 .void-platform-status-notice[data-state='expired'] {
   color: var(--color-text-red);
@@ -243,31 +226,10 @@ body {
   }
 }
 
-.void-admin-owner-transfer {
-  display: grid;
-  gap: var(--spacing-4);
-  margin-block-start: var(--spacing-8);
-}
-.void-admin-owner-transfer > * {
-  margin: 0;
-}
 .void-admin-owner-transfer-form {
-  display: grid;
-  gap: var(--spacing-4);
   width: min(100%, 320px);
 }
-.void-admin-owner-transfer-form button {
-  justify-self: start;
-}
 
-.void-admin-project-team {
-  display: grid;
-  gap: var(--spacing-4);
-  min-width: 0;
-}
-.void-admin-project-team > * {
-  margin: 0;
-}
 .void-admin-team-table-scroll {
   --container-padding-inline-start: 0px;
   --container-padding-inline-end: 0px;
@@ -298,12 +260,6 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
   gap: var(--spacing-4);
-  margin-block: var(--spacing-6);
-}
-
-.void-admin-dashboard-sections {
-  display: grid;
-  gap: var(--spacing-6);
 }
 .void-admin-card {
   min-width: 0;
@@ -343,11 +299,6 @@ body {
   flex-shrink: 0;
   color: var(--color-text-secondary);
 }
-.void-admin-card-content {
-  display: grid;
-  gap: var(--spacing-4);
-  min-width: 0;
-}
 .void-admin-card-content,
 .void-admin-card-footer {
   color: var(--color-text-primary);
@@ -357,9 +308,6 @@ body {
 }
 .void-admin-card-content p {
   margin: 0;
-}
-.void-admin-card-content > .astryx-button {
-  justify-self: start;
 }
 .void-admin-card-footer .void-admin-pagination {
   margin: 0;
@@ -535,8 +483,6 @@ body {
 }
 .void-admin-auth-settings,
 .void-admin-email-settings {
-  display: grid;
-  gap: var(--spacing-5);
   max-width: 960px;
 }
 .void-admin-auth-settings h1,
@@ -551,19 +497,10 @@ body {
   font-size: var(--text-body-size);
   font-weight: 600;
 }
-.void-admin-auth-intro,
-.void-admin-email-intro {
-  display: grid;
-  gap: var(--spacing-3);
-}
 .void-admin-auth-intro p,
 .void-admin-email-intro p,
 .void-admin-auth-method-type {
   color: var(--color-text-secondary);
-}
-.void-admin-auth-protection-details {
-  display: grid;
-  gap: var(--spacing-4);
 }
 .void-admin-auth-protection-steps {
   display: grid;
@@ -625,14 +562,8 @@ body {
 .void-admin-auth-method-type {
   font-size: var(--text-supporting-size);
 }
-.void-admin-auth-add-methods {
-  display: grid;
-  gap: var(--spacing-3);
-}
 .void-admin-email-choice-form {
-  display: grid;
-  justify-items: start;
-  gap: var(--spacing-4);
+  align-items: flex-start;
 }
 .void-admin-email-choice-form .astryx-radio-indicator {
   width: 1rem;
@@ -643,18 +574,12 @@ body {
   height: 0.375rem;
 }
 .void-admin-zero-trust {
-  display: grid;
-  gap: var(--spacing-5);
   max-width: 960px;
 }
 .void-admin-zero-trust h1,
 .void-admin-zero-trust h2,
 .void-admin-zero-trust p {
   margin: 0;
-}
-.void-admin-zero-trust-intro {
-  display: grid;
-  gap: var(--spacing-2);
 }
 .void-admin-zero-trust-intro p {
   color: var(--color-text-secondary);
@@ -675,22 +600,12 @@ body {
   font-weight: 600;
 }
 .void-admin-zero-trust-form {
-  display: grid;
-  justify-items: start;
-  gap: var(--spacing-4);
+  align-items: flex-start;
 }
 .void-admin-zero-trust-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--spacing-2);
-}
-.void-admin-project-zero-trust {
-  display: grid;
-  gap: var(--spacing-3);
-  min-width: 0;
-}
-.void-admin-project-zero-trust > * {
-  margin: 0;
 }
 .void-admin-project-zero-trust-state {
   display: flex;
@@ -699,8 +614,6 @@ body {
   gap: var(--spacing-4);
 }
 .void-admin-access-page {
-  display: grid;
-  gap: var(--spacing-5);
   max-width: 1120px;
 }
 .void-admin-access-page h1,
@@ -713,17 +626,11 @@ body {
   font-size: var(--text-body-size);
   font-weight: 600;
 }
-.void-admin-access-intro,
-.void-admin-access-form,
-.void-admin-access-share {
-  display: grid;
-  gap: var(--spacing-3);
-}
 .void-admin-access-intro p {
   color: var(--color-text-secondary);
 }
 .void-admin-access-form {
-  justify-items: start;
+  align-items: flex-start;
 }
 .void-admin-access-form > .void-admin-card {
   width: 100%;
@@ -788,14 +695,12 @@ body {
   align-items: center;
   justify-content: flex-end;
   gap: var(--spacing-3);
-  margin-block-start: var(--spacing-5);
 }
 .void-admin-search {
   display: flex;
   flex-wrap: wrap;
   align-items: end;
   gap: var(--spacing-3);
-  margin-block: var(--spacing-5);
 }
 /* Keep the selected token's button from picking up the legacy form-button paint. */
 .void-admin-content .astryx-typeahead .astryx-token > button {
@@ -931,11 +836,6 @@ body {
   flex: 0 0 auto;
   color: var(--color-text-secondary);
 }
-.void-admin-loading-lines {
-  display: grid;
-  gap: var(--spacing-4);
-  margin-block-start: var(--spacing-6);
-}
 .void-admin-sr-only {
   position: absolute;
   width: 1px;
@@ -952,13 +852,6 @@ body {
   .void-admin-content {
     max-width: 1200px;
     margin-inline: auto;
-  }
-  .void-admin-content h1 {
-    margin-block-end: var(--spacing-4);
-  }
-  .void-admin-content h2 {
-    margin-block-start: var(--spacing-8);
-    margin-block-end: var(--spacing-3);
   }
   .void-admin-content table {
     width: 100%;
@@ -1010,8 +903,6 @@ body {
   justify-content: flex-start;
 }
 .void-admin-plan-form {
-  display: grid;
-  gap: var(--spacing-4);
   max-width: 800px;
 }
 .void-admin-plan-fields {

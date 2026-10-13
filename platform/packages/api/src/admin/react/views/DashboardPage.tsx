@@ -16,6 +16,7 @@ import { AdminCard } from './AdminCard.tsx';
 import { DeploymentTable } from './DeploymentTable.tsx';
 import { formatDateTime, formatNumber } from './format.ts';
 import { Layout } from './Layout.tsx';
+import { PageStack } from './PageStack.tsx';
 import { ProjectsTable } from './ProjectsTable.tsx';
 import { ProjectUrlLink } from './ProjectUrlLink.tsx';
 import { SystemStatusCard } from './SystemStatusCard.tsx';
@@ -196,7 +197,7 @@ export function DashboardPage({ platformName, username, healthCheckNames }: Dash
           </Text>
         </AdminCard>
       </div>
-      <div className="void-admin-dashboard-sections">
+      <PageStack className="void-admin-dashboard-sections">
         <DeferredTopProjects
           topProjects={dashboard.topProjects}
           siteDomain={dashboard.siteDomain}
@@ -212,7 +213,7 @@ export function DashboardPage({ platformName, username, healthCheckNames }: Dash
         <AdminCard title="Latest Deployments">
           <DeploymentTable deployments={dashboard.deployments} showProject tz={dashboard.tz} />
         </AdminCard>
-      </div>
+      </PageStack>
     </Layout>
   );
 }

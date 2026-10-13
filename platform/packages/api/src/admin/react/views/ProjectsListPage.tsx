@@ -8,6 +8,7 @@ import { Layout } from './Layout.tsx';
 import { Pagination } from './Pagination.tsx';
 import { ProjectsTable } from './ProjectsTable.tsx';
 import { SearchForm } from './SearchForm.tsx';
+import { SectionStack } from './SectionStack.tsx';
 
 export function ProjectsListPage({ path, platformName, username }: AdminPageProps) {
   const { projectsPage: ref } = useRequest(projectsPageRequest(path), {
@@ -23,28 +24,30 @@ export function ProjectsListPage({ path, platformName, username }: AdminPageProp
   const selectedProject = projects.find((project) => project.id === search);
   return (
     <Layout platformName={platformName} title="Projects" username={username}>
-      <h1>Projects</h1>
-      <SearchForm
-        action="/admin/projects"
-        kind="projects"
-        label="Search projects"
-        value={filter}
-        onChange={setFilter}
-        initialValue={search}
-        initialSelection={
-          selectedProject
-            ? {
-                id: selectedProject.id,
-                label: selectedProject.slug,
-                description: selectedProject.owner_login ?? undefined,
-              }
-            : undefined
-        }
-      />
-      <ProjectsTable projects={projects} siteDomain={siteDomain} tz={tz} />
-      {page != null && totalPages != null && (
-        <Pagination page={page} totalPages={totalPages} baseUrl="/admin/projects" />
-      )}
+      <SectionStack>
+        <h1>Projects</h1>
+        <SearchForm
+          action="/admin/projects"
+          kind="projects"
+          label="Search projects"
+          value={filter}
+          onChange={setFilter}
+          initialValue={search}
+          initialSelection={
+            selectedProject
+              ? {
+                  id: selectedProject.id,
+                  label: selectedProject.slug,
+                  description: selectedProject.owner_login ?? undefined,
+                }
+              : undefined
+          }
+        />
+        <ProjectsTable projects={projects} siteDomain={siteDomain} tz={tz} />
+        {page != null && totalPages != null && (
+          <Pagination page={page} totalPages={totalPages} baseUrl="/admin/projects" />
+        )}
+      </SectionStack>
     </Layout>
   );
 }

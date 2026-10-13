@@ -12,6 +12,7 @@ import { DeploymentLogs } from './DeploymentLogs.tsx';
 import { displayStatus } from './DeploymentTable.tsx';
 import { formatDateTime } from './format.ts';
 import { Layout } from './Layout.tsx';
+import { SectionStack } from './SectionStack.tsx';
 
 export function DeploymentDetailPage({ path, platformName, username }: AdminPageProps) {
   const { deploymentDetail: ref } = useRequest(deploymentDetailRequest(path), {
@@ -39,7 +40,7 @@ export function DeploymentDetailPage({ path, platformName, username }: AdminPage
       <h1>Deployment {deployment.id}</h1>
 
       {canCancel && (
-        <>
+        <SectionStack>
           <h2>Deploy Control</h2>
           <form
             method="post"
@@ -48,18 +49,18 @@ export function DeploymentDetailPage({ path, platformName, username }: AdminPage
           >
             <Button type="submit" label="Cancel Deploy" variant="destructive" />
           </form>
-        </>
+        </SectionStack>
       )}
 
       {(deployment.status === 'failed' || deployment.status === 'canceled') &&
         deployment.error_message && (
-          <>
+          <SectionStack>
             <h2>Error</h2>
             <pre>{deployment.error_message}</pre>
             <p>
               <CopyButton text={deployment.error_message} label="Copy error" />
             </p>
-          </>
+          </SectionStack>
         )}
 
       <Table>

@@ -1,5 +1,6 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 import { Layout } from './Layout.tsx';
+import { SectionStack } from './SectionStack.tsx';
 
 export function EmailOperationPage({
   label,
@@ -19,13 +20,15 @@ export function EmailOperationPage({
 }) {
   return (
     <Layout platformName={platformName} title={label} username={username}>
-      <h1>
-        {label} {status}
-      </h1>
-      <p>{error ?? 'The operation has not completed. Check its status before retrying.'}</p>
-      <p>
-        Operation ID: <code>{operationId ?? 'unavailable'}</code>
-      </p>
+      <SectionStack>
+        <h1>
+          {label} {status}
+        </h1>
+        <p>{error ?? 'The operation has not completed. Check its status before retrying.'}</p>
+        <p>
+          Operation ID: <code>{operationId ?? 'unavailable'}</code>
+        </p>
+      </SectionStack>
     </Layout>
   );
 }

@@ -20,6 +20,8 @@ import { type AdminPageProps } from '../page-utils.ts';
 import { AdminCard } from './AdminCard.tsx';
 import { FormCheckbox, FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
+import { PageStack } from './PageStack.tsx';
+import { SectionStack } from './SectionStack.tsx';
 
 const HOME = '/admin/zero-trust';
 
@@ -100,15 +102,15 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
     policyIds.length === 0;
   return (
     <Layout platformName={platformName} title="Zero Trust" username={username}>
-      <div className="void-admin-zero-trust">
-        <header className="void-admin-zero-trust-intro">
+      <PageStack className="void-admin-zero-trust">
+        <SectionStack as="header" className="void-admin-zero-trust-intro">
           <Heading level={1}>Project Zero Trust</Heading>
           <p>
             Void manages a wildcard Cloudflare Access application for protected projects and
             exact-host bypass applications for public exceptions. The Cloudflare API token is
             encrypted and never shown again.
           </p>
-        </header>
+        </SectionStack>
 
         {lastError && <Banner status="error" title="Last error" description={lastError} />}
 
@@ -195,7 +197,12 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
               </p>
             )}
 
-            <form method="post" action={`${HOME}/configure`} className="void-admin-zero-trust-form">
+            <SectionStack
+              as="form"
+              method="post"
+              action={`${HOME}/configure`}
+              className="void-admin-zero-trust-form"
+            >
               {publicOnly && (
                 <p>
                   Void manages public app rules for this account. Leave policy fields blank to
@@ -253,7 +260,7 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
                 </RadioList>
               )}
               <Button type="submit" label="Save and reconcile" />
-            </form>
+            </SectionStack>
           </AdminCard>
         </section>
 
@@ -281,7 +288,7 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
             </AdminCard>
           </section>
         )}
-      </div>
+      </PageStack>
     </Layout>
   );
 }

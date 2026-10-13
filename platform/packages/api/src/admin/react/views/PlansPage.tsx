@@ -21,6 +21,8 @@ import type { AdminPlanPreview, AdminPlanProgress } from '../../plans.ts';
 import type { AdminPageProps } from '../page-utils.ts';
 import { FormCheckbox, FormNumberInput, FormSelector, FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
+import { PageStack } from './PageStack.tsx';
+import { SectionStack } from './SectionStack.tsx';
 
 const HOME = '/admin/config/plans';
 const fields: Array<{ title: string; keys: Array<EditablePlanLimit> }> = [
@@ -97,17 +99,19 @@ export function PlansPage({ path, platformName, username }: AdminPageProps) {
   const pending = catalog.reconciliation && !catalog.reconciliation.complete;
   return (
     <Layout platformName={platformName} username={username} title="Plans">
-      <div className="void-admin-plan-heading">
-        <h1>Plans</h1>
-        <Button href={`${HOME}/new`} label="Add plan" />
-      </div>
-      <p>
-        Default for new accounts:{' '}
-        <strong>{catalog.plans.find((p) => p.id === catalog.defaultPlanId)?.name}</strong>. Changes
-        to this default leave existing accounts on their current plans.
-      </p>
+      <SectionStack>
+        <div className="void-admin-plan-heading">
+          <h1>Plans</h1>
+          <Button href={`${HOME}/new`} label="Add plan" />
+        </div>
+        <p>
+          Default for new accounts:{' '}
+          <strong>{catalog.plans.find((p) => p.id === catalog.defaultPlanId)?.name}</strong>.
+          Changes to this default leave existing accounts on their current plans.
+        </p>
+      </SectionStack>
       {pending && (
-        <section aria-label="Pending plan update">
+        <SectionStack aria-label="Pending plan update">
           <h2>Account updates pending</h2>
           <p>
             Finish this update before changing plans again. Recorded usage and billing periods are
@@ -120,7 +124,7 @@ export function PlansPage({ path, platformName, username }: AdminPageProps) {
             <input type="hidden" name="revision" value={catalog.revision} />
             <Button type="submit" label="Continue account updates" />
           </form>
-        </section>
+        </SectionStack>
       )}
       <Table>
         <TableHeader>
@@ -190,40 +194,47 @@ export function PlanEditPage({ path, platformName, username }: AdminPageProps) {
         </p>
       ) : (
         <>
-          <form method="post" action={`${HOME}/preview`} className="void-admin-plan-form">
-            <input type="hidden" name="action" value={plan ? 'set' : 'add'} />
-            <input type="hidden" name="revision" value={catalog.revision} />
-            {plan ? (
-              <>
-                <input type="hidden" name="id" value={plan.id} />
-                <p>
-                  Plan ID: <code>{plan.id}</code> · {count} accounts
-                  {plan.archived ? ' · Archived' : ''}
-                </p>
-              </>
-            ) : (
+          <PageStack
+            as="form"
+            method="post"
+            action={`${HOME}/preview`}
+            className="void-admin-plan-form"
+          >
+            <SectionStack as="div">
+              <input type="hidden" name="action" value={plan ? 'set' : 'add'} />
+              <input type="hidden" name="revision" value={catalog.revision} />
+              {plan ? (
+                <>
+                  <input type="hidden" name="id" value={plan.id} />
+                  <p>
+                    Plan ID: <code>{plan.id}</code> · {count} accounts
+                    {plan.archived ? ' · Archived' : ''}
+                  </p>
+                </>
+              ) : (
+                <FormTextInput
+                  label="Plan ID"
+                  name="id"
+                  required
+                  maxLength={64}
+                  description="A stable ID using lowercase letters, digits, and hyphens."
+                />
+              )}
               <FormTextInput
-                label="Plan ID"
-                name="id"
+                label="Display name"
+                name="name"
+                initialValue={plan?.name ?? ''}
                 required
-                maxLength={64}
-                description="A stable ID using lowercase letters, digits, and hyphens."
+                maxLength={80}
               />
-            )}
-            <FormTextInput
-              label="Display name"
-              name="name"
-              initialValue={plan?.name ?? ''}
-              required
-              maxLength={80}
-            />
+            </SectionStack>
             {plan ? (
               <>
                 <p>
                   0 means unlimited by the plan. Build timeouts always have a maximum of 60 minutes.
                 </p>
                 {fields.map((group) => (
-                  <section key={group.title}>
+                  <SectionStack key={group.title}>
                     <h2>{group.title}</h2>
                     <div className="void-admin-plan-fields">
                       {group.keys.map((key) => (
@@ -238,32 +249,34 @@ export function PlanEditPage({ path, platformName, username }: AdminPageProps) {
                         />
                       ))}
                     </div>
-                  </section>
+                  </SectionStack>
                 ))}
-                <p>
-                  The default CPU limit must fit the maximum app CPU limit. An unlimited default
-                  requires an unlimited maximum.
-                </p>
-                <h2>Build size and permissions</h2>
-                <FormSelector
-                  label="Build size"
-                  name="buildInstanceType"
-                  initialValue={plan.buildInstanceType}
-                  options={[
-                    { value: 'standard-3', label: 'Standard · 2 vCPU, 8 GiB' },
-                    { value: 'standard-4', label: 'Large · 4 vCPU, 12 GiB' },
-                  ]}
-                />
-                <FormCheckbox
-                  label="Allow short project names (five characters or fewer)"
-                  name="allowShortSlugs"
-                  submitValue="true"
-                  initialValue={plan.allowShortSlugs}
-                />
-                <p>
-                  Existing URLs remain available. Storage figures are informational; static
-                  deployment retention is unchanged.
-                </p>
+                <SectionStack>
+                  <p>
+                    The default CPU limit must fit the maximum app CPU limit. An unlimited default
+                    requires an unlimited maximum.
+                  </p>
+                  <h2>Build size and permissions</h2>
+                  <FormSelector
+                    label="Build size"
+                    name="buildInstanceType"
+                    initialValue={plan.buildInstanceType}
+                    options={[
+                      { value: 'standard-3', label: 'Standard · 2 vCPU, 8 GiB' },
+                      { value: 'standard-4', label: 'Large · 4 vCPU, 12 GiB' },
+                    ]}
+                  />
+                  <FormCheckbox
+                    label="Allow short project names (five characters or fewer)"
+                    name="allowShortSlugs"
+                    submitValue="true"
+                    initialValue={plan.allowShortSlugs}
+                  />
+                  <p>
+                    Existing URLs remain available. Storage figures are informational; static
+                    deployment retention is unchanged.
+                  </p>
+                </SectionStack>
               </>
             ) : (
               <FormSelector
@@ -274,62 +287,71 @@ export function PlanEditPage({ path, platformName, username }: AdminPageProps) {
               />
             )}
             <Button type="submit" label="Review changes" />
-          </form>
+          </PageStack>
           {plan && (
-            <section>
-              <h2>Plan management</h2>
-              <div className="void-admin-plan-actions">
-                {!plan.archived && plan.id !== catalog.defaultPlanId && (
-                  <PlanAction
-                    action="default"
-                    id={plan.id}
-                    revision={catalog.revision}
-                    label="Make signup default"
-                  />
+            <PageStack>
+              <SectionStack>
+                <h2>Plan management</h2>
+                <div className="void-admin-plan-actions">
+                  {!plan.archived && plan.id !== catalog.defaultPlanId && (
+                    <PlanAction
+                      action="default"
+                      id={plan.id}
+                      revision={catalog.revision}
+                      label="Make signup default"
+                    />
+                  )}
+                  {plan.id !== catalog.defaultPlanId && (
+                    <PlanAction
+                      action="archive"
+                      id={plan.id}
+                      revision={catalog.revision}
+                      archived={!plan.archived}
+                      label={plan.archived ? 'Restore assignments' : 'Archive plan'}
+                    />
+                  )}
+                  {Object.hasOwn(PLAN_LIMITS, plan.id) && (
+                    <PlanAction
+                      action="reset"
+                      id={plan.id}
+                      revision={catalog.revision}
+                      label="Reset original limits"
+                    />
+                  )}
+                </div>
+                {plan.id === catalog.defaultPlanId && (
+                  <p>Choose another signup default before archiving this plan.</p>
                 )}
-                {plan.id !== catalog.defaultPlanId && (
-                  <PlanAction
-                    action="archive"
-                    id={plan.id}
-                    revision={catalog.revision}
-                    archived={!plan.archived}
-                    label={plan.archived ? 'Restore assignments' : 'Archive plan'}
+              </SectionStack>
+              <SectionStack>
+                <h2>Remove plan</h2>
+                <p>Accounts keep their recorded usage when moved to a replacement plan.</p>
+                <SectionStack
+                  as="form"
+                  method="post"
+                  action={`${HOME}/preview`}
+                  className="void-admin-plan-form"
+                >
+                  <input type="hidden" name="action" value="remove" />
+                  <input type="hidden" name="id" value={plan.id} />
+                  <input type="hidden" name="revision" value={catalog.revision} />
+                  <FormSelector
+                    label="Replacement plan"
+                    name="replacementPlanId"
+                    initialValue=""
+                    options={[
+                      ...(!count && plan.id !== catalog.defaultPlanId
+                        ? [{ value: '', label: 'No replacement needed' }]
+                        : [{ value: '', label: 'Choose a replacement' }]),
+                      ...catalog.plans
+                        .filter((p) => p.id !== plan.id && !p.archived)
+                        .map((p) => ({ value: p.id, label: `${p.name} (${p.id})` })),
+                    ]}
                   />
-                )}
-                {Object.hasOwn(PLAN_LIMITS, plan.id) && (
-                  <PlanAction
-                    action="reset"
-                    id={plan.id}
-                    revision={catalog.revision}
-                    label="Reset original limits"
-                  />
-                )}
-              </div>
-              {plan.id === catalog.defaultPlanId && (
-                <p>Choose another signup default before archiving this plan.</p>
-              )}
-              <h2>Remove plan</h2>
-              <p>Accounts keep their recorded usage when moved to a replacement plan.</p>
-              <form method="post" action={`${HOME}/preview`} className="void-admin-plan-form">
-                <input type="hidden" name="action" value="remove" />
-                <input type="hidden" name="id" value={plan.id} />
-                <input type="hidden" name="revision" value={catalog.revision} />
-                <FormSelector
-                  label="Replacement plan"
-                  name="replacementPlanId"
-                  initialValue=""
-                  options={[
-                    ...(!count && plan.id !== catalog.defaultPlanId
-                      ? [{ value: '', label: 'No replacement needed' }]
-                      : [{ value: '', label: 'Choose a replacement' }]),
-                    ...catalog.plans
-                      .filter((p) => p.id !== plan.id && !p.archived)
-                      .map((p) => ({ value: p.id, label: `${p.name} (${p.id})` })),
-                  ]}
-                />
-                <Button type="submit" label="Review removal" variant="destructive" />
-              </form>
-            </section>
+                  <Button type="submit" label="Review removal" variant="destructive" />
+                </SectionStack>
+              </SectionStack>
+            </PageStack>
           )}
         </>
       )}
@@ -408,35 +430,37 @@ export function PlanPreviewPage({
   }
   return (
     <Layout platformName={platformName} username={username} title="Review plan change">
-      <h1>Review plan change</h1>
-      <p>
-        <strong>{preview.affectedAccounts}</strong> existing accounts affected.
-      </p>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHeaderCell>Setting</TableHeaderCell>
-            <TableHeaderCell>Current</TableHeaderCell>
-            <TableHeaderCell>Proposed</TableHeaderCell>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {changes.map((row) => (
-            <TableRow key={row.label}>
-              <TableHeaderCell>{row.label}</TableHeaderCell>
-              <TableCell>{row.before}</TableCell>
-              <TableCell>{row.after}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      {preview.warnings.map((warning) => (
-        <p key={warning} role="alert">
-          {warning}
+      <SectionStack>
+        <h1>Review plan change</h1>
+        <p>
+          <strong>{preview.affectedAccounts}</strong> existing accounts affected.
         </p>
-      ))}
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHeaderCell>Setting</TableHeaderCell>
+              <TableHeaderCell>Current</TableHeaderCell>
+              <TableHeaderCell>Proposed</TableHeaderCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {changes.map((row) => (
+              <TableRow key={row.label}>
+                <TableHeaderCell>{row.label}</TableHeaderCell>
+                <TableCell>{row.before}</TableCell>
+                <TableCell>{row.after}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        {preview.warnings.map((warning) => (
+          <p key={warning} role="alert">
+            {warning}
+          </p>
+        ))}
+      </SectionStack>
       {preview.overLimitAccounts.length > 0 && (
-        <section>
+        <SectionStack>
           <h2>Accounts above proposed quotas</h2>
           <p>
             This preview samples up to {preview.usageSampleSize} accounts. Other affected accounts
@@ -452,24 +476,26 @@ export function PlanPreviewPage({
               </li>
             ))}
           </ul>
-        </section>
+        </SectionStack>
       )}
-      <p>
-        Recorded usage and billing periods are preserved. Lowering quotas can restrict existing
-        apps. Raising quotas leaves manual administrator suspensions in place.
-      </p>
-      <form method="post" action={`${HOME}/apply`} className="void-admin-plan-actions">
-        <input type="hidden" name="action" value={preview.action} />
-        <input type="hidden" name="id" value={target} />
-        <input type="hidden" name="revision" value={preview.expectedRevision} />
-        <input type="hidden" name="body" value={JSON.stringify(preview.body)} />
-        <Button
-          type="submit"
-          label="Apply changes"
-          variant={preview.action === 'remove' ? 'destructive' : 'primary'}
-        />
-        <Button href={HOME} label="Cancel" variant="secondary" />
-      </form>
+      <SectionStack>
+        <p>
+          Recorded usage and billing periods are preserved. Lowering quotas can restrict existing
+          apps. Raising quotas leaves manual administrator suspensions in place.
+        </p>
+        <form method="post" action={`${HOME}/apply`} className="void-admin-plan-actions">
+          <input type="hidden" name="action" value={preview.action} />
+          <input type="hidden" name="id" value={target} />
+          <input type="hidden" name="revision" value={preview.expectedRevision} />
+          <input type="hidden" name="body" value={JSON.stringify(preview.body)} />
+          <Button
+            type="submit"
+            label="Apply changes"
+            variant={preview.action === 'remove' ? 'destructive' : 'primary'}
+          />
+          <Button href={HOME} label="Cancel" variant="secondary" />
+        </form>
+      </SectionStack>
     </Layout>
   );
 }
@@ -552,26 +578,28 @@ export function PlanResultPage({
   }, [initial]);
   return (
     <Layout platformName={platformName} username={username} title="Plan update">
-      <h1>Plan saved</h1>
-      <p role="status">
-        {state.complete
-          ? 'Account updates complete.'
-          : state.error
-            ? 'Account updates paused.'
-            : 'Updating accounts…'}{' '}
-        {processed} accounts updated in this session.
-      </p>
-      {state.error && <p role="alert">{state.error}</p>}
-      {!state.complete && (
-        <form method="post" action={`${HOME}/resume`}>
-          <input type="hidden" name="revision" value={state.revision} />
-          <Button type="submit" label="Continue account updates" isDisabled={running} />
-        </form>
-      )}
-      <p>
-        Usage totals and billing periods are preserved. If you leave this page, you can continue any
-        pending updates from Plans.
-      </p>
+      <SectionStack>
+        <h1>Plan saved</h1>
+        <p role="status">
+          {state.complete
+            ? 'Account updates complete.'
+            : state.error
+              ? 'Account updates paused.'
+              : 'Updating accounts…'}{' '}
+          {processed} accounts updated in this session.
+        </p>
+        {state.error && <p role="alert">{state.error}</p>}
+        {!state.complete && (
+          <form method="post" action={`${HOME}/resume`}>
+            <input type="hidden" name="revision" value={state.revision} />
+            <Button type="submit" label="Continue account updates" isDisabled={running} />
+          </form>
+        )}
+        <p>
+          Usage totals and billing periods are preserved. If you leave this page, you can continue
+          any pending updates from Plans.
+        </p>
+      </SectionStack>
     </Layout>
   );
 }

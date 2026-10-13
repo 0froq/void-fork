@@ -9,6 +9,8 @@ import { AuthSettingsView, authSettingsRequest } from '../../fate/views.ts';
 import { type AdminPageProps } from '../page-utils.ts';
 import { AdminCard } from './AdminCard.tsx';
 import { Layout } from './Layout.tsx';
+import { PageStack } from './PageStack.tsx';
+import { SectionStack } from './SectionStack.tsx';
 
 const HOME = '/admin/config/auth';
 const LOGIN_KINDS = [
@@ -29,11 +31,11 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
   const { data, tested } = pageData;
   return (
     <Layout platformName={platformName} title="Authentication settings" username={username}>
-      <div className="void-admin-auth-settings">
-        <header className="void-admin-auth-intro">
+      <PageStack className="void-admin-auth-settings">
+        <SectionStack as="header" className="void-admin-auth-intro">
           <Heading level={1}>Authentication</Heading>
           <p>Manage how people reach the platform and sign in.</p>
-        </header>
+        </SectionStack>
 
         <section aria-labelledby="platform-protection-heading">
           <AdminCard
@@ -49,7 +51,7 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
               />
             }
           >
-            <div className="void-admin-auth-protection-details">
+            <SectionStack as="div" className="void-admin-auth-protection-details">
               <div className="void-admin-auth-protection-steps">
                 <AdminCard title="Enable Cloudflare Access" headingLevel={3}>
                   <p>
@@ -73,7 +75,7 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
                 in Cloudflare when you no longer need them.
               </p>
               <p>Login methods and protection for individual apps are configured separately.</p>
-            </div>
+            </SectionStack>
           </AdminCard>
         </section>
 
@@ -206,7 +208,7 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
                 ) : (
                   <p className="void-admin-auth-empty">No login methods configured yet.</p>
                 )}
-                <div className="void-admin-auth-add-methods">
+                <SectionStack as="div" className="void-admin-auth-add-methods">
                   <h3>Add a login method</h3>
                   <div className="void-admin-auth-actions">
                     {LOGIN_KINDS.map(({ kind, label }) => (
@@ -219,7 +221,7 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
                       />
                     ))}
                   </div>
-                </div>
+                </SectionStack>
               </AdminCard>
             </section>
           </>
@@ -233,7 +235,7 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
             <Button href="/admin/signup-control" label="Manage access" variant="secondary" />
           </AdminCard>
         </section>
-      </div>
+      </PageStack>
     </Layout>
   );
 }

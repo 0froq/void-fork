@@ -6,6 +6,7 @@ import { useFateClient } from 'react-fate';
 import { DeploymentLogsView, deploymentLogsRequest } from '../../fate/views.ts';
 import { CopyButton } from './CopyButton.tsx';
 import { SearchTypeahead } from './SearchTypeahead.tsx';
+import { SectionStack } from './SectionStack.tsx';
 
 type LogEntry = {
   timestamp: number;
@@ -189,9 +190,9 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
   );
 
   return (
-    <>
+    <SectionStack>
       <h2>Runtime Logs</h2>
-      <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center">
+      <div className="void-admin-inline-form">
         <Selector
           id="log-since"
           label="Time"
@@ -257,6 +258,6 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
           ))
         )}
       </div>
-    </>
+    </SectionStack>
   );
 }

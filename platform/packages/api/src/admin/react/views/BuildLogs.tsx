@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useFateClient } from 'react-fate';
 import type { Build } from '../../../types.ts';
 import { BuildLogsView, buildLogsRequest } from '../../fate/views.ts';
+import { SectionStack } from './SectionStack.tsx';
 
 type LogLine = { seq: number; line: string; stream: string };
 export function BuildLogs({ build }: { build: Build }) {
@@ -98,7 +99,7 @@ export function BuildLogs({ build }: { build: Build }) {
   }, [lines]);
 
   return (
-    <>
+    <SectionStack>
       <h2>Build Logs</h2>
       {error && <p role="alert">{error}</p>}
       <pre
@@ -120,6 +121,6 @@ export function BuildLogs({ build }: { build: Build }) {
                 </span>
               ))}
       </pre>
-    </>
+    </SectionStack>
   );
 }

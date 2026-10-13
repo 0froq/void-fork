@@ -23,7 +23,9 @@ import { AdminCard } from './AdminCard.tsx';
 import { formatDateTime } from './format.ts';
 import { FormCheckbox, FormSelector, FormTextArea, FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
+import { PageStack } from './PageStack.tsx';
 import { Pagination } from './Pagination.tsx';
+import { SectionStack } from './SectionStack.tsx';
 
 function BooleanBadge({ value }: { value: boolean }) {
   return <Badge label={value ? 'Yes' : 'No'} variant={value ? 'success' : 'neutral'} />;
@@ -101,11 +103,11 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
 
   return (
     <Layout platformName={platformName} title="Access" username={username}>
-      <div className="void-admin-access-page">
-        <header className="void-admin-access-intro">
+      <PageStack className="void-admin-access-page">
+        <SectionStack as="header" className="void-admin-access-intro">
           <Heading level={1}>Access</Heading>
           <p>Decide who can join this platform and manage invitations and individual grants.</p>
-        </header>
+        </SectionStack>
 
         <section aria-labelledby="access-policy-heading">
           <AdminCard
@@ -126,7 +128,8 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
             }
           >
             {initialized ? (
-              <form
+              <SectionStack
+                as="form"
                 method="post"
                 action="/admin/signup-control/policy"
                 className="void-admin-access-form"
@@ -189,14 +192,15 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                   Access protection.
                 </p>
                 <Button type="submit" label="Save signup policy" />
-              </form>
+              </SectionStack>
             ) : (
-              <div className="void-admin-access-form">
+              <SectionStack as="div" className="void-admin-access-form">
                 <p>
                   To use company-approved signup, first set up{' '}
                   <a href="/admin/config/auth">Authentication settings</a>.
                 </p>
-                <form
+                <SectionStack
+                  as="form"
                   method="post"
                   action="/admin/signup-control/toggle"
                   className="void-admin-access-form"
@@ -213,8 +217,8 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                     label={enabled ? 'Open signup' : 'Restrict signup'}
                     variant="secondary"
                   />
-                </form>
-              </div>
+                </SectionStack>
+              </SectionStack>
             )}
           </AdminCard>
         </section>
@@ -245,7 +249,8 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
               </p>
             )}
             {mode !== 'public' && (
-              <form
+              <SectionStack
+                as="form"
                 method="post"
                 action="/admin/invitations/send"
                 className="void-admin-access-form"
@@ -265,13 +270,13 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
                   type="submit"
                   label={emailEnabled ? 'Invite and email' : 'Create invitations'}
                 />
-              </form>
+              </SectionStack>
             )}
-            <div className="void-admin-access-share">
+            <SectionStack as="div" className="void-admin-access-share">
               <h3>{emailEnabled ? 'Share connection details' : 'Share these details manually'}</h3>
               <CopyValue label="Platform invitation page" value={inviteUrl} />
               <CopyValue label="Void CLI connection command" value={connectCommand} />
-            </div>
+            </SectionStack>
           </AdminCard>
         </section>
 
@@ -483,7 +488,7 @@ export function SignupControlPage({ path, platformName, username }: AdminPagePro
             {invitations.length === 0 && <p>No invitations yet.</p>}
           </AdminCard>
         </section>
-      </div>
+      </PageStack>
     </Layout>
   );
 }
