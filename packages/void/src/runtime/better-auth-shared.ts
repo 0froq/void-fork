@@ -215,26 +215,46 @@ function appendAuthHeaders(
     return;
   }
 
+  // `no-store`, or `private` with `no-cache`, keeps the response out of shared
+  // caches and makes the browser ask before reusing it, which allows ETag + 304
+  // (the ETag must differ per user). `private` alone lets the browser show the
+  // response to the next account that signs in.
+  const routeDirectives = bareCacheDirectives(c.res.headers.get('cache-control'));
+  const keepRoutePolicy =
+    routeDirectives.has('no-store') ||
+    (routeDirectives.has('private') && routeDirectives.has('no-cache'));
   source.forEach((value, key) => {
     // getSession's response policy belongs to the session endpoint. An anonymous
     // lookup must not make the application's public page or asset uncacheable.
-    if (!includeCachePolicy && ['cache-control', 'pragma'].includes(key.toLowerCase())) {
+    if (
+      (!includeCachePolicy || keepRoutePolicy) &&
+      ['cache-control', 'pragma'].includes(key.toLowerCase())
+    ) {
       return;
     }
     c.header(key, value, {
       append: key.toLowerCase() === 'set-cookie',
     });
   });
+  const sessionDirectives = bareCacheDirectives(source.get('cache-control'));
   if (
     source.has('set-cookie') &&
-    !(source.get('cache-control') ?? '')
-      .split(',')
-      .some((directive) =>
-        ['private', 'no-store', 'no-cache'].includes(directive.trim().toLowerCase()),
-      )
+    !keepRoutePolicy &&
+    !['private', 'no-store', 'no-cache'].some((directive) => sessionDirectives.has(directive))
   ) {
     c.header('Cache-Control', 'private, no-store');
   }
+}
+
+// Lowercased Cache-Control directive names that carry no value. Commas inside a
+// quoted value do not split directives, so `no-cache="a,private"` has no `private`.
+function bareCacheDirectives(policy: string | null): Set<string> {
+  const directives = (policy ?? '').match(/(?:[^",]|"(?:[^"\\]|\\.)*"?)+/g) ?? [];
+  return new Set(
+    directives
+      .map((directive) => directive.trim().toLowerCase())
+      .filter((directive) => !directive.includes('=')),
+  );
 }
 
 function resolveUserConfig(

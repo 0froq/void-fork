@@ -127,6 +127,8 @@ Auth sessions use the same database as your app. Void creates `BETTER_AUTH_SECRE
 
 Local development needs no secret setup. To preview a production build locally, provide `BETTER_AUTH_SECRET`.
 
+Responses to signed-in requests get `Cache-Control: no-store`, so neither the browser cache nor a shared cache keeps a user's data. A route keeps its own policy when it sets `no-store`, or `private` together with `no-cache`. To answer repeat requests with `304`, use `private, no-cache` with Hono's [`etag()`](https://hono.dev/docs/middleware/builtin/etag) middleware. If you set the `ETag` yourself, make it differ per user, so the `304` doesn't reuse another account's page. The browser cache keeps a copy of a `private, no-cache` page, so the Back button can show it again after the user signs out. Keep the default `no-store` for pages that must not stay in the browser cache.
+
 `POST`, `PUT`, `PATCH` and `DELETE` requests and WebSocket connections from another origin don't use the signed-in session unless that origin is in `trustedOrigins`. If a separate frontend calls your app, add its origin there (see [Customization](#customization)). If your routes use their own cookies, check the request `Origin` yourself, for example with Hono's [`csrf()`](https://hono.dev/docs/middleware/builtin/csrf) middleware.
 
 Deployed apps on Cloudflare limit auth requests per client IP with Better Auth's defaults, for example 3 sign-in attempts per 10 seconds. Each Worker instance keeps its own count. Change or turn off the limits with `rateLimit` in `auth.ts`. To share one count across instances, set `rateLimit: { storage: 'database' }`, then run `void db generate` for a direct Cloudflare deploy.
