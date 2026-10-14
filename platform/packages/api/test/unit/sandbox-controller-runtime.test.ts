@@ -97,6 +97,20 @@ afterEach(() => {
 });
 
 describe('trusted Sandbox lifecycle', () => {
+  it('retains the VM before waiting for boot readiness', async () => {
+    const f = fixture();
+    f.container.exec.mockImplementation(async () => {
+      expect(f.container.setInactivityTimeout).toHaveBeenCalledWith(10 * 60 * 1000);
+      return f.process;
+    });
+    await f.start();
+    expect(f.container.start.mock.invocationCallOrder[0]).toBeLessThan(
+      f.container.setInactivityTimeout.mock.invocationCallOrder[0]!,
+    );
+    expect(f.container.setInactivityTimeout.mock.invocationCallOrder[0]).toBeLessThan(
+      f.container.exec.mock.invocationCallOrder[0]!,
+    );
+  });
   it('reserves before boot and confirms readiness before billing', async () => {
     const f = fixture();
     f.control.reserve.mockImplementation(async () => {

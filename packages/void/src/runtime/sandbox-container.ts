@@ -318,11 +318,13 @@ export class SandboxContainer<Env = unknown> extends DurableObject<Env> {
           ...(this.entrypoint ? { entrypoint: this.entrypoint } : {}),
         });
       }
+      // Startup returns before the VM is ready. Retain it while initialization
+      // waits for boot; setting the timeout afterwards can lose the VM first.
+      await this.container.setInactivityTimeout(this.inactivityTimeoutMs);
       await this.initialize();
       if (epoch !== this.#epoch) {
         throw new Error('Sandbox startup was cancelled.');
       }
-      await this.container.setInactivityTimeout(this.inactivityTimeoutMs);
       await this.afterStart();
     } catch (error) {
       // Readiness, admission and initialization must all succeed before use.
