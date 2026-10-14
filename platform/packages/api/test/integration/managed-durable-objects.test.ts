@@ -196,6 +196,28 @@ function currentRelease(worker: string) {
 }
 
 describe('managed native Durable Objects', () => {
+  it.each(['before', 'after'])(
+    'recovers an R2 failure %s writing a release module',
+    async (phase) => {
+      const put = env.STATIC_ASSETS_R2.put.bind(env.STATIC_ASSETS_R2);
+      let failed = false;
+      vi.spyOn(env.STATIC_ASSETS_R2, 'put').mockImplementation(async (key, value, options) => {
+        if (!failed && key.includes('/durable/modules/')) {
+          failed = true;
+          if (phase === 'after') {
+            await put(key, value, options);
+          }
+          throw new Error('put: internal error (10001)');
+        }
+        return put(key, value, options);
+      });
+      const result = await deploy();
+      expect(failed).toBe(true);
+      expect(result.id).toBeDefined();
+      expect((await getDeployment(env.db, result.id!))?.status).toBe('live');
+    },
+  );
+
   it('refuses to replace an existing Worker whose bindings are empty', async () => {
     const worker = await durableObjectWorkerName(project.id, binding.className);
     provider.state.hostScripts.set(worker, {

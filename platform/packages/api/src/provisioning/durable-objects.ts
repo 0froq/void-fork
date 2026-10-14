@@ -15,6 +15,7 @@ import { encryptPlatformCredential, decryptPlatformCredential } from '../project
 import { projects, resources, deployments } from '../schema.ts';
 import type { DeployManifest, Resource } from '../types.ts';
 import { CF_API_BASE, cfFetch, CloudflareApiError } from './cloudflare-api.ts';
+import { putDurableSnapshotObject } from './durable-snapshot.ts';
 
 type Env = ApiEnv['Bindings'];
 type Binding = Record<string, unknown> & { type: string; name: string };
@@ -340,17 +341,21 @@ export async function storeDurableObjectSnapshot(
     if (!bytes) {
       throw new Error('Custom Durable Object deployment asset is missing.');
     }
-    await env.STATIC_ASSETS_R2.put(
+    await putDurableSnapshotObject(
+      env.STATIC_ASSETS_R2,
       `worker-bundles/${projectId}/${deploymentId}/durable/assets/${asset.hash}`,
       bytes,
     );
   }
   for (const module of modules) {
     const bytes = await module.content.arrayBuffer();
-    files.push({ name: module.name, contentType: module.content.type, sha256: await hash(bytes) });
-    await env.STATIC_ASSETS_R2.put(
+    const file = { name: module.name, contentType: module.content.type, sha256: await hash(bytes) };
+    files.push(file);
+    await putDurableSnapshotObject(
+      env.STATIC_ASSETS_R2,
       `worker-bundles/${projectId}/${deploymentId}/durable/modules/${module.name}`,
       bytes,
+      file.sha256,
     );
   }
   const credential = await encryptPlatformCredential(
@@ -359,7 +364,11 @@ export async function storeDurableObjectSnapshot(
     `durable:${deploymentId}`,
     JSON.stringify({ metadata, files } satisfies Snapshot),
   );
-  await env.STATIC_ASSETS_R2.put(snapshotKey(projectId, deploymentId), JSON.stringify(credential));
+  await putDurableSnapshotObject(
+    env.STATIC_ASSETS_R2,
+    snapshotKey(projectId, deploymentId),
+    JSON.stringify(credential),
+  );
   await db
     .update(deployments)
     .set({ bundle_stored: true })
