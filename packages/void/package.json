@@ -342,7 +342,7 @@
     "@cloudflare/build-output-utils": "catalog:",
     "@cloudflare/codemods": "catalog:",
     "@cloudflare/config": "catalog:",
-    "@cloudflare/sandbox": "1.0.0",
+    "@cloudflare/sandbox": "^1.0.1",
     "@cloudflare/vite-plugin": "catalog:",
     "@cloudflare/workers-auth": "catalog:",
     "@cloudflare/workers-types": "catalog:",

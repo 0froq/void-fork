@@ -28,7 +28,7 @@
     "@astryxdesign/core": "catalog:",
     "@astryxdesign/theme-neutral": "catalog:",
     "@cloudflare/containers": "0.3.7",
-    "@cloudflare/sandbox": "1.0.0",
+    "@cloudflare/sandbox": "^1.0.1",
     "@nkzw/fate": "catalog:",
     "@stylexjs/stylex": "catalog:",
     "@void/deploy-core": "workspace:*",
