@@ -32,25 +32,25 @@ catalog:
   vite: npm:@voidzero-dev/vite-plus-core@1.1.0
   vite-plus: 1.1.0
   vitest: 5.0.4
-  wrangler: ^4.150.0
-  cf: ^1.0.0-beta.16
+  wrangler: ^4.151.0
+  cf: ^1.0.0-beta.17
   oauth4webapi: ^3.8.8
   '@astryxdesign/core': 0.7.0
   '@astryxdesign/theme-neutral': 0.7.0
   '@stylexjs/stylex': 0.19.1
   '@angular/build': ^22.2.2
   '@astrojs/cloudflare': ^14.3.4
-  '@cloudflare/build-output-utils': ^0.9.1
-  '@cloudflare/codemods': ^0.4.2
-  '@cloudflare/config': ^0.25.0
-  '@cloudflare/vite-plugin': ^1.63.2
+  '@cloudflare/build-output-utils': ^0.9.2
+  '@cloudflare/codemods': ^0.5.0
+  '@cloudflare/config': ^0.26.0
+  '@cloudflare/vite-plugin': ^1.64.0
   '@cloudflare/workers-auth': ^0.14.0
   '@nkzw/fate': 1.7.7
   '@vitejs/plugin-react': ^6.1.2
   '@vitejs/plugin-rsc': ^0.5.37
   astro: ^7.3.8
   magic-string: ^1.4.3
-  miniflare: 5.20261006.2-beta
+  miniflare: 5.20261012.0-beta
   nuxt: ^4.6.1
   playwright: ^1.64.0
   postal-mime: ^4.0.5
@@ -67,7 +67,7 @@ catalogs:
   platform:
     '@cloudflare/workers-types': ^5.20261014.1
     hono: 4.13.13
-    wrangler: ^4.150.0
+    wrangler: ^4.151.0
   sveltekit:
     typescript: 6.0.3
 

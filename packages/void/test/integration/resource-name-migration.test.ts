@@ -14,10 +14,11 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { build } from 'vite';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { analyzeApplication } from '../../src/application-routing.ts';
-import { buildVoidManifest, collectWorkerFiles } from '../../src/cli/package.ts';
+import { buildVoidManifest } from '../../src/cli/package.ts';
 import { syncWranglerDurableObjects, syncWranglerWebSockets } from '../../src/cli/wrangler.ts';
 import { readConfig } from '../../src/config.ts';
 import { scanDurableObjectModules } from '../../src/durable/scan.ts';
+import { collectPrerenderWorkerModules } from '../../src/prerender.ts';
 import { compileRouteTable, compileWorkerEntry } from '../../src/router/compile.ts';
 
 const repository = join(import.meta.dirname, '..', '..', '..', '..');
@@ -379,21 +380,14 @@ export default defineRoom({
         { tag: 'void-durable-counter-v1', new_sqlite_classes: ['CounterDurableObject'] },
         { tag: 'void-ws-v1', new_sqlite_classes: ['ChatRoomWs'] },
       ]);
-      const files = collectWorkerFiles(output);
-      const modulePaths = [
-        config.main,
-        ...Array.from(files.keys()).filter((path) => path !== config.main),
-      ];
-      expect(modulePaths.every((path) => /\.(?:js|mjs)$/.test(path))).toBe(true);
+      // Source maps belong in uploads, but are not executable Worker modules.
+      const modules = collectPrerenderWorkerModules(output, config.main);
+      expect(modules.every((module) => module.type === 'ESModule')).toBe(true);
       runtime = new Miniflare(
         convertV4MiniflareOptions({
           compatibilityDate: config.compatibility_date,
           compatibilityFlags: config.compatibility_flags,
-          modules: modulePaths.map((path) => ({
-            type: 'ESModule',
-            path: join(output, path),
-            contents: files.get(path)!,
-          })),
+          modules,
           modulesRoot: output,
           durableObjects: {
             COUNTER: { className: 'CounterDurableObject', useSQLite: true },
