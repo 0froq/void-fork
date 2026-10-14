@@ -181,17 +181,17 @@ catalogs:
       specifier: 0.6.5
       version: 0.6.5
     '@cloudflare/build-output-utils':
-      specifier: ^0.9.0
-      version: 0.9.0
+      specifier: ^0.9.1
+      version: 0.9.1
     '@cloudflare/codemods':
       specifier: ^0.4.2
       version: 0.4.2
     '@cloudflare/config':
-      specifier: ^0.24.1
-      version: 0.24.1
+      specifier: ^0.25.0
+      version: 0.25.0
     '@cloudflare/vite-plugin':
-      specifier: ^1.63.1
-      version: 1.63.1
+      specifier: ^1.63.2
+      version: 1.63.2
     '@cloudflare/workers-auth':
       specifier: ^0.13.1
       version: 0.13.1
@@ -223,14 +223,14 @@ catalogs:
       specifier: ^7.3.7
       version: 7.3.7
     cf:
-      specifier: ^1.0.0-beta.14
-      version: 1.0.0-beta.14
+      specifier: ^1.0.0-beta.16
+      version: 1.0.0-beta.16
     magic-string:
       specifier: ^1.4.3
       version: 1.4.3
     miniflare:
-      specifier: 5.20261006.1-alpha
-      version: 5.20261006.1-alpha
+      specifier: 5.20261006.2-beta
+      version: 5.20261006.2-beta
     nuxt:
       specifier: ^4.6.0
       version: 4.6.0
@@ -274,8 +274,8 @@ catalogs:
       specifier: 5.0.3
       version: 5.0.3
     wrangler:
-      specifier: ^4.149.0
-      version: 4.149.0
+      specifier: ^4.150.0
+      version: 4.150.0
   platform:
     '@cloudflare/workers-types':
       specifier: ^5.20261009.1
@@ -284,8 +284,8 @@ catalogs:
       specifier: 4.13.13
       version: 4.13.13
     wrangler:
-      specifier: ^4.149.0
-      version: 4.149.0
+      specifier: ^4.150.0
+      version: 4.150.0
   sveltekit:
     typescript:
       specifier: 6.0.3
@@ -360,7 +360,7 @@ importers:
         version: link:../packages/void
       wrangler:
         specifier: 'catalog:'
-        version: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+        version: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
 
   packages/create-void:
     devDependencies:
@@ -518,7 +518,7 @@ importers:
         version: 1.1.0(@types/node@26.6.4)(@vitest/ui@5.0.3)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(playwright@1.64.0)(sass-embedded@1.104.1)(sass@1.104.1)(svelte@5.57.2(@typescript-eslint/types@8.71.0))(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1)
       wrangler:
         specifier: 'catalog:'
-        version: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+        version: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
 
   packages/react:
     dependencies:
@@ -608,19 +608,19 @@ importers:
     dependencies:
       '@cloudflare/build-output-utils':
         specifier: 'catalog:'
-        version: 0.9.0
+        version: 0.9.1
       '@cloudflare/codemods':
         specifier: 'catalog:'
         version: 0.4.2
       '@cloudflare/config':
         specifier: 'catalog:'
-        version: 0.24.1
+        version: 0.25.0
       '@cloudflare/sandbox':
         specifier: ^1.0.1
         version: 1.0.1
       '@cloudflare/vite-plugin':
         specifier: 'catalog:'
-        version: 1.63.1(@types/node@26.6.4)(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1))(wrangler@4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))
+        version: 1.63.2(@types/node@26.6.4)(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1))(wrangler@4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))
       '@cloudflare/workers-auth':
         specifier: 'catalog:'
         version: 0.13.1(vitest@5.0.3)
@@ -659,7 +659,7 @@ importers:
         version: 1.1.0
       cf:
         specifier: 'catalog:'
-        version: 1.0.0-beta.14(@types/node@26.6.4)
+        version: 1.0.0-beta.16(@types/node@26.6.4)
       drizzle-arktype:
         specifier: ^0.1.3
         version: 0.1.3(arktype@2.2.7)(drizzle-orm@0.45.3(@cloudflare/workers-types@5.20261009.1)(@electric-sql/pglite@0.5.8)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(kysely@0.29.2)(mysql2@3.24.5(@types/node@26.6.4))(pg@8.23.1))
@@ -695,7 +695,7 @@ importers:
         version: 4.1.0
       miniflare:
         specifier: 'catalog:'
-        version: 5.20261006.1-alpha(@types/node@26.6.4)
+        version: 5.20261006.2-beta(@types/node@26.6.4)
       minimatch:
         specifier: ^10.2.6
         version: 10.2.6
@@ -935,7 +935,7 @@ importers:
         version: 1.1.0(@types/node@26.6.4)(@vitest/ui@5.0.3)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(playwright@1.64.0)(sass-embedded@1.104.1)(sass@1.104.1)(svelte@5.57.2(@typescript-eslint/types@8.71.0))(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1)
       wrangler:
         specifier: catalog:platform
-        version: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+        version: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
 
   platform/packages/dashboard:
     dependencies:
@@ -993,7 +993,7 @@ importers:
         version: link:../../../packages/void
       wrangler:
         specifier: catalog:platform
-        version: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+        version: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
 
   platform/packages/dispatch:
     dependencies:
@@ -1024,7 +1024,7 @@ importers:
         version: 1.1.0(@types/node@26.6.4)(@vitest/ui@5.0.3)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(playwright@1.64.0)(sass-embedded@1.104.1)(sass@1.104.1)(svelte@5.57.2(@typescript-eslint/types@8.71.0))(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1)
       wrangler:
         specifier: catalog:platform
-        version: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+        version: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
 
   platform/packages/email-gateway:
     dependencies:
@@ -1049,7 +1049,7 @@ importers:
         version: 1.1.0(@types/node@26.6.4)(@vitest/ui@5.0.3)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(playwright@1.64.0)(sass-embedded@1.104.1)(sass@1.104.1)(svelte@5.57.2(@typescript-eslint/types@8.71.0))(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1)
       wrangler:
         specifier: catalog:platform
-        version: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+        version: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
 
   platform/packages/proxy:
     dependencies:
@@ -1083,7 +1083,7 @@ importers:
         version: 1.1.0(@types/node@26.6.4)(@vitest/ui@5.0.3)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(playwright@1.64.0)(sass-embedded@1.104.1)(sass@1.104.1)(svelte@5.57.2(@typescript-eslint/types@8.71.0))(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1)
       wrangler:
         specifier: catalog:platform
-        version: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+        version: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
 
   platform/packages/tail:
     devDependencies:
@@ -1098,7 +1098,7 @@ importers:
         version: 1.1.0(@types/node@26.6.4)(@vitest/ui@5.0.3)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(playwright@1.64.0)(sass-embedded@1.104.1)(sass@1.104.1)(svelte@5.57.2(@typescript-eslint/types@8.71.0))(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1)
       wrangler:
         specifier: catalog:platform
-        version: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+        version: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
 
   playground/analog:
     dependencies:
@@ -1165,13 +1165,13 @@ importers:
         version: link:../../packages/void
       wrangler:
         specifier: 'catalog:'
-        version: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+        version: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
 
   playground/astro:
     dependencies:
       '@astrojs/cloudflare':
         specifier: 'catalog:'
-        version: 14.3.4(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(astro@7.3.7(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(aws4fetch@1.0.20)(db0@0.3.4(@electric-sql/pglite@0.5.8)(better-sqlite3@13.0.3)(drizzle-orm@0.45.3(@cloudflare/workers-types@5.20261009.1)(@electric-sql/pglite@0.5.8)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(kysely@0.29.2)(mysql2@3.24.5(@types/node@26.6.4))(pg@8.23.1))(mysql2@3.24.5(@types/node@26.6.4)))(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1))(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(wrangler@4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))(yaml@2.9.1)
+        version: 14.3.4(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(astro@7.3.7(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(aws4fetch@1.0.20)(db0@0.3.4(@electric-sql/pglite@0.5.8)(better-sqlite3@13.0.3)(drizzle-orm@0.45.3(@cloudflare/workers-types@5.20261009.1)(@electric-sql/pglite@0.5.8)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(kysely@0.29.2)(mysql2@3.24.5(@types/node@26.6.4))(pg@8.23.1))(mysql2@3.24.5(@types/node@26.6.4)))(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1))(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(wrangler@4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))(yaml@2.9.1)
       astro:
         specifier: 'catalog:'
         version: 7.3.7(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(aws4fetch@1.0.20)(db0@0.3.4(@electric-sql/pglite@0.5.8)(better-sqlite3@13.0.3)(drizzle-orm@0.45.3(@cloudflare/workers-types@5.20261009.1)(@electric-sql/pglite@0.5.8)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(kysely@0.29.2)(mysql2@3.24.5(@types/node@26.6.4))(pg@8.23.1))(mysql2@3.24.5(@types/node@26.6.4)))(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1)
@@ -1370,7 +1370,7 @@ importers:
         version: link:../../packages/void
       wrangler:
         specifier: 'catalog:'
-        version: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+        version: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
 
   playground/pg-test:
     dependencies:
@@ -1460,7 +1460,7 @@ importers:
     devDependencies:
       '@react-router/dev':
         specifier: ^8.4.0
-        version: 8.4.0(e52b948f0610addad920e5f208761b5f)
+        version: 8.4.0(a2e6422d4be1cd2a1050826d692d3f97)
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
@@ -1630,7 +1630,7 @@ importers:
     dependencies:
       '@sveltejs/adapter-cloudflare':
         specifier: ^8.0.0
-        version: 8.0.0(@sveltejs/kit@3.0.1(@sveltejs/vite-plugin-svelte@7.3.1(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0)))(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0))(typescript@6.0.3))(wrangler@4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))
+        version: 8.0.0(@sveltejs/kit@3.0.1(@sveltejs/vite-plugin-svelte@7.3.1(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0)))(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0))(typescript@6.0.3))(wrangler@4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))
       '@sveltejs/kit':
         specifier: ^3.0.1
         version: 3.0.1(@sveltejs/vite-plugin-svelte@7.3.1(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0)))(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0))(typescript@6.0.3)
@@ -1655,7 +1655,7 @@ importers:
         version: link:../../packages/void
       wrangler:
         specifier: 'catalog:'
-        version: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+        version: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
 
   playground/tanstack-start:
     dependencies:
@@ -1853,7 +1853,7 @@ importers:
     devDependencies:
       '@sveltejs/adapter-cloudflare':
         specifier: 7.2.9
-        version: 7.2.9(@sveltejs/kit@2.70.3(@sveltejs/vite-plugin-svelte@7.3.1(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0)))(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0))(typescript@6.0.3))(wrangler@4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))
+        version: 7.2.9(@sveltejs/kit@2.70.3(@sveltejs/vite-plugin-svelte@7.3.1(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0)))(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0))(typescript@6.0.3))(wrangler@4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))
       '@sveltejs/kit':
         specifier: 2.70.3
         version: 2.70.3(@sveltejs/vite-plugin-svelte@7.3.1(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0)))(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0))(typescript@6.0.3)
@@ -1877,7 +1877,7 @@ importers:
         version: link:../../../packages/void
       wrangler:
         specifier: 'catalog:'
-        version: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+        version: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
 
 packages:
 
@@ -2551,15 +2551,15 @@ packages:
     resolution: {integrity: sha512-dlT1m5e/0yUL0kRNcQn7yGLVThkgbB0Ga/1AmfDDC/8ik6AIiSf2QLQO2zPYvefsHP0aFgxO93cVLCCfDp7kzQ==}
     engines: {node: '>= 20.12.0'}
 
-  '@cloudflare/build-output-utils@0.9.0':
-    resolution: {integrity: sha512-2FMA4XnVj5u7LYJE9j3uSJ+cU4Zn994WiyEOVhbMV7wh7pcwi1rIYafH6kiWaa+Y3Bjvf0ow7JgoDaO05qYVPg==}
+  '@cloudflare/build-output-utils@0.9.1':
+    resolution: {integrity: sha512-zTzHGwXD7dJ1+vWlVgvTWbg1k0x53+Wu1aR6MDWAflOwJD9KtHjz7Qqq6pnTbVxlR0m5GLlD6sshEuiKnB1KQA==}
 
   '@cloudflare/codemods@0.4.2':
     resolution: {integrity: sha512-oHvDlfhQEIkdf8Mvz4SMgk+6evVlu9rrntRv5KQfRK3H4RkXUmawzYQ7+zdBG0wiWdp/Ku/PqNMWVYAs8T4jrQ==}
     hasBin: true
 
-  '@cloudflare/config@0.24.1':
-    resolution: {integrity: sha512-tja1/oHB5sCgigiRrZrESYFUzNEgex1zW0GDWXNbpUVpB8zX7ZQKMYnZYX2zD2sy8dk9paDZDnPC1VSu7y8aZw==}
+  '@cloudflare/config@0.25.0':
+    resolution: {integrity: sha512-h4tgL9/pmeoIdKfs/irfV/eCotbEpbadO2RGPbHwRij6Ek7q8Gqx4juSoDSb/fk9IclansgAHXF9b8rb3Kw4jg==}
 
   '@cloudflare/containers@0.3.7':
     resolution: {integrity: sha512-DM9dm3FnIBSyiSJ1FLavKwl/lk3oAmTaynCzZQ9pZR0ncRPquSxkxd8Nu2MFILxmDDsPkxKsSNEh9mHHMty4Fw==}
@@ -2572,8 +2572,8 @@ packages:
     resolution: {integrity: sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg==}
     engines: {node: '>=22.0.0'}
 
-  '@cloudflare/runtime-types@0.1.9':
-    resolution: {integrity: sha512-T3LcgIUw2VMWCw/50deozY/Iqu9j1NN3xbYGTmYbLvGk1a8aNZHplwf/JknYmqSVHZU4eHqsFpkn8IID2W4W/A==}
+  '@cloudflare/runtime-types@0.1.10':
+    resolution: {integrity: sha512-OXEpo7VZ/ALsLGzKCX4n0Dknnf1w3W6wCWELiKyW6MUd7JRvd23KSTrUKIHLJaBpXR1hTKCqWBUWUHBn2wZbnQ==}
 
   '@cloudflare/sandbox@1.0.1':
     resolution: {integrity: sha512-8Qvv2SbMGfDW+zo0AkwaDna+b+IbXPgMKjelu6UZla1jyTwt1Ye0Z4LEahwoXtIMbpQvopr9NvXtLm+abA7+Tw==}
@@ -2593,6 +2593,13 @@ packages:
     peerDependencies:
       vite: ^6.1.0 || ^7.0.0 || ^8.0.0
       wrangler: ^4.149.0
+
+  '@cloudflare/vite-plugin@1.63.2':
+    resolution: {integrity: sha512-62T+K8dnViTQ66h3DOsTroGS5Tq72MzewPvBa2iPzwstteFRZbHFwzac/erLBzJybp6u8sw+BF4UGxb+wTuIeQ==}
+    hasBin: true
+    peerDependencies:
+      vite: ^6.1.0 || ^7.0.0 || ^8.0.0
+      wrangler: ^4.150.0
 
   '@cloudflare/workerd-darwin-64@1.20261006.1':
     resolution: {integrity: sha512-lCX6avJO2It9AyDEYitjmOtJRVp/xmaW0TziyoLAnfxlzozyyRbSFfIIMMCiDx/sTP1++E4VLbV+7BHSD33f0Q==}
@@ -6691,8 +6698,8 @@ packages:
   ccount@2.0.1:
     resolution: {integrity: sha512-eyrF0jiFpY+3drT6383f1qhkbGsLSifNAjA61IUjZjmLCWjItY6LB9ft9YhoDgwfmclB2zhu51Lc7+95b8NRAg==}
 
-  cf@1.0.0-beta.14:
-    resolution: {integrity: sha512-CIDV5JAUIhJRTCPG3gR72BBzNbPH0NqpF/C3d6mPTXFd1LMbAgfAv6C0sg0MtLLb0blz1kFudDDd4azlKQ/p9A==}
+  cf@1.0.0-beta.16:
+    resolution: {integrity: sha512-buY0XUHp+wAA0paOKxdUr5UgLKhO8xkeJL5Pn2Xt1UQLfqPFKrqTC3mKrGsrmOhf8Qyn4Omxc4F/8x37fa9kVA==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -8536,6 +8543,10 @@ packages:
 
   miniflare@5.20261006.1-alpha:
     resolution: {integrity: sha512-6ylv8tamkrspDI2R/cAYfv+YWmfGNdXe76Pi9TauEUWsFVXn3LNF9Yk8oduzf1a+TYsSRYTqlOE7+nGGRsMHdw==}
+    engines: {node: '>=22.0.0'}
+
+  miniflare@5.20261006.2-beta:
+    resolution: {integrity: sha512-agufWI3mXF8xGzry2/sOF8Im8AoYs04DWBCLDWDmd4QtMSGEo9IgrPmYOwsCmQA3K3MbLzsvr01GpWc8x3Duqw==}
     engines: {node: '>=22.0.0'}
 
   minimatch@10.2.6:
@@ -10659,8 +10670,8 @@ packages:
     resolution: {integrity: sha512-+TvsA6VAVoMC3XDKR5MoC/qlLqDixEfOBysDEKnPIPou/NvoPWCAuXHXMsswwlvmEuvX56lQjvELLyLuzTKvRw==}
     engines: {node: '>=12'}
 
-  wrangler@4.149.0:
-    resolution: {integrity: sha512-OzK7xmB5r5iLKb3cIT3783g13fe6T7xyeKu9LEdUyl+DKAM2KP/jkjnE0OUhyw+mB/XJM9ycjgF3MWm8PR9amg==}
+  wrangler@4.150.0:
+    resolution: {integrity: sha512-Mf3MiCoGXszX965MtKcOSe8whSyFBL2qpCp+DiSwH94+0FNYveSPQPVRRlMAMH8lkln8PECcSW1do6hnelwPZA==}
     engines: {node: '>=22.0.0'}
     hasBin: true
     peerDependencies:
@@ -11096,15 +11107,15 @@ snapshots:
 
   '@ark/util@0.56.6': {}
 
-  '@astrojs/cloudflare@14.3.4(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(astro@7.3.7(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(aws4fetch@1.0.20)(db0@0.3.4(@electric-sql/pglite@0.5.8)(better-sqlite3@13.0.3)(drizzle-orm@0.45.3(@cloudflare/workers-types@5.20261009.1)(@electric-sql/pglite@0.5.8)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(kysely@0.29.2)(mysql2@3.24.5(@types/node@26.6.4))(pg@8.23.1))(mysql2@3.24.5(@types/node@26.6.4)))(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1))(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(wrangler@4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))(yaml@2.9.1)':
+  '@astrojs/cloudflare@14.3.4(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(astro@7.3.7(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(aws4fetch@1.0.20)(db0@0.3.4(@electric-sql/pglite@0.5.8)(better-sqlite3@13.0.3)(drizzle-orm@0.45.3(@cloudflare/workers-types@5.20261009.1)(@electric-sql/pglite@0.5.8)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(kysely@0.29.2)(mysql2@3.24.5(@types/node@26.6.4))(pg@8.23.1))(mysql2@3.24.5(@types/node@26.6.4)))(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1))(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(wrangler@4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))(yaml@2.9.1)':
     dependencies:
       '@astrojs/internal-helpers': 0.12.0
       '@astrojs/underscore-redirects': 1.0.4
-      '@cloudflare/vite-plugin': 1.63.1(@types/node@26.6.4)(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1))(wrangler@4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))
+      '@cloudflare/vite-plugin': 1.63.1(@types/node@26.6.4)(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1))(wrangler@4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))
       astro: 7.3.7(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(aws4fetch@1.0.20)(db0@0.3.4(@electric-sql/pglite@0.5.8)(better-sqlite3@13.0.3)(drizzle-orm@0.45.3(@cloudflare/workers-types@5.20261009.1)(@electric-sql/pglite@0.5.8)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(kysely@0.29.2)(mysql2@3.24.5(@types/node@26.6.4))(pg@8.23.1))(mysql2@3.24.5(@types/node@26.6.4)))(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1)
       piccolore: 0.1.3
       vite: '@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1)'
-      wrangler: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+      wrangler: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
     transitivePeerDependencies:
       - '@arethetypeswrong/core'
       - '@types/node'
@@ -11608,13 +11619,13 @@ snapshots:
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
 
-  '@cloudflare/build-output-utils@0.9.0':
+  '@cloudflare/build-output-utils@0.9.1':
     dependencies:
-      '@cloudflare/config': 0.24.1
+      '@cloudflare/config': 0.25.0
 
   '@cloudflare/codemods@0.4.2': {}
 
-  '@cloudflare/config@0.24.1':
+  '@cloudflare/config@0.25.0':
     dependencies:
       zod: 4.6.5
 
@@ -11624,9 +11635,9 @@ snapshots:
 
   '@cloudflare/kv-asset-handler@0.5.0': {}
 
-  '@cloudflare/runtime-types@0.1.9(@types/node@26.6.4)':
+  '@cloudflare/runtime-types@0.1.10(@types/node@26.6.4)':
     dependencies:
-      miniflare: 5.20261006.1-alpha(@types/node@26.6.4)
+      miniflare: 5.20261006.2-beta(@types/node@26.6.4)
       workerd: 1.20261006.1
     transitivePeerDependencies:
       - '@types/node'
@@ -11644,14 +11655,28 @@ snapshots:
     optionalDependencies:
       workerd: 1.20261006.1
 
-  '@cloudflare/vite-plugin@1.63.1(@types/node@26.6.4)(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1))(wrangler@4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))':
+  '@cloudflare/vite-plugin@1.63.1(@types/node@26.6.4)(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1))(wrangler@4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))':
     dependencies:
       '@cloudflare/unenv-preset': 2.16.2(unenv@2.0.0-rc.24)(workerd@1.20261006.1)
       miniflare: 5.20261006.1-alpha(@types/node@26.6.4)
       unenv: 2.0.0-rc.24
       vite: '@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1)'
       workerd: 1.20261006.1
-      wrangler: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+      wrangler: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+      ws: 8.21.0
+    transitivePeerDependencies:
+      - '@types/node'
+      - bufferutil
+      - utf-8-validate
+
+  '@cloudflare/vite-plugin@1.63.2(@types/node@26.6.4)(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1))(wrangler@4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))':
+    dependencies:
+      '@cloudflare/unenv-preset': 2.16.2(unenv@2.0.0-rc.24)(workerd@1.20261006.1)
+      miniflare: 5.20261006.2-beta(@types/node@26.6.4)
+      unenv: 2.0.0-rc.24
+      vite: '@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1)'
+      workerd: 1.20261006.1
+      wrangler: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
       ws: 8.21.0
     transitivePeerDependencies:
       - '@types/node'
@@ -13203,7 +13228,7 @@ snapshots:
 
   '@poppinss/exception@1.2.3': {}
 
-  '@react-router/dev@8.4.0(e52b948f0610addad920e5f208761b5f)':
+  '@react-router/dev@8.4.0(a2e6422d4be1cd2a1050826d692d3f97)':
     dependencies:
       '@babel/core': 7.29.7(supports-color@10.2.2)
       '@babel/generator': 7.29.8
@@ -13234,7 +13259,7 @@ snapshots:
       '@vitejs/plugin-rsc': 0.5.36(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1))(react-dom@19.3.0(react@19.3.0))(react-server-dom-webpack@19.3.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(webpack@5.105.3(cssnano@9.3.2(postcss@8.5.28))(csso@5.0.5)(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.28)))(react@19.3.0)
       react-server-dom-webpack: 19.3.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(webpack@5.105.3(cssnano@9.3.2(postcss@8.5.28))(csso@5.0.5)(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.28))
       typescript: 7.0.2
-      wrangler: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+      wrangler: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
     transitivePeerDependencies:
       - babel-plugin-macros
       - supports-color
@@ -13708,19 +13733,19 @@ snapshots:
     dependencies:
       acorn: 8.18.0
 
-  '@sveltejs/adapter-cloudflare@7.2.9(@sveltejs/kit@2.70.3(@sveltejs/vite-plugin-svelte@7.3.1(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0)))(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0))(typescript@6.0.3))(wrangler@4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))':
+  '@sveltejs/adapter-cloudflare@7.2.9(@sveltejs/kit@2.70.3(@sveltejs/vite-plugin-svelte@7.3.1(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0)))(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0))(typescript@6.0.3))(wrangler@4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))':
     dependencies:
       '@cloudflare/workers-types': 4.20260702.1
       '@sveltejs/kit': 2.70.3(@sveltejs/vite-plugin-svelte@7.3.1(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0)))(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0))(typescript@6.0.3)
       worktop: 0.8.0-next.18
-      wrangler: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+      wrangler: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
 
-  '@sveltejs/adapter-cloudflare@8.0.0(@sveltejs/kit@3.0.1(@sveltejs/vite-plugin-svelte@7.3.1(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0)))(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0))(typescript@6.0.3))(wrangler@4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))':
+  '@sveltejs/adapter-cloudflare@8.0.0(@sveltejs/kit@3.0.1(@sveltejs/vite-plugin-svelte@7.3.1(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0)))(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0))(typescript@6.0.3))(wrangler@4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4))':
     dependencies:
       '@cloudflare/workers-types': 5.20261009.1
       '@rolldown/pluginutils': 1.0.1
       '@sveltejs/kit': 3.0.1(@sveltejs/vite-plugin-svelte@7.3.1(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0)))(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0))(typescript@6.0.3)
-      wrangler: 4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
+      wrangler: 4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4)
 
   '@sveltejs/kit@2.70.3(@sveltejs/vite-plugin-svelte@7.3.1(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0)))(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vue-tsc@3.3.6(typescript@6.0.3))(yaml@2.9.1))(svelte@5.57.2(@typescript-eslint/types@8.71.0))(typescript@6.0.3)':
     dependencies:
@@ -15487,14 +15512,14 @@ snapshots:
 
   ccount@2.0.1: {}
 
-  cf@1.0.0-beta.14(@types/node@26.6.4):
+  cf@1.0.0-beta.16(@types/node@26.6.4):
     dependencies:
-      '@cloudflare/build-output-utils': 0.9.0
+      '@cloudflare/build-output-utils': 0.9.1
       '@cloudflare/codemods': 0.4.2
-      '@cloudflare/config': 0.24.1
-      '@cloudflare/runtime-types': 0.1.9(@types/node@26.6.4)
+      '@cloudflare/config': 0.25.0
+      '@cloudflare/runtime-types': 0.1.10(@types/node@26.6.4)
       blake3-wasm: 2.1.5
-      miniflare: 5.20261006.1-alpha(@types/node@26.6.4)
+      miniflare: 5.20261006.2-beta(@types/node@26.6.4)
       minisearch: 7.2.0
     transitivePeerDependencies:
       - '@types/node'
@@ -17414,6 +17439,19 @@ snapshots:
   mimic-function@5.0.1: {}
 
   miniflare@5.20261006.1-alpha(@types/node@26.6.4):
+    dependencies:
+      '@cspotcode/source-map-support': 0.8.1
+      sharp: 0.35.5(@types/node@26.6.4)
+      undici: 7.29.1
+      workerd: 1.20261006.1
+      ws: 8.21.0
+      youch: 4.1.0-beta.10
+    transitivePeerDependencies:
+      - '@types/node'
+      - bufferutil
+      - utf-8-validate
+
+  miniflare@5.20261006.2-beta(@types/node@26.6.4):
     dependencies:
       '@cspotcode/source-map-support': 0.8.1
       sharp: 0.35.5(@types/node@26.6.4)
@@ -20378,13 +20416,13 @@ snapshots:
       mrmime: 2.0.1
       regexparam: 3.0.0
 
-  wrangler@4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4):
+  wrangler@4.150.0(@cloudflare/workers-types@5.20261009.1)(@types/node@26.6.4):
     dependencies:
       '@cloudflare/kv-asset-handler': 0.5.0
       '@cloudflare/unenv-preset': 2.16.2(unenv@2.0.0-rc.24)(workerd@1.20261006.1)
       blake3-wasm: 2.1.5
       esbuild: 0.28.2
-      miniflare: 5.20261006.1-alpha(@types/node@26.6.4)
+      miniflare: 5.20261006.2-beta(@types/node@26.6.4)
       path-to-regexp: 6.3.0
       unenv: 2.0.0-rc.24
       workerd: 1.20261006.1
