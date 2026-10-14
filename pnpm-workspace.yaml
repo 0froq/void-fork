@@ -25,12 +25,12 @@ allowBuilds:
 catalog:
   '@cloudflare/workers-types': ^5.20261014.1
   '@types/node': ^26.6.5
-  '@voidzero-dev/vite-plus-prompts': 1.1.0
+  '@voidzero-dev/vite-plus-prompts': 1.2.0
   typescript: 7.0.2
   '@voidzero-dev/vitepress-theme': ^5.0.7
   pathslash: ^0.1.0
-  vite: npm:@voidzero-dev/vite-plus-core@1.1.0
-  vite-plus: 1.1.0
+  vite: npm:@voidzero-dev/vite-plus-core@1.2.0
+  vite-plus: 1.2.0
   vitest: 5.0.4
   wrangler: ^4.151.0
   cf: ^1.0.0-beta.17
@@ -124,7 +124,4 @@ minimumReleaseAgeExclude:
   - lucide-react@1.56.0
   - mysql2@3.24.6
   - vue@3.5.44
-
-patchedDependencies:
-  # Remove when upgrading to the next prompts release containing the one-space output fix.
-  '@voidzero-dev/vite-plus-prompts@1.1.0': patches/@voidzero-dev__vite-plus-prompts@1.1.0.patch
+  - vite-plus@1.2.0

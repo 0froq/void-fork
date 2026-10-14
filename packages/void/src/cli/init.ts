@@ -27,6 +27,7 @@ import { maybeSetupDeployProject } from './deploy-setup.ts';
 import { maybeScaffoldEnvTs } from './env-scaffold.ts';
 import { migrateFrameworkAdapterPaths } from './framework-config-migrate.ts';
 import { initialCommitCommand, setupGit } from './init-git.ts';
+import { configureVitePlusScaffold } from './init-vite-plus.ts';
 import { migrateLegacyVoidConfig } from './migrate.ts';
 import { formatUrl, note, printSuccess } from './output.ts';
 import { discoverPlatform, saveDiscoveredPlatform } from './platform-cmd.ts';
@@ -98,6 +99,7 @@ const EMPTY_PROJECT_ALLOWED_ENTRIES = new Set([
   'CLAUDE.md',
   '.node-version',
   '.npmrc',
+  '.yarnrc.yml',
   '.nvmrc',
   '.editorconfig',
   '.vscode',
@@ -2191,8 +2193,10 @@ function scaffoldPagesApp(
     const targetGroup = group === 'dependencies' ? dependencies : devDependencies;
     const sourceGroup = otherGroup === 'dependencies' ? dependencies : devDependencies;
     const existing = targetGroup[name] ?? sourceGroup[name];
-    if (!targetGroup[name]) {
-      targetGroup[name] = existing ?? fallbackVersion;
+    const selectToolchainVersion =
+      toolchain === 'vite-plus' && (name === 'vite' || name === 'vite-plus');
+    if (!targetGroup[name] || (selectToolchainVersion && existing !== fallbackVersion)) {
+      targetGroup[name] = selectToolchainVersion ? fallbackVersion : (existing ?? fallbackVersion);
       dependencyAdded = true;
     }
     if (sourceGroup[name]) {
@@ -2212,6 +2216,14 @@ function scaffoldPagesApp(
   // pnpm workspace members, which need the root `allowBuilds`.
   if (packageManager === 'pnpm' || isPnpmProject(root, pkg)) {
     ensurePnpmAllowBuilds(root, pkg);
+  }
+
+  if (toolchain === 'vite-plus') {
+    configureVitePlusScaffold(
+      packageManager === 'pnpm' ? resolvePnpmConfigRoot(root, pkg) : root,
+      packageManager,
+      pkg,
+    );
   }
 
   writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n');

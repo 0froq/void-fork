@@ -1200,8 +1200,8 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.dependencies.react).toBeDefined();
       expect(pkg.dependencies['react-dom']).toBeDefined();
       expect(pkg.dependencies.hono).toBeDefined();
-      expect(pkg.devDependencies.vite).toBeDefined();
-      expect(pkg.devDependencies['vite-plus']).toBe('^0.1.21');
+      expect(pkg.devDependencies.vite).toBe('npm:@voidzero-dev/vite-plus-core@^1.2.0');
+      expect(pkg.devDependencies['vite-plus']).toBe('^1.2.0');
       expect(pkg.devDependencies.void).toBeDefined();
       expect(pkg.devDependencies.typescript).toBeDefined();
       expect(pkg.devDependencies['@void/react']).toBeDefined();
@@ -1380,7 +1380,8 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.dependencies.hono).toBeDefined();
       expect(pkg.devDependencies.void).toBeDefined();
       expect(pkg.devDependencies['@void/react']).toBeDefined();
-      expect(pkg.devDependencies['vite-plus']).toBe('^0.1.21');
+      expect(pkg.devDependencies['vite-plus']).toBe('^1.2.0');
+      expect(pkg.devDependencies.vite).toBe('npm:@voidzero-dev/vite-plus-core@^1.2.0');
       expect(pkg.packageManager).toBeUndefined();
       expectPnpmAllowBuilds(root);
       expect(detectProjectState(root).packageManager).toBe('pnpm');
@@ -1433,6 +1434,15 @@ describe('isScaffoldableEmptyProject', () => {
           packageManager.startsWith('pnpm@'),
         );
         expect(installCalls()[0][0]).toBe('vp');
+        const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+        expect(pkg.devDependencies.vite).toBe('npm:@voidzero-dev/vite-plus-core@^1.2.0');
+        if (packageManager.startsWith('npm@')) {
+          expect(pkg.overrides.vite).toBe('$vite');
+        } else if (packageManager.startsWith('bun@')) {
+          expect(pkg.overrides.vite).toBe('npm:@voidzero-dev/vite-plus-core@^1.2.0');
+        } else if (packageManager.startsWith('yarn@')) {
+          expect(pkg.resolutions.vite).toBe('npm:@voidzero-dev/vite-plus-core@^1.2.0');
+        }
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
@@ -1506,7 +1516,7 @@ describe('isScaffoldableEmptyProject', () => {
 
       const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
       expect(pkg.scripts.dev).toBe('vp dev');
-      expect(pkg.devDependencies['vite-plus']).toBe('^0.1.21');
+      expect(pkg.devDependencies['vite-plus']).toBe('^1.2.0');
       expect(pkg.devDependencies.void).toBe('^0.8.9');
       expect(readFileSync(join(root, 'vite.config.ts'), 'utf-8')).toContain(
         'voidReact({ react: { compiler: true } })',
@@ -1541,7 +1551,7 @@ describe('isScaffoldableEmptyProject', () => {
 
       const appRoot = join(root, 'my-new-app');
       const pkg = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf-8'));
-      expect(pkg.devDependencies['vite-plus']).toBe('^0.1.21');
+      expect(pkg.devDependencies['vite-plus']).toBe('^1.2.0');
       expect(pkg.scripts.dev).toBe('vp dev');
       expect(readFileSync(join(appRoot, 'pages', 'index.tsx'), 'utf-8')).toContain(
         'no database or server code yet',
@@ -2642,6 +2652,8 @@ export default config;
             devDependencies: {
               void: '^0.2.3',
               '@void/react': '^0.2.3',
+              vite: '^8.0.10',
+              'vite-plus': '^0.1.21',
             },
           },
           null,
@@ -2657,7 +2669,8 @@ export default config;
 
       const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
       expect(pkg.scripts.dev).toBe('vp dev');
-      expect(pkg.devDependencies['vite-plus']).toBe('^0.1.21');
+      expect(pkg.devDependencies['vite-plus']).toBe('^1.2.0');
+      expect(pkg.devDependencies.vite).toBe('npm:@voidzero-dev/vite-plus-core@^1.2.0');
       expect(pkg.devDependencies.void).toBe('^0.2.3');
       expect(pkg.devDependencies['@void/react']).toBe('^0.2.3');
       expect(pkg.devDependencies['oxc-transform-react']).toBe('^0.149.0');

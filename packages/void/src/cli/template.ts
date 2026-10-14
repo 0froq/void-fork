@@ -25,7 +25,8 @@ export const SCAFFOLD_BASE_DEV_DEPENDENCIES = {
 } as const;
 
 export const SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES = {
-  'vite-plus': '^0.1.21',
+  vite: 'npm:@voidzero-dev/vite-plus-core@^1.2.0',
+  'vite-plus': '^1.2.0',
 } as const;
 
 export const SCAFFOLD_TOOLCHAIN_OPTIONS = [
