@@ -78,13 +78,19 @@ beforeEach(async () => {
     const name = /\/scripts\/([^/?]+)/.exec(url)?.[1];
     if (
       name?.startsWith('void-do-') &&
-      url.endsWith('/bindings') &&
+      (url.endsWith('/bindings') || url.endsWith('/settings')) &&
       !provider.state.hostScripts.has(name)
     ) {
+      if (url.endsWith('/bindings')) {
+        return cfSuccess([]);
+      }
       return Response.json(
         { success: false, errors: [{ code: 10007, message: 'script not found' }] },
         { status: 404 },
       );
+    }
+    if (name?.startsWith('void-do-') && url.endsWith('/settings') && !init?.method) {
+      return cfSuccess({ bindings: provider.state.hostScripts.get(name)!.bindings });
     }
     const response = await original(input, init);
     if (init?.method === 'PUT' && init.body instanceof FormData && response.ok && name) {
@@ -190,6 +196,21 @@ function currentRelease(worker: string) {
 }
 
 describe('managed native Durable Objects', () => {
+  it('refuses to replace an existing Worker whose bindings are empty', async () => {
+    const worker = await durableObjectWorkerName(project.id, binding.className);
+    provider.state.hostScripts.set(worker, {
+      classes: new Map(),
+      bindings: [],
+      metadata: {},
+    });
+    const result = await deploy();
+    expect(result.events).toContainEqual(
+      expect.objectContaining({ event: 'error', message: expect.stringContaining('ownership') }),
+    );
+    expect(writes).toHaveLength(0);
+    expect(provider.state.hostScripts.get(worker)!.bindings).toEqual([]);
+  });
+
   it('runs the published class through real RPC and retains data after upgrade, rollback, and restart', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-managed-native-'));
     let runtime: Miniflare | undefined;

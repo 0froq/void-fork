@@ -60,7 +60,17 @@ function marker(
 
 async function readBindings(env: Env, worker: string): Promise<Array<Binding> | undefined> {
   try {
-    return await cfFetch<Array<Binding>>(`${url(env, worker)}/bindings`, env.CF_API_TOKEN);
+    const bindings = await cfFetch<Array<Binding>>(
+      `${url(env, worker)}/bindings`,
+      env.CF_API_TOKEN,
+    );
+    // Dispatch can return an empty binding list for a script without a Worker.
+    // Confirm absence before provisioning; an existing unmarked Worker must
+    // still fail the ownership check.
+    if (bindings.length === 0) {
+      await cfFetch(`${url(env, worker)}/settings`, env.CF_API_TOKEN);
+    }
+    return bindings;
   } catch (error) {
     if (error instanceof CloudflareApiError && error.status === 404) {
       return undefined;
