@@ -42,6 +42,7 @@ import {
 } from './platform-install-auth.ts';
 import {
   acquirePlatformDatabaseLifecycleLock,
+  claimPlatformDatabase,
   createPlatformInstallationSecrets,
   installPlatform,
   loadPlatformRuntime,
@@ -84,15 +85,14 @@ import {
   platformInstallCommandArguments,
   platformSetupPages,
   platformSetupFieldHelp,
+  platformSetupLink,
 } from './platform-setup.ts';
 
-export function resolvePlatformInstallDatabaseUrl(
+function isPlatformInstallDatabaseBound(
   checkpoint: Record<string, string> | null,
-  manifest: PlatformInstallationManifest | null = null,
-): string {
-  const explicit = process.env.VOID_PLATFORM_DATABASE_URL || process.env.DATABASE_URL || '';
-  const recorded = checkpoint?.databaseUrl || '';
-  const databaseBound =
+  manifest: PlatformInstallationManifest | null,
+): boolean {
+  return Boolean(
     checkpoint?.databaseClaimState === 'claimed' ||
     manifest?.resources.some(
       (resource) =>
@@ -102,8 +102,17 @@ export function resolvePlatformInstallDatabaseUrl(
     manifest?.steps.some(
       (step) =>
         step.key.startsWith('database-schema:') || step.key.startsWith('database-migrations:'),
-    );
-  if (databaseBound) {
+    ),
+  );
+}
+
+export function resolvePlatformInstallDatabaseUrl(
+  checkpoint: Record<string, string> | null,
+  manifest: PlatformInstallationManifest | null = null,
+): string {
+  const explicit = process.env.VOID_PLATFORM_DATABASE_URL || process.env.DATABASE_URL || '';
+  const recorded = checkpoint?.databaseUrl || '';
+  if (isPlatformInstallDatabaseBound(checkpoint, manifest)) {
     if (!recorded) {
       if (explicit) {
         // Discovery intentionally recovers no credentials. The database's
@@ -456,6 +465,8 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
     active.start(message);
     return active;
   };
+  // Set while a step uses an unclaimed database URL, which a resume may still replace.
+  let usingUnboundDatabase = false;
   try {
     if (!existing && !args.plan) {
       assertPlatformInstallationSlugAvailable(installationSlug);
@@ -482,11 +493,13 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
         );
       }
       progress = startProgress('Reading the saved installation');
+      usingUnboundDatabase = !isPlatformInstallDatabaseBound(checkpoint, existing);
       const authoritative = await readPlatformDatabaseLifecycleManifest(
         databaseUrl,
         existing.id,
         existing.ownershipNonce,
       );
+      usingUnboundDatabase = false;
       progress?.stop('Read the saved installation.');
       progress = undefined;
       if (authoritative) {
@@ -1101,6 +1114,19 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       process.env.VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON ||
       process.env.VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION,
     );
+    // Interactive fresh installs keep the identity keys in this machine's encrypted
+    // recovery data, like the email signing key. Headless runners may lose that data,
+    // so they still supply both keys.
+    const generateIdentityKeys = credentialSetup && !!process.stdin.isTTY;
+    const generatedKeys = generateIdentityKeys
+      ? [
+          configured('jwtSecret', 'VOID_PLATFORM_JWT_SECRET') ? '' : 'JWT signing key',
+          configured('projectSecretKey', 'VOID_PLATFORM_PROJECT_SECRET_KEY') ||
+          hasFullProjectSecretKeyring
+            ? ''
+            : 'project encryption key',
+        ].filter(Boolean)
+      : [];
     const secrets = createPlatformInstallationSecrets({
       configurableAuthentication: !!authenticationSelection.authentication.configurable,
       ...authenticationSecrets,
@@ -1117,22 +1143,25 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       r2AccessKeyId,
       r2SecretAccessKey,
       existingInstallation: !credentialSetup,
-      jwtSecret: await collect(
-        'jwtSecret',
-        'VOID_PLATFORM_JWT_SECRET',
-        'JWT signing key:',
-        true,
-        true,
-        credentialSetup
-          ? (value) =>
-              Buffer.byteLength(value, 'utf8') >= 32
-                ? undefined
-                : 'The JWT signing secret must contain at least 32 random bytes.'
-          : undefined,
-      ),
+      generateIdentityKeys,
+      jwtSecret: generateIdentityKeys
+        ? configured('jwtSecret', 'VOID_PLATFORM_JWT_SECRET')
+        : await collect(
+            'jwtSecret',
+            'VOID_PLATFORM_JWT_SECRET',
+            'JWT signing key:',
+            true,
+            true,
+            credentialSetup
+              ? (value) =>
+                  Buffer.byteLength(value, 'utf8') >= 32
+                    ? undefined
+                    : 'The JWT signing secret must contain at least 32 random bytes.'
+              : undefined,
+          ),
       projectSecretKey:
         configured('projectSecretKey', 'VOID_PLATFORM_PROJECT_SECRET_KEY') ||
-        (hasFullProjectSecretKeyring
+        (hasFullProjectSecretKeyring || generateIdentityKeys
           ? ''
           : await collect(
               'projectSecretKey',
@@ -1153,17 +1182,32 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       projectSecretActiveKeyVersion:
         process.env.VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION || '',
     });
+    if (generatedKeys.length) {
+      log.info(
+        `Void generated the ${generatedKeys.join(' and ')} and keeps ${generatedKeys.length > 1 ? 'them' : 'it'} in this machine’s encrypted recovery data. ` +
+          platformSetupLink({
+            title: 'About these keys',
+            url: 'https://void.cloud/guide/platform/installation/credentials#signing-and-encryption-keys',
+          }),
+      );
+    }
     progress = startProgress('Installing the platform');
     if (credentialSetup) {
       // Stop treating this as an untouched local draft before any database claim is attempted.
       saveValues({
+        jwtSecret: secrets.jwtSecret,
         projectSecretKey: secrets.projectSecretKey,
         ...(secrets.emailEnabled ? { emailSigningSecret: secrets.emailSigningSecret } : {}),
       });
       existing = completePlatformSetupDraft(existing);
     }
+    usingUnboundDatabase = !isPlatformInstallDatabaseBound(checkpoint, existing);
     const result = await installPlatform(plan, secrets, existing, {
       acquireDatabaseLifecycleLock: acquirePlatformDatabaseLifecycleLock,
+      claimDatabase: async (...claim) => {
+        await claimPlatformDatabase(...claim);
+        usingUnboundDatabase = false;
+      },
       client,
       operatorApiToken: managementApiToken || operatorCredential.token,
       runtime,
@@ -1271,8 +1315,12 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
     if (result.setupPending && completedAuthCode) {
       log.info(`First administrator setup: ${formatUrl(`${plan.apiUrl}/setup`)}`);
       console.log(`One-time administrator setup code: ${completedAuthCode}`);
+      log.info(`Login callback URL: ${formatUrl(`${plan.apiUrl}/auth/callback`)}`);
       log.info(
         'Confirm your identity in the browser, then test and enable any additional login methods in Settings.',
+      );
+      log.info(
+        `If sign-in fails, run \`void platform repair ${result.manifest.id}\` to change the login settings.`,
       );
     }
     if (!plan.deployment.application.zoneName) {
@@ -1291,6 +1339,11 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       log.info(
         `Continue with: ${cliCommandName()} platform install --resume --name ${existing.id}`,
       );
+      if (usingUnboundDatabase) {
+        log.info(
+          'To use another PostgreSQL database, set VOID_PLATFORM_DATABASE_URL to its URL first.',
+        );
+      }
     }
     throw error;
   } finally {

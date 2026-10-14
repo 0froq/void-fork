@@ -17,6 +17,7 @@ import {
   PlatformCloudflareClient,
 } from '../../src/cli/platform-cloudflare.ts';
 import { platformDomainTarget } from '../../src/cli/platform-domain.ts';
+import { recordProvisionIntent } from '../../src/cli/platform-installer-resources.ts';
 import { installPlatform } from '../../src/cli/platform-installer.ts';
 import { verifyPlatformAiGatewayPlan } from '../../src/cli/platform-lifecycle.ts';
 import {
@@ -1165,6 +1166,29 @@ describe('platform installation planning', () => {
     });
   });
 
+  it('refuses a same-named AI Gateway after an interrupted create', async () => {
+    const initial = await createPlatformInstallPlan(client(), input, null);
+    const action = initial.actions.find((entry) => entry.key === 'ai-gateway')!;
+    const name = action.name;
+    const manifest = recordProvisionIntent(
+      manifestFor(initial),
+      action,
+      '2026-09-14T00:00:01.000Z',
+    );
+    // Gateways carry no ownership marker, so a creation time just after the
+    // intent does not show who created this one.
+    const withGateway = client({
+      listAiGateways: async () => [{ createdAt: '2026-09-14T00:00:03.000Z', id: name, name }],
+    });
+
+    await expect(createPlatformInstallPlan(withGateway, input, manifest)).rejects.toThrow(
+      `platform: ai-gateway "${name}" already exists, and Void cannot tell whether this installation created it. Nothing was overwritten. If an earlier failed attempt of this installation created it, delete it in the Cloudflare dashboard, then rerun the command. Otherwise, choose another installation name.`,
+    );
+    await expect(createPlatformInstallPlan(withGateway, input, null)).rejects.toThrow(
+      'Resume the owning installation, or choose another installation name.',
+    );
+  });
+
   it('refuses an intent-only resource after an ambiguous create response', async () => {
     const initial = await createPlatformInstallPlan(client(), input, legacyInstallation());
     let manifest = manifestFor(initial);
@@ -1193,7 +1217,7 @@ describe('platform installation planning', () => {
         input,
         manifest,
       ),
-    ).rejects.toThrow('not owned');
+    ).rejects.toThrow('cannot tell whether this installation created it');
 
     const recovered = await createPlatformInstallPlan(
       client({
@@ -1372,7 +1396,7 @@ describe('platform installation planning', () => {
         input,
         manifest,
       ),
-    ).rejects.toThrow('not owned');
+    ).rejects.toThrow('cannot tell whether this installation created it');
   });
 
   it('resumes an intent-owned dispatch Worker after its public route was uploaded', async () => {

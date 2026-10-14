@@ -33,7 +33,7 @@ void platform uninstall [id] --plan
 void platform uninstall [id]
 ```
 
-Uninstall blocks platform traffic, removes Queues that no remaining platform Worker uses, and lists the resources left for you to review. Use `--plan` to review deletions and retained resources before making changes. By default, Workers, the Queues they use, KV, R2, Hyperdrive, the dispatch namespace, and AI Gateway remain in your account. Adopted resources, external PostgreSQL, and zones are always retained. Email Routing settings are retained; `--purge-resources` removes only the rules that send mail to the platform. DNS records, routes, custom domains, and Cloudflare Access resources are retained unless you use `--purge-resources`.
+Uninstall blocks platform traffic, removes Queues that no remaining platform Worker uses, and lists the resources left for you to review. Use `--plan` to review deletions and retained resources before making changes. By default, Workers, the Queues they use, KV, R2, Hyperdrive, the dispatch namespace, and AI Gateway remain in your account. Adopted resources, external PostgreSQL, and zones are always retained. To install a platform again, use a new empty PostgreSQL database. Email Routing settings are retained; `--purge-resources` removes only the rules that send mail to the platform. DNS records, routes, custom domains, and Cloudflare Access resources are retained unless you use `--purge-resources`.
 
 When uninstall finishes, the record of what was kept stays at `~/.void/platforms/<account-id>/<installation-id>.json`. Without `--purge-data`, the encrypted credentials file `<installation-id>.recovery.enc` next to it is kept too. Delete both once you have finished the manual cleanup below.
 
@@ -90,6 +90,11 @@ After an uninstall without `--purge-resources`, Cloudflare refuses to delete a r
 If installation configured Cloudflare Access, the uninstall plan lists its recorded applications and service tokens with their ownership and IDs. Review them in Zero Trust after uninstall. Remove installer-created resources only when nothing else uses them; resources connected from an existing company setup remain under their owner's control.
 
 Uninstall does not remove the applications created for [project Zero Trust](/guide/platform/administration/zero-trust). While Zero Trust is enabled or still has Access applications, uninstall and `--plan` stop before any change and list those applications. Run `void platform zero-trust disable` first. Uninstall reads this from the installation database, so it also stops when the database cannot be reached.
+
+If no platform user exists yet, for example because first administrator setup did
+not finish, nobody can run `zero-trust disable`. Uninstall then turns off project
+Zero Trust and deletes its applications itself. Run it on the computer that installed
+the platform. If the uninstall asks you to, update an older platform runtime first.
 
 ::: details Why some resources require manual cleanup
 

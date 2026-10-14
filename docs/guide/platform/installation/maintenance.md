@@ -50,6 +50,43 @@ For completed provisioning whose administrator setup is still pending, run
 expired. Enter it at `/setup`, sign in, and confirm the displayed identity.
 An installation that already has an administrator does not reopen setup.
 
+### First administrator sign-in fails
+
+If sign-in fails after you enter the setup code, the page shows the reason and an
+error code. When a provider setting may be the cause, it also shows the callback
+URL the provider must have.
+
+| Error code                                                                  | What to check                                                               |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `github_incorrect_client_credentials`, `github_failed`, `oidc_token_failed` | The client ID and client secret, and that the provider has the callback URL |
+| `github_redirect_uri_mismatch`                                              | The callback URL registered in the GitHub OAuth app                         |
+| `oidc_discovery_failed`                                                     | The issuer URL, exactly, including any trailing slash                       |
+| `github_unverified_user_email`                                              | Verify the primary email of the GitHub account                              |
+| `google_domain_not_allowed`, `oidc_group_not_allowed`                       | Sign in with an allowed account, or change the allowed domains or groups    |
+| `login_denied`, `github_bad_verification_code`                              | Start a new sign-in                                                         |
+
+If the provider shows its own error page instead, register exactly the callback
+URL printed with your setup code.
+
+To change the login settings, run repair on the computer that installed the
+platform:
+
+```sh
+void platform repair <id>
+void platform repair <id> --auth-config <path>
+```
+
+Interactive repair asks whether to change the login settings, with the saved
+values filled in; leave the client secret blank to keep it. `--auth-config`
+takes a file in the [install format](/guide/platform/installation/setup#finish-login-configuration)
+and is the way to change OIDC allowed groups. Login methods and Access protection
+stay as installed. Repair prints a new setup code and the callback URL.
+
+A GitHub-only installation signs in with the GitHub OAuth App from its
+installation settings. To replace its client ID and secret, set
+`VOID_PLATFORM_GITHUB_CLIENT_ID` and `VOID_PLATFORM_GITHUB_CLIENT_SECRET` when
+you run `void platform repair <id>`.
+
 ### Repair missing resources
 
 Preview what needs repair, then apply it:
@@ -164,7 +201,7 @@ During a restore, keep platform and application traffic disabled before changing
 
 ### Where local state lives
 
-Installation records live in `~/.void/platforms/`. Credentials are stored separately in encrypted recovery files, with the encryption key in your operating system's keychain. Keep your original secrets in a password manager for recovery on another machine.
+Installation records live in `~/.void/platforms/`. Credentials are stored separately in encrypted recovery files, with the encryption key in your operating system's keychain. Keep your original secrets in a password manager for recovery on another machine. Signing and encryption keys that Void generated exist only in these files; to keep your own copy, [supply them when installing](/guide/platform/installation/credentials#signing-and-encryption-keys).
 
 If the keychain isn't available, Void stops before writing secrets. Headless environments can supply `VOID_PLATFORM_RECOVERY_KEY`: a canonical base64-encoded 32-byte key from a secret manager. A temporary CI runner can use a new recovery-encryption key for each run only when every original credential remains available in protected CI secrets, including `VOID_PLATFORM_JWT_SECRET`, `VOID_PLATFORM_EMAIL_SIGNING_SECRET` for an email-enabled installation, and either the original `VOID_PLATFORM_PROJECT_SECRET_KEY` or the complete rotated keyring and active-version pair.
 

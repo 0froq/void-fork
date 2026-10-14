@@ -829,7 +829,9 @@ export async function installPlatform(
       );
       if (authentication.setupPending) {
         setupPending = true;
-        dependencies.onProgress?.(`Administrator setup pending: ${state.plan.apiUrl}/setup`);
+        dependencies.onProgress?.(
+          'Administrator setup prepared; its link and code are shown when this finishes',
+        );
       }
       state.manifest = recordInstallationStep(
         state.manifest,
@@ -1037,6 +1039,7 @@ export { recordResource } from './platform-installer-resources.ts';
 export {
   platformDatabaseClientUrl,
   acquirePlatformDatabaseLifecycleLock,
+  claimPlatformDatabase,
   acquirePlatformDatabaseLifecycleLockConnection,
   readPlatformDatabaseLifecycleManifest,
   readPlatformProjectSlugs,

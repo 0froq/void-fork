@@ -158,6 +158,106 @@ describe('Cloudflare Access provisioning', () => {
     }
   });
 
+  it.each([
+    { azureAD: { id: 'company-group', identity_provider_id: 'company-idp' } },
+    { login_method: { id: 'company-idp' } },
+    { auth_context: { id: 'context', ac_id: 'c1', identity_provider_id: 'company-idp' } },
+    { cloudflare_account_member: {} },
+    { cloudflare_account_member: { account_id: '023e105f4ecef8ad9ca31a8372d0c353' } },
+    { okta: { identity_provider_id: 'subsidiary-idp', name: 'Engineering' } },
+  ])('accepts %j as a company identity rule', async (rule) => {
+    const env = fixture();
+    env.policy.include = [rule];
+    delete env.policy.require;
+    const result = await provisionPlatformAccess(
+      env.client,
+      { ...base, login: { id: 'access', label: 'Company Access' } },
+      fresh(),
+      () => {},
+    );
+    expect(result.login?.configuration.kind).toBe('cloudflare-access');
+    expect(env.apps.size).toBe(1);
+  });
+
+  it.each([
+    { include: [{ login_method: { id: 'subsidiary-idp' } }] },
+    {
+      include: [{ ip: { ip: '203.0.113.0/24' } }],
+      require: [{ login_method: { id: 'subsidiary-idp' } }],
+    },
+    { include: [{ azureAD: { id: 'company-group', identity_provider_id: 'subsidiary-idp' } }] },
+    {
+      include: [{ ip: { ip: '203.0.113.0/24' } }],
+      require: [
+        { auth_context: { id: 'context', ac_id: 'c1', identity_provider_id: 'subsidiary-idp' } },
+      ],
+    },
+  ])('accepts a company provider rule only when it is a selected provider (%j)', async (rules) => {
+    const env = fixture();
+    env.identityProviders.push({ id: 'subsidiary-idp', type: 'azureAD', name: 'Subsidiary SSO' });
+    delete env.policy.require;
+    Object.assign(env.policy, rules);
+    const login = { id: 'access', label: 'Company Access' };
+    await expect(
+      provisionPlatformAccess(env.client, { ...base, login }, fresh(), () => {}),
+    ).rejects.toThrow(
+      'An Access allow policy uses an identity provider that is not one of the selected identity providers.',
+    );
+    expect(env.calls.some((call) => call.method === 'POST')).toBe(false);
+    const result = await provisionPlatformAccess(
+      env.client,
+      { ...base, identityProviderIds: ['company-idp', 'subsidiary-idp'], login },
+      fresh(),
+      () => {},
+    );
+    expect(result.login?.configuration.kind).toBe('cloudflare-access');
+    expect([...env.apps.values()][0]?.allowed_idps).toEqual(['company-idp', 'subsidiary-idp']);
+  });
+
+  it.each([{ azureAD: { id: 'company-group' } }, { auth_context: { id: 'context', ac_id: 'c1' } }])(
+    'rejects %j without its identity provider',
+    async (rule) => {
+      const env = fixture();
+      env.policy.include = [rule];
+      delete env.policy.require;
+      await expect(
+        provisionPlatformAccess(
+          env.client,
+          { ...base, login: { id: 'access', label: 'Company Access' } },
+          fresh(),
+          () => {},
+        ),
+      ).rejects.toThrow('Select Access allow policies restricted to company identities.');
+      expect(env.calls.some((call) => call.method === 'POST')).toBe(false);
+    },
+  );
+
+  it.each([
+    { type: 'onetimepin' },
+    { type: 'github' },
+    { type: 'cloudflare', config: { restrict_to_account_members: false } },
+    { type: 'oidc', config: { auth_url: 'https://accounts.google.com/o/oauth2/auth' } },
+    { type: 'saml', config: { sso_target_url: 'https://idp.example.net/sso/saml' } },
+  ])('rejects a policy that admits anyone who signs in with %j', async (provider) => {
+    const env = fixture();
+    env.identityProviders.push({ id: 'public-login', name: 'Public login', ...provider });
+    env.policy.include = [{ login_method: { id: 'public-login' } }];
+    delete env.policy.require;
+    await expect(
+      provisionPlatformAccess(
+        env.client,
+        {
+          ...base,
+          identityProviderIds: ['company-idp', 'public-login'],
+          login: { id: 'access', label: 'Company Access' },
+        },
+        fresh(),
+        () => {},
+      ),
+    ).rejects.toThrow('Select Access allow policies restricted to company identities.');
+    expect(env.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
   it('rejects more specific overlapping Access apps before creating even an OIDC app', async () => {
     const env = fixture();
     env.apps.set('foreign', {

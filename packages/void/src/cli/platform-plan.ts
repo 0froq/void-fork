@@ -988,8 +988,13 @@ function addNamedPlan(
       !markedProvision &&
       !ambiguousProvision
     ) {
+      // When this installation asked for the resource before it stopped, its
+      // failed create may have made it, or someone else may have taken the
+      // name. Without a matching marker only the user can tell which.
       throw new Error(
-        `platform: ${kind} ${JSON.stringify(name)} already exists but is not owned by this installation. Resume the owning installation, or choose another installation name. Nothing was overwritten.`,
+        existing !== null && hasUnrecordedProvisionIntent(existing, key, kind, name)
+          ? `platform: ${kind} ${JSON.stringify(name)} already exists, and Void cannot tell whether this installation created it. Nothing was overwritten. If an earlier failed attempt of this installation created it, delete it in the Cloudflare dashboard, then rerun the command. Otherwise, choose another installation name.`
+          : `platform: ${kind} ${JSON.stringify(name)} already exists but is not owned by this installation. Resume the owning installation, or choose another installation name. Nothing was overwritten.`,
       );
     }
     if (ambiguousProvision && !markedProvision && !remotelyOwned) {
