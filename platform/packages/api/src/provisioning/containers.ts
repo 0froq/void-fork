@@ -1,5 +1,42 @@
 import { CF_API_BASE, cfFetch, CloudflareApiError } from './cloudflare-api.ts';
 
+/** Custom images need a prepared snapshot before a native container can start. */
+export async function prepareContainerImage(
+  accountId: string,
+  apiToken: string,
+  image: string,
+): Promise<void> {
+  if (image === 'cloudflare/debian-trixie') {
+    return;
+  }
+  const deadline = Date.now() + 15 * 60_000;
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new Error('Cloudflare Container image preparation timed out. Retry the deployment.');
+    }
+    const result = await cfFetch<{ image: string; status: string }>(
+      `${CF_API_BASE}/${accountId}/containers/image-preparations`,
+      apiToken,
+      {
+        method: 'POST',
+        body: JSON.stringify({ image }),
+        signal: AbortSignal.timeout(remaining),
+      },
+    );
+    if (result.image !== image) {
+      throw new Error('Cloudflare Container image preparation returned another image.');
+    }
+    if (result.status === 'ready') {
+      return;
+    }
+    if (result.status !== 'pending') {
+      throw new Error('Cloudflare Container image preparation failed. Retry the deployment.');
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(2_000, remaining)));
+  }
+}
+
 export type ContainerApplicationInfo = Readonly<{
   id: string;
   name: string;

@@ -136,6 +136,23 @@ describe('per-deploy sandbox integration', () => {
   // ----------------------------------------------------------------------
   // First sandbox deploy
   // ----------------------------------------------------------------------
+  it('fails before controller upload when custom image preparation fails', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'sb-image-error');
+    const cf = mockCfApi({
+      prepareContainerImage: () =>
+        Response.json({
+          success: true,
+          result: { image: SANDBOX_IMAGE_V1, status: 'error' },
+        }),
+    });
+    const events = await readAllEvents(await deploy(project.id, user.jwt));
+    expect(getDoneEvent(events)).toBeUndefined();
+    expect(cf.state.hostScripts.size).toBe(0);
+    expect(cf.state.containerApps.size).toBe(0);
+    expect(await env.ROUTING.get(project.slug)).toBeNull();
+  });
+
   it('provisions a trusted controller and gives the tenant only its restricted service', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'sb-first');
@@ -183,6 +200,7 @@ describe('per-deploy sandbox integration', () => {
     const [stored] = await env.db.select().from(deployments).where(eq(deployments.id, deployId));
     expect(JSON.parse(stored!.manifest!).sandbox.runtime).toEqual({ protocol: 2 });
     cf.expectCallOrder(
+      { method: 'POST', url: '/containers/image-preparations' },
       { method: 'PUT', url: '/workers/scripts/' + controllerName },
       { method: 'POST', url: '/containers/applications' },
       { method: 'PUT', url: '/scripts/' + userWorkerName },
@@ -835,7 +853,7 @@ describe('per-deploy sandbox integration', () => {
   it('ordinary Worker deploy does not publish the retired proxy account mirror', async () => {
     const user = await createTestUser(env.db, 'sb-p6-nosb-user', 'github', undefined, 'solo');
     const project = await createTestProject(env.db, user.id, 'sb-p6-nosb');
-    mockCfApi();
+    const cf = mockCfApi();
 
     const workerSource = "export default { fetch() { return new Response('ok'); } }";
     const res = await app.fetch(
@@ -867,6 +885,7 @@ describe('per-deploy sandbox integration', () => {
     // the pipeline and reads KV before `ROUTING.put` ever fires.
     const done = getDoneEvent(await readAllEvents(res));
     expect(done).toBeDefined();
+    expect(cf.mock.calls.some(([url]) => String(url).includes('/containers/'))).toBe(false);
 
     const raw = await env.ROUTING.get(`project:${project.id}`);
     expect(raw).toBeNull();

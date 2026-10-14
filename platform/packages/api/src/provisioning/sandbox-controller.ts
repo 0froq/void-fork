@@ -10,6 +10,7 @@ import {
   deleteContainerApplicationIdempotent,
   findContainerApplication,
   perDeployContainerApplicationName,
+  prepareContainerImage,
   tryCreateContainerApplication,
 } from './containers.ts';
 
@@ -182,7 +183,9 @@ export async function provisionSandboxController(input: {
   let settings = await readSettings(accountId, apiToken, workerName);
   if (settings) {
     assertConfiguration(settings, identity, apiService, expectedText);
-  } else {
+  }
+  await prepareContainerImage(accountId, apiToken, sandbox.image);
+  if (!settings) {
     const form = new FormData();
     const metadata = {
       main_module: 'index.js',

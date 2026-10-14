@@ -1108,6 +1108,7 @@ export type CfApiMocks = {
   // up when overrides are not supplied. Tests can still override individually.
   getDispatchScript?: (url: string, init?: RequestInit) => Response | Promise<Response>;
   patchScriptSettings?: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  prepareContainerImage?: (url: string, init?: RequestInit) => Response | Promise<Response>;
   createContainerApp?: (url: string, init?: RequestInit) => Response | Promise<Response>;
   patchContainerApp?: (url: string, init?: RequestInit) => Response | Promise<Response>;
   deleteContainerApp?: (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -1684,6 +1685,16 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): MockCfApiHandle 
     }
     if (method === 'DELETE' && url.includes('/hyperdrive/configs/')) {
       return mocks.deleteHyperdrive(url, init);
+    }
+
+    if (method === 'POST' && url.endsWith('/containers/image-preparations')) {
+      return (
+        mocks.prepareContainerImage?.(url, init) ??
+        cfSuccess({
+          image: JSON.parse(String(init?.body)).image,
+          status: 'ready',
+        })
+      );
     }
 
     // Container application endpoints (must come before the generic dispatch
