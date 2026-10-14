@@ -12,6 +12,9 @@ import {
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const PLAYGROUND = 'playground/sveltekit';
+// Kit 2 uses the JavaScript TypeScript compiler. Its Windows CI subprocess hit the
+// 20s deadline; give it the same 3× allowance as integration server startup.
+const TYPECHECK_TIMEOUT = process.platform === 'win32' ? 60_000 : 20_000;
 describe.each([2, 3])('SvelteKit %i compatibility', (major) => {
   let child: ReturnType<typeof spawn>;
   let fixture: IsolatedPlayground;
@@ -130,12 +133,22 @@ export function checkSchema() {
   });
 
   it('typechecks generated database and schema imports', () => {
+    const started = performance.now();
     const result = spawn.sync(
       process.execPath,
       [join(fixture.root, 'node_modules/typescript/bin/tsc'), '--noEmit'],
-      { cwd: fixture.root, encoding: 'utf8', timeout: 20_000 },
+      { cwd: fixture.root, encoding: 'utf8', timeout: TYPECHECK_TIMEOUT },
     );
-    expect(result.status, result.stdout + result.stderr).toBe(0);
+    const diagnostics = [
+      `TypeScript finished after ${Math.round(performance.now() - started)}ms (status=${result.status}, signal=${result.signal}).`,
+      result.error?.stack,
+      result.stdout,
+      result.stderr,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    expect(result.error, diagnostics).toBeFalsy();
+    expect(result.status, diagnostics).toBe(0);
   });
 
   it('renders home page with SSR', async () => {
