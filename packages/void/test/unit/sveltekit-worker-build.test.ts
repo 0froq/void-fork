@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -76,12 +77,14 @@ async function buildKitServer(
     const hoistedDir = fileURLToPath(
       new URL('../../../../node_modules/.pnpm/node_modules', import.meta.url),
     );
-    const link = (name: string) =>
-      symlinkSync(
-        realpathSync.native(join(hoistedDir, name)),
-        join(parent, 'node_modules', name),
-        'junction',
-      );
+    const link = (name: string) => {
+      const source = join(hoistedDir, name);
+      // Old installs can leave links to optional packages unavailable on this OS or CPU.
+      if (!existsSync(source)) {
+        return;
+      }
+      symlinkSync(realpathSync.native(source), join(parent, 'node_modules', name), 'junction');
+    };
     mkdirSync(join(parent, 'node_modules'));
     for (const name of readdirSync(hoistedDir)) {
       if (name.startsWith('@')) {
