@@ -9,7 +9,7 @@
   "dependencies": {
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "vinext": "1.0.1"
+    "vinext": "1.1.0"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",

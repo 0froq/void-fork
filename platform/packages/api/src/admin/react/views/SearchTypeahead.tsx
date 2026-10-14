@@ -97,7 +97,7 @@ export function SearchTypeahead({
       minQueryLength={remoteSearch ? 2 : 1}
       debounceMs={remoteSearch ? 200 : 0}
       width={width}
-      emptySearchResultsText={
+      emptySearchText={
         remoteSearch ? 'No matching results.' : 'No suggestions. Search for any text.'
       }
     />

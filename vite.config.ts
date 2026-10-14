@@ -455,9 +455,9 @@ export default defineConfig({
           fsModuleCache: true,
           include: sdkPgliteUnitTests,
           sequence: { groupOrder: 2 },
-          // Node 24 on Linux can abort the whole run while unregistering PGlite's Wasm JIT
-          // allocations across worker threads. Keep each database in its own process.
-          pool: process.platform === 'linux' ? 'forks' : 'threads',
+          // Native Node 24 worker crashes can abort the run on Linux and macOS.
+          // Keep PGlite's Wasm heap in a separate process for each database.
+          pool: ['linux', 'darwin'].includes(process.platform) ? 'forks' : 'threads',
           maxWorkers,
           ...(process.platform === 'win32' ? { testTimeout: 20_000 } : {}),
         },
@@ -480,9 +480,9 @@ export default defineConfig({
         test: {
           name: 'platform-unit-pglite',
           fsModuleCache: true,
-          // Node 24 on Linux can abort the whole run while unregistering PGlite's Wasm JIT
-          // allocations across worker threads. Keep each database in its own process.
-          pool: process.platform === 'linux' ? 'forks' : 'threads',
+          // Native Node 24 worker crashes can abort the run on Linux and macOS.
+          // Keep PGlite's Wasm heap in a separate process for each database.
+          pool: ['linux', 'darwin'].includes(process.platform) ? 'forks' : 'threads',
           include: pgliteUnitTests,
           maxWorkers,
         },
@@ -506,9 +506,9 @@ export default defineConfig({
         test: {
           name: 'platform-api-integration-threads',
           fsModuleCache: true,
-          // Node 24 on Linux can abort while unregistering PGlite's Wasm JIT
-          // allocations across worker threads. Keep each database in its own process.
-          pool: process.platform === 'linux' ? 'forks' : 'threads',
+          // Native Node 24 worker crashes can abort the run on Linux and macOS.
+          // Keep PGlite's Wasm heap in a separate process for each database.
+          pool: ['linux', 'darwin'].includes(process.platform) ? 'forks' : 'threads',
           include: ['platform/packages/api/test/integration/**/*.test.ts'],
           exclude: apiTimezoneTests,
           globalSetup: ['platform/packages/api/test/integration/global-setup.ts'],

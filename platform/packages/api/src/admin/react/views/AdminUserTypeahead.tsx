@@ -69,7 +69,7 @@ export function AdminUserTypeahead({
       )}
       minQueryLength={2}
       width="min(100%, 320px)"
-      emptySearchResultsText="No eligible users found."
+      emptySearchText="No eligible users found."
     />
   );
 }

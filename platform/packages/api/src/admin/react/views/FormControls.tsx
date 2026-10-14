@@ -99,7 +99,7 @@ export function FormTextArea({
   return (
     <TextArea
       ref={textareaRef}
-      className="void-admin-autogrow-textarea"
+      containerClassName="void-admin-autogrow-textarea"
       label={label}
       htmlName={name}
       value={value}

@@ -112,7 +112,9 @@ export function ZeroTrustPage({ path, platformName, username }: AdminPageProps) 
           </p>
         </SectionStack>
 
-        {lastError && <Banner status="error" title="Last error" description={lastError} />}
+        {lastError && (
+          <Banner role="alert" status="error" title="Last error" description={lastError} />
+        )}
 
         <section aria-labelledby="zero-trust-status-heading">
           <AdminCard
