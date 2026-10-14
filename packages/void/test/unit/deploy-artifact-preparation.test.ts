@@ -66,3 +66,18 @@ it('fails when Worker build output is missing', async () => {
   rmSync(join(root, 'dist/server'), { recursive: true });
   await expect(prepareDeployArtifact(root)).rejects.toThrow('Worker output not found');
 });
+it('packages native Durable Objects for managed deployment without namespace authority', async () => {
+  mkdirSync(join(root, 'durable-objects'));
+  writeFileSync(
+    join(root, 'durable-objects/workspace.ts'),
+    "import {defineDurableObject} from 'void/durable'; export default defineDurableObject({name:'workspace',class: class Workspace {}});",
+  );
+  const result = await prepareDeployArtifact(root);
+  expect(result.artifact.manifest.version).toBe(4);
+  expect(result.artifact.manifest.durableObjects).toEqual({
+    bindings: [
+      { bindingName: 'WORKSPACE', className: 'WorkspaceDurableObject', storage: 'sqlite' },
+    ],
+  });
+  expect(fetch).not.toHaveBeenCalled();
+});

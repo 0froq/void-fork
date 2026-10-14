@@ -24,7 +24,7 @@ Both targets use the same application APIs. A core platform adds shared access a
 | Workers AI and provider requests                 | Your account and gateway         | Installation gateway and proxy                |
 | Runtime logs                                     | Live Cloudflare tail             | Retained platform logs                        |
 | Application rollback                             | Worker versions                  | Retained platform deployments                 |
-| Typed Durable State                              | Supported                        | Unavailable                                   |
+| Typed Durable State and native Durable Objects   | Supported                        | Supported                                     |
 | Sandboxes                                        | Requires Workers Paid and Docker | Requires Workers Paid on the platform account |
 | Custom application domains                       | Supported                        | Unavailable in the core installation          |
 | Generated GitHub deployment workflow             | Supported                        | Use your CI with a scoped developer token     |

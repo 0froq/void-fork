@@ -6,7 +6,7 @@ outline: deep
 
 Use a Durable Object when requests need to share state under one name, such as a shopping cart, room, or rate limiter. Void gives you typed methods and stores the object's state between calls.
 
-Create a module in `durable-objects/` with `defineDurableState()`. Void provides a SQLite-backed Cloudflare Durable Object for it. This feature supports native Void apps deployed directly to Cloudflare.
+Create a module in `durable-objects/` with `defineDurableState()`. Void provides a SQLite-backed Cloudflare Durable Object for it. This feature supports native Void apps on Void platforms and direct Cloudflare deployments.
 
 Commit `void.lock.json` when Void adds a resource. Keep its deployed migration entries in their original order.
 
@@ -117,7 +117,7 @@ export default Counter;
 
 State migrations update your saved values. Void manages Cloudflare’s separate class migrations in `void.lock.json`.
 
-Do not delete or reorder generated Durable Object migrations in `void.lock.json` after deployment. For a class addition, rename, or removal on an existing Worker, review the migration and run `void deploy --platform cloudflare --atomic`. If this Worker needs atomic publication on every deploy, set `deploy: { cloudflare: { mode: 'atomic' } }` in `void.config.ts`. Cloudflare applies class lifecycle changes in one deployment. The Worker receives traffic before Void checks readiness, and you cannot roll back across that migration boundary. Staged deploys keep pre-traffic readiness verification.
+For direct Cloudflare deployments, do not delete or reorder generated Durable Object migrations in `void.lock.json` after deployment. For a class addition, rename, or removal on an existing Worker, review the migration and run `void deploy --platform cloudflare --atomic`. If this Worker needs atomic publication on every deploy, set `deploy: { cloudflare: { mode: 'atomic' } }` in `void.config.ts`. Cloudflare applies class lifecycle changes in one deployment. The Worker receives traffic before Void checks readiness, and you cannot roll back across that migration boundary. Staged deploys keep pre-traffic readiness verification.
 
 ## Rename a file while keeping its state
 
@@ -158,15 +158,19 @@ If you already moved the file, `void info` also shows resources recorded in `voi
 
 ## Deployment support
 
-Typed state works in local development and direct Cloudflare deploys of native Void apps. Deploy with `void deploy --platform cloudflare`.
+Typed state works in local development, on Void platforms, and in direct Cloudflare deploys of native Void apps. Use `void deploy` for a Void platform or `void deploy --platform cloudflare` for your own Cloudflare account.
 
-Custom Durable Object modules are not supported on Void platforms, in meta-frameworks, or on Node.js, Bun, and Deno.
+On a Void platform, each class keeps its storage across deployments and rollbacks. A rollback restores the class code and keeps the current stored data. Removing a definition makes the class inactive; adding it again with the same resource name restores access to its data. Deleting the project deletes its Durable Object storage.
+
+A project supports up to 32 distinct custom classes, including removed classes whose storage is retained. Keep resource names and instance names stable to preserve data. Upgrade an older Void installation before deploying an app that uses custom Durable Objects.
+
+Custom Durable Object modules are not supported in meta-frameworks or on Node.js, Bun, and Deno.
 
 This is separate from [typed WebSocket routes](./websockets.md), which also use SQLite-backed Durable Objects and work on both direct Cloudflare and hosted Void deployments.
 
 ## Native Durable Object classes
 
-Use `defineDurableObject` to keep a native Cloudflare class, including classes extending Cloudflare Agents. Void discovers its binding and exports the class without replacing its constructor, lifecycle, or RPC methods. Like Durable State, this supports direct Cloudflare deployments.
+Use `defineDurableObject` to keep a native Cloudflare class, including classes extending Cloudflare Agents. Void discovers its binding and exports the class without replacing its constructor, lifecycle, or RPC methods. Like Durable State, this supports Void platforms and direct Cloudflare deployments.
 
 ```ts
 // durable-objects/workspace.ts

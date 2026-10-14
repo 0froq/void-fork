@@ -79,6 +79,7 @@ import {
   snapshotQueueConsumer,
   updateHyperdrive,
 } from '../provisioning/cloudflare-api.ts';
+import { reconcileManagedDurableObjects } from '../provisioning/durable-objects.ts';
 import {
   addDestination,
   listDestinations,
@@ -1393,6 +1394,14 @@ const app = new Hono<ApiEnv>()
           // preceded by an exact snapshot and compensated in reverse order
           // before the transaction releases the project lock.
           try {
+            await reconcileManagedDurableObjects(
+              context.env,
+              tx,
+              projectId,
+              target.id,
+              manifest ?? null,
+              (undo) => externalUndo.push(async () => undo()),
+            );
             await putRouting(lockedProject.slug, routingJson);
 
             // Resolve the target worker's baked __VOID_PROXY_TOKEN once if

@@ -19,7 +19,18 @@ function isFetchEvent(event: TraceItem['event']): event is TraceItemFetchEventIn
 export function parseScriptName(
   scriptName: string,
   platformDispatchWorkerName?: string,
+  scriptTags?: ReadonlyArray<string>,
 ): { projectKey: string; deployId: string } | null {
+  if (scriptName.startsWith('void-do-')) {
+    const project = scriptTags?.find((tag) => /^void-project:user-[a-z0-9-]+$/.test(tag));
+    const deployment = scriptTags?.find((tag) => /^void-deployment:dpl_[a-zA-Z0-9_]+$/.test(tag));
+    return project && deployment
+      ? {
+          projectKey: project.slice('void-project:'.length),
+          deployId: deployment.slice('void-deployment:'.length),
+        }
+      : null;
+  }
   const dplIndex = scriptName.lastIndexOf('-dpl_');
   if (dplIndex > 4) {
     return {
@@ -47,7 +58,11 @@ export default {
         continue;
       }
 
-      const parsed = parseScriptName(scriptName, env.PLATFORM_DISPATCH_WORKER_NAME);
+      const parsed = parseScriptName(
+        scriptName,
+        env.PLATFORM_DISPATCH_WORKER_NAME,
+        event.scriptTags,
+      );
       if (!parsed) {
         continue;
       }

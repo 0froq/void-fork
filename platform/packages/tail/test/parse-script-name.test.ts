@@ -2,6 +2,18 @@ import { describe, it, expect } from 'vite-plus/test';
 import { parseScriptName } from '../src/index.ts';
 
 describe('parseScriptName', () => {
+  it('attributes stable Durable Object Workers through platform-owned tags', () => {
+    expect(
+      parseScriptName('void-do-proj_example-hash', undefined, [
+        'void-project:user-my-app',
+        'void-deployment:dpl_abc123',
+      ]),
+    ).toEqual({ projectKey: 'user-my-app', deployId: 'dpl_abc123' });
+    expect(parseScriptName('void-do-proj_example-hash')).toBeNull();
+    expect(
+      parseScriptName('void-do-proj_example-hash', undefined, ['void-project:__platform-dispatch']),
+    ).toBeNull();
+  });
   it('parses versioned script name', () => {
     expect(parseScriptName('user-myapp-dpl_abc123')).toEqual({
       projectKey: 'user-myapp',

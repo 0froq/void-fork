@@ -27,6 +27,8 @@
  * against the real producers so the list cannot silently drift.
  */
 export const RESERVED_BINDING_NAMES: ReadonlySet<string> = new Set([
+  '__VOID_DURABLE_OWNER',
+  '__VOID_DURABLE_DEPLOYMENT',
   '__VOID_PROXY',
   '__VOID_SANDBOX',
   '__PROJECT_ID',

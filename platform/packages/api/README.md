@@ -497,6 +497,14 @@ Integration coverage includes:
 - scheduled usage enforcement
 - GitHub App connect/webhook/OIDC routes and the `BuildScheduler` queue/concurrency behavior
 
+## Managed custom Durable Objects
+
+Manifest version 4 declares local SQLite-backed classes. Clients supply class and binding names; namespace IDs are server-owned. The API records a project resource before provisioning its stable dispatch Worker, then verifies the project marker and pinned namespace before changing or deleting it. Tenant code stays inside the installation's dispatch namespace; each stable Worker's default fetch returns 404.
+
+Cutover, rollback, and recovery reconcile class code under the project lock. Removed classes become inactive and retain storage; only project deletion force-deletes their owned Workers. Deployment retention removes release bundles without removing these project resources. A project can create at most 32 distinct custom classes.
+
+Release modules and encrypted binding metadata are stored under the deployment's private `worker-bundles/` R2 prefix. Snapshot ciphertext is bound to the project and deployment; module hashes are checked before replay. Keep encryption key versions available for every retained snapshot. Publication reads the retained application Worker's current proxy token, and token rotation patches active class Workers before revoking the old generation. Rollback changes code, never stored data.
+
 ## Connected apps
 
 Registered confidential OAuth clients use code + S256 PKCE with identity-only grants. Each publish requires Void consent for an exact artifact and project, then uses an audience-separated, revocable credential and a durable deployment receipt. Admin registration/disablement lives at `/admin/connected-apps`; user disconnection lives at `/oauth/connections`. See [the design record](../../meta/design-docs/0091-connected-apps.md) and [operator guide](../../../docs/guide/platform/administration/connected-apps.md).

@@ -271,6 +271,7 @@ function deleteCfResource(
       return deleteR2Bucket(accountId, apiToken, cfId);
     case 'queue':
       return deleteQueue(accountId, apiToken, cfId);
+    case 'durable-object':
     case 'hyperdrive':
     case 'container':
       // ensureResource never creates these (createCfResource throws first), so a
@@ -306,6 +307,8 @@ async function createCfResource(
       throw new Error(
         'Hyperdrive resources are provisioned via the database endpoint, not ensureResource',
       );
+    case 'durable-object':
+      throw new Error('Custom Durable Objects are provisioned during Worker deployment');
     case 'container':
       throw new Error('Container resources are provisioned during sandbox deployment');
   }
@@ -337,6 +340,8 @@ async function lookupCfResource(
       throw new Error(
         'Hyperdrive resources are provisioned via the database endpoint, not ensureResource',
       );
+    case 'durable-object':
+      throw new Error('Custom Durable Objects are provisioned during Worker deployment');
     case 'container':
       throw new Error('Container resources are provisioned during sandbox deployment');
   }

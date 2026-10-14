@@ -365,6 +365,8 @@ class MemoryR2Bucket {
     uploaded: Date;
     body: ReadableStream<Uint8Array>;
     arrayBuffer: () => Promise<ArrayBuffer>;
+    text: () => Promise<string>;
+    json: <T>() => Promise<T>;
   } | null> {
     const entry = this.store.get(key);
     if (!entry) {
@@ -377,6 +379,8 @@ class MemoryR2Bucket {
       uploaded: entry.uploaded,
       body: new Response(entry.body).body!,
       arrayBuffer: async () => entry.body.slice(0),
+      text: async () => new TextDecoder().decode(entry.body),
+      json: async <T>() => JSON.parse(new TextDecoder().decode(entry.body)) as T,
     };
   }
 

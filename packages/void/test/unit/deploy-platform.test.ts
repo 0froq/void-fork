@@ -2,7 +2,6 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
-import { assertManagedDurableStateSupported } from '../../src/cli/deploy-managed-framework.ts';
 import { resolveDeploymentPlatform, runDeploy } from '../../src/cli/deploy.ts';
 
 const roots: Array<string> = [];
@@ -37,16 +36,6 @@ describe('resolveDeploymentPlatform', () => {
     const root = makeRoot({ platform: 'none' });
     await expect(runDeploy(root)).rejects.toThrow(
       'Pass `--platform cloudflare` or `--platform void` to choose a destination.',
-    );
-  });
-
-  it('rejects typed Durable State before a managed-platform build', () => {
-    const root = makeRoot();
-    mkdirSync(join(root, 'durable-objects'));
-    writeFileSync(join(root, 'durable-objects', 'counter.ts'), 'export default {}');
-
-    expect(() => assertManagedDurableStateSupported(root)).toThrow(
-      'Deploy to your own Cloudflare account with `void deploy --platform cloudflare`',
     );
   });
 });

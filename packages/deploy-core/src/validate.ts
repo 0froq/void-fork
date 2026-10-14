@@ -537,6 +537,52 @@ export function validateManifestShape(manifest: unknown): string | null {
     }
   }
 
+  if (manifest.durableObjects !== undefined) {
+    const durable = manifest.durableObjects;
+    if (manifest.version !== 4 || !isRecord(durable) || !Array.isArray(durable.bindings)) {
+      return 'invalid manifest shape: durableObjects requires manifest version 4 and a bindings array';
+    }
+    if (durable.bindings.length > 32) {
+      return 'invalid manifest shape: at most 32 custom Durable Objects are supported';
+    }
+    const names = new Set<string>();
+    const classes = new Set<string>();
+    const otherBindings = new Set([
+      ...Object.values(bindings).filter(Array.isArray).flat(),
+      ...Object.keys(isRecord(manifest.vars) ? manifest.vars : {}),
+      ...(Array.isArray(manifest.queues) ? manifest.queues.map((q) => q.bindingName) : []),
+      ...(isRecord(manifest.websocket) && Array.isArray(manifest.websocket.routes)
+        ? manifest.websocket.routes.map((r) => r.bindingName ?? r.className)
+        : []),
+      ...(isRecord(manifest.live) ? [manifest.live.bindingName] : []),
+    ]);
+    for (const binding of durable.bindings) {
+      if (
+        !isRecord(binding) ||
+        Object.keys(binding).some(
+          (key) => !['bindingName', 'className', 'storage'].includes(key),
+        ) ||
+        typeof binding.bindingName !== 'string' ||
+        !/^[A-Za-z_$][\w$]{0,127}$/.test(binding.bindingName) ||
+        binding.bindingName.startsWith('__') ||
+        ['ASSETS', 'SEND_EMAIL', 'USAGE_EVENTS_QUEUE'].includes(binding.bindingName) ||
+        typeof binding.className !== 'string' ||
+        !/^[A-Za-z_$][\w$]{0,127}$/.test(binding.className) ||
+        binding.storage !== 'sqlite'
+      ) {
+        return 'invalid manifest shape: custom Durable Objects require local SQLite classes and valid binding names';
+      }
+      if (
+        names.has(binding.bindingName) ||
+        classes.has(binding.className) ||
+        otherBindings.has(binding.bindingName)
+      ) {
+        return 'invalid manifest shape: custom Durable Object bindings and classes must be unique';
+      }
+      names.add(binding.bindingName);
+      classes.add(binding.className);
+    }
+  }
   return null;
 }
 

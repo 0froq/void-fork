@@ -20,6 +20,7 @@ import {
 import app from '../../src/index.ts';
 import { getProjectDeploymentWorkerName, getProjectQueueName } from '../../src/naming.ts';
 import { reconcileProjectCleanupJobs } from '../../src/provisioning/cleanup.ts';
+import { durableObjectWorkerName } from '../../src/provisioning/durable-objects.ts';
 import {
   advanceProxyTokenRotation,
   issueProjectProxyToken,
@@ -436,6 +437,80 @@ async function deploy(projectId: string, jwt: string): Promise<string> {
 }
 
 describe('proxy token rotation', () => {
+  it('patches native Durable Object credentials within the provider budget before revoking old tokens', async () => {
+    const cf = cfApi();
+    const bindings = Array.from({ length: 8 }, (_, index) => ({
+      bindingName: `OBJECT_${index}`,
+      className: `Object${index}`,
+      storage: 'sqlite',
+    }));
+    const fx = await setupProject(cf, {
+      retained: 0,
+      manifest: { ...MANIFEST, version: 4, durableObjects: { bindings } },
+    });
+    const names: Array<string> = [];
+    for (const binding of bindings) {
+      const worker = await durableObjectWorkerName(fx.projectId, binding.className);
+      names.push(worker);
+      const namespaceId = `namespace-${binding.className}`;
+      await env.db.insert(resources).values({
+        id: `res_native_${binding.className}`,
+        project_id: fx.projectId,
+        type: 'durable-object',
+        cf_id: worker,
+        binding_name: binding.className,
+        metadata: { dispatchNamespace: 'void-users', namespaceId, proxyTokenGen: 0 },
+      });
+      cf.seedHostScript({
+        scriptName: worker,
+        bindings: [
+          ...workerBindings(fx.legacy),
+          {
+            type: 'durable_object_namespace',
+            name: binding.bindingName,
+            class_name: binding.className,
+            namespace_id: namespaceId,
+          },
+          {
+            type: 'plain_text',
+            name: '__VOID_DURABLE_OWNER',
+            text: JSON.stringify({
+              protocol: 1,
+              projectId: fx.projectId,
+              dispatchNamespace: 'void-users',
+              className: binding.className,
+            }),
+          },
+          { type: 'plain_text', name: '__VOID_DURABLE_DEPLOYMENT', text: fx.active },
+        ],
+      });
+    }
+    await request(fx.projectId);
+    let result: ProjectRotationOutcome | undefined;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      result = await advance(fx.projectId, {
+        budget: { cfCallsRemaining: 6, deadline: Date.now() + 60_000 },
+      });
+      if (result.status === 'done' || result.status === 'failed') {
+        break;
+      }
+      expect(await floor(fx.projectId)).toBeNull();
+      const appToken = scriptToken(cf, fx.worker(fx.active));
+      expect(await routing.get(fx.queueKey, 'json')).toMatchObject({ proxyToken: appToken });
+      expect(cron.states.get(fx.projectId)?.proxyToken).toBe(appToken);
+      expect(appToken).toBe(await tok(fx.projectId, await held(fx.active)));
+    }
+    expect(result).toEqual({ status: 'done', gen: 1 });
+    const token = await tok(fx.projectId, 1);
+    for (const worker of names) {
+      expect(scriptToken(cf, worker)).toBe(token);
+    }
+    const floorAt = events.indexOf(`kv ${proxyTokenStateKey(fx.projectId)}`);
+    for (const worker of names) {
+      expect(floorAt).toBeGreaterThan(events.indexOf(`PATCH ${worker}`));
+    }
+  });
+
   it('moves every Worker to the next generation before raising the floor', async () => {
     const cf = cfApi();
     const fx = await setupProject(cf, { staticRetained: true });

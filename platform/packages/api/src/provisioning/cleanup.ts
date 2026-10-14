@@ -65,6 +65,7 @@ import {
   findContainerApplication,
   perDeployContainerApplicationName,
 } from './containers.ts';
+import { deleteManagedDurableObject } from './durable-objects.ts';
 import { runEmailDestinationCleanup } from './email-destination-cleanup.ts';
 import { deleteSandboxController, isManagedSandbox } from './sandbox-controller.ts';
 
@@ -86,6 +87,8 @@ function deleteCloudflareResource(
       return deleteQueue(accountId, apiToken, resource.cf_id);
     case 'hyperdrive':
       return deleteHyperdrive(accountId, apiToken, resource.cf_id);
+    case 'durable-object':
+      throw new Error('Custom Durable Object deletion requires project ownership verification.');
     case 'container':
       return deleteContainerApplicationIdempotent(accountId, apiToken, resource.cf_id);
     default:
@@ -142,6 +145,14 @@ async function executeCleanupJob(
 ): Promise<void> {
   switch (job.kind) {
     case 'cf-resource':
+      if (job.payload.type === 'durable-object') {
+        await deleteManagedDurableObject(env, job.project_id, {
+          cf_id: jobValue(job, 'cfId'),
+          binding_name: jobValue(job, 'className'),
+          metadata: JSON.parse(jobValue(job, 'metadata')) as Record<string, unknown>,
+        });
+        return;
+      }
       await ignoreMissingProviderObject(() =>
         deleteCloudflareResource(env.CF_ACCOUNT_ID, env.CF_API_TOKEN, {
           type: jobValue(job, 'type') as Resource['type'],

@@ -19,6 +19,12 @@ import {
   generateManagedAuthSecret,
   encryptProjectSecret,
 } from '../project-secrets.ts';
+import {
+  prepareManagedDurableObjects,
+  managedDurableObjectBindings,
+  storeDurableObjectSnapshot,
+  verifyManagedDurableObjectApplicationBindings,
+} from '../provisioning/durable-objects.ts';
 import { provisionBindings } from '../provisioning/provision.ts';
 import {
   provisionSandboxController,
@@ -293,6 +299,22 @@ export async function uploadDeploymentWorker(input: {
     name,
     text,
   }));
+  const durableObjects = await prepareManagedDurableObjects(
+    context.env,
+    context.get('db'),
+    projectId,
+    deployment.id,
+    manifest,
+  );
+  if (durableObjects) {
+    manifest.durableObjects = durableObjects;
+    await context
+      .get('db')
+      .update(deployments)
+      .set({ manifest: JSON.stringify(manifest) })
+      .where(eq(deployments.id, deployment.id));
+  }
+  const customDurableBindings = managedDurableObjectBindings(manifest);
   const websocketBindings = buildWebSocketUploadBindings(manifest.websocket);
   if (manifest.sandbox) {
     input.currentStep = 'sandbox_container';
@@ -327,6 +349,7 @@ export async function uploadDeploymentWorker(input: {
     ...secretBindings,
     ...workerBindings,
     ...websocketBindings,
+    ...customDurableBindings,
     ...sandboxBindings,
     ...liveBindings,
     ...(completionJwt ? [{ name: 'ASSETS', type: 'assets' }] : []),
@@ -354,6 +377,35 @@ export async function uploadDeploymentWorker(input: {
     },
     tail_consumers: [{ service: tailServiceName }],
   };
+  if (manifest.durableObjects?.bindings.length) {
+    const customNames = new Set(customDurableBindings.map((binding) => binding.name));
+    for (const name of customNames) {
+      if (allBindings.filter((binding) => binding.name === name).length !== 1) {
+        throw new Error('Custom Durable Object binding collides with another application binding.');
+      }
+    }
+    await storeDurableObjectSnapshot(
+      context.env,
+      context.get('db'),
+      projectId,
+      deployment.id,
+      {
+        ...metadata,
+        bindings: allBindings,
+        assetManifest,
+        appWorker: workerName,
+        logProject: `user-${project.slug}`,
+        customClasses: Object.fromEntries(
+          manifest.durableObjects.bindings.map((binding) => [
+            binding.bindingName,
+            binding.className,
+          ]),
+        ),
+      },
+      workerFiles,
+      assetsByHash,
+    );
+  }
   workerFormData.append(
     'metadata',
     new Blob([JSON.stringify(metadata)], { type: 'application/json' }),
@@ -406,6 +458,7 @@ export async function uploadDeploymentWorker(input: {
     },
   );
   input.workerUploaded = true;
+  await verifyManagedDurableObjectApplicationBindings(context.env, workerName, manifest);
 
   await assertDeploymentCanProceed(context.get('db'), deployment.id, projectId);
 

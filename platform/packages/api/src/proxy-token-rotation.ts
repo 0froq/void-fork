@@ -1,11 +1,18 @@
 import { and, asc, eq, or, sql, type SQL } from 'drizzle-orm';
 import { DEFAULT_DISPATCH_NAMESPACE } from './constants.ts';
 import { snapshotCronScheduler, syncCronScheduler } from './cron-scheduler-client.ts';
-import { getActiveDeployment, type Db, type DbOrTx } from './db.ts';
+import {
+  getActiveDeployment,
+  getDeployment,
+  getProjectResources,
+  type Db,
+  type DbOrTx,
+} from './db.ts';
 import type { ApiEnv } from './env.ts';
 import { getProjectDeploymentWorkerName, getProjectQueueName } from './naming.ts';
 import { hasProjectCapability, projectRoleForUser } from './project-access.ts';
 import { requireNormalizedProject } from './project-state.ts';
+import { verifyManagedDurableObjectOwnership } from './provisioning/durable-objects.ts';
 import {
   buildProxyTokenBindingsPatch,
   CloudflareRateLimitError,
@@ -22,7 +29,7 @@ import {
   type ProxyTokenRotationReason,
 } from './proxy-token-rotation-request.ts';
 import { deriveProxyToken, proxyTokenStateKey, serializeProxyTokenState } from './proxy-token.ts';
-import { deployments, projectCleanupJobs, projects, users } from './schema.ts';
+import { deployments, projectCleanupJobs, projects, resources, users } from './schema.ts';
 import { isAdminSuspended } from './suspension.ts';
 import type { DeployManifest, Project, ProjectRole } from './types.ts';
 
@@ -631,6 +638,72 @@ async function patchNext(tx: DbOrTx, ctx: StepContext, locked: LockedStep): Prom
       .update(deployments)
       .set({ proxy_token_gen: gen })
       .where(eq(deployments.id, row.deploymentId));
+  }
+  if (row.active && current) {
+    const active = await getDeployment(tx, row.deploymentId);
+    const manifest = active?.manifest ? (JSON.parse(active.manifest) as DeployManifest) : null;
+    const classes = new Set(
+      manifest?.durableObjects?.bindings.map((binding) => binding.className) ?? [],
+    );
+    const resource = (await getProjectResources(tx, ctx.projectId)).find(
+      (value) =>
+        value.type === 'durable-object' &&
+        classes.has(value.binding_name) &&
+        value.metadata.proxyTokenGen !== gen,
+    );
+    if (resource) {
+      if (patched) {
+        // Commit the application's token and its queue/cron copies before
+        // starting another provider write that can fail or exhaust the budget.
+        await finishStep(
+          tx,
+          ctx.projectId,
+          sql`jsonb_build_object('lastPatchAt', ${isoUtc(sql`clock_timestamp()`)})`,
+        );
+        return { kind: 'continue' };
+      }
+      ctx.workerName = resource.cf_id;
+      const native = await ctx.cf.getScriptBindings(resource.cf_id);
+      if (!native) {
+        throw new Error('Active custom Durable Object Worker is missing.');
+      }
+      verifyManagedDurableObjectOwnership(ctx.env, ctx.projectId, resource, native);
+      if (
+        !native.some(
+          (binding) =>
+            binding.name === '__VOID_DURABLE_DEPLOYMENT' && binding.text === row.deploymentId,
+        )
+      ) {
+        throw new Error('Active custom Durable Object release differs.');
+      }
+      const existing = tokenBinding(native);
+      if (existing?.type !== 'plain_text') {
+        throw new Error('Custom Durable Object proxy token is missing.');
+      }
+      if (existing.text !== token) {
+        ctx.workerAheadOfRow = true;
+        const result =
+          (await ctx.cf.patchScriptBindings(
+            resource.cf_id,
+            buildProxyTokenBindingsPatch(native, token),
+          )) ?? (await ctx.cf.getScriptBindings(resource.cf_id));
+        if (tokenBinding(result ?? [])?.text !== token) {
+          throw new Error('Custom Durable Object did not take the new proxy token.');
+        }
+      }
+      await tx
+        .update(resources)
+        .set({ metadata: { ...resource.metadata, proxyTokenGen: gen } })
+        .where(eq(resources.id, resource.id));
+      // Keep the deployment cursor here. Each step patches at most one native
+      // Worker so large projects stay within the rotation's provider budget.
+      await finishStep(
+        tx,
+        ctx.projectId,
+        sql`jsonb_build_object('lastPatchAt', ${isoUtc(sql`clock_timestamp()`)})`,
+      );
+      return { kind: 'continue' };
+    }
   }
   await finishStep(
     tx,

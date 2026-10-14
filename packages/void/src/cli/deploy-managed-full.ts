@@ -46,7 +46,6 @@ import {
   streamDirectR2Deploy,
   warnUnpublishedRouting,
 } from './deploy-managed-events.ts';
-import { assertManagedDurableStateSupported } from './deploy-managed-framework.ts';
 import { runStaticDeploy, assembleVoidManifest } from './deploy-managed-static.ts';
 import { formatDeploySummary, printDeploySuccess } from './deploy-summary.ts';
 import { MANAGED_DEPLOY_BUILD_ENV } from './deploy-transport.ts';
@@ -84,8 +83,6 @@ export async function runFullDeploy(
     mode: 'full',
     framework: detected?.name,
   });
-
-  assertManagedDurableStateSupported(root);
 
   // Build in a child process to avoid Vite API side effects on bundle output.
   if (!skipBuild) {
@@ -262,7 +259,13 @@ export async function runFullDeploy(
       authEnabled,
       hasLive: liveConfig !== undefined,
     });
-    if (allPrerenderable && !nonPageBackend && schedules.length === 0 && queues.length === 0) {
+    if (
+      allPrerenderable &&
+      !nonPageBackend &&
+      analysis.durableObjects.length === 0 &&
+      schedules.length === 0 &&
+      queues.length === 0
+    ) {
       log.info('All pages prerendered — deploying as static site');
       cliLog?.info('full_to_static_redirect', { reason: 'all_pages_prerendered' });
       return runStaticDeploy(
@@ -428,6 +431,7 @@ export async function runFullDeploy(
       fallbackRules,
       dialect,
       webSockets,
+      durableObjects: analysis.durableObjects,
     },
     voidConfig.routing?.revalidate,
     voidConfig.routing?.isr !== false,

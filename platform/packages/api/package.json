@@ -61,6 +61,7 @@
     "@types/react-dom": "^19.3.0",
     "@voidzero-dev/vite-plus-prompts": "catalog:",
     "drizzle-kit": "^0.31.11",
+    "miniflare": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",

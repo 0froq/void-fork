@@ -77,6 +77,21 @@ describe('worker packaging', () => {
 });
 
 describe('buildVoidManifest', () => {
+  it('emits the managed Durable Object protocol only for apps that use custom classes', () => {
+    const plain = buildVoidManifest({ bindings: makeBindings() });
+    expect(plain.version).toBe(3);
+    expect(plain.durableObjects).toBeUndefined();
+    const durable = buildVoidManifest({
+      bindings: makeBindings(),
+      durableObjects: [{ bindingName: 'WORKSPACE', className: 'WorkspaceDurableObject' }],
+    });
+    expect(durable.version).toBe(4);
+    expect(durable.durableObjects).toEqual({
+      bindings: [
+        { bindingName: 'WORKSPACE', className: 'WorkspaceDurableObject', storage: 'sqlite' },
+      ],
+    });
+  });
   it('advertises authenticated email protocol only for a managed inbound handler', () => {
     expect(
       buildVoidManifest({ bindings: makeBindings(), hasEmailHandlers: true }).emailProtocolVersion,

@@ -333,6 +333,13 @@ export async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promis
       );
     }
   }
+  if (incomingManifest.durableObjects?.runtime !== undefined) {
+    return context.json(
+      { event: 'error', message: 'durableObjects.runtime is reserved for the platform.' },
+      400,
+    );
+  }
+
   if (incomingManifest.sandbox && incomingManifest.sandbox.controllerProtocol !== 2) {
     return context.json(
       {
@@ -587,6 +594,12 @@ export async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promis
 
   // Module names become multipart part names in the Cloudflare upload. This
   // also covers modules restored from a staged deployment input.
+  if (incomingManifest.durableObjects?.bindings.length && workerFiles.length === 0) {
+    return context.json(
+      { event: 'error', message: 'Custom Durable Objects require a Worker deployment.' },
+      400,
+    );
+  }
   const workerFilesProblem = workerFilesError(
     workerFiles.map(({ name }) => name),
     incomingManifest.workerMain,

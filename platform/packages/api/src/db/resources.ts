@@ -73,7 +73,13 @@ export function cleanupJobsForResource(
       target: `cf-resource:${projectId}:${resource.type}:${resource.cf_id}`,
       project_id: projectId,
       kind: 'cf-resource',
-      payload: { type: resource.type, cfId: resource.cf_id },
+      payload: {
+        type: resource.type,
+        cfId: resource.cf_id,
+        ...(resource.type === 'durable-object'
+          ? { className: resource.binding_name, metadata: JSON.stringify(resource.metadata) }
+          : {}),
+      },
     },
   ];
   if (resource.type === 'queue') {

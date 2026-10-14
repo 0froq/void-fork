@@ -1,4 +1,4 @@
-export const SUPPORTED_MANIFEST_VERSIONS: ReadonlyArray<number> = [3];
+export const SUPPORTED_MANIFEST_VERSIONS: ReadonlyArray<number> = [3, 4];
 
 export type MigrationMeta = {
   name: string;
@@ -230,6 +230,12 @@ export type LiveManifestMeta = {
   migrations?: ReadonlyArray<LiveMigrationMeta>;
 };
 
+export type DurableObjectManifestMeta = {
+  bindings: ReadonlyArray<{ bindingName: string; className: string; storage: 'sqlite' }>;
+  /** Verified by the platform; never accepted from a deployment client. */
+  runtime?: { protocol: 1; namespaces: Record<string, string> };
+};
+
 export type DeployManifest = {
   version: number;
   assetManifestVersion?: 1 | 2;
@@ -276,6 +282,7 @@ export type DeployManifest = {
   websocket?: WebSocketManifestMeta;
   sandbox?: SandboxManifestMeta;
   live?: LiveManifestMeta;
+  durableObjects?: DurableObjectManifestMeta;
 };
 
 export type DeployEvent =

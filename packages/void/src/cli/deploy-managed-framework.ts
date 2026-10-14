@@ -3,7 +3,6 @@ import { existsSync } from 'node:fs';
 import { join } from 'pathslash';
 import { analyzeApplicationSync } from '../application-analysis.ts';
 import { type VoidConfig } from '../config.ts';
-import { scanDurableObjectModules } from '../durable/scan.ts';
 import { collectRevalidate } from '../isr-config.ts';
 import { type DetectedFramework } from '../plugin-inference.ts';
 import { buildEnv } from '../shared/untrusted-env.ts';
@@ -256,12 +255,4 @@ export async function runFrameworkDeploy(
 
   warnUnpublishedRouting(result);
   printDeploySuccess(result.published !== false);
-}
-
-export function assertManagedDurableStateSupported(root: string): void {
-  if (scanDurableObjectModules(root).length > 0) {
-    throw new Error(
-      'deploy: typed Durable State modules in durable-objects/ are not yet supported by the Void managed platform. Deploy to your own Cloudflare account with `void deploy --platform cloudflare`.',
-    );
-  }
 }

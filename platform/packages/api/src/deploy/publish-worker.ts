@@ -33,6 +33,7 @@ import {
   findContainerApplication,
   perDeployContainerApplicationName,
 } from '../provisioning/containers.ts';
+import { reconcileManagedDurableObjects } from '../provisioning/durable-objects.ts';
 import { provisionBindings } from '../provisioning/provision.ts';
 import { deleteSandboxController, isManagedSandbox } from '../provisioning/sandbox-controller.ts';
 import { buildRoutingJson, computeDispatchLimits } from '../routing.ts';
@@ -379,6 +380,7 @@ export async function publishWorkerDeployment(input: {
       zeroTrust,
     });
     const cutoverDomains = await getDomainsByProjectId(txDb, projectId);
+    await reconcileManagedDurableObjects(context.env, txDb, projectId, deployment.id, manifest);
     await putTrackedRouting(project.slug, routingJson);
     input.routingSwitched = true;
     input.logger = input.logger.with({ routingSwitched: true });

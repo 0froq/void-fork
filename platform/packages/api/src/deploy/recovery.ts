@@ -29,6 +29,7 @@ import {
   removeQueueConsumer,
   getDispatchWorkerProxyToken,
 } from '../provisioning/cloudflare-api.ts';
+import { reconcileManagedDurableObjects } from '../provisioning/durable-objects.ts';
 import { requestRotationIfReplacingUntrustedCode } from '../proxy-token-rotation.ts';
 import { buildRoutingJson, buildStaticRoutingJson, computeDispatchLimits } from '../routing.ts';
 import { type DeployManifest, type Deployment, type Project } from '../types.ts';
@@ -336,6 +337,7 @@ export async function replayDeploymentCutover(
     ? await resolveCutoverProxyToken(env, workerName, project.id)
     : null;
 
+  await reconcileManagedDurableObjects(env, db, project.id, deployment.id, manifest);
   await env.ROUTING.put(project.slug, routingJson);
   await reconcileProjectDomainRoutes(env, domains, routingJson);
   if (!isStatic && manifest.schedules?.length) {
@@ -391,6 +393,7 @@ export async function clearProjectExternalState(
   const resources = await getProjectResources(db, project.id);
   const queueNames = await persistedQueueNames(db, project.id);
 
+  await reconcileManagedDurableObjects(env, db, project.id, null, null);
   await env.ROUTING.delete(project.slug);
   await reconcileProjectDomainRoutes(env, domains, null);
   await clearCronScheduler(env, project.id);

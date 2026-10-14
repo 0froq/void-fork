@@ -18,6 +18,7 @@ import { sendDeployFailedEmail } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
 import { type DeployLogger } from '../observability/logger.ts';
 import { ProjectAccessDeniedError } from '../project-access.ts';
+import { reconcileManagedDurableObjects } from '../provisioning/durable-objects.ts';
 import { deleteSandboxController } from '../provisioning/sandbox-controller.ts';
 import {
   type DeployManifest,
@@ -308,14 +309,18 @@ export async function recoverFailedDeployment(input: {
       await restoreTrackedRouting().catch((error) => compensationErrors.push(error));
       await restoreTrackedCronState().catch((error) => compensationErrors.push(error));
     }
-    if (needsProtectedClaim && (compensationErrors.length > 0 || routingSwitched)) {
+    if (needsProtectedClaim) {
       await context.get('db').transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
         const lockedProject = await getProject(tx, projectId);
         if (!lockedProject || lockedProject.status === 'deleting') {
           return;
         }
-        if (compensationErrors.length > 0) {
+        if (
+          compensationErrors.length > 0 ||
+          failedManifest.durableObjects ||
+          currentStep === 'durable_objects'
+        ) {
           const committedActive = lockedProject.active_deployment_id
             ? await getDeployment(tx, lockedProject.active_deployment_id)
             : null;
@@ -332,6 +337,19 @@ export async function recoverFailedDeployment(input: {
             await clearProjectExternalState(context.env, tx, lockedProject);
           }
         } else {
+          const committedActive = lockedProject.active_deployment_id
+            ? await getDeployment(tx, lockedProject.active_deployment_id)
+            : null;
+          await reconcileManagedDurableObjects(
+            context.env,
+            tx,
+            projectId,
+            committedActive?.id ?? null,
+            committedActive?.manifest ? JSON.parse(committedActive.manifest) : null,
+          );
+          if (!routingSwitched) {
+            return;
+          }
           // Exact undo succeeded, but a domain activation may have
           // committed after the earlier snapshot and copied this failed
           // deployment's slug route. Reconcile only domain keys to the

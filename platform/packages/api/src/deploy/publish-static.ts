@@ -16,6 +16,7 @@ import type { ApiEnv } from '../env.ts';
 import { getProjectQueueName } from '../naming.ts';
 import { type DeployLogger } from '../observability/logger.ts';
 import { removeQueueConsumer } from '../provisioning/cloudflare-api.ts';
+import { reconcileManagedDurableObjects } from '../provisioning/durable-objects.ts';
 import { buildStaticRoutingJson } from '../routing.ts';
 import { deployments } from '../schema.ts';
 import { REASON_REQUESTS_EXCEEDED } from '../suspension.ts';
@@ -202,6 +203,7 @@ export async function publishStaticDeployment(input: {
       zeroTrust,
     });
     const cutoverDomains = await getDomainsByProjectId(txDb, projectId);
+    await reconcileManagedDurableObjects(context.env, txDb, projectId, deployment.id, manifest);
     await putTrackedRouting(project.slug, routingJson);
     input.routingSwitched = true;
     input.logger = input.logger.with({ routingSwitched: true });

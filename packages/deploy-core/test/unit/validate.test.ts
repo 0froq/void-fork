@@ -1,6 +1,43 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { validateManifestShape, type DeployManifest } from '../../src/index.ts';
 
+describe('custom Durable Object declarations', () => {
+  const binding = {
+    bindingName: 'WORKSPACE',
+    className: 'WorkspaceDurableObject',
+    storage: 'sqlite',
+  };
+  const manifest = (bindings: Array<unknown> = [binding]) => ({
+    version: 4,
+    bindings: {},
+    durableObjects: { bindings },
+  });
+  it('accepts local SQLite classes and leaves ordinary apps on version 3', () => {
+    expect(validateManifestShape(manifest())).toBeNull();
+    expect(validateManifestShape({ version: 3, bindings: {} })).toBeNull();
+    expect(validateManifestShape({ ...manifest(), version: 3 })).toContain('version 4');
+  });
+  it.each([
+    { script_name: 'another-project' },
+    { namespace_id: 'foreign' },
+    { storage: 'legacy-kv' },
+    { bindingName: '__VOID_PROXY' },
+    { bindingName: 'ASSETS' },
+    { className: 'Invalid-name' },
+  ])('rejects unsafe binding fields %j', (fields) => {
+    expect(validateManifestShape(manifest([{ ...binding, ...fields }]))).not.toBeNull();
+  });
+  it('rejects duplicate classes and binding collisions', () => {
+    expect(validateManifestShape(manifest([binding, binding]))).toContain('unique');
+    expect(validateManifestShape({ ...manifest(), bindings: { r2: ['WORKSPACE'] } })).toContain(
+      'unique',
+    );
+    expect(validateManifestShape({ ...manifest(), vars: { WORKSPACE: 'value' } })).toContain(
+      'unique',
+    );
+  });
+});
+
 function manifestWithMigration(migration: unknown): DeployManifest {
   return {
     version: 3,

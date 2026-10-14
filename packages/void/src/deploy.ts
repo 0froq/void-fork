@@ -13,7 +13,6 @@ import {
   toManifestSchedulesAndQueues,
 } from './cli/deploy-helpers.ts';
 import { mergeAndLintRoutingRules } from './cli/deploy-managed-events.ts';
-import { assertManagedDurableStateSupported } from './cli/deploy-managed-framework.ts';
 import { assembleVoidManifest } from './cli/deploy-managed-static.ts';
 import { collectAndHashAssets, collectWorkerFiles } from './cli/package.ts';
 import { readConfig, isNodeTarget } from './config.ts';
@@ -36,7 +35,6 @@ export async function prepareDeployArtifact(
   if (isNodeTarget(config.target) || config.output === 'static') {
     throw new Error('Artifact preparation requires a Void Cloudflare Worker build.');
   }
-  assertManagedDurableStateSupported(root);
   const analysis = await analyzeApplication(root, { config, environment: 'prod' });
   if (analysis.bindings.needsSandbox || analysis.bindings.needsLive) {
     throw new Error(
@@ -76,6 +74,7 @@ export async function prepareDeployArtifact(
       queues,
       dialect,
       webSockets: websockets,
+      durableObjects: analysis.durableObjects,
       ssr:
         ssr ||
         scan.routes.length > 0 ||

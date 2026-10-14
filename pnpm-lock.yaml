@@ -930,6 +930,9 @@ importers:
       drizzle-kit:
         specifier: ^0.31.11
         version: 0.31.11
+      miniflare:
+        specifier: 'catalog:'
+        version: 5.20261006.2-beta(@types/node@26.6.4)
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

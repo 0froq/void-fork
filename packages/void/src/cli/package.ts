@@ -452,6 +452,7 @@ export function buildVoidManifest(opts: {
   fallbackRules?: Array<DevRedirectRule>;
   dialect?: 'sqlite' | 'postgresql' | 'mysql';
   webSockets?: Array<WebSocketRouteDefinition>;
+  durableObjects?: ReadonlyArray<{ bindingName: string; className: string }>;
 }): DeployManifest {
   const {
     bindings,
@@ -476,6 +477,16 @@ export function buildVoidManifest(opts: {
   const resolvedDialect = dialect ?? 'sqlite';
 
   const manifest: DeployManifest = { version: 3, assetManifestVersion: 2, bindings: {} };
+  if (opts.durableObjects?.length) {
+    manifest.version = 4;
+    manifest.durableObjects = {
+      bindings: opts.durableObjects.map(({ bindingName, className }) => ({
+        bindingName,
+        className,
+        storage: 'sqlite',
+      })),
+    };
+  }
   if (opts.hasEmailHandlers) {
     manifest.emailProtocolVersion = 1;
   }
