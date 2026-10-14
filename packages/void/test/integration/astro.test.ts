@@ -42,7 +42,8 @@ describe('playground/astro dev', () => {
     ) {
       return;
     }
-    rmSync(middleware);
+    // The dev server's exit hook can remove it between the read and cleanup.
+    rmSync(middleware, { force: true });
     const gitignore = join(root, '.gitignore');
     writeFileSync(
       gitignore,
