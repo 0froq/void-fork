@@ -115,10 +115,17 @@ export function runPty(
   });
 }
 
-export async function initializePackedProject(directory, framework, manager, version) {
+export async function initializePackedProject(
+  directory,
+  framework,
+  manager,
+  version,
+  toolchain = 'vite',
+) {
   const frameworks = ['react', 'vue', 'svelte', 'solid'];
   assert(frameworks.includes(framework), 'Unknown Pages framework');
   assert(['npm', 'pnpm'].includes(manager), 'Unknown package manager');
+  assert(['vite', 'vite-plus'].includes(toolchain), 'Unknown toolchain');
   assert(
     /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?$/.test(version),
     'Invalid package version',
@@ -143,7 +150,10 @@ export async function initializePackedProject(directory, framework, manager, ver
     env,
     prompts: [
       { text: 'Initialize a git repository?', response: '\r' },
-      { text: 'Choose a Pages scaffold toolchain:', response: '\x1b[B\r' },
+      {
+        text: 'Choose a Pages scaffold toolchain:',
+        response: toolchain === 'vite-plus' ? '\r' : '\x1b[B\r',
+      },
       {
         text: 'Choose a Pages framework to scaffold:',
         response: '\x1b[B'.repeat(frameworks.indexOf(framework)) + '\r',

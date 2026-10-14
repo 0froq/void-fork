@@ -86,3 +86,9 @@ jobs:
         env:
           VOID_PACKED_PM: ${{ matrix.pm }}
         run: node .github/scripts/packed-consumer.mjs
+      - name: Prepublish Test with Vite+ and ${{ matrix.pm }}
+        env:
+          VOID_PACKED_PM: ${{ matrix.pm }}
+          VOID_PACKED_FRAMEWORK: react
+          VOID_PACKED_TOOLCHAIN: vite-plus
+        run: node .github/scripts/packed-consumer.mjs

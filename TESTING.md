@@ -229,7 +229,10 @@ node --test --test-timeout=10000 .github/scripts/packed-*.test.mjs
 ```
 
 `VOID_PACKED_PM=npm|pnpm` and `VOID_PACKED_FRAMEWORK=react|vue|svelte|solid` select a focused
-local run. The interactive initializer is a Node.js script using the system `script` PTY
+local run. `VOID_PACKED_TOOLCHAIN=vite-plus` verifies Vite+ initialization, the workspace's
+tested Vite+ version, and the generated `vp` build/dev/preview commands. CI checks a React
+app with Vite+ for both package managers alongside the plain Vite coverage.
+The interactive initializer is a Node.js script using the system `script` PTY
 utility and Bash; it has no Python or native npm dependency.
 
 ## Browser readiness and Windows CI

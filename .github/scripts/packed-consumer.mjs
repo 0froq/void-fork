@@ -21,14 +21,24 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const suite = process.env.VOID_PACKED_SUITE ?? 'smoke';
 assert(['smoke', 'full'].includes(suite), 'VOID_PACKED_SUITE must be smoke or full');
 const full = suite === 'full';
+const toolchain = process.env.VOID_PACKED_TOOLCHAIN ?? 'vite';
+assert(
+  ['vite', 'vite-plus'].includes(toolchain),
+  'VOID_PACKED_TOOLCHAIN must be vite or vite-plus',
+);
+const useVitePlus = toolchain === 'vite-plus';
+const vitePlusVersion = JSON.parse(
+  readFileSync(join(root, 'node_modules/vite-plus/package.json'), 'utf8'),
+).version;
 const work = mkdtempSync(join(tmpdir(), 'void-packed-consumer-'));
 const archiveDir = join(work, 'archives');
 mkdirSync(archiveDir);
 console.log(`Packed consumer artifacts: ${work}`);
 console.log(`Packed consumer suite: ${suite}`);
+console.log(`Packed consumer toolchain: ${toolchain}`);
 const environment = { ...process.env, CI: 'true' };
 for (const key of Object.keys(environment)) {
-  if (/^(VOID_|CLOUDFLARE_|CF_|WRANGLER_|NPM_TOKEN$|NODE_AUTH_TOKEN$)/i.test(key)) {
+  if (/^(VOID_|VP_|CLOUDFLARE_|CF_|WRANGLER_|NPM_TOKEN$|NODE_AUTH_TOKEN$)/i.test(key)) {
     delete environment[key];
   }
 }
@@ -174,7 +184,14 @@ try {
         console.log(`Checking packed ${label}: create-void and interactive init`);
         await run(
           process.execPath,
-          [join(root, '.github/scripts/packed-init.mjs'), fixture, framework, manager, version],
+          [
+            join(root, '.github/scripts/packed-init.mjs'),
+            fixture,
+            framework,
+            manager,
+            version,
+            toolchain,
+          ],
           work,
         );
         const agentInstructions = readFileSync(join(fixture, 'AGENTS.md'), 'utf8');
@@ -245,12 +262,37 @@ try {
           );
         }
         const manifest = JSON.parse(readFileSync(join(fixture, 'package.json'), 'utf8'));
-        assert(!manifest.devDependencies?.['vite-plus'], 'Plain Vite init must not install Vite+');
-        const installedVite = JSON.parse(
-          readFileSync(join(fixture, 'node_modules/vite/package.json'), 'utf8'),
-        );
-        assert.equal(installedVite.name, 'vite');
-        assert(installedVite.version.startsWith('8.'), 'The consumer must use public Vite 8');
+        if (useVitePlus) {
+          assert.equal(
+            manifest.devDependencies['vite-plus'],
+            `^${vitePlusVersion}`,
+            'Vite+ init must match the tested workspace toolchain',
+          );
+          assert.equal(
+            manifest.devDependencies.vite,
+            `npm:@voidzero-dev/vite-plus-core@^${vitePlusVersion}`,
+            'Vite+ init must use the matching core alias',
+          );
+          const installedVitePlus = JSON.parse(
+            readFileSync(join(fixture, 'node_modules/vite-plus/package.json'), 'utf8'),
+          );
+          assert.equal(installedVitePlus.name, 'vite-plus');
+          assert.equal(
+            installedVitePlus.version.split('.')[0],
+            vitePlusVersion.split('.')[0],
+            'The consumer must use a compatible Vite+ release',
+          );
+        } else {
+          assert(
+            !manifest.devDependencies?.['vite-plus'],
+            'Plain Vite init must not install Vite+',
+          );
+          const installedVite = JSON.parse(
+            readFileSync(join(fixture, 'node_modules/vite/package.json'), 'utf8'),
+          );
+          assert.equal(installedVite.name, 'vite');
+          assert(installedVite.version.startsWith('8.'), 'The consumer must use public Vite 8');
+        }
         assert.equal(
           JSON.parse(readFileSync(join(fixture, 'node_modules/void/package.json'), 'utf8')).version,
           version,
@@ -280,7 +322,10 @@ try {
         );
         mkdirSync(join(fixture, 'public'), { recursive: true });
         writeFileSync(join(fixture, 'public/packed.txt'), label);
-        const vite = join(fixture, 'node_modules/vite/bin/vite.js');
+        const vite = join(
+          fixture,
+          useVitePlus ? 'node_modules/vite-plus/bin/vp' : 'node_modules/vite/bin/vite.js',
+        );
         await run(process.execPath, [vite, 'build'], fixture);
         await run(
           process.execPath,
@@ -442,7 +487,7 @@ if (runtime.manifest.platformVersion !== ${JSON.stringify(version)}) throw new E
           }
         }
         console.log(
-          `Passed packed ${label} (${suite}): init, frozen install, public Vite build/typecheck, assets, KV, email, runtime integrity${full ? ', dev/preview, hydration/navigation' : ', dev HTTP'}${framework === 'react' ? ', Node target' : ''}`,
+          `Passed packed ${label} (${suite}): init, frozen install, ${useVitePlus ? 'Vite+' : 'public Vite'} build/typecheck, assets, KV, email, runtime integrity${full ? ', dev/preview, hydration/navigation' : ', dev HTTP'}${framework === 'react' ? ', Node target' : ''}`,
         );
       } catch (error) {
         failures.push({ fixture: label, error: String(error.stack ?? error) });
