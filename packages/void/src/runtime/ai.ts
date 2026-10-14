@@ -431,7 +431,11 @@ async function providerRequestBody(
   };
 }
 
-type ProxySend = (action: string, payload: Record<string, unknown>) => Promise<Response>;
+type ProxySend = (
+  action: string,
+  payload: Record<string, unknown>,
+  signal?: AbortSignal | null,
+) => Promise<Response>;
 
 /** Backend for the Void platform proxy, reached by service binding or HTTPS. */
 function makeProxyBackend(send: ProxySend, runtimeEnv: RuntimeEnv): AiBackend {
@@ -440,7 +444,14 @@ function makeProxyBackend(send: ProxySend, runtimeEnv: RuntimeEnv): AiBackend {
     payload: Record<string, unknown>,
     options: { throwOnError?: boolean } = {},
   ): Promise<Response> {
-    const res = await send(action, payload);
+    let signal: AbortSignal | undefined;
+    if (typeof payload.options === 'object' && payload.options !== null) {
+      // AbortSignal is request-local state, not a serializable binding option.
+      const { signal: bindingSignal, ...wireOptions } = payload.options as AiOptions;
+      signal = bindingSignal;
+      payload = { ...payload, options: wireOptions };
+    }
+    const res = await send(action, payload, signal);
     const limit = await limitFromResponse(res, 'ai');
     if (limit) {
       throw limit;
@@ -483,9 +494,10 @@ function makeProxyBackend(send: ProxySend, runtimeEnv: RuntimeEnv): AiBackend {
 
 function makeServiceBindingBackend(proxy: Fetcher, runtimeEnv: RuntimeEnv): AiBackend {
   return makeProxyBackend(
-    (action, payload) =>
+    (action, payload, signal) =>
       proxy.fetch(`https://ai-proxy/ai/${action}`, {
         method: 'POST',
+        signal,
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           action,
@@ -507,9 +519,10 @@ function makeHttpBackend(token: string, projectId: string, runtimeEnv: RuntimeEn
   };
 
   return makeProxyBackend(
-    (action, payload) =>
+    (action, payload, signal) =>
       fetch(`${base}/${action}`, {
         method: 'POST',
+        signal,
         headers,
         body: JSON.stringify({ action, ...payload, projectId }),
         redirect: 'manual',

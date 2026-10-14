@@ -18,6 +18,58 @@ function makeDirectAi(
 }
 
 describe('runtime ai', () => {
+  it.each(['http', 'service'] as const)(
+    'keeps cancellation on the %s transport instead of serializing it as a binding option',
+    async (transport) => {
+      vi.resetModules();
+      const { envContext } = await import('../../src/runtime/env-raw.ts');
+      const { ai } = await import('../../src/runtime/ai.ts');
+      const controller = new AbortController();
+      const request = vi.fn(async (_url: string, init: RequestInit) => {
+        expect(init.signal).toBe(controller.signal);
+        expect(JSON.parse(init.body as string).options).toEqual({ returnRawResponse: true });
+        return new Response(
+          new ReadableStream({
+            start(stream) {
+              init.signal!.addEventListener('abort', () => stream.error(init.signal!.reason));
+            },
+          }),
+        );
+      });
+      vi.stubGlobal('fetch', request);
+      const env =
+        transport === 'service'
+          ? {
+              __VOID_PROXY: { fetch: request },
+              __PROJECT_ID: 'project',
+              __VOID_PROXY_TOKEN: 'token',
+            }
+          : {
+              __VOID_TOKEN: 'token',
+              __VOID_PROJECT_ID: 'project',
+              __VOID_PROXY_URL: 'https://proxy.test',
+            };
+      await envContext.run(env, async () => {
+        const stream = (await ai.run(
+          'model',
+          { stream: true },
+          {
+            returnRawResponse: true,
+            signal: controller.signal,
+          },
+        )) as ReadableStream;
+        const reader = stream.getReader();
+        const reading = reader.read();
+        const reason = new Error('Turn cancelled');
+        controller.abort(reason);
+        const terminal = await reading;
+        expect(new TextDecoder().decode(terminal.value)).toContain('event: void:error');
+        expect(await reader.read()).toEqual({ done: true, value: undefined });
+      });
+      expect(request).toHaveBeenCalledOnce();
+    },
+  );
+
   it('rejects missing proxy metadata without sending credentials', async () => {
     vi.resetModules();
     const { envContext } = await import('../../src/runtime/env-raw.ts');
