@@ -1868,11 +1868,62 @@ jobs:
           expect.stringContaining('export default defineNuxtConfig'),
           'Manual Nuxt config step',
         );
+        // Without the preset Nuxt builds a Node server; without the dev config, dev has no env;
+        // without the top-level alias, `nuxi typecheck` cannot find `@schema`.
+        const nuxtNote = mockNote.mock.calls.find(
+          ([, title]) => title === 'Manual Nuxt config step',
+        );
+        for (const line of [
+          'import { resolve } from "node:path";',
+          '  alias: {\n    "@schema": resolve(import.meta.dirname, "db/schema.ts"),\n  },\n  nitro: {',
+          'preset: "cloudflare-module",',
+          'modules: ["void/nitro"],',
+          'cloudflare: { dev: { configPath: "./.void-wrangler.jsonc" } },',
+        ]) {
+          expect(nuxtNote?.[0]).toContain(line);
+        }
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
     },
   );
+
+  it('prints an Analog-specific manual config step with the Nitro module', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-'));
+    try {
+      writeFileSync(
+        join(root, 'package.json'),
+        JSON.stringify(
+          {
+            name: 'existing-analog-app',
+            private: true,
+            devDependencies: { '@analogjs/platform': '^2.8.0' },
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+      mockSelect.mockResolvedValueOnce('none');
+      mockConfirm.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+
+      await runInitCommand(root);
+
+      expect(existsSync(join(root, 'vite.config.ts'))).toBe(false);
+      const analogNote = mockNote.mock.calls.find(
+        ([, title]) => title === 'Manual Analog config step',
+      );
+      for (const line of [
+        'Install `nitro-cloudflare-dev` as a dev dependency.',
+        'preset: "cloudflare-module",',
+        'modules: ["nitro-cloudflare-dev", "void/nitro"],',
+        'cloudflareDev: { configPath: "./.void-wrangler.jsonc" },',
+      ]) {
+        expect(analogNote?.[0]).toContain(line);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 
   it('adds voidPlugin to an existing Vite plugins array without replacing scripts', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));

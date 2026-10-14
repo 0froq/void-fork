@@ -1,4 +1,6 @@
-import { type Plugin } from 'vite';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'pathslash';
+import { defaultServerConditions, type Plugin } from 'vite';
 import { type ApplicationAnalysis } from './application-analysis.ts';
 import {
   ensureWranglerCompat,
@@ -9,6 +11,7 @@ import {
   syncWranglerBindings,
 } from './cli/wrangler.ts';
 import { readConfig } from './config.ts';
+import { findDependencyClosure, findVoidDependentPackages } from './installed-packages.ts';
 import { resolveLocalD1Target } from './local-d1.ts';
 import { voidLog } from './log.ts';
 import { bindingRuntimePlugin } from './plugin-binding-runtime.ts';
@@ -26,8 +29,19 @@ import {
   nitroDevTriggerInjectPlugin,
 } from './plugin-framework-triggers.ts';
 import { migrationPlugin } from './plugin-migration.ts';
-import { createCloudflareBuiltinsExternalPlugin } from './plugin-worker-environment.ts';
-import { injectSvelteKitHooks } from './sveltekit-hooks-transform.ts';
+import {
+  createBareVoidRedirectPlugin,
+  createCloudflareBuiltinsExternalPlugin,
+} from './plugin-worker-environment.ts';
+import { injectSvelteKitBuildHooks, injectSvelteKitHooks } from './sveltekit-hooks-transform.ts';
+
+const handlerFile = fileURLToPath(import.meta.resolve('#self/handler'));
+const envModuleFile = fileURLToPath(import.meta.resolve('#self/_env'));
+// Packages Void depends on are installed for code in this directory.
+const voidDir = dirname(fileURLToPath(import.meta.url));
+
+const ASTRO_SERVER_ENTRY = '@astrojs/cloudflare/entrypoints/server';
+const ASTRO_SCOPED_SERVER_ENTRY = '\0void:astro-server-entry';
 
 export function createFrameworkPlugins(input: {
   readonly localD1: ReturnType<typeof resolveLocalD1Target>;
@@ -180,6 +194,36 @@ export function createFrameworkPlugins(input: {
   const svelteKitHooksInjectPlugin: Plugin = {
     name: 'void:sveltekit-hooks-inject',
     apply: 'serve',
+    config() {
+      if (detected.class !== 'b') {
+        return;
+      }
+      // Kit's dev server runs server code in Vite's Node SSR graph. That graph
+      // externalizes a bare import resolving into node_modules before any plugin
+      // sees it, so an installed void/db would load the package's D1 runtime
+      // instead of the virtual module. Inlining keeps every void import, including
+      // the injected env import below and those of PostgreSQL and MySQL apps'
+      // installed packages that import void, in the graph that holds void/db's env
+      // module. In a D1 app, a package's own void/db reads the same D1 binding, so
+      // those packages stay with Node.
+      return {
+        ssr: {
+          noExternal: ['void', ...(dialect === 'sqlite' ? [] : findVoidDependentPackages(root))],
+        },
+      };
+    },
+    resolveId: {
+      order: 'pre',
+      filter: { id: /^void$/ },
+      handler() {
+        if (detected.class !== 'b' || this.environment?.name === 'client') {
+          return;
+        }
+        // Inlined, the package entry would load the whole Vite plugin into Kit's module
+        // runner. Server code gets the lightweight handler subpath, as in Void apps.
+        return handlerFile;
+      },
+    },
     transform(code, id) {
       if (detected.class !== 'b') {
         return;
@@ -194,14 +238,111 @@ export function createFrameworkPlugins(input: {
     },
   };
 
+  // Astro's Cloudflare adapter owns the Worker entry. For PostgreSQL and MySQL, its default
+  // entry runs each request inside Void's request scope (`withRuntimeEnv`), as the Class A
+  // wrapper does, so void/db keeps one client per request instead of one per query. D1 apps
+  // keep Astro's own entry: in a request scope, void/db reads D1 through a replica-capable
+  // session instead of the primary.
+  const astroRequestScopePlugin: Plugin | undefined =
+    detected.name === 'astro' && dialect !== 'sqlite'
+      ? {
+          name: 'void:astro-request-scope',
+          enforce: 'pre',
+          resolveId: {
+            filter: { id: /^@astrojs\/cloudflare\/entrypoints\/server(?:\.js)?$/ },
+            handler(_id, importer) {
+              if (importer === ASTRO_SCOPED_SERVER_ENTRY || this.environment?.name === 'client') {
+                return;
+              }
+              return ASTRO_SCOPED_SERVER_ENTRY;
+            },
+          },
+          load: {
+            // oxlint-disable-next-line no-control-regex -- \0 prefix is Vite's virtual module convention
+            filter: { id: /^\0void:astro-server-entry$/ },
+            handler() {
+              return `import original from ${JSON.stringify(ASTRO_SERVER_ENTRY)};
+import { withRuntimeEnv } from ${JSON.stringify(envModuleFile)};
+export * from ${JSON.stringify(ASTRO_SERVER_ENTRY)};
+
+export default {
+  ...original,
+  fetch(request, env, ctx) {
+    return withRuntimeEnv(env, () => original.fetch(request, env, ctx));
+  },
+};
+`;
+            },
+          },
+        }
+      : undefined;
+
+  // SvelteKit builds its server in Vite's Node `ssr` environment, and the adapter's Worker runs
+  // that output as it is. For PostgreSQL and MySQL, void/db's driver then fails in workerd: pg
+  // loads pg-cloudflare's Node stub, and CommonJS requires of Node built-ins become
+  // `createRequire(import.meta.url)`. A driver that Vite can resolve from the app root (npm, Yarn
+  // and Bun installs, or an app that lists it) even stays external, and Void's browser-target
+  // packaging bundles it with browser stubs. Build void/db as the Cloudflare plugin builds
+  // Workers: void, drizzle-orm, the driver with every package it depends on, and installed
+  // packages that import void. Other dependencies stay external, as in Kit's own build: Kit's
+  // analyse step loads this output in Node, and a package's `workerd` build may import
+  // `cloudflare:` modules (capnweb does). Run each request in Void's request scope, as in dev, so
+  // void/db keeps one client per request. D1 apps keep Kit's output: in a request scope, void/db
+  // reads D1 through a replica-capable session instead of the primary.
+  const svelteKitWorkerBuildPlugin: Plugin | undefined =
+    detected.class === 'b' && dialect !== 'sqlite'
+      ? {
+          name: 'void:sveltekit-worker-build',
+          apply: 'build',
+          enforce: 'pre',
+          configEnvironment(name, environment) {
+            if (name !== 'ssr') {
+              return;
+            }
+            return {
+              resolve: {
+                conditions: environment.resolve?.conditions
+                  ? ['workerd', 'worker']
+                  : ['workerd', 'worker', ...defaultServerConditions],
+                noExternal: [
+                  'void',
+                  // By name as well: a Yarn PnP install has no node_modules to read. The
+                  // driver's own dependencies then resolve only through it, so they are bundled.
+                  'drizzle-orm',
+                  dialect === 'mysql' ? 'mysql2' : 'pg',
+                  ...findDependencyClosure('drizzle-orm', voidDir),
+                  ...findDependencyClosure(dialect === 'mysql' ? 'mysql2' : 'pg', voidDir),
+                  ...findVoidDependentPackages(root),
+                ],
+              },
+              // Node output binds `require` at load with createRequire(import.meta.url). Neutral
+              // output throws only when a require runs, as for mysql2's optional `cardinal`.
+              build: { rolldownOptions: { platform: 'neutral' } },
+            };
+          },
+          transform(code, id) {
+            if (
+              !id.includes('.svelte-kit/generated/server/internal') &&
+              !id.includes('.svelte-kit/generated/build/server.js')
+            ) {
+              return;
+            }
+            return injectSvelteKitBuildHooks(code, id, envModuleFile);
+          },
+        }
+      : undefined;
+
   return [
     devTriggerSecretGuardPlugin(),
     createCloudflareBuiltinsExternalPlugin(),
     wranglerCompatPlugin,
     wranglerSyncPlugin,
     ...(nuxtVite8WebSocketCompatPlugin ? [nuxtVite8WebSocketCompatPlugin] : []),
+    ...(astroRequestScopePlugin ? [astroRequestScopePlugin] : []),
     svelteKitHooksInjectPlugin,
+    ...(svelteKitWorkerBuildPlugin ? [svelteKitWorkerBuildPlugin] : []),
     clientStubsPlugin,
+    // Also serves the Node built-ins that the driver requires in SvelteKit's workerd build.
     serverRuntimeOptimizerPlugin,
     bindingRuntimePlugin(bindingNames),
     // Framework-agnostic env DX: typegen, client leak guard, and build-time
@@ -217,6 +358,7 @@ export function createFrameworkPlugins(input: {
       forceVirtualDb: bindingNames?.d1 !== undefined,
       localD1DatabaseId: localD1.databaseId,
       localD1PersistRoot: frameworkPersistRoot,
+      nitroBundlesServer: detected.name === 'nuxt' || detected.name === 'analog',
     }),
     migrationPlugin(root, dialect, localD1.databaseId, frameworkPersistRoot, {
       enabled: false,
@@ -227,7 +369,10 @@ export function createFrameworkPlugins(input: {
       ? [nitroDevTriggerInjectPlugin(root, { serverDir: 'server' })]
       : []),
     ...(detected.name === 'analog' ? [analogDevTriggerInjectPlugin(root)] : []),
-    ...(detected.name === 'astro' ? [astroDevTriggerInjectPlugin(root)] : []),
+    // Astro runs its server code, the dev cron and queue dispatch included, in workerd.
+    ...(detected.name === 'astro'
+      ? [createBareVoidRedirectPlugin(), astroDevTriggerInjectPlugin(root)]
+      : []),
     implicitDeployGuard,
   ];
 }

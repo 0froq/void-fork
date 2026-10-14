@@ -234,10 +234,6 @@ const usersWithPosts = await db.query.users.findMany({
 });
 ```
 
-::: warning ⚠️ Nuxt and Analog limitations
-In Nuxt and Analog, use the query builder (`db.select().from(table)`). The `db.query.*` relational API is not available in these frameworks.
-:::
-
 ## Seeding
 
 Use `void db seed` to reset your local database, re-apply migrations, and then run a seed file.
@@ -376,7 +372,7 @@ To keep an existing migration history:
 
 Review and commit the metadata, then run `void deploy` again. If no database has applied the SQL yet, you can instead replace it with migrations from `void db generate`.
 
-For D1 migrations containing triggers, add a `--> statement-breakpoint` line after each complete SQL statement, including the trigger's closing `END;`. Keep the trigger body together.
+For D1 migrations containing triggers, and MySQL migrations containing triggers, procedures, functions or events, add a `--> statement-breakpoint` line after each complete SQL statement, including the trigger's closing `END;`. Keep the trigger body together.
 
 ## Scaffolding
 

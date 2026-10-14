@@ -119,7 +119,9 @@ export async function migrateCloudflareWorker(input: {
   let appliedMigrations = 0;
 
   // Cloudflare never returns the Hyperdrive password, so the deploy environment provides the
-  // production URL. The runners record applied names, so retries are idempotent.
+  // production URL. A rerun skips migrations already recorded as finished. A failed PostgreSQL
+  // file rolls back. A failed MySQL file rolls back its data changes, but MySQL commits DDL on
+  // its own, so earlier statements of that file can stay applied.
   if (dialect !== 'sqlite' && migrations.length > 0) {
     const mysql = dialect === 'mysql';
     const label = mysql ? 'MySQL' : 'PostgreSQL';
