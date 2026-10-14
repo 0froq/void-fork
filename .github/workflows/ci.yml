@@ -33,6 +33,7 @@ jobs:
       # Build every playground once per OS for complete build/type coverage.
       # Integration tests build their own selected fixtures in separate checkouts.
       - run: vp run build:all
+      - run: vp run build:docs
       - run: node test/check-playground-build-artifacts.mjs
       - run: vp run check
 
