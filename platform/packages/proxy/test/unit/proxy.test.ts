@@ -1400,6 +1400,29 @@ describe('proxy worker', () => {
   });
 
   describe('AI: /ai/run', () => {
+    it('replaces a serialized signal with native request cancellation', async () => {
+      const env = createEnv();
+      const controller = new AbortController();
+      const request = new Request(
+        post('/ai/run', {
+          model: 'm',
+          inputs: {},
+          options: { signal: {}, returnRawResponse: true },
+          projectId: 'proj_000000000042',
+          aiToken: aiTokens['proj_000000000042'],
+        }),
+        { signal: controller.signal },
+      );
+      const res = await worker.fetch(request, env);
+      expect(res.status).toBe(200);
+      const options = env.AI.run.mock.calls[0]![2];
+      expect(options.returnRawResponse).toBe(true);
+      expect(options.signal).toBe(request.signal);
+      expect(options.signal.aborted).toBe(false);
+      controller.abort();
+      expect(options.signal.aborted).toBe(true);
+    });
+
     it('calls AI.run with model, inputs, and gateway metadata', async () => {
       const env = createEnv();
       const res = await worker.fetch(
@@ -1418,6 +1441,7 @@ describe('proxy worker', () => {
         '@cf/meta/llama-3-8b-instruct',
         { prompt: 'hi' },
         {
+          signal: expect.any(AbortSignal),
           max_tokens: 100,
           gateway: { id: 'void', metadata: { projectId: usageTags['proj_000000000042'] } },
         },
@@ -1440,6 +1464,7 @@ describe('proxy worker', () => {
         'm',
         {},
         {
+          signal: expect.any(AbortSignal),
           gateway: { id: 'void-team', metadata: { projectId: usageTags['proj_000000000042'] } },
         },
       );
@@ -1469,6 +1494,7 @@ describe('proxy worker', () => {
         'm',
         { prompt: 'hi' },
         {
+          signal: expect.any(AbortSignal),
           gateway: {
             id: 'void',
             skipCache: true,
@@ -1523,6 +1549,7 @@ describe('proxy worker', () => {
         'm',
         {},
         {
+          signal: expect.any(AbortSignal),
           gateway: {
             id: 'void',
             eventId: 'event-1',
@@ -1550,6 +1577,7 @@ describe('proxy worker', () => {
         'm',
         {},
         {
+          signal: expect.any(AbortSignal),
           gateway: {
             id: 'void',
             cacheKey: 'proj_000000000042:k',
@@ -1675,6 +1703,7 @@ describe('proxy worker', () => {
         'm',
         {},
         {
+          signal: expect.any(AbortSignal),
           gateway: { id: 'void', metadata: { projectId: usageTags['proj_000000000099'] } },
         },
       );

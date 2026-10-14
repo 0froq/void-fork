@@ -205,7 +205,9 @@ function gatewayOptions(
   usageTag: string,
   gatewayId: string,
 ): Record<string, unknown> {
-  const options = asRecord(value);
+  // JSON cannot carry cancellation state. Never pass a serialized signal to
+  // a native binding, including when an older SDK still sends the field.
+  const options = withoutKeys(asRecord(value), (key) => key === 'signal');
   const gateway = withoutKeys(asRecord(options.gateway), (key) => PLATFORM_GATEWAY_KEYS.has(key));
   if (typeof gateway.cacheKey === 'string') {
     gateway.cacheKey = projectCacheKey(projectId, gateway.cacheKey);
@@ -405,7 +407,10 @@ ai.post('/run', async (context) => {
   );
 
   try {
-    const result = await context.env.AI.run(model, body.inputs, options);
+    const result = await context.env.AI.run(model, body.inputs, {
+      ...options,
+      signal: context.req.raw.signal,
+    });
     return responseFromAiResult(result, hasStreamFlag(body.inputs) && body.inputs.stream === true);
   } catch (err) {
     const message = messageFromThrown(err);
