@@ -91,7 +91,7 @@ body {
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .void-admin-shell :is(button, .astryx-button):not(:disabled):not([aria-disabled='true']) {
+  .void-admin-shell .astryx-button:not(:disabled):not([aria-disabled='true']) {
     transform: scale(1);
     transition:
       background-color 160ms ease,
@@ -103,14 +103,42 @@ body {
   }
 
   @media (hover: hover) {
-    .void-admin-shell :is(button, .astryx-button):not(:disabled):not([aria-disabled='true']):hover {
+    .void-admin-shell .astryx-button:not(:disabled):not([aria-disabled='true']):hover {
       transform: scale(1.05);
     }
   }
 
-  .void-admin-shell :is(button, .astryx-button):not(:disabled):not([aria-disabled='true']):active {
+  .void-admin-shell .astryx-button:not(:disabled):not([aria-disabled='true']):active {
     transform: scale(0.95);
   }
+}
+
+.void-admin-disclosure > .astryx-collapsible-trigger {
+  min-height: 40px;
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 0;
+  border-radius: var(--radius-element);
+  background: var(--color-background-muted);
+  font-size: var(--text-body-size);
+  justify-content: flex-start;
+  transition: background-color 160ms ease;
+}
+.void-admin-disclosure > .astryx-collapsible-trigger:hover {
+  background: var(--color-overlay-pressed);
+}
+.void-admin-disclosure > .astryx-collapsible-trigger:active {
+  background: var(--color-overlay-pressed);
+}
+.void-admin-disclosure > .astryx-collapsible-content {
+  padding-block-start: var(--spacing-4);
+}
+.void-admin-disclosure pre {
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-element);
+  background: var(--color-background-surface);
+  font-size: var(--text-supporting-size);
+  overflow-wrap: anywhere;
 }
 
 .void-admin-brand {

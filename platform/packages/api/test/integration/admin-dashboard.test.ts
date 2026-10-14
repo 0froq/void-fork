@@ -2784,7 +2784,94 @@ describe('GET /admin/deployments/:id', () => {
     expect(html).toContain('sync');
     expect(html).toContain('0 * * * *');
     expect(html).toContain('Raw JSON');
-  });
+
+    const client = await readFile(
+      new URL('../../dist/admin-assets/admin/client.js', import.meta.url),
+    );
+    const css = await readFile(new URL('../../dist/admin-assets/admin/style.css', import.meta.url));
+    const browser = await chromium.launch();
+    try {
+      for (const width of [1280, 390]) {
+        const context = await browser.newContext({
+          viewport: { width, height: 844 },
+          reducedMotion: 'no-preference',
+        });
+        await context.addCookies([
+          { name: 'admin_token', value: admin.adminJwt, url: 'http://localhost' },
+        ]);
+        const page = await context.newPage();
+        page.setDefaultTimeout(5000);
+        const errors: Array<string> = [];
+        page.on('pageerror', (error) => errors.push(error.message));
+        await page.route('**/*', async (route) => {
+          const incoming = route.request();
+          const url = new URL(incoming.url());
+          if (url.origin !== 'http://localhost') {
+            return route.abort();
+          }
+          if (url.pathname === '/admin/client.js' || url.pathname === '/admin/style.css') {
+            return route.fulfill({
+              contentType: url.pathname.endsWith('.js') ? 'text/javascript' : 'text/css',
+              body: url.pathname.endsWith('.js') ? client : css,
+            });
+          }
+          const response = await app.fetch(
+            new Request(incoming.url(), {
+              method: incoming.method(),
+              headers: await incoming.allHeaders(),
+              ...(incoming.method() === 'POST' ? { body: incoming.postData() ?? '' } : {}),
+            }),
+            { ...env, DEV_AUTH_BYPASS: 'true' },
+          );
+          await route.fulfill({
+            status: response.status,
+            headers: Object.fromEntries(response.headers),
+            body: Buffer.from(await response.arrayBuffer()),
+          });
+        });
+        await page.goto(`http://localhost/admin/deployments/${id}`);
+        await page.locator('[data-hydrated="true"]').waitFor();
+        const card = page
+          .locator('.void-admin-card')
+          .filter({ has: page.getByRole('heading', { name: 'Manifest', exact: true }) });
+        const heading = (await card
+          .getByRole('heading', { name: 'Manifest', exact: true })
+          .boundingBox())!;
+        const kv = (await card.locator('th').filter({ hasText: /^KV$/ }).boundingBox())!;
+        expect(kv.y).toBeGreaterThan(heading.y + heading.height);
+        const table = (await card
+          .getByRole('group', { name: 'Table', exact: true })
+          .boundingBox())!;
+        expect(kv.y).toBeGreaterThanOrEqual(table.y);
+        expect(kv.y + kv.height).toBeLessThanOrEqual(table.y + table.height);
+        const trigger = card.getByRole('button', { name: 'Raw JSON', exact: true });
+        expect(await trigger.getAttribute('aria-expanded')).toBe('false');
+        const triggerBox = (await trigger.boundingBox())!;
+        expect(triggerBox.y - (table.y + table.height)).toBeCloseTo(16, 0);
+        const json = card.locator('pre');
+        expect(await json.isVisible()).toBe(false);
+        await trigger.hover();
+        expect(await trigger.evaluate((button) => getComputedStyle(button).transform)).toBe('none');
+        await page.mouse.down();
+        expect(await trigger.evaluate((button) => getComputedStyle(button).transform)).toBe('none');
+        await page.mouse.up();
+        await json.waitFor({ state: 'visible' });
+        expect(await trigger.getAttribute('aria-expanded')).toBe('true');
+        expect(await json.textContent()).toBe(JSON.stringify(JSON.parse(manifest), null, 2));
+        await trigger.focus();
+        await trigger.press('Enter');
+        await json.waitFor({ state: 'hidden' });
+        expect(await trigger.getAttribute('aria-expanded')).toBe('false');
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+        expect(errors).toEqual([]);
+        await context.close();
+      }
+    } finally {
+      await browser.close();
+    }
+  }, 30_000);
 
   test('returns 404 for unknown deployment', async () => {
     const admin = await createTestUser(env.db, 'admin13', 'github', undefined, 'free', 'admin');

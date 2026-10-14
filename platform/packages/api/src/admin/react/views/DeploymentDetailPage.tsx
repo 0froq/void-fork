@@ -1,7 +1,6 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 
 import { Button } from '@astryxdesign/core/Button';
-import { Collapsible } from '@astryxdesign/core/Collapsible';
 import { Table, TableBody, TableCell, TableHeaderCell, TableRow } from '@astryxdesign/core/Table';
 import { useRequest, useView } from 'react-fate';
 import type { DeployManifest } from '../../../types.ts';
@@ -9,6 +8,7 @@ import { DeploymentDetailView, deploymentDetailRequest } from '../../fate/views.
 import { type AdminPageProps } from '../page-utils.ts';
 import { CopyButton } from './CopyButton.tsx';
 import { DeploymentLogs } from './DeploymentLogs.tsx';
+import { DeploymentManifestCard } from './DeploymentManifestCard.tsx';
 import { displayStatus } from './DeploymentTable.tsx';
 import { formatDateTime } from './format.ts';
 import { Layout } from './Layout.tsx';
@@ -105,71 +105,10 @@ export function DeploymentDetailPage({ path, platformName, username }: AdminPage
             <TableHeaderCell />
             <TableCell />
           </TableRow>
-          {manifest && (
-            <TableRow>
-              <TableCell colSpan={4} style={{ padding: 0 }}>
-                <Collapsible trigger="Manifest">
-                  <div style="padding: 0 8px 8px">
-                    <Table style={{ margin: 0 }}>
-                      <TableBody>
-                        {manifest.bindings &&
-                          Object.entries(manifest.bindings).map(([type, value]) =>
-                            Array.isArray(value) && value.length > 0 ? (
-                              <TableRow key={type}>
-                                <TableHeaderCell>{type.toUpperCase()}</TableHeaderCell>
-                                <TableCell>
-                                  {value.map((n: string, i: number) => (
-                                    <span key={n}>
-                                      {i > 0 && ', '}
-                                      <code>{n}</code>
-                                    </span>
-                                  ))}
-                                </TableCell>
-                              </TableRow>
-                            ) : value === true ? (
-                              <TableRow key={type}>
-                                <TableHeaderCell>{type.toUpperCase()}</TableHeaderCell>
-                                <TableCell>enabled</TableCell>
-                              </TableRow>
-                            ) : null,
-                          )}
-                        {manifest.migrations && (
-                          <TableRow>
-                            <TableHeaderCell>Migrations</TableHeaderCell>
-                            <TableCell>
-                              {manifest.migrations.dialect} — {manifest.migrations.pending} pending
-                            </TableCell>
-                          </TableRow>
-                        )}
-                        {manifest.schedules && manifest.schedules.length > 0 && (
-                          <TableRow>
-                            <TableHeaderCell>Schedules</TableHeaderCell>
-                            <TableCell>
-                              {manifest.schedules.map((s, i) => (
-                                <span key={s.name}>
-                                  {i > 0 && ', '}
-                                  {s.name}: {s.cron}
-                                </span>
-                              ))}
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                    {deployment.manifest && (
-                      <Collapsible trigger="Raw JSON">
-                        <pre style="margin-top: 8px; font-size: 0.8rem">
-                          {JSON.stringify(JSON.parse(deployment.manifest), null, 2)}
-                        </pre>
-                      </Collapsible>
-                    )}
-                  </div>
-                </Collapsible>
-              </TableCell>
-            </TableRow>
-          )}
         </TableBody>
       </Table>
+
+      {manifest && <DeploymentManifestCard manifest={manifest} />}
 
       {deployment.status === 'live' && project && <DeploymentLogs deploymentId={deployment.id} />}
     </Layout>
