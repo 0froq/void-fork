@@ -132,12 +132,13 @@ body {
 .void-admin-disclosure > .astryx-collapsible-content {
   padding-block-start: var(--spacing-4);
 }
-.void-admin-disclosure pre {
+.void-admin-code-block {
   margin: 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-element);
   background: var(--color-background-surface);
   font-size: var(--text-supporting-size);
+  line-height: 1.6;
   overflow-wrap: anywhere;
 }
 

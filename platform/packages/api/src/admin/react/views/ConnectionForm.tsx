@@ -2,6 +2,7 @@
 
 import { Button } from '@astryxdesign/core/Button';
 import type { PlatformLoginConfiguration } from '@void/platform';
+import { CodeBlock } from './CodeBlock.tsx';
 import { FormTextInput } from './FormControls.tsx';
 import { SectionStack } from './SectionStack.tsx';
 const HOME = '/admin/config/auth';
@@ -28,7 +29,7 @@ export function ConnectionForm({
       <input type="hidden" name="kind" value={configuration.kind} />
       <input type="hidden" name="revision" value={revision ?? ''} />
       <p>Register this callback URL with the provider:</p>
-      <pre>{callbackUrl}</pre>
+      <CodeBlock code={callbackUrl} />
       <FormTextInput
         label="Connection ID"
         name="connectionId"

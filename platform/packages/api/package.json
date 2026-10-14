@@ -50,6 +50,7 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-fate": "catalog:",
+    "shiki": "catalog:",
     "void": "workspace:*"
   },
   "devDependencies": {

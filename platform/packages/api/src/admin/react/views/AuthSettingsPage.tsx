@@ -8,6 +8,7 @@ import { useRequest, useView } from 'react-fate';
 import { AuthSettingsView, authSettingsRequest } from '../../fate/views.ts';
 import { type AdminPageProps } from '../page-utils.ts';
 import { AdminCard } from './AdminCard.tsx';
+import { CodeBlock } from './CodeBlock.tsx';
 import { Layout } from './Layout.tsx';
 import { PageStack } from './PageStack.tsx';
 import { SectionStack } from './SectionStack.tsx';
@@ -59,11 +60,17 @@ export function AuthSettingsPage({ path, platformName, username }: AdminPageProp
                     installing CLI needs the installation's recovery credentials and Access setup
                     permission.
                   </p>
-                  <pre>void platform config auth protection enable --installation &lt;id&gt;</pre>
+                  <CodeBlock
+                    code="void platform config auth protection enable --installation <id>"
+                    language="shellscript"
+                  />
                 </AdminCard>
                 <AdminCard title="Disable Cloudflare Access" headingLevel={3}>
                   <p>First change any signup policy that relies on Access.</p>
-                  <pre>void platform config auth protection disable --installation &lt;id&gt;</pre>
+                  <CodeBlock
+                    code="void platform config auth protection disable --installation <id>"
+                    language="shellscript"
+                  />
                 </AdminCard>
               </div>
               <p>

@@ -4,6 +4,7 @@ import { Collapsible } from '@astryxdesign/core/Collapsible';
 import { Table, TableBody, TableCell, TableHeaderCell, TableRow } from '@astryxdesign/core/Table';
 import type { DeployManifest } from '../../../types.ts';
 import { AdminCard } from './AdminCard.tsx';
+import { CodeBlock } from './CodeBlock.tsx';
 
 export function DeploymentManifestCard({ manifest }: { manifest: DeployManifest }) {
   return (
@@ -60,7 +61,7 @@ export function DeploymentManifestCard({ manifest }: { manifest: DeployManifest 
         chevronPosition="start"
         defaultIsOpen={false}
       >
-        <pre>{JSON.stringify(manifest, null, 2)}</pre>
+        <CodeBlock code={JSON.stringify(manifest, null, 2)} language="json" />
       </Collapsible>
     </AdminCard>
   );

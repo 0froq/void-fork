@@ -255,6 +255,9 @@ catalogs:
     rolldown:
       specifier: ^1.2.13
       version: 1.2.13
+    shiki:
+      specifier: ^4.5.0
+      version: 4.5.0
     solid-js:
       specifier: ^1.9.17
       version: 1.9.17
@@ -899,6 +902,9 @@ importers:
       react-fate:
         specifier: 'catalog:'
         version: 1.7.7(@trpc/client@11.19.0(@trpc/server@11.19.0(typescript@7.0.2))(typescript@7.0.2))(@voidzero-dev/vite-plus-core@1.1.0(@types/node@26.6.4)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.6)(esbuild@0.28.2)(jiti@2.7.0)(sass-embedded@1.104.1)(sass@1.104.1)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(vue-tsc@3.3.6(typescript@7.0.2))(yaml@2.9.1))(drizzle-orm@0.45.4(@cloudflare/workers-types@5.20261014.1)(@electric-sql/pglite@0.5.9)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(kysely@0.29.2)(mysql2@3.24.6(@types/node@26.6.4))(pg@8.23.1))(graphql-sse@2.6.2(graphql@17.0.2))(graphql@17.0.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      shiki:
+        specifier: 'catalog:'
+        version: 4.5.0
       void:
         specifier: workspace:*
         version: link:../../../packages/void

@@ -2760,7 +2760,7 @@ describe('GET /admin/deployments/:id', () => {
     const n = ++manifestCounter;
     const id = `dpl_manifest${n}`;
     const manifest = JSON.stringify({
-      bindings: { d1: ['DB'], kv: ['CACHE'] },
+      bindings: { d1: ['DB'], kv: ['CACHE', '</code><script>alert("unsafe")</script>'] },
       migrations: { dialect: 'sqlite', pending: 1 },
       schedules: [{ name: 'sync', cron: '0 * * * *' }],
     });
@@ -2857,6 +2857,21 @@ describe('GET /admin/deployments/:id', () => {
         await page.mouse.up();
         await json.waitFor({ state: 'visible' });
         expect(await trigger.getAttribute('aria-expanded')).toBe('true');
+        expect(await json.textContent()).toBe(JSON.stringify(JSON.parse(manifest), null, 2));
+        await json.locator('code span').first().waitFor();
+        expect(await json.textContent()).toBe(JSON.stringify(JSON.parse(manifest), null, 2));
+        expect(await json.locator('script').count()).toBe(0);
+        const stringToken = json.locator('code span').filter({ hasText: /^"CACHE"$/ });
+        expect(await stringToken.evaluate((token) => getComputedStyle(token).color)).toBe(
+          'rgb(0, 163, 63)',
+        );
+        await page.emulateMedia({ colorScheme: 'dark' });
+        await page.waitForFunction(() => {
+          const token = Array.from(
+            document.querySelectorAll('.void-admin-code-block code span'),
+          ).find((span) => span.textContent === '"CACHE"');
+          return token && getComputedStyle(token).color === 'rgb(82, 206, 129)';
+        });
         expect(await json.textContent()).toBe(JSON.stringify(JSON.parse(manifest), null, 2));
         await trigger.focus();
         await trigger.press('Enter');

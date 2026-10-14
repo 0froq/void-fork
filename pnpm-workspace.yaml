@@ -59,6 +59,7 @@ catalog:
   rolldown: ^1.2.13
   solid-js: ^1.9.17
   svelte: ^5.57.2
+  shiki: ^4.5.0
 
 catalogs:
   angular:

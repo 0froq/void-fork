@@ -1,7 +1,12 @@
 import { startReactPages } from '@void/react/pages-client';
 import { AdminNavigationFallback } from './AdminNavigationFallback.tsx';
+import { configureCodeHighlighting } from './code-highlighting.ts';
 import { adminComponents, adminLayoutTree, matchAdminRoute } from './pages.ts';
 import './styles.css';
+
+configureCodeHighlighting(() =>
+  import('./code-highlighter.ts').then((module) => module.highlightCode),
+);
 
 void startReactPages({
   components: adminComponents,
