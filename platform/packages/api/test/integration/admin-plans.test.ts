@@ -188,7 +188,11 @@ describe('administrator plan dashboard', () => {
       limits: { requestsPerMonth: 1000 },
     });
     expect((await readPlanCatalog(env.db)).revision).toBe(0);
-    expect((await apply(proposed)).status).toBe(200);
+    const saved = await apply(proposed);
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get('Location')).toBe(`${home}/free/edit?notice=plan-saved&revision=1`);
+    const updated = await request(saved.headers.get('Location')!);
+    expect(await updated.text()).toContain('Edit Starter');
     expect((await apply(proposed)).status).toBe(409);
     expect(
       (
@@ -216,7 +220,7 @@ describe('administrator plan dashboard', () => {
     expect((await readPlanCatalog(env.db)).revision).toBe(1);
     expect(await env.db.select().from(operatorEvents)).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ status: 'success', http_status: 200 }),
+        expect.objectContaining({ status: 'success', http_status: 303 }),
         expect.objectContaining({ status: 'failed', http_status: 409 }),
       ]),
     );
@@ -224,13 +228,13 @@ describe('administrator plan dashboard', () => {
 
   test('adds reserved-looking IDs, defaults, archives, restores, resets and removes with account replacement', async () => {
     const add = await preview('add', 'new', { name: 'New plan', copyFrom: 'pro' });
-    expect((await apply(add)).status).toBe(200);
+    expect((await apply(add)).status).toBe(303);
     expect(await (await request(`${home}/new/edit`)).text()).toContain('Edit New plan');
-    expect((await apply(await preview('default', 'new'))).status).toBe(200);
+    expect((await apply(await preview('default', 'new'))).status).toBe(303);
     expect((await readPlanCatalog(env.db)).defaultPlanId).toBe('new');
-    expect((await apply(await preview('default', 'free'))).status).toBe(200);
-    expect((await apply(await preview('archive', 'new', { archived: 'true' }))).status).toBe(200);
-    expect((await apply(await preview('archive', 'new', { archived: 'false' }))).status).toBe(200);
+    expect((await apply(await preview('default', 'free'))).status).toBe(303);
+    expect((await apply(await preview('archive', 'new', { archived: 'true' }))).status).toBe(303);
+    expect((await apply(await preview('archive', 'new', { archived: 'false' }))).status).toBe(303);
     const account = await createTestUser(env.db, 'assigned', 'github', undefined, 'new');
     const original = (await env.db.select().from(users).where(eq(users.id, account.id)))[0]!;
     expect(
@@ -244,13 +248,17 @@ describe('administrator plan dashboard', () => {
     ).toBe(409);
     const remove = await preview('remove', 'new', { replacementPlanId: 'pro' });
     expect(remove.affectedAccounts).toBe(1);
-    expect((await apply(remove)).status).toBe(200);
+    const removed = await apply(remove);
+    expect(removed.status).toBe(303);
+    expect(removed.headers.get('Location')).toBe(
+      `${home}?notice=plan-removed&revision=${remove.expectedRevision + 1}`,
+    );
     expect((await env.db.select().from(users).where(eq(users.id, account.id)))[0]).toMatchObject({
       plan: 'pro',
       billing_cycle_start: original.billing_cycle_start,
     });
     expect(reevaluated).toContain(account.id);
-    expect((await apply(await preview('reset', 'free'))).status).toBe(200);
+    expect((await apply(await preview('reset', 'free'))).status).toBe(303);
   });
 
   test('saves interrupted propagation, exposes pending work and resumes through the JSON endpoint', async () => {
@@ -262,7 +270,12 @@ describe('administrator plan dashboard', () => {
     });
     const result = await apply(change);
     expect(await result.json()).toMatchObject({
-      props: { initial: { complete: false, error: expect.any(String), processed: 0, revision: 1 } },
+      component: 'planProgress',
+      props: {
+        initial: { complete: false, error: expect.any(String), processed: 0, revision: 1 },
+        target: 'free',
+        returnTo: `${home}/free/edit?notice=plan-saved&revision=1`,
+      },
     });
     expect(await (await request(home)).text()).toContain('Continue account updates');
     expect(await (await request(`${home}/free/edit`)).text()).not.toContain('Review changes');
@@ -283,6 +296,9 @@ describe('administrator plan dashboard', () => {
       error: null,
     });
     expect((await readPlanCatalog(env.db)).reconciliation?.complete).toBe(true);
+    const resumed = await request(`${home}/resume`, { revision: '1', id: 'free' });
+    expect(resumed.status).toBe(303);
+    expect(resumed.headers.get('Location')).toBe(`${home}/free/edit?notice=plan-saved&revision=1`);
   });
 
   test('Fate serves the catalog only for supported plan routes', async () => {
@@ -398,7 +414,30 @@ describe('administrator plan dashboard', () => {
       expect((await readPlanCatalog(env.db)).revision).toBe(0);
       expect(await page.locator('body').innerText()).toContain('31 existing accounts affected');
       await page.getByRole('button', { name: 'Apply changes', exact: true }).click();
-      await page.getByRole('status').filter({ hasText: 'Account updates complete.' }).waitFor();
+      await page.getByRole('heading', { name: 'Edit Starter', exact: true }).waitFor();
+      const confirmation = page
+        .locator('.astryx-toast[role="status"]')
+        .filter({ hasText: 'Plan saved.' });
+      await confirmation.waitFor();
+      expect(await page.locator('input[name="requestsPerMonth"]').inputValue()).toBe('1000');
+      expect(new URL(page.url()).pathname).toBe(`${home}/free/edit`);
+      expect(new URL(page.url()).search).toBe('');
+      const toastBox = (await confirmation.boundingBox())!;
+      expect(toastBox.x + toastBox.width / 2).toBeCloseTo(page.viewportSize()!.width / 2, 0);
+      expect(toastBox.y).toBeLessThan(64);
+      await page.setViewportSize({ width: 390, height: 844 });
+      const mobileToastBox = (await confirmation.boundingBox())!;
+      expect(mobileToastBox.x).toBeGreaterThanOrEqual(0);
+      expect(mobileToastBox.x + mobileToastBox.width).toBeLessThanOrEqual(390);
+      expect(mobileToastBox.x + mobileToastBox.width / 2).toBeCloseTo(195, 0);
+      await page.bringToFront();
+      await confirmation.waitFor({ state: 'hidden', timeout: 8000 });
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.reload();
+      await page.locator('[data-hydrated="true"]').waitFor();
+      expect(await page.locator('.astryx-toast').filter({ hasText: 'Plan saved.' }).count()).toBe(
+        0,
+      );
       expect(syncs).toEqual([
         expect.objectContaining({ processed: 6, complete: true, revision: 1 }),
       ]);

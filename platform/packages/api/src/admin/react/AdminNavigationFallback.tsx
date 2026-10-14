@@ -15,7 +15,7 @@ const TITLES: Partial<Record<AdminPageId, string>> = {
   plans: 'Plans',
   planEdit: 'Edit plan',
   planPreview: 'Review plan change',
-  planResult: 'Plan update',
+  planProgress: 'Updating accounts',
   users: 'Users',
   userDetail: 'User',
   projects: 'Projects',

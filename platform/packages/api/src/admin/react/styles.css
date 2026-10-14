@@ -63,6 +63,13 @@ body {
   font-family: var(--font-family-body);
 }
 
+.void-admin-toast-provider {
+  display: contents;
+}
+.void-admin-toast-provider [role='region'][popover='manual']:has(.astryx-toast) {
+  align-items: center;
+}
+
 .void-admin-shell #astryx-app-shell-main,
 .void-admin-content {
   min-width: 0;

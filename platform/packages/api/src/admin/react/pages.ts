@@ -16,7 +16,7 @@ export const adminComponents = {
   plans: async () => ({ default: (await import('./views/PlansPage.tsx')).PlansPage }),
   planEdit: async () => ({ default: (await import('./views/PlansPage.tsx')).PlanEditPage }),
   planPreview: async () => ({ default: (await import('./views/PlansPage.tsx')).PlanPreviewPage }),
-  planResult: async () => ({ default: (await import('./views/PlansPage.tsx')).PlanResultPage }),
+  planProgress: async () => ({ default: (await import('./views/PlansPage.tsx')).PlanProgressPage }),
   authSettings: async () => ({
     default: (await import('./views/AuthSettingsPage.tsx')).AuthSettingsPage,
   }),
@@ -131,7 +131,7 @@ export function matchAdminRoute(url: string): AdminPageId | null {
     return 'planPreview';
   }
   if (path === '/admin/config/plans/apply' || path === '/admin/config/plans/resume') {
-    return 'planResult';
+    return 'planProgress';
   }
   if (path === '/admin/config/auth') {
     return 'authSettings';

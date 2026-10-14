@@ -8,6 +8,7 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@astryxdesign/core/Table';
+import { useToast } from '@astryxdesign/core/Toast';
 import {
   PLAN_EDITABLE_LIMIT_KEYS,
   PLAN_LIMITS,
@@ -70,6 +71,27 @@ function usePlans(path: string) {
   }
   return data;
 }
+
+function usePlanConfirmation(path: string) {
+  const toast = useToast();
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const messages: Record<string, string> = {
+      'plan-saved': 'Plan saved.',
+      'plan-removed': 'Plan removed.',
+      'plans-updated': 'Account updates complete.',
+    };
+    const notice = url.searchParams.get('notice') ?? '';
+    const message = Object.hasOwn(messages, notice) ? messages[notice] : undefined;
+    if (!message) {
+      return;
+    }
+    url.searchParams.delete('notice');
+    url.searchParams.delete('revision');
+    window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+    toast({ body: message, isAutoHide: true, autoHideDuration: 4000 });
+  }, [path, toast]);
+}
 function PlanAction({
   action,
   id,
@@ -95,6 +117,7 @@ function PlanAction({
 }
 
 export function PlansPage({ path, platformName, username }: AdminPageProps) {
+  usePlanConfirmation(path);
   const { catalog, accounts } = usePlans(path);
   const pending = catalog.reconciliation && !catalog.reconciliation.complete;
   return (
@@ -177,6 +200,7 @@ export function PlansPage({ path, platformName, username }: AdminPageProps) {
 }
 
 export function PlanEditPage({ path, platformName, username }: AdminPageProps) {
+  usePlanConfirmation(path);
   const { catalog, accounts, selectedPlanId } = usePlans(path);
   const plan = catalog.plans.find((p) => p.id === selectedPlanId);
   const pending = catalog.reconciliation && !catalog.reconciliation.complete;
@@ -500,12 +524,16 @@ export function PlanPreviewPage({
   );
 }
 
-export function PlanResultPage({
+export function PlanProgressPage({
   initial,
+  returnTo,
+  target,
   platformName,
   username,
 }: {
   initial: AdminPlanProgress;
+  returnTo: string;
+  target?: string;
   platformName: string;
   username?: string;
 }) {
@@ -554,6 +582,10 @@ export function PlanResultPage({
         if (next.complete || next.error) {
           setRunning(false);
         }
+        if (next.complete) {
+          window.location.replace(returnTo);
+          return;
+        }
         if (!next.complete && !next.error) {
           timer = setTimeout(() => void advance(), 1000);
         }
@@ -575,11 +607,11 @@ export function PlanResultPage({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [initial]);
+  }, [initial, returnTo]);
   return (
-    <Layout platformName={platformName} username={username} title="Plan update">
+    <Layout platformName={platformName} username={username} title="Updating accounts">
       <SectionStack>
-        <h1>Plan saved</h1>
+        <h1>{state.error ? 'Account updates paused' : 'Updating accounts'}</h1>
         <p role="status">
           {state.complete
             ? 'Account updates complete.'
@@ -592,6 +624,7 @@ export function PlanResultPage({
         {!state.complete && (
           <form method="post" action={`${HOME}/resume`}>
             <input type="hidden" name="revision" value={state.revision} />
+            {target && <input type="hidden" name="id" value={target} />}
             <Button type="submit" label="Continue account updates" isDisabled={running} />
           </form>
         )}

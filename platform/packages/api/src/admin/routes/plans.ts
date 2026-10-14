@@ -3,7 +3,7 @@ import {
   parsePlatformPlanId,
   type PlatformPlanCatalog,
 } from '@void/platform/plans';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import type { ApiEnv } from '../../env.ts';
 import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
@@ -70,6 +70,31 @@ function progress(result: {
     cursor: result.catalog.reconciliation?.cursor ?? null,
     error: result.reconciliation.error?.message ?? null,
   };
+}
+
+const HOME = '/admin/config/plans';
+function completedPlanUrl(revision: number, target?: string, removed = false) {
+  const path = target ? `${HOME}/${encodeURIComponent(target)}/edit` : HOME;
+  const notice = removed ? 'plan-removed' : target ? 'plan-saved' : 'plans-updated';
+  return `${path}?notice=${notice}&revision=${revision}`;
+}
+
+function planProgressResponse(
+  context: Context<ApiEnv>,
+  state: AdminPlanProgress,
+  returnTo: string,
+  target?: string,
+) {
+  if (state.complete) {
+    return context.redirect(returnTo, 303);
+  }
+  return renderAdminPage(context, 'planProgress', 'Updating accounts', {
+    initial: state,
+    returnTo,
+    target,
+    platformName: getPlatformDisplayName(context.env, context.req.url),
+    username: context.get('user').login,
+  });
 }
 
 app.get('/', (context) => renderFateListPage(context, 'plans'));
@@ -169,12 +194,14 @@ app.post('/apply', async (context) => {
         throw new Error('Plan update is unavailable.');
       }
       const state = progress(result);
+      const destination = selectedAction === 'remove' ? undefined : target;
       return {
-        response: await renderAdminPage(context, 'planResult', 'Plan update', {
-          initial: state,
-          platformName: getPlatformDisplayName(context.env, context.req.url),
-          username: context.get('user').login,
-        }),
+        response: await planProgressResponse(
+          context,
+          state,
+          completedPlanUrl(state.revision, destination, selectedAction === 'remove'),
+          destination,
+        ),
         succeeded: !state.error,
       };
     },
@@ -183,18 +210,24 @@ app.post('/apply', async (context) => {
 
 app.post('/resume', async (context) => {
   const form = await context.req.parseBody();
+  const target = form.id ? planId(form.id) : undefined;
   const body = { expectedRevision: Number(form.revision) };
   return executeAuditedMutation(
     context,
     operatorAuditIntent('config/plans/sync', body),
     async () => {
-      const state = progress(await syncOperatorPlanCatalog(context, body));
+      const result = await syncOperatorPlanCatalog(context, body);
+      const state = progress(result);
+      const destination = result.catalog.plans.some((plan) => plan.id === target)
+        ? target
+        : undefined;
       return {
-        response: await renderAdminPage(context, 'planResult', 'Plan update', {
-          initial: state,
-          platformName: getPlatformDisplayName(context.env, context.req.url),
-          username: context.get('user').login,
-        }),
+        response: await planProgressResponse(
+          context,
+          state,
+          completedPlanUrl(state.revision, destination),
+          destination,
+        ),
         succeeded: !state.error,
       };
     },

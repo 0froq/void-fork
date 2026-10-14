@@ -1,5 +1,6 @@
 /** @jsxImportSource @voidcloud/api/admin-jsx */
 
+import { LayerProvider } from '@astryxdesign/core/Layer';
 import { LinkProvider } from '@astryxdesign/core/Link';
 import { Theme } from '@astryxdesign/core/theme';
 import { neutralTheme } from '@astryxdesign/theme-neutral/built';
@@ -20,7 +21,11 @@ type AdminShared = {
 export function AdminUiProviders({ children }: { children: ReactNode }) {
   return (
     <Theme theme={neutralTheme}>
-      <LinkProvider component={Link}>{children}</LinkProvider>
+      <div className="void-admin-toast-provider">
+        <LayerProvider toast={{ position: 'topEnd', maxVisible: 3 }}>
+          <LinkProvider component={Link}>{children}</LinkProvider>
+        </LayerProvider>
+      </div>
     </Theme>
   );
 }
