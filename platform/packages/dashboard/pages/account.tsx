@@ -1,4 +1,5 @@
 import { Button } from '@astryxdesign/core/Button';
+import { VStack } from '@astryxdesign/core/VStack';
 import type { Props } from './account.server.ts';
 
 export const layout = 'dashboard';
@@ -12,12 +13,14 @@ export default function AccountPage({ methods, error }: Props) {
         confirm the new identity before it is linked.
       </p>
       {error && <p>{error}</p>}
-      {methods.map((method) => (
-        <form key={method.id} method="post">
-          <input type="hidden" name="connectionId" value={method.id} />
-          <Button label={`Link ${method.label}`} type="submit" />
-        </form>
-      ))}
+      <VStack gap={2}>
+        {methods.map((method) => (
+          <form key={method.id} method="post">
+            <input type="hidden" name="connectionId" value={method.id} />
+            <Button label={`Link ${method.label}`} type="submit" />
+          </form>
+        ))}
+      </VStack>
       <a href="/">Back to account</a>
     </main>
   );

@@ -182,12 +182,14 @@ async function loginPage(context: Context<ApiEnv>, id: string) {
     context,
     'Sign in to Void',
     browserPageLead('Sign in to Void', 'Choose your platform login method.') +
+      '<div class="void-auth-actions">' +
       methods
         .map(
           (method) =>
             `<a class="void-auth-button void-auth-button-primary" href="/oauth/login?request=${h(id)}&amp;provider=${h(encodeURIComponent(method.id))}">${h(method.label)}</a>`,
         )
-        .join(''),
+        .join('') +
+      '</div>',
   );
 }
 async function consentPage(context: Context<ApiEnv>, request: typeof oauthRequests.$inferSelect) {
@@ -231,7 +233,7 @@ async function consentPage(context: Context<ApiEnv>, request: typeof oauthReques
       deploy ? 'Approve publish' : 'Connect application',
       `${client.name} by ${client.operator}`,
     ) +
-      `<p>${h(new URL(request.data.redirectUri).origin)}</p><p>Signed in as ${h(context.get('user').login)}.</p><p>${h(details)}</p>${summary}<form method="post" action="/oauth/approve"><input type="hidden" name="request" value="${h(request.id)}"><button class="void-auth-button void-auth-button-primary" name="decision" value="approve">${deploy ? 'Approve publish' : 'Connect'}</button><button class="void-auth-button" name="decision" value="deny">Cancel</button></form>`,
+      `<p>${h(new URL(request.data.redirectUri).origin)}</p><p>Signed in as ${h(context.get('user').login)}.</p><p>${h(details)}</p>${summary}<form class="void-auth-actions" method="post" action="/oauth/approve"><input type="hidden" name="request" value="${h(request.id)}"><button class="void-auth-button void-auth-button-primary" name="decision" value="approve">${deploy ? 'Approve publish' : 'Connect'}</button><button class="void-auth-button" name="decision" value="deny">Cancel</button></form>`,
   );
 }
 app.use('*', async (context, next) => {

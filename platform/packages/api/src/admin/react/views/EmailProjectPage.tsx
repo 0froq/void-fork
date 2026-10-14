@@ -293,28 +293,32 @@ export function EmailProjectPage({ path, platformName, username }: AdminPageProp
                     )}
                   </TableCell>
                   <TableCell>
-                    <form
-                      method="post"
-                      action={`/admin/email/${projectId}/domains/${domain.domain}/rotate-secret`}
-                    >
-                      <Button type="submit" label="Rotate secret" size="sm" />
-                    </form>
-                    {/* The typed slug is the real confirmation; the server checks it. */}
-                    <form
-                      method="post"
-                      action={`/admin/email/${projectId}/domains/${domain.domain}/revoke`}
-                      data-confirm={`Remove "${domain.domain}"? This disables its exact assignment. Shared ingress stays while another domain uses it.`}
-                    >
-                      <FormTextInput
-                        label="Confirm project name"
-                        name="confirm"
-                        placeholder={project.slug}
-                        autoComplete="off"
-                        required
-                        width={190}
-                      />{' '}
-                      <Button type="submit" label="Revoke" variant="destructive" size="sm" />
-                    </form>
+                    <SectionStack as="div" gap={2}>
+                      <form
+                        method="post"
+                        action={`/admin/email/${projectId}/domains/${domain.domain}/rotate-secret`}
+                      >
+                        <Button type="submit" label="Rotate secret" size="sm" />
+                      </form>
+                      {/* The typed slug is the real confirmation; the server checks it. */}
+                      <SectionStack
+                        as="form"
+                        gap={2}
+                        method="post"
+                        action={`/admin/email/${projectId}/domains/${domain.domain}/revoke`}
+                        data-confirm={`Remove "${domain.domain}"? This disables its exact assignment. Shared ingress stays while another domain uses it.`}
+                      >
+                        <FormTextInput
+                          label="Confirm project name"
+                          name="confirm"
+                          placeholder={project.slug}
+                          autoComplete="off"
+                          required
+                          width={190}
+                        />
+                        <Button type="submit" label="Revoke" variant="destructive" size="sm" />
+                      </SectionStack>
+                    </SectionStack>
                   </TableCell>
                 </TableRow>
               ))}

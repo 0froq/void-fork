@@ -39,7 +39,8 @@ html[data-theme="dark"] { color-scheme: dark; }
 .void-auth-page p { margin: 0; font: inherit; color: var(--auth-secondary); overflow-wrap: anywhere; }
 .void-auth-page strong { font-weight: 600; color: var(--auth-text); }
 .void-auth-page a:not(.void-auth-button) { color: var(--auth-text); text-underline-offset: 3px; }
-.void-auth-page .void-auth-actions { display: grid; gap: 12px; }
+.void-auth-page form { display: grid; gap: 12px; }
+.void-auth-page .void-auth-actions { display: grid; gap: 8px; }
 .void-auth-page .void-auth-button { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 44px; padding: 10px 16px; border: 1px solid var(--auth-border); border-radius: var(--auth-radius-element); background: var(--auth-body); color: var(--auth-text); font: inherit; font-weight: 550; line-height: 1.4; text-align: center; text-decoration: none; overflow-wrap: anywhere; cursor: pointer; }
 .void-auth-page .void-auth-button-primary { background: var(--auth-accent); color: var(--auth-on-accent); border-color: var(--auth-accent); }
 .void-auth-page .void-auth-button:hover { filter: brightness(.92); }
