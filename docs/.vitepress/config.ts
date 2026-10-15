@@ -162,9 +162,6 @@ const companyLinks = {
   items: [
     { text: 'VoidZero', link: 'https://voidzero.dev' },
     { text: 'Blog', link: 'https://voidzero.dev/blog' },
-    { text: 'Terms of Service', link: 'https://voidzero.dev/legal/terms' },
-    { text: 'Privacy Policy', link: 'https://voidzero.dev/legal/privacy' },
-    { text: 'Acceptable Use Policy', link: 'https://voidzero.dev/legal/acceptable-use' },
   ],
 };
 
