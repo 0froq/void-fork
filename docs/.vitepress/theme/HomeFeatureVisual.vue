@@ -2,6 +2,7 @@
 import RiveAnimation from '@components/shared/RiveAnimation.vue';
 import frameworksAnimation from './assets/animations/640_x_320_vite_frameworks_diamond.riv';
 import connectorsAnimation from './assets/animations/640_x_320_void_connectors.riv';
+import StackAndShip from './game/StackAndShip.vue';
 
 defineProps<{
   kind: 'stack' | 'frameworks';
@@ -17,8 +18,10 @@ const descriptions = {
   <div
     class="feature-visual"
     :class="`feature-visual--${kind}`"
-    role="img"
-    :aria-label="descriptions[kind]"
+    :role="kind === 'stack' ? 'img' : 'group'"
+    :aria-label="
+      kind === 'stack' ? descriptions[kind] : 'Framework integrations and Stack & Ship game'
+    "
   >
     <div v-if="kind === 'stack'" class="feature-animation">
       <RiveAnimation
@@ -29,7 +32,7 @@ const descriptions = {
       />
     </div>
 
-    <div v-else-if="kind === 'frameworks'" class="feature-animation">
+    <StackAndShip v-else-if="kind === 'frameworks'" class="feature-animation">
       <RiveAnimation
         :desktop-src="frameworksAnimation"
         :desktop-width="640"
@@ -37,7 +40,7 @@ const descriptions = {
         state-machines="State Machine 1"
         canvas-class="w-full h-auto"
       />
-    </div>
+    </StackAndShip>
   </div>
 </template>
 
@@ -56,6 +59,10 @@ const descriptions = {
 .feature-visual--frameworks {
   border: 0;
   background: transparent;
+}
+
+.feature-visual--frameworks {
+  overflow: visible;
 }
 
 .feature-animation {
