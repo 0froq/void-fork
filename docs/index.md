@@ -53,8 +53,8 @@ platform_features:
     title: Secure Vibe Coding for Your Team
     details: Let your team build and deploy with coding agents while admins retain control of Cloudflare access.
     highlights:
-      - Keep Cloudflare credentials with your admin team
       - Enable non-technical teammates to build their own apps
+      - Keep Cloudflare credentials with your admin team
       - Deploy prototypes fast and share apps for feedback
     guide:
       text: Explore team deployments
