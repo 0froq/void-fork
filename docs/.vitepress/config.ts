@@ -168,7 +168,7 @@ const companyLinks = {
 export default extendConfig(
   defineConfig({
     title: 'Void',
-    description: 'Build and deploy full-stack Vite apps at warp speed',
+    description: 'Build with Vite. Deploy with Void.',
     cleanUrls: true,
     head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/icon.svg' }]],
     appearance: 'dark',
