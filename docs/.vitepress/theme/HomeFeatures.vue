@@ -12,7 +12,7 @@ const { frontmatter } = useData();
     <section
       v-for="feature in frontmatter.features"
       :key="feature.title"
-      class="wrapper border-t border-nickel grid md:grid-cols-2 md:divide-x divide-nickel"
+      class="wrapper border-t border-nickel grid md:grid-cols-2"
     >
       <div class="px-5 py-6 md:p-10 flex flex-col justify-between gap-15">
         <div class="flex flex-col gap-5">
@@ -44,7 +44,10 @@ const { frontmatter } = useData();
       </div>
       <div
         class="border-t border-nickel md:border-t-0 min-h-[22rem] sm:min-h-[30rem] min-w-0 flex items-center justify-center"
-        :class="feature.visual === 'resources' ? 'resources-background' : 'bg-primary p-5 sm:p-10'"
+        :class="[
+          feature.visual === 'resources' ? 'md:order-first md:border-r' : 'md:border-l',
+          feature.visual === 'resources' ? 'resources-background' : 'bg-primary p-5 sm:p-10',
+        ]"
       >
         <HomeResourceCode v-if="feature.visual === 'resources'" />
         <HomeFeatureVisual v-else-if="feature.visual" :kind="feature.visual" />
