@@ -31,7 +31,7 @@ features:
   - iconify: lucide:wand-sparkles
     visual: resources
     title: Resources from Your Code
-    details: Void detects supported resources from your imports and provisions them on deploy. Configure existing resources explicitly.
+    details: Void detects supported resources from your imports and provisions them on deploy.
     highlights:
       - Database, KV, and storage inferred from imports
       - Local resources for development
