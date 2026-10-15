@@ -18,7 +18,7 @@ const { frontmatter } = useData();
 <template>
   <div
     v-if="frontmatter.hero"
-    class="wrapper wrapper--ticks grid lg:grid-cols-2 w-full border-nickel md:divide-x"
+    class="home-hero wrapper wrapper--ticks grid lg:grid-cols-2 w-full border-nickel md:divide-x"
   >
     <div class="flex flex-col p-15 sm:p-20 justify-between gap-20 items-center md:items-start">
       <div class="flex flex-col gap-5 items-center md:items-start text-center md:text-left">

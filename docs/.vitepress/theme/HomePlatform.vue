@@ -32,7 +32,7 @@ const featureAnimations = {
         </div>
         <a
           :href="feature.guide.link"
-          class="platform-feature-link px-3 py-1.5 rounded w-fit inline-flex items-center gap-2 text-primary text-sm font-mono focus-visible:outline-2 focus-visible:outline-electric"
+          class="home-feature-link platform-feature-link px-3 py-1.5 rounded w-fit inline-flex items-center gap-2 text-primary text-sm font-mono focus-visible:outline-2 focus-visible:outline-electric"
         >
           {{ feature.guide.text }}
           <Icon icon="lucide:arrow-up-right" class="size-4" aria-hidden="true" />

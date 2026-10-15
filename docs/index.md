@@ -19,36 +19,36 @@ hero:
 features:
   - iconify: lucide:layers
     visual: stack
-    title: Full-Stack Features
-    details: Add full-stack features to your app as you need them without having to wire it all together yourself.
+    title: Full-Stack, Inferred
+    details: Import what you need. Void provides local resources and provisions them on deploy.
     highlights:
-      - Server routes, edge routing and pages
-      - Authentication
-      - AI, queues, and scheduled jobs
+      - Server routes and authentication
+      - Databases, storage, and AI
+      - Queues and scheduled jobs
     guide:
-      text: Explore app types
-      link: /guide/app-types
+      text: Explore the SDK
+      link: /guide/
   - iconify: lucide:wand-sparkles
     visual: resources
-    title: Resources from Your Code
-    details: Void detects supported resources from your imports and provisions them on deploy.
+    title: Typed from Database to UI
+    details: Share types across your database, server loaders, and page components.
     highlights:
-      - Database, KV, and storage inferred from imports
-      - Local resources for development
-      - Types shared between server loaders and pages
+      - Types from your database schema
+      - Typed loaders, actions, and APIs
+      - Server code stays on the server
     guide:
-      text: Resource inference guide
-      link: /reference/resource-inference
+      text: Explore Type Safety
+      link: /guide/type-safety
   - iconify: lucide:blocks
     visual: frameworks
-    title: Choose Your Framework
-    details: 'Scale your apps based on what you need: API-only, SPA + API, or full-stack.'
+    title: Use Your Favorite Framework
+    details: Build with Void's adapters or keep your existing Vite framework.
     highlights:
-      - Native pages with React, Vue, Svelte, or Solid
-      - Supports TanStack Start, React Router, SvelteKit, Nuxt, Analog, and Astro v6+
-      - Rendering options including SSR, SSG, ISR, and islands
+      - Ships with adapters for Async React, Vue, Svelte, and Solid
+      - Supports TanStack Start, SvelteKit, Nuxt, and more
+      - Build APIs, SPAs, or server-rendered pages
     guide:
-      text: Framework integrations
+      text: Explore Frameworks
       link: /integrations/frameworks/overview
 platform_features:
   - id: platform-ai-coding

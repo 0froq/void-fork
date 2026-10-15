@@ -36,7 +36,7 @@ const { frontmatter } = useData();
         <a
           v-if="feature.guide"
           :href="feature.guide.link"
-          class="px-3 py-1.5 bg-slate rounded w-fit inline-flex items-center gap-2 text-white text-sm font-mono hover:bg-nickel focus-visible:outline-2 focus-visible:outline-vite"
+          class="home-feature-link sdk-feature-link px-3 py-1.5 rounded w-fit inline-flex items-center gap-2 text-sm font-mono focus-visible:outline-2 focus-visible:outline-vite"
         >
           {{ feature.guide.text }}
           <Icon icon="lucide:arrow-up-right" class="size-4" aria-hidden="true" />
@@ -57,6 +57,15 @@ const { frontmatter } = useData();
 </template>
 
 <style scoped>
+.sdk-feature-link {
+  color: var(--color-white);
+  background-color: var(--color-nickel);
+}
+
+.sdk-feature-link:hover {
+  background-color: color-mix(in srgb, var(--color-nickel) 85%, var(--color-white));
+}
+
 .resources-background {
   background: var(--color-wine) url('./assets/backgrounds/viteplus.jpg') center / cover;
 }
