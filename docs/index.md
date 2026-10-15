@@ -5,7 +5,7 @@ theme: dark
 hero:
   name: Void
   text: Build with Vite. Deploy with Void.
-  tagline: Void is a CLI, platform, and full-stack SDK that unifies building & deploying apps
+  tagline: Void is a CLI, platform, and full-stack SDK that unifies building & deploying apps.
   actions:
     - theme: brand
       text: Get Started
