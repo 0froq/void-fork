@@ -11,8 +11,11 @@ hero:
       text: Get Started
       link: ./guide/
     - theme: alt
-      text: View on Github
+      text: View on GitHub
       link: https://github.com/voidzero-dev/void
+    - theme: alt
+      text: Read the Announcement
+      link: https://blog.cloudflare.com/deploy-with-void
 features:
   - iconify: lucide:layers
     visual: stack

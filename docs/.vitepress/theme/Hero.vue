@@ -35,7 +35,7 @@ const { frontmatter } = useData();
         >
           {{ frontmatter.hero.tagline }}
         </p>
-        <div class="flex flex-col min-[410px]:flex-row items-center gap-5 mt-8">
+        <div class="flex flex-col min-[410px]:flex-row flex-wrap items-center gap-5 mt-8">
           <a
             v-for="action in frontmatter.hero.actions"
             :key="action.text"
