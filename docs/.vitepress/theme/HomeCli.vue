@@ -117,7 +117,7 @@ onBeforeUnmount(() => {
       </a>
       <h2 id="cli-heading" class="text-white">Deploy with One Command</h2>
       <p>
-        Handle the full lifecycle of your project: building, deploying and managing your resources
+        Handle the full lifecycle of your project: building, deploying and managing your resources.
       </p>
     </div>
 
