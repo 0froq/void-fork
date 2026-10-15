@@ -25,6 +25,7 @@ import {
   processDeploymentBatch,
 } from '../../src/deployment-execution.ts';
 import * as execution from '../../src/deployment-execution.ts';
+import * as recovery from '../../src/deployment-recovery.ts';
 import type { ApiEnv } from '../../src/env.ts';
 import app, { FAST_CRON } from '../../src/index.ts';
 import * as cleanup from '../../src/provisioning/cleanup.ts';
@@ -645,6 +646,75 @@ describe('durable deployment admission and observation', () => {
 });
 
 describe('durable execution claim and revocation', () => {
+  it('retries a returned recovery cleanup failure after one minute without reexecuting the deployment', async () => {
+    const id = await admit();
+    await env.db
+      .update(deployments)
+      .set({
+        status: 'uploading',
+        manifest: JSON.stringify({ version: 3, type: 'worker', bindings: {} }),
+      })
+      .where(eq(deployments.id, id));
+    await env.db
+      .update(deploymentOperations)
+      .set({ status: 'running', lease_expires_at: sql`now() - interval '1 second'` })
+      .where(eq(deploymentOperations.id, id));
+    const execute = vi.spyOn(deploy, 'executeQueuedDeployment');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const provider = vi.fn(async () => new Response(null, { status: 503 }));
+    vi.stubGlobal('fetch', provider);
+    const first = await run(id);
+    expect(first.retry).toHaveBeenCalledExactlyOnceWith({ delaySeconds: 60 });
+    expect(first.ack).not.toHaveBeenCalled();
+    const operation = await getDeploymentOperation(env.db, id);
+    expect(operation).toMatchObject({ status: 'recovering', inputs_deleted: false });
+    expect(Date.parse(operation!.lease_expires_at!)).toBeGreaterThan(Date.now());
+    expect(Date.parse(operation!.lease_expires_at!)).toBeLessThan(Date.now() + 2 * 60_000);
+    expect((await env.db.select().from(deployments))[0]?.status).toBe('canceling');
+    expect(log).toHaveBeenCalledWith(
+      '[deployment-execution] execution/reconciliation interrupted',
+      expect.objectContaining({
+        deploymentId: id,
+        error: expect.objectContaining({ message: expect.stringContaining('cleanup failed') }),
+      }),
+    );
+    await env.db
+      .update(deploymentOperations)
+      .set({ lease_expires_at: sql`now() - interval '1 second'` })
+      .where(eq(deploymentOperations.id, id));
+    provider.mockImplementation(async () => new Response(null, { status: 404 }));
+    const second = await run(id);
+    expect(second.ack).toHaveBeenCalledOnce();
+    expect(second.retry).not.toHaveBeenCalled();
+    expect(await getDeploymentOperation(env.db, id)).toMatchObject({
+      status: 'terminal',
+      inputs_deleted: true,
+    });
+    expect((await env.db.select().from(deployments))[0]?.status).toBe('failed');
+    expect(execute).not.toHaveBeenCalled();
+    expect(provider.mock.calls).toHaveLength(2);
+  });
+
+  it('does not shorten a replacement recovery owner lease after losing its claim', async () => {
+    const id = await admit();
+    await env.db
+      .update(deploymentOperations)
+      .set({ status: 'running', lease_expires_at: sql`now() - interval '1 second'` })
+      .where(eq(deploymentOperations.id, id));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(recovery, 'settleExpiredDeployment').mockImplementationOnce(async () => {
+      await env.db
+        .update(deploymentOperations)
+        .set({ owner_id: 'replacement-owner', lease_expires_at: sql`now() + interval '5 minutes'` })
+        .where(eq(deploymentOperations.id, id));
+      throw new Error('Recovery ownership changed');
+    });
+    expect((await run(id)).retry).toHaveBeenCalledOnce();
+    const operation = await getDeploymentOperation(env.db, id);
+    expect(operation?.owner_id).toBe('replacement-owner');
+    expect(Date.parse(operation!.lease_expires_at!)).toBeGreaterThan(Date.now() + 4 * 60_000);
+  });
+
   it('rejects admitted work from a collaborator suspended before queued execution', async () => {
     const collaborator = await createTestUser(env.db, 'queued-collaborator');
     await env.db.insert(projectMembers).values({
@@ -694,6 +764,7 @@ describe('durable execution claim and revocation', () => {
     expect(await env.db.select().from(deployments)).toMatchObject([{ id, status: 'live' }]);
     const interrupted = await getDeploymentOperation(env.db, id);
     expect(interrupted).toMatchObject({ status: 'running', inputs_deleted: false });
+    expect(Date.parse(interrupted!.lease_expires_at!)).toBeGreaterThan(Date.now() + 17 * 60_000);
     expect(
       interrupted?.events.some(({ event }) => event.event === 'done' || event.event === 'error'),
     ).toBe(false);

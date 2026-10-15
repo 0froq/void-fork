@@ -336,9 +336,22 @@ export async function deleteSandboxController(
   const response = await fetch(workerUrl(accountId, workerName), {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${apiToken}` },
+    signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok && response.status !== 404) {
-    throw new Error(`Sandbox controller deletion failed (HTTP ${response.status}).`);
+    const detail = await response
+      .json()
+      .then((value) => {
+        const body = value as { errors?: Array<{ message?: string }> };
+        return body.errors
+          ?.map((error) => error.message)
+          .filter(Boolean)
+          .join(', ');
+      })
+      .catch(() => undefined);
+    throw new Error(
+      `Sandbox controller deletion failed (HTTP ${response.status}).${detail ? ` ${detail}` : ''}`,
+    );
   }
   if (db) {
     await markCleanupComplete(db, deploymentId);

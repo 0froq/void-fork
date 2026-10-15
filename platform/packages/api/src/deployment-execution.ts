@@ -449,6 +449,10 @@ export async function processDeploymentBatch(
       message.ack();
       continue;
     }
+    console.info('[deployment-execution] execution claimed', {
+      deploymentId: id,
+      status: operation.status,
+    });
     try {
       if (operation.status === 'recovering') {
         const { settleExpiredDeployment } = await import('./deployment-recovery.ts');
@@ -485,8 +489,19 @@ export async function processDeploymentBatch(
     } catch (error) {
       console.error('[deployment-execution] execution/reconciliation interrupted', {
         deploymentId: id,
-        error,
+        error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
       });
+      // A returned recovery failure has no deployment execution left to fence:
+      // it only reconciles the abandoned candidate. Match the retry interval
+      // used for an incomplete recovery instead of retaining its hard lifetime.
+      // An interrupted initial execution still needs the full lease because
+      // its provisioning or remotely committed SQL may be unresolved.
+      if (operation.status === 'recovering') {
+        await db
+          .update(deploymentOperations)
+          .set({ lease_expires_at: sql`now() + interval '1 minute'` })
+          .where(and(eq(deploymentOperations.id, id), eq(deploymentOperations.owner_id, ownerId)));
+      }
       message.retry({ delaySeconds: 60 });
     }
   }

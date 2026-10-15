@@ -50,6 +50,9 @@ export async function settleExpiredDeployment(
   db: Db,
   deploymentId: string,
 ): Promise<Settlement> {
+  const progress = (step: string) =>
+    console.info('[deployment-execution] recovery progress', { deploymentId, step });
+  progress('loading deployment');
   const initial = await getDeployment(db, deploymentId);
   if (!initial) {
     return {
@@ -70,6 +73,7 @@ export async function settleExpiredDeployment(
 
   // Commit cancellation before external cleanup so a failure or lost response
   // retains an in-flight fence rather than allowing another deployment to race.
+  progress('fencing interrupted execution');
   await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT id FROM projects WHERE id = ${initial.project_id} FOR UPDATE`);
     const deployment = await getDeployment(tx, deploymentId);
@@ -82,6 +86,7 @@ export async function settleExpiredDeployment(
     }
   });
 
+  progress('cleaning candidate');
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT id FROM projects WHERE id = ${initial.project_id} FOR UPDATE`);
     const deployment = await getDeployment(tx, deploymentId);
@@ -112,21 +117,11 @@ export async function settleExpiredDeployment(
       const manifest = deployment.manifest
         ? (JSON.parse(deployment.manifest) as DeployManifest)
         : null;
-      if (manifest?.sandbox) {
-        await deleteSandboxController(
-          env.CF_ACCOUNT_ID,
-          env.CF_API_TOKEN,
-          project.id,
-          deployment.id,
-          manifest.sandbox,
-          env.SANDBOX_CONCURRENCY_COUNTER,
-          tx,
-        );
-      }
       // An upload can land before its acknowledgement or local uploaded flag.
       // The manifest is committed before upload; null/static manifests cannot
       // have uploaded a Worker and need no dispatch provider permissions.
       if (manifest && manifest.type !== 'static' && manifest.type !== 'spa') {
+        progress('deleting candidate worker');
         const namespace = env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
         const workerName = `user-${project.slug}-${deployment.id}`;
         const response = await fetch(
@@ -141,6 +136,21 @@ export async function settleExpiredDeployment(
           throw new Error(`Interrupted deployment cleanup failed (HTTP ${response.status}).`);
         }
       }
+      // Remove the tenant service binding before deleting its controller.
+      if (manifest?.sandbox) {
+        progress('deleting sandbox controller');
+        await deleteSandboxController(
+          env.CF_ACCOUNT_ID,
+          env.CF_API_TOKEN,
+          project.id,
+          deployment.id,
+          manifest.sandbox,
+          env.SANDBOX_CONCURRENCY_COUNTER,
+          tx,
+        );
+        progress('sandbox controller deleted');
+      }
+      progress('deleting candidate bundle');
       await env.ROUTING.delete(`manifest:${deployment.id}`);
       await deleteWorkerBundle(env.STATIC_ASSETS_R2, project.id, deployment.id);
       await tx
@@ -157,6 +167,7 @@ export async function settleExpiredDeployment(
     await updateDeploymentStatus(tx, deployment.id, canceled ? 'canceled' : 'failed', undefined, {
       force: true,
     });
+    progress('candidate cleanup complete');
     return {
       terminal: true,
       event: {

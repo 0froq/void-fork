@@ -4,6 +4,7 @@ import { getDeployment, getProject, type Db } from '../../src/db.ts';
 import { replayDeploymentCutover } from '../../src/deploy/recovery.ts';
 import { settleExpiredDeployment } from '../../src/deployment-recovery.ts';
 import type { ApiEnv } from '../../src/env.ts';
+import { sandboxControllerWorkerName } from '../../src/provisioning/sandbox-controller.ts';
 import { deriveProxyToken } from '../../src/proxy-token.ts';
 import { deployments, domains, projectMigrations, projects, resources } from '../../src/schema.ts';
 import {
@@ -110,6 +111,75 @@ test('keeps cancellation and candidate artifacts when provider deletion is uncon
   providerDelete(404);
   expect(await settle(candidate.id)).toMatchObject({ terminal: true });
   expect(await getDeployment(env.db, candidate.id)).toMatchObject({ status: 'failed' });
+});
+
+test('removes the candidate service binding before its sandbox controller, preserving both on an unconfirmed Worker delete', async () => {
+  const committed = await createTestDeployment(env.db, project.id);
+  const candidate = await createTestDeployment(env.db, project.id, 'uploading');
+  const workerName = `user-${project.slug}-${candidate.id}`;
+  const controllerName = sandboxControllerWorkerName(project.id, candidate.id);
+  await env.db
+    .update(deployments)
+    .set({
+      manifest: JSON.stringify({ type: 'worker', sandbox: { runtime: { protocol: 2 } } }),
+    })
+    .where(eq(deployments.id, candidate.id));
+  let rejectWorkerDelete = true;
+  const cf = mockCfApi({
+    deleteWorker: (url) => {
+      const name = new URL(url).pathname.split('/').at(-1)!;
+      if (name === workerName && rejectWorkerDelete) {
+        return new Response(null, { status: 503 });
+      }
+      if (name === controllerName && cf.state.hostScripts.has(workerName)) {
+        return Response.json(
+          { errors: [{ message: 'Controller is still referenced by candidate service binding' }] },
+          { status: 400 },
+        );
+      }
+      cf.state.hostScripts.delete(name);
+      return new Response(null, { status: 200 });
+    },
+  });
+  cf.state.hostScripts.set(workerName, {
+    classes: new Map(),
+    metadata: {},
+    bindings: [{ type: 'service', name: '__VOID_SANDBOX', service: controllerName }],
+  });
+  cf.state.hostScripts.set(controllerName, {
+    classes: new Map(),
+    metadata: {},
+    bindings: [
+      {
+        type: 'plain_text',
+        name: '__VOID_SANDBOX_OWNER',
+        text: JSON.stringify({ protocol: 1, projectId: project.id, deploymentId: candidate.id }),
+      },
+      {
+        type: 'plain_text',
+        name: '__VOID_USER_ID',
+        text: (await getProject(env.db, project.id))!.user_id,
+      },
+      {
+        type: 'durable_object_namespace',
+        name: 'SANDBOX',
+        class_name: 'SandboxController',
+        namespace_id: 'candidate-controller',
+      },
+    ],
+  });
+
+  await expect(settle(candidate.id)).rejects.toThrow('cleanup failed');
+  expect(cf.state.hostScripts.has(workerName)).toBe(true);
+  expect(cf.state.hostScripts.has(controllerName)).toBe(true);
+  expect((await getDeployment(env.db, candidate.id))?.status).toBe('canceling');
+
+  rejectWorkerDelete = false;
+  expect(await settle(candidate.id)).toMatchObject({ terminal: true });
+  expect(cf.state.hostScripts.has(workerName)).toBe(false);
+  expect(cf.state.hostScripts.has(controllerName)).toBe(false);
+  expect((await getProject(env.db, project.id))?.active_deployment_id).toBe(committed.id);
+  expect((await getDeployment(env.db, candidate.id))?.status).toBe('failed');
 });
 
 test('preserves an explicit user cancellation after confirmed cleanup', async () => {
