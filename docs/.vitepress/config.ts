@@ -158,9 +158,9 @@ const socialLinks = [
 ];
 
 const companyLinks = {
-  text: 'Company',
+  text: 'VoidZero',
   items: [
-    { text: 'Company', link: 'https://voidzero.dev' },
+    { text: 'VoidZero', link: 'https://voidzero.dev' },
     { text: 'Blog', link: 'https://voidzero.dev/blog' },
     { text: 'Terms of Service', link: 'https://voidzero.dev/legal/terms' },
     { text: 'Privacy Policy', link: 'https://voidzero.dev/legal/privacy' },
@@ -377,6 +377,7 @@ export default extendConfig(
       },
 
       footer: {
+        copyright: `© ${new Date().getFullYear()} Cloudflare Inc. All Rights Reserved.`,
         nav: [
           {
             title: 'Docs',
