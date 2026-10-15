@@ -19,7 +19,7 @@ const featureAnimations = {
       v-for="feature in frontmatter.platform_features"
       :key="feature.id"
       :aria-labelledby="feature.id"
-      class="wrapper border-t border-stroke grid md:grid-cols-2 md:divide-x divide-stroke"
+      class="wrapper border-t border-stroke grid md:grid-cols-2"
     >
       <div class="px-5 py-6 md:p-10 flex flex-col justify-between gap-15">
         <div class="flex flex-col gap-5">
@@ -40,9 +40,10 @@ const featureAnimations = {
       </div>
       <div
         class="border-t border-stroke md:border-t-0 min-h-[22rem] sm:min-h-[30rem] min-w-0 flex items-center justify-center"
-        :class="
-          feature.visual === 'resources' ? 'platform-resources-background' : 'bg-white p-5 sm:p-10'
-        "
+        :class="[
+          feature.id === 'platform-control-plane' ? 'md:order-first md:border-r' : 'md:border-l',
+          feature.visual === 'resources' ? 'platform-resources-background' : 'bg-white p-5 sm:p-10',
+        ]"
       >
         <HomePlatformResourceCode v-if="feature.visual === 'resources'" />
         <div
