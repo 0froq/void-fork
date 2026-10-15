@@ -52,7 +52,8 @@ const { frontmatter } = useData();
     </a>
     <h2 id="features-heading" class="text-white">Turn Vite Apps Full-Stack</h2>
     <p class="max-w-md text-white/70 text-balance sm:text-pretty">
-      Use your favorite Vite framework, add the backend features you need, and infer your resources.
+      Use your favorite Vite framework, add the backend features you need, and let Void infer your
+      resources.
     </p>
   </section>
 
