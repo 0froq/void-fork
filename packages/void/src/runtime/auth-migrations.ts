@@ -105,7 +105,8 @@ function resolveColumnType(
         return 'integer';
       }
       if (idStrategy === 'uuid') {
-        return 'uuid';
+        // Better Auth leaves the id out of PostgreSQL inserts when it uses uuids.
+        return fieldName === 'id' ? 'uuid DEFAULT gen_random_uuid()' : 'uuid';
       }
       return 'text';
     }
@@ -133,12 +134,36 @@ function resolveColumnType(
   return 'TEXT';
 }
 
+function renderDefaultLiteral(
+  dialect: VoidAuthMigrationSchema['dialect'],
+  value: string | number | boolean,
+): string {
+  if (typeof value === 'boolean') {
+    return dialect === 'sqlite' ? (value ? '1' : '0') : value ? 'TRUE' : 'FALSE';
+  }
+  if (typeof value === 'number') {
+    return String(value);
+  }
+  if (dialect === 'mysql' && value.includes('\\')) {
+    // NO_BACKSLASH_ESCAPES changes what a backslash means in a MySQL string. A hex string does not change.
+    const hex = Array.from(new TextEncoder().encode(value), (byte) =>
+      byte.toString(16).padStart(2, '0'),
+    ).join('');
+    return `_utf8mb4 X'${hex}'`;
+  }
+  if (dialect === 'postgresql' && value.includes('\\')) {
+    // standard_conforming_strings changes what a backslash means in '...'. E'...' does not change.
+    return `E'${value.replaceAll('\\', '\\\\').replaceAll("'", "''")}'`;
+  }
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
 function buildColumnDefinition(
   dialect: 'sqlite' | 'postgresql' | 'mysql',
   schema: VoidAuthMigrationSchema,
   fieldName: string,
   field: VoidAuthMigrationField,
-  options: { primaryKey?: boolean } = {},
+  options: { primaryKey?: boolean; withDefault?: boolean } = {},
 ): string {
   const parts = [
     `${quoteIdentifier(fieldName, dialect)} ${resolveColumnType(dialect, schema.idStrategy, fieldName, field)}`,
@@ -149,6 +174,9 @@ function buildColumnDefinition(
   }
   if (field.required || options.primaryKey) {
     parts.push('NOT NULL');
+  }
+  if (options.withDefault && field.defaultValue !== undefined) {
+    parts.push(`DEFAULT ${renderDefaultLiteral(dialect, field.defaultValue)}`);
   }
   if (field.references) {
     parts.push(
@@ -197,11 +225,13 @@ function buildAddColumnSql(
 ): string {
   // Only PostgreSQL accepts ADD COLUMN IF NOT EXISTS; callers check the column exists first.
   const ifNotExists = schema.dialect === 'postgresql' ? ' IF NOT EXISTS' : '';
+  // The default fills rows that exist. New tables keep no database default.
   return `ALTER TABLE ${quoteIdentifier(tableName, schema.dialect)} ADD COLUMN${ifNotExists} ${buildColumnDefinition(
     schema.dialect,
     schema,
     fieldName,
     field,
+    { withDefault: true },
   )}`;
 }
 
@@ -273,6 +303,55 @@ async function ensurePgIndexes(
   await createMissingIndexes(runner, 'postgresql', table, existingIndexes);
 }
 
+/**
+ * Name the fields that a table with rows cannot take, and the fix, before the table changes.
+ * SQLite and PostgreSQL cannot add a NOT NULL column with no default to a table that has rows;
+ * MySQL fills those rows itself. On each dialect, a new required column gives every row the same
+ * value, so its unique index fails when the table has two or more rows.
+ */
+async function assertRequiredColumnsCanBeAdded(
+  runner: Pick<SqliteMigrationRunner, 'all'>,
+  dialect: VoidAuthMigrationSchema['dialect'],
+  table: VoidAuthMigrationTable,
+  missing: Array<string>,
+): Promise<void> {
+  const required = missing.filter((fieldName) => table.fields[fieldName]!.required);
+  const unique = required.filter((fieldName) => table.fields[fieldName]!.unique);
+  const noDefault =
+    dialect === 'mysql'
+      ? []
+      : required.filter((fieldName) => table.fields[fieldName]!.defaultValue === undefined);
+  if (unique.length === 0 && noDefault.length === 0) {
+    return;
+  }
+  // One row blocks a field with no default. Two rows block a unique field.
+  const rows = await runner.all(
+    `SELECT 1 AS present FROM ${quoteIdentifier(table.name, dialect)} LIMIT 2`,
+  );
+  const describe = (fieldNames: Array<string>) => ({
+    names: fieldNames.map((fieldName) => JSON.stringify(fieldName)).join(', '),
+    noun: fieldNames.length === 1 ? 'field' : 'fields',
+  });
+  if (rows.length >= 2 && unique.length > 0) {
+    const { names, noun } = describe(unique);
+    throw new Error(
+      `Cannot add required unique auth ${noun} ${names} to table ${JSON.stringify(table.name)}: ` +
+        'the table has more than one row, and a new column gives every row the same value. ' +
+        `Set \`required: false\` on the ${noun}, ` +
+        `or add the ${unique.length === 1 ? 'column' : 'columns'} in a migration that gives each row its own value.`,
+    );
+  }
+  if (rows.length >= 1 && noDefault.length > 0) {
+    const { names, noun } = describe(noDefault);
+    throw new Error(
+      `Cannot add required auth ${noun} ${names} to table ${JSON.stringify(table.name)}: ` +
+        'the table has rows, and there is no fixed default value to fill them. ' +
+        `Set \`required: false\` on the ${noun}. ` +
+        'A string, number or boolean field can use a fixed `defaultValue` instead.',
+    );
+  }
+}
+
 export async function applySqliteAuthMigrations(
   runner: SqliteMigrationRunner,
   schema: VoidAuthMigrationSchema,
@@ -294,6 +373,12 @@ export async function applySqliteAuthMigrations(
       `PRAGMA table_info(${quotePragmaArg(table.name)})`,
     );
     const existingColumns = new Set(columnRows.map((row) => String(row.name)));
+    await assertRequiredColumnsCanBeAdded(
+      runner,
+      'sqlite',
+      table,
+      Object.keys(table.fields).filter((fieldName) => !existingColumns.has(fieldName)),
+    );
 
     for (const [fieldName, field] of Object.entries(table.fields)) {
       if (existingColumns.has(fieldName)) {
@@ -331,6 +416,12 @@ export async function applyPgAuthMigrations(
       [schemaName, table.name],
     );
     const existingColumns = new Set(columnRows.map((row) => String(row.column_name)));
+    await assertRequiredColumnsCanBeAdded(
+      runner,
+      'postgresql',
+      table,
+      Object.keys(table.fields).filter((fieldName) => !existingColumns.has(fieldName)),
+    );
 
     for (const [fieldName, field] of Object.entries(table.fields)) {
       if (existingColumns.has(fieldName)) {
@@ -369,6 +460,12 @@ export async function applyMySqlAuthMigrations(
       );
       const existingColumns = new Map(
         columnRows.map((row) => [String(row.column_name), row] as const),
+      );
+      await assertRequiredColumnsCanBeAdded(
+        runner,
+        'mysql',
+        table,
+        Object.keys(table.fields).filter((fieldName) => !existingColumns.has(fieldName)),
       );
       for (const [fieldName, field] of Object.entries(table.fields)) {
         const existingColumn = existingColumns.get(fieldName);
