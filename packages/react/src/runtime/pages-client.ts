@@ -8,6 +8,7 @@ import React, {
   useLayoutEffect,
   useMemo,
   useReducer,
+  useState,
   useTransition,
   type ComponentType,
 } from 'react';
@@ -106,6 +107,9 @@ const committedResources = new Set<number>();
 const EMPTY_PARAMS: Record<string, string> = {};
 
 let activePendingNavigationId: number | null = null;
+// The URL the prerendered HTML was rendered with, while it differs from the browser URL. The
+// hydration commit clears it before effects run, so effects and later renders read the browser URL.
+let prerenderedUrl: string | null = null;
 let scheduleVisit:
   | ((url: string, options?: VisitOptions) => Promise<ReactPageData | undefined>)
   | null = null;
@@ -154,6 +158,51 @@ function normalizeUrl(value: string | URL): string {
   }
   const url = value instanceof URL ? value : new URL(value, window.location.origin);
   return url.origin === window.location.origin ? url.pathname + url.search + url.hash : url.href;
+}
+
+/** Page data holds a decoded path. Compare it with browser URLs in their encoded form. */
+function encodedPageUrl(url: string): string {
+  if (!url) {
+    return url;
+  }
+  const parsed = new URL(url, window.location.origin);
+  return parsed.pathname + parsed.search;
+}
+
+/** Static hosts serve one page at `/a`, `/a/`, `/a.html` and `/a/index.html`. */
+function staticPagePath(pathname: string): string {
+  let path = pathname;
+  if (path.endsWith('/index.html')) {
+    path = path.slice(0, -'index.html'.length);
+  } else if (path.endsWith('.html')) {
+    path = path.slice(0, -'.html'.length);
+  }
+  return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
+}
+
+/**
+ * Static page data serves every query of a path, so its url has no query. Returns the query of
+ * fetchUrl when the page data is such data for its path, or null.
+ */
+function staticVisitQuery(pageUrl: string, fetchUrl: string): string | null {
+  if (!pageUrl || pageUrl.includes('?')) {
+    return null;
+  }
+  const queryStart = fetchUrl.indexOf('?');
+  const fetchPath = queryStart === -1 ? fetchUrl : fetchUrl.slice(0, queryStart);
+  if (staticPagePath(fetchPath) !== staticPagePath(pageUrl)) {
+    return null;
+  }
+  return queryStart === -1 ? '' : fetchUrl.slice(queryStart);
+}
+
+/**
+ * The URL prerendered HTML was rendered with, when it lacks the visitor's query, or null.
+ */
+function prerenderedRouteUrl(pageData: ReactPageData): string | null {
+  const pageUrl = encodedPageUrl(pageData.url);
+  const query = staticVisitQuery(pageUrl, window.location.pathname + window.location.search);
+  return query ? pageUrl + window.location.hash : null;
 }
 
 function navigationForResource(resource: PageNavigationResource): NavigationState {
@@ -287,21 +336,29 @@ function RouteResource({
   const pageData = result.pageData as ReactPageData;
   const PageComponent = result.component as ReactPageComponent;
   const routeParams = pageData.params ?? EMPTY_PARAMS;
-  const routeRouter = useMemo(
-    () =>
-      createRouterFacade(
-        outerRouter!,
-        () => {
-          const outerUrl = outerRouter!.url;
-          const outerPath = outerUrl.pathname + outerUrl.search;
-          return outerPath === pageData.url
-            ? outerPath + outerUrl.hash
-            : pageData.url + resource.hash;
-        },
-        () => routeParams,
-      ),
-    [outerRouter, pageData.url, resource.hash, routeParams],
-  );
+  const routeRouter = useMemo(() => {
+    const pageUrl = encodedPageUrl(pageData.url);
+    return createRouterFacade(
+      outerRouter!,
+      () => {
+        const outerUrl = outerRouter!.url;
+        const outerPath = outerUrl.pathname + outerUrl.search;
+        if (outerPath === pageUrl) {
+          return outerPath + outerUrl.hash;
+        }
+        // Keep the query of a visit that loaded static page data. The outer URL keeps the hash
+        // current after a same-page hash visit; during a reveal it still names the old page.
+        const query = staticVisitQuery(pageUrl, resource.fetchUrl);
+        if (query !== null) {
+          return (
+            pageUrl + query + (outerPath === resource.fetchUrl ? outerUrl.hash : resource.hash)
+          );
+        }
+        return pageUrl + resource.hash;
+      },
+      () => routeParams,
+    );
+  }, [outerRouter, pageData.url, resource.fetchUrl, resource.hash, routeParams]);
   let element = React.createElement(PageComponent, pageData.props);
   for (let i = result.layouts.length - 1; i >= 0; i--) {
     const Layout = result.layouts[i] as ReactLayoutComponent;
@@ -356,11 +413,12 @@ function App({
   navigationFallback?: ComponentType<{ initialPageData: PageObject }>;
 }): React.ReactNode {
   const initialPageData = engine.initialPageData as ReactPageData;
+  const [hydrated, setHydrated] = useState(prerenderedUrl === null);
   const initialResource = useMemo<ReactPageResource>(
     () => ({
       id: 0,
       url: initialPageData.url || currentUrl(),
-      fetchUrl: initialPageData.url || currentUrl(),
+      fetchUrl: window.location.pathname + window.location.search,
       hash: window.location.hash,
       method: 'GET',
       options: {},
@@ -374,6 +432,13 @@ function App({
       async commit() {
         engine.commitInitialRender();
         document.getElementById('app')!.setAttribute('data-hydrated', 'true');
+        if (prerenderedUrl !== null) {
+          prerenderedUrl = null;
+          // A transition waits for Suspense boundaries that are still dehydrated, where an urgent
+          // update would replace their server HTML with the fallback. Those boundaries hydrate
+          // with the browser URL, so one that renders the query falls back to a client render.
+          React.startTransition(() => setHydrated(true));
+        }
       },
       dispose() {},
     }),
@@ -598,8 +663,11 @@ function App({
   }, [isTransitionPending, state.navigation]);
 
   const routerValue = useMemo(
-    () => createRouterFacade(router, () => state.routeUrl),
-    [router, state.routeUrl],
+    () =>
+      createRouterFacade(router, () =>
+        hydrated ? state.routeUrl : (prerenderedUrl ?? state.routeUrl),
+      ),
+    [router, state.routeUrl, hydrated],
   );
 
   return React.createElement(
@@ -630,6 +698,7 @@ export async function startReactPages(config: ReactPagesConfig): Promise<ReactPa
   pendingVisitSettlers.clear();
   committedResources.clear();
   activePendingNavigationId = null;
+  prerenderedUrl = null;
 
   const engine = await createPageNavigationEngine({
     adapter: {
@@ -657,13 +726,16 @@ export async function startReactPages(config: ReactPagesConfig): Promise<ReactPa
     throw new Error('pages: Missing #app element for Void React pages hydration.');
   }
 
+  const isSsr = appEl.getAttribute('data-void-ssr') !== 'false';
+  if (isSsr) {
+    prerenderedUrl = prerenderedRouteUrl(engine.initialPageData as ReactPageData);
+  }
   const appRoot = React.createElement(App, {
     engine,
     router,
     viewTransitions: config.viewTransitions,
     navigationFallback: config.navigationFallback,
   });
-  const isSsr = appEl.getAttribute('data-void-ssr') !== 'false';
   const hasDeferred = Boolean((engine.initialPageData as ReactPageData).deferredKeys);
   const app =
     isSsr && hasDeferred
