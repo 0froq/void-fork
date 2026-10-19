@@ -95,9 +95,10 @@ catalogs:
     typescript: 6.0.3
 
 packageExtensions:
-  '@analogjs/vite-plugin-angular@2.8.0':
+  # Analog imports TypeScript without declaring it; use the app's compiler.
+  '@analogjs/vite-plugin-angular@*':
     peerDependencies:
-      typescript: '>=6.0 <6.1'
+      typescript: '*'
 
 overrides:
   # Keep Vite+'s pinned Vitest internals on the same patch as the runner.
