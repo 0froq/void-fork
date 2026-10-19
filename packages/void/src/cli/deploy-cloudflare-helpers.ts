@@ -534,8 +534,16 @@ export function formatCloudflareActivationError(
         'Set CLOUDFLARE_WORKERS_SUBDOMAIN to your account subdomain (for example "my-team")',
         'and retry. Void caches it after a successful workers.dev deployment; production traffic is unchanged.',
       ].join('\n');
-    case 'readiness-staging-failed':
-      return `deploy: Cloudflare could not stage the uploaded Worker Version at zero-percent traffic${status}; production traffic is unchanged.${cloudflareCode}${diagnostic}${result.cloudflareErrorCode === 10210 && /Durable Object migration/i.test(result.diagnostic ?? '') ? '\n\nReview the Durable Object migration, then run `void deploy --platform cloudflare --atomic`. For future deploys, set deploy.cloudflare.mode to "atomic" in void.config.ts.' : ''}`;
+    case 'readiness-staging-failed': {
+      const hint =
+        result.cloudflareErrorCode === 10210 &&
+        (result.diagnostic ?? '').toLowerCase().includes('durable object migration')
+          ? '\n\nReview the Durable Object migration, then run `void deploy --platform cloudflare --atomic`. For future deploys, set deploy.cloudflare.mode to "atomic" in void.config.ts.'
+          : result.cloudflareErrorCode === 100405
+            ? '\n\nThe new version declares different exports from the live version (for example a Durable Object or Workflow class), so Cloudflare cannot split traffic between them. Run `void deploy --platform cloudflare --atomic` once to publish it at 100% directly; it receives traffic before readiness is checked.'
+            : '';
+      return `deploy: Cloudflare could not stage the uploaded Worker Version at zero-percent traffic${status}; production traffic is unchanged.${cloudflareCode}${diagnostic}${hint}`;
+    }
     case 'atomic-failed':
       return `deploy: Cloudflare could not publish the Worker atomically${status}; inspect production status before retrying.${cloudflareCode}${diagnostic}`;
     case 'atomic-output-invalid':

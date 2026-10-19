@@ -8,7 +8,11 @@ import {
   getWorkerBundleDir,
   readBuildOutput,
 } from '@cloudflare/build-output-utils';
-import type { ParsedOutputWorkerConfig } from '@cloudflare/config';
+import {
+  convertToWranglerConfig,
+  type ParsedInputConfig,
+  type ParsedOutputWorkerConfig,
+} from '@cloudflare/config';
 import type { CloudflareCommandResult } from '@void/deploy-cloudflare';
 import ignore from 'ignore';
 import mime from 'mime';
@@ -244,7 +248,23 @@ function bindingsFromOutput(
   return bindings;
 }
 
-function exportsFromOutput(exports: unknown, bindings: Array<Json>): Json | undefined {
+const durableObjectStates = new Set([
+  'created',
+  'deleted',
+  'renamed',
+  'transferred',
+  'expecting-transfer',
+]);
+
+/**
+ * The `exports` that cf uploads for the same Build Output. cf converts them with
+ * `@cloudflare/config`'s `convertToWranglerConfig` (cf `build-*.mjs`), and its
+ * `resolveExportsUploadPayload` (cf `containers-*.mjs`) sends Worker entrypoints,
+ * then Durable Objects, then Workflows reduced to their identity. Cloudflare
+ * stages a version at 0% only when its exports are identical to the live
+ * version's, and that version may have been uploaded by cf.
+ */
+export function exportsFromOutput(exports: unknown, bindings: Array<Json>): Json | undefined {
   if (exports === undefined) {
     return undefined;
   }
@@ -252,7 +272,6 @@ function exportsFromOutput(exports: unknown, bindings: Array<Json>): Json | unde
   if (!entries) {
     throw new Error('Cloudflare Durable Object exports were not readable.');
   }
-  const result: Json = {};
   const workflows = new Map<string, string>();
   for (const [name, raw] of Object.entries(entries)) {
     const value = object(raw);
@@ -262,53 +281,30 @@ function exportsFromOutput(exports: unknown, bindings: Array<Json>): Json | unde
         throw new Error(`Cloudflare Workflow ${workflowName} has multiple local exports.`);
       }
       workflows.set(workflowName, name);
-      // cf uploads identity only. Execution settings stay in the immutable
-      // Build Output and are applied by its separate typed trigger deployment.
-      result[name] = { type: 'workflow', name: workflowName };
       continue;
     }
     if (value?.type === 'worker') {
-      result[name] = {
-        type: 'worker',
-        ...(value.cache === undefined ? {} : { cache: value.cache }),
-      };
       continue;
     }
     if (!value || value.type !== 'durable-object') {
       throw new Error(`Cloudflare export ${name} cannot be uploaded with pinned secrets.`);
     }
-    if (value.state === 'deleted') {
-      result[name] = { type: 'durable-object', state: 'deleted' };
-    } else if (value.state === 'renamed' || value.state === 'transferred') {
-      const renamed = value.state === 'renamed';
-      result[name] = {
-        type: 'durable-object',
-        state: value.state,
-        [renamed ? 'renamed_to' : 'transferred_to']: requiredString(
-          value[renamed ? 'renamedTo' : 'transferredTo'],
-          name,
-        ),
-      };
-    } else if (value.storage === 'sqlite' || value.storage === 'legacy-kv') {
-      if (
-        value.state !== undefined &&
-        !['created', 'expecting-transfer'].includes(String(value.state))
-      ) {
-        throw new Error(`Cloudflare Durable Object export ${name} has an unsupported state.`);
+    const state = value.state ?? 'created';
+    if (!durableObjectStates.has(String(state))) {
+      throw new Error(`Cloudflare Durable Object export ${name} has an unsupported state.`);
+    }
+    if (state === 'renamed' || state === 'transferred') {
+      requiredString(value[state === 'renamed' ? 'renamedTo' : 'transferredTo'], name);
+    } else if (state !== 'deleted') {
+      if (value.storage !== 'sqlite' && value.storage !== 'legacy-kv') {
+        throw new Error(`Cloudflare Durable Object export ${name} has no storage type.`);
       }
-      result[name] = {
-        type: 'durable-object',
-        storage: value.storage,
-        state: value.state ?? 'created',
-        ...(value.container === undefined
-          ? {}
-          : { container: requiredString(value.container, name) }),
-        ...(value.state === 'expecting-transfer'
-          ? { transfer_from: requiredString(value.transferFrom, name) }
-          : {}),
-      };
-    } else {
-      throw new Error(`Cloudflare Durable Object export ${name} has no storage type.`);
+      if (value.container !== undefined) {
+        requiredString(value.container, name);
+      }
+      if (state === 'expecting-transfer') {
+        requiredString(value.transferFrom, name);
+      }
     }
   }
   for (const binding of bindings) {
@@ -325,7 +321,27 @@ function exportsFromOutput(exports: unknown, bindings: Array<Json>): Json | unde
       );
     }
   }
-  return result;
+  // The converter reads only `worker.exports` for this field.
+  const converted =
+    object(
+      convertToWranglerConfig({
+        worker: { exports: entries },
+        containers: [],
+      } as unknown as ParsedInputConfig).exports,
+    ) ?? {};
+  const result: Json = {};
+  for (const type of ['worker', 'durable-object', 'workflow']) {
+    for (const [name, value] of Object.entries(converted)) {
+      const entry = object(value);
+      if (entry?.type !== type) {
+        continue;
+      }
+      // cf uploads Workflow identity only. Execution settings stay in the immutable
+      // Build Output and are applied by its separate typed trigger deployment.
+      result[name] = type === 'workflow' ? { type, name: entry.name } : entry;
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 async function preflightWorkflowExports(options: {

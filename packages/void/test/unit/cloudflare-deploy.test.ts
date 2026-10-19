@@ -244,6 +244,20 @@ describe('Cloudflare activation diagnostics', () => {
     expect(message).toContain('deploy.cloudflare.mode');
   });
 
+  it('suggests one atomic publication when the versions declare different exports', () => {
+    const message = formatCloudflareActivationError({
+      ok: false,
+      reason: 'readiness-staging-failed',
+      status: 1,
+      cloudflareErrorCode: 100405,
+      diagnostic:
+        '[100405] All versions in a multi-version deployment must declare identical `exports`.',
+    });
+    expect(message).toContain('production traffic is unchanged');
+    expect(message).toContain('declares different exports from the live version');
+    expect(message).toContain('Run `void deploy --platform cloudflare --atomic` once');
+  });
+
   it('reports readiness restoration outcomes without claiming uncertain traffic is unchanged', () => {
     expect(
       formatCloudflareActivationError({

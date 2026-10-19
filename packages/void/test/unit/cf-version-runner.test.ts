@@ -12,7 +12,11 @@ import {
   readBuildOutput,
   writeContainerConfig,
 } from '@cloudflare/build-output-utils';
-import { OutputContainerSchema } from '@cloudflare/config';
+import {
+  convertToWranglerConfig,
+  OutputContainerSchema,
+  type ParsedInputConfig,
+} from '@cloudflare/config';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
 import { isVoidSecretOnlyDraft } from '../../../deploy-cloudflare/src/secret-draft.ts';
 import {
@@ -23,7 +27,7 @@ import {
 import { operationFixture } from '../../../deploy-cloudflare/test/operation-fixture.ts';
 import { voidSecretDraftVersion } from '../../../deploy-cloudflare/test/secret-draft-fixture.ts';
 import { prepareCfBuildOutput } from '../../src/cli/cf-build-output.ts';
-import { uploadPinnedCloudflareVersion } from '../../src/cli/cf-version-api.ts';
+import { exportsFromOutput, uploadPinnedCloudflareVersion } from '../../src/cli/cf-version-api.ts';
 import {
   createActiveSecretPinner,
   createCfCommand,
@@ -67,6 +71,11 @@ async function listen(server: Server): Promise<string> {
       }),
   );
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`;
+}
+
+/** Compare JSON with its key order, which a deep equality check ignores. */
+function expectSameJson(actual: unknown, expected: unknown): void {
+  expect(JSON.stringify(actual, null, 2)).toBe(JSON.stringify(expected, null, 2));
 }
 
 /** The real pinned cf, whose child sees only a synthetic token and the fake API. */
@@ -895,9 +904,8 @@ async function verifyPinnedUpload(atomic: boolean): Promise<void> {
       ]),
     );
     expect(body.modules).toEqual([expect.objectContaining({ name: 'index.js' })]);
-    expect(body.exports).toEqual({
-      LocalJob: { type: 'workflow', name: 'local-workflow' },
-      ExportOnlyJob: { type: 'workflow', name: 'export-only-workflow' },
+    // cf's key order: Worker entrypoints, Durable Objects, then Workflows.
+    expectSameJson(body.exports, {
       Rpc: { type: 'worker', cache: { enabled: false } },
       Departed: { type: 'durable-object', state: 'transferred', transferred_to: 'target-worker' },
       Arriving: {
@@ -906,6 +914,8 @@ async function verifyPinnedUpload(atomic: boolean): Promise<void> {
         storage: 'sqlite',
         transfer_from: 'source-worker',
       },
+      LocalJob: { type: 'workflow', name: 'local-workflow' },
+      ExportOnlyJob: { type: 'workflow', name: 'export-only-workflow' },
     });
     expect(readFileSync(getWorkerConfigPath(prepared.directory), 'utf8')).toBe(
       originalWorkerConfig,
@@ -964,6 +974,187 @@ it('uploads live secrets and multiple asset batches when the latest upload is in
 
 it('uploads live secrets and multiple asset batches for atomic publication', () =>
   verifyPinnedUpload(true));
+
+it('converts Container and transfer exports as cf does', () => {
+  const exports = {
+    Flow: {
+      type: 'workflow',
+      name: 'flow',
+      defaultRetention: { successRetention: 1, errorRetention: '2 days' },
+    },
+    Box: { type: 'durable-object', state: 'created', storage: 'sqlite', container: 'box' },
+    LegacyBox: { type: 'durable-object', storage: 'legacy-kv', container: 'legacy-box' },
+    Incoming: {
+      type: 'durable-object',
+      state: 'expecting-transfer',
+      storage: 'sqlite',
+      transferFrom: 'source-worker',
+      container: 'incoming',
+    },
+    LegacyIncoming: {
+      type: 'durable-object',
+      state: 'expecting-transfer',
+      storage: 'legacy-kv',
+      transferFrom: 'source-worker',
+      container: 'legacy-incoming',
+    },
+    Entry: { type: 'worker' },
+  };
+  // cf's upload: the converter's entries, Worker entrypoints first, then Durable
+  // Objects, then Workflows reduced to their identity.
+  const converted = Object.entries(
+    convertToWranglerConfig({ worker: { exports }, containers: [] } as unknown as ParsedInputConfig)
+      .exports as Record<string, { type: string; name?: string }>,
+  );
+  const fromCf = Object.fromEntries(
+    ['worker', 'durable-object', 'workflow'].flatMap((type) =>
+      converted
+        .filter(([, value]) => value.type === type)
+        .map(([name, value]) => [name, type === 'workflow' ? { type, name: value.name } : value]),
+    ),
+  );
+  expectSameJson(exportsFromOutput(exports, []), fromCf);
+  // What cf sends today, kept readable.
+  expect(fromCf).toEqual({
+    Entry: { type: 'worker' },
+    Box: { type: 'durable-object', storage: 'sqlite', container: 'box' },
+    LegacyBox: { type: 'durable-object', storage: 'legacy-kv' },
+    Incoming: {
+      type: 'durable-object',
+      state: 'expecting-transfer',
+      storage: 'sqlite',
+      transfer_from: 'source-worker',
+      container: 'incoming',
+    },
+    LegacyIncoming: {
+      type: 'durable-object',
+      state: 'expecting-transfer',
+      storage: 'legacy-kv',
+      transfer_from: 'source-worker',
+    },
+    Flow: { type: 'workflow', name: 'flow' },
+  });
+  expect(exportsFromOutput({}, [])).toBeUndefined();
+  expect(() =>
+    exportsFromOutput({ Room: { type: 'durable-object', state: 'paused', storage: 'sqlite' } }, []),
+  ).toThrow('has an unsupported state');
+});
+
+// Cloudflare stages a 0% candidate only when its exports equal the live version's,
+// and the live version may come from cf. Compare against the real pinned cf upload.
+it(
+  'uploads the same exports as cf for the same Build Output',
+  async () => {
+    const activeVersionId = '11111111-1111-4111-8111-111111111111';
+    const prepared = await output({ secrets: { required: ['AUTH_SECRET'] } });
+    const worker = JSON.parse(readFileSync(getWorkerConfigPath(prepared.directory), 'utf8'));
+    worker.exports = {
+      Job: {
+        type: 'workflow',
+        name: 'jobs',
+        limits: { steps: 3 },
+        defaultRetention: { successRetention: '1 day' },
+      },
+      Room: { type: 'durable-object', storage: 'sqlite' },
+      Legacy: { type: 'durable-object', state: 'created', storage: 'legacy-kv' },
+      Rpc: { type: 'worker', cache: { enabled: false } },
+      Removed: { type: 'durable-object', state: 'deleted' },
+      OldRoom: { type: 'durable-object', state: 'renamed', renamedTo: 'Room' },
+      Departed: { type: 'durable-object', state: 'transferred', transferredTo: 'target-worker' },
+      Arriving: {
+        type: 'durable-object',
+        state: 'expecting-transfer',
+        storage: 'sqlite',
+        transferFrom: 'source-worker',
+      },
+    };
+    writeFileSync(getWorkerConfigPath(prepared.directory), JSON.stringify(worker));
+    const uploads: Array<{ path: string; exports: unknown }> = [];
+    const server = createServer(async (request, response) => {
+      const chunks: Array<Buffer> = [];
+      for await (const chunk of request) {
+        chunks.push(Buffer.from(chunk));
+      }
+      const body = Buffer.concat(chunks);
+      const path = new URL(request.url!, 'http://localhost').pathname;
+      let result: unknown = {};
+      if (request.method === 'POST' && path.endsWith('/workers/scripts/void-test/versions')) {
+        const form = await new Request('http://localhost', {
+          method: 'POST',
+          headers: { 'content-type': request.headers['content-type']! },
+          body,
+        }).formData();
+        uploads.push({ path, exports: JSON.parse(String(form.get('metadata'))).exports });
+        result = { id: '33333333-3333-4333-8333-333333333333', number: 2 };
+      } else if (
+        request.method === 'POST' &&
+        path.endsWith('/workers/workers/void-test/versions')
+      ) {
+        uploads.push({ path, exports: JSON.parse(body.toString('utf8')).exports });
+        result = { id: '22222222-2222-4222-8222-222222222222', urls: [] };
+      } else if (path.endsWith('/services/void-test')) {
+        result = {
+          default_environment: {
+            environment: 'production',
+            script: { id: 'void-test', last_deployed_from: 'wrangler' },
+          },
+        };
+      } else if (path.endsWith('/workflows/jobs')) {
+        result = { name: 'jobs', script_name: 'void-test', class_name: 'Job' };
+      } else if (path.endsWith(`/versions/${activeVersionId}`)) {
+        result = { id: activeVersionId, bindings: [{ name: 'AUTH_SECRET', type: 'secret_text' }] };
+      }
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ success: true, errors: [], messages: [], result }));
+    });
+    const apiBaseUrl = await listen(server);
+    try {
+      // cf reports a local error after this upload because the fake result is incomplete.
+      await pinnedCf(apiBaseUrl)(['workers', 'versions', 'create', '--prebuilt'], {
+        cwd: prepared.directory,
+        capture: true,
+        timeoutMs: REAL_CF_TIMEOUT_MS,
+      });
+      expect(
+        await createActiveSecretPinner({
+          output: prepared,
+          handoffPending: false,
+          requiredNames: ['AUTH_SECRET'],
+        })!(activeVersionId, [{ name: 'AUTH_SECRET', type: 'secret_text' }]),
+      ).toBe(true);
+      await uploadPinnedCloudflareVersion({
+        output: prepared,
+        accountId: 'account-id',
+        apiBaseUrl,
+        workerName: 'void-test',
+        token: 'synthetic-token',
+        atomic: false,
+        verifyUploader: () => true,
+      });
+      expect(uploads.map(({ path }) => path.split('/').at(-3))).toEqual(['scripts', 'workers']);
+      const [cf, pinned] = uploads.map(({ exports }) => JSON.stringify(exports, null, 2));
+      expect(pinned).toBe(cf);
+      expect(JSON.parse(pinned!)).toEqual({
+        Rpc: { type: 'worker', cache: { enabled: false } },
+        Room: { type: 'durable-object', storage: 'sqlite' },
+        Legacy: { type: 'durable-object', storage: 'legacy-kv' },
+        Removed: { type: 'durable-object', state: 'deleted' },
+        OldRoom: { type: 'durable-object', state: 'renamed', renamed_to: 'Room' },
+        Departed: { type: 'durable-object', state: 'transferred', transferred_to: 'target-worker' },
+        Arriving: {
+          type: 'durable-object',
+          state: 'expecting-transfer',
+          storage: 'sqlite',
+          transfer_from: 'source-worker',
+        },
+        Job: { type: 'workflow', name: 'jobs' },
+      });
+    } finally {
+      prepared.dispose();
+    }
+  },
+  REAL_CF_TIMEOUT_MS,
+);
 
 it('uploads Worker limits, placement and cache with pinned secrets', async () => {
   const prepared = await output({
@@ -1754,16 +1945,12 @@ it.each([
       expect(post.body.containers).toEqual([
         { name: 'sandbox', class_name: 'Sandbox', images: expectedImages },
       ]);
-      expect(post.body.exports).toEqual({
+      // Live classes carry no state, as in cf's upload of the same Build Output.
+      expectSameJson(post.body.exports, {
         OldRoom: { type: 'durable-object', state: 'renamed', renamed_to: 'Room' },
-        Room: { type: 'durable-object', storage: 'sqlite', state: 'created' },
         Removed: { type: 'durable-object', state: 'deleted' },
-        Sandbox: {
-          type: 'durable-object',
-          storage: 'sqlite',
-          state: 'created',
-          container: 'sandbox',
-        },
+        Sandbox: { type: 'durable-object', storage: 'sqlite', container: 'sandbox' },
+        Room: { type: 'durable-object', storage: 'sqlite' },
       });
       expect(requests.findIndex((row) => row.url.endsWith('/image-preparations'))).toBeLessThan(
         requests.indexOf(post),
