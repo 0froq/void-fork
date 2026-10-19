@@ -126,6 +126,10 @@ declare module 'hono' {
 export type CloudContext = Context<CloudEnv>;
 
 type HandlerFn = (c: CloudContext) => unknown | Promise<unknown>;
+// `R` is the loader's data, so `defineHandler<Props>(async (c) => ...)` works.
+type LoaderFn<R> = (c: CloudContext) => R | Response | Promise<R | Response>;
+// For loaders that LoaderFn cannot infer, such as `cond ? loadA() : loadB()`.
+type LoaderOutput<F extends HandlerFn> = Exclude<Awaited<ReturnType<F>>, Response>;
 type MiddlewareFn = MiddlewareHandler<CloudEnv>;
 type BasicAuthOptionValue = string | (() => string);
 
@@ -209,35 +213,68 @@ export type TypedHandler<V extends ValidatorSlots = {}, R = unknown> = {
  * Multiple arguments: middleware chain + final handler, composed at runtime.
  */
 export function defineHandler<R>(
-  handler: (c: CloudContext) => R | Response | Promise<R | Response>,
+  handler: LoaderFn<R>,
 ): TypedHandler<{}, Exclude<Awaited<R>, Response>>;
-export function defineHandler(firstMiddleware: MiddlewareFn, handler: HandlerFn): TypedHandler;
-export function defineHandler(
+export function defineHandler<R>(
+  firstMiddleware: MiddlewareFn,
+  handler: LoaderFn<R>,
+): TypedHandler<{}, Exclude<Awaited<R>, Response>>;
+export function defineHandler<F extends HandlerFn>(
+  firstMiddleware: MiddlewareFn,
+  handler: F,
+): TypedHandler<{}, LoaderOutput<F>>;
+export function defineHandler<R>(
   firstMiddleware: MiddlewareFn,
   secondMiddleware: MiddlewareFn,
-  handler: HandlerFn,
-): TypedHandler;
-export function defineHandler(
+  handler: LoaderFn<R>,
+): TypedHandler<{}, Exclude<Awaited<R>, Response>>;
+export function defineHandler<F extends HandlerFn>(
+  firstMiddleware: MiddlewareFn,
+  secondMiddleware: MiddlewareFn,
+  handler: F,
+): TypedHandler<{}, LoaderOutput<F>>;
+export function defineHandler<R>(
   firstMiddleware: MiddlewareFn,
   secondMiddleware: MiddlewareFn,
   thirdMiddleware: MiddlewareFn,
-  handler: HandlerFn,
-): TypedHandler;
-export function defineHandler(
+  handler: LoaderFn<R>,
+): TypedHandler<{}, Exclude<Awaited<R>, Response>>;
+export function defineHandler<F extends HandlerFn>(
+  firstMiddleware: MiddlewareFn,
+  secondMiddleware: MiddlewareFn,
+  thirdMiddleware: MiddlewareFn,
+  handler: F,
+): TypedHandler<{}, LoaderOutput<F>>;
+export function defineHandler<R>(
   firstMiddleware: MiddlewareFn,
   secondMiddleware: MiddlewareFn,
   thirdMiddleware: MiddlewareFn,
   fourthMiddleware: MiddlewareFn,
-  handler: HandlerFn,
-): TypedHandler;
-export function defineHandler(
+  handler: LoaderFn<R>,
+): TypedHandler<{}, Exclude<Awaited<R>, Response>>;
+export function defineHandler<F extends HandlerFn>(
+  firstMiddleware: MiddlewareFn,
+  secondMiddleware: MiddlewareFn,
+  thirdMiddleware: MiddlewareFn,
+  fourthMiddleware: MiddlewareFn,
+  handler: F,
+): TypedHandler<{}, LoaderOutput<F>>;
+export function defineHandler<R>(
   firstMiddleware: MiddlewareFn,
   secondMiddleware: MiddlewareFn,
   thirdMiddleware: MiddlewareFn,
   fourthMiddleware: MiddlewareFn,
   fifthMiddleware: MiddlewareFn,
-  handler: HandlerFn,
-): TypedHandler;
+  handler: LoaderFn<R>,
+): TypedHandler<{}, Exclude<Awaited<R>, Response>>;
+export function defineHandler<F extends HandlerFn>(
+  firstMiddleware: MiddlewareFn,
+  secondMiddleware: MiddlewareFn,
+  thirdMiddleware: MiddlewareFn,
+  fourthMiddleware: MiddlewareFn,
+  fifthMiddleware: MiddlewareFn,
+  handler: F,
+): TypedHandler<{}, LoaderOutput<F>>;
 export function defineHandler(...args: Array<MiddlewareFn | HandlerFn>): TypedHandler {
   if (args.length === 1) {
     return args[0] as TypedHandler;
