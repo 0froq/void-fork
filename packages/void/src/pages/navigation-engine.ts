@@ -7,6 +7,7 @@ import { PrefetchCache, parseCacheFor } from './prefetch.ts';
 import type { CacheForInput, CacheForResult } from './prefetch.ts';
 import type { PageObject } from './protocol.ts';
 import { createScrollRestoration } from './scroll-restoration.ts';
+import { isSameOrigin } from './url.ts';
 
 export type PageComponentModule = {
   default: unknown;
@@ -595,13 +596,18 @@ export async function createPageNavigationEngine(
     deferredRegistry: DeferredRegistry,
   ): Promise<PageNavigationResult | undefined> {
     // Page data only comes from this origin. Other http(s) URLs get a full page
-    // load; other schemes (javascript:, data:, ...) must never reach location.href.
+    // load. Capacitor's iOS WebView uses capacitor: for local pages.
+    // Unsafe schemes (javascript:, data:, ...) must never reach location.href.
     // Check the scheme first: a blob: URL reports the origin that created it.
     const target = new URL(url, window.location.origin);
-    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+    if (
+      target.protocol !== 'http:' &&
+      target.protocol !== 'https:' &&
+      target.protocol !== 'capacitor:'
+    ) {
       throw new Error(`Void Router: refusing to navigate to a ${target.protocol} URL.`);
     }
-    if (target.origin !== window.location.origin) {
+    if (!isSameOrigin(target, window.location.origin)) {
       if (method !== 'GET') {
         throw new Error('Void Router: non-GET visits must target the current origin.');
       }
@@ -676,7 +682,7 @@ export async function createPageNavigationEngine(
 
       if (response?.redirected) {
         const redirectUrl = new URL(response.url, window.location.origin);
-        if (redirectUrl.origin !== window.location.origin) {
+        if (!isSameOrigin(redirectUrl, window.location.origin)) {
           window.location.href = method === 'GET' ? url : response.url;
           return undefined;
         }

@@ -11,7 +11,7 @@ type TestRouterConfig = Partial<Omit<VoidRouterConfig, 'adapter'>> & {
   adapter?: Partial<VoidRouterConfig['adapter']>;
 };
 
-function stubClientGlobals() {
+function stubClientGlobals(origin = 'http://localhost') {
   const documentStub = {
     createElement: vi.fn(() => ({})),
     getElementById: vi.fn((id: string) => {
@@ -42,7 +42,7 @@ function stubClientGlobals() {
   vi.stubGlobal('window', {
     addEventListener: vi.fn(),
     location: {
-      origin: 'http://localhost',
+      origin,
       pathname: '/',
       search: '',
       hash: '',
@@ -924,8 +924,8 @@ describe('createVoidRouter', () => {
 });
 
 describe('createVoidRouter other-origin visits', () => {
-  async function createRouter() {
-    stubClientGlobals();
+  async function createRouter(origin = 'http://localhost') {
+    stubClientGlobals(origin);
     const fetchMock = vi.fn(async () => pageJson({ component: 'users', props: { users: [] } }));
     vi.stubGlobal('fetch', fetchMock);
     const applyUpdate = vi.fn();
@@ -936,6 +936,64 @@ describe('createVoidRouter other-origin visits', () => {
     });
     return { router, fetchMock, applyUpdate };
   }
+
+  it.each([
+    ['GET', '/users'],
+    ['GET', 'capacitor://localhost/users'],
+    ['POST', '/users'],
+    ['POST', 'capacitor://localhost/users'],
+  ])('loads Capacitor %s visits to %s in place', async (method, url) => {
+    const { router, fetchMock, applyUpdate } = await createRouter('capacitor://localhost');
+    await router.visit(url, { method });
+    expect(fetchMock).toHaveBeenCalledWith('/users', expect.objectContaining({ method }));
+    expect(applyUpdate).toHaveBeenCalledTimes(1);
+    expect(window.location.href).toBeUndefined();
+  });
+
+  it('follows a same-host Capacitor action redirect in place', async () => {
+    const { router, fetchMock, applyUpdate } = await createRouter('capacitor://localhost');
+    const response = pageJson({});
+    Object.defineProperties(response, {
+      redirected: { value: true },
+      url: { value: 'capacitor://localhost/users' },
+    });
+    fetchMock.mockResolvedValueOnce(response);
+    await router.visit('/submit', { method: 'POST' });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/users',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(applyUpdate).toHaveBeenCalledTimes(1);
+    expect(window.location.href).toBeUndefined();
+  });
+
+  it('does not fetch another Capacitor host for GET navigation', async () => {
+    const { router, fetchMock, applyUpdate } = await createRouter('capacitor://localhost');
+    await router.visit('capacitor://other/users');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(applyUpdate).not.toHaveBeenCalled();
+    expect(window.location.href).toBe('capacitor://other/users');
+  });
+
+  it('does not treat different Capacitor hosts as the same origin', async () => {
+    const { router, fetchMock } = await createRouter('capacitor://localhost');
+    await expect(router.visit('capacitor://other/users', { method: 'POST' })).rejects.toThrow(
+      'Void Router: non-GET visits must target the current origin.',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(window.location.href).toBeUndefined();
+  });
+
+  it.each(['javascript:alert(1)', 'data:text/html,x', 'file:///users', 'app://localhost/users'])(
+    'still rejects %s from Capacitor',
+    async (url) => {
+      const { router, fetchMock } = await createRouter('capacitor://localhost');
+      await expect(router.visit(url)).rejects.toThrow(/refusing to navigate/);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(window.location.href).toBeUndefined();
+    },
+  );
 
   it.each(['javascript:alert(1)', ' JaVaScRiPt:alert(1)', 'data:text/html,x'])(
     'rejects %j without fetching or assigning location',

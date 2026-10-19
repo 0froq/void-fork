@@ -17,6 +17,7 @@ import {
   type PrefetchOptions,
 } from './navigation-engine.ts';
 import { ISLAND_FRONTMATTER_ID } from './serialize.ts';
+import { isSameOrigin } from './url.ts';
 
 export { getValidationErrors, isModifiedEvent, mergeDataIntoHref } from './adapter-helpers.ts';
 export {
@@ -98,7 +99,7 @@ function normalizeUrl(value: string | URL): string {
     return value;
   }
   const url = toUrl(value);
-  return url.origin === getUrlOrigin() ? url.pathname + url.search + url.hash : url.href;
+  return isSameOrigin(url, getUrlOrigin()) ? url.pathname + url.search + url.hash : url.href;
 }
 
 function navigationMethod(method: string): NavigationMethod {
