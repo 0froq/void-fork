@@ -76,6 +76,7 @@ export default defineConfig({
       'src/runtime/client-svelte.ts',
       'src/runtime/client-solid.ts',
       'src/runtime/fetch.ts',
+      'src/runtime/fetch-server.ts',
       'src/runtime/fetch-stream.ts',
       'src/runtime/route-url.ts',
       'src/runtime/sse.ts',

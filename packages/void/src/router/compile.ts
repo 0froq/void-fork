@@ -11,7 +11,7 @@ import { ASSET_EXTENSIONS } from '../runtime/routing-assets.ts';
 import { DEFAULT_SANDBOX_CLASS_NAME } from '../sandbox/config.ts';
 import type { ScanResult } from './scan.ts';
 
-const ROUTE_URL_PATH = fileURLToPath(import.meta.resolve('#self/runtime/route-url'));
+const FETCH_SERVER_PATH = fileURLToPath(import.meta.resolve('#self/runtime/fetch-server'));
 const ROUTING_RUNTIME_PATH = fileURLToPath(import.meta.resolve('#self/runtime/routing'));
 
 function pushDefaultErrorPageHelpers(lines: Array<string>, options: CompileOptions): void {
@@ -1415,68 +1415,17 @@ function compileHeaderMiddleware(lines: Array<string>, rules: Array<HeaderRule>)
 export function compileWorkerClient(authClientPath: string, nodeTarget = false): string {
   const envImport = nodeTarget ? '' : 'import { env } from "cloudflare:workers";\n';
   const dispatch = nodeTarget
-    ? 'const response = await app.fetch(request);'
-    : 'const executionCtx = store?.executionCtx ?? { waitUntil() {}, passThroughOnException() {} };\n  const response = await app.fetch(request, env, executionCtx);';
+    ? 'app.fetch(request)'
+    : 'app.fetch(request, env, store?.executionCtx ?? { waitUntil() {}, passThroughOnException() {} })';
   return `import app, { requestContext } from "virtual:void-routes";
-import { interpolateRouteParams } from ${JSON.stringify(ROUTE_URL_PATH)};
+import { createServerFetch } from ${JSON.stringify(FETCH_SERVER_PATH)};
+export { FetchError } from ${JSON.stringify(FETCH_SERVER_PATH)};
 ${envImport}export { auth, createAuthClient } from ${JSON.stringify(authClientPath)};
 
-export class FetchError extends Error {
-  constructor(status, statusText, data) {
-    super(\`fetch: Request failed with status \${status}.\`);
-    this.name = "FetchError";
-    this.status = status;
-    this.statusText = statusText;
-    this.data = data;
-  }
-}
-
-export async function fetch(path, options) {
-  let url = interpolateRouteParams(path, options?.params);
-
-  if (options?.query) {
-    const qs = new URLSearchParams(options.query).toString();
-    if (qs) url += "?" + qs;
-  }
-
-  const method = options?.method ?? "GET";
-  const headers = new Headers(options?.headers);
-
-  const store = requestContext.getStore();
-  if (store?.request) {
-    const outerReq = store.request;
-    if (!headers.has("cookie")) {
-      const cookie = outerReq.headers.get("cookie");
-      if (cookie) headers.set("cookie", cookie);
-    }
-    if (!headers.has("authorization")) {
-      const auth = outerReq.headers.get("authorization");
-      if (auth) headers.set("authorization", auth);
-    }
-  }
-
-  if (options?.body != null && !headers.has("content-type")) {
-    headers.set("content-type", "application/json");
-  }
-
-  const request = new Request("${nodeTarget ? 'http://localhost' : 'http://worker.local'}" + url, {
-    method,
-    headers,
-    body: options?.body != null ? JSON.stringify(options.body) : undefined,
-  });
-
-  ${dispatch}
-
-  if (response.status === 204) return undefined;
-
-  const contentType = response.headers.get("content-type") ?? "";
-  const data = contentType.includes("application/json") ? await response.json() : await response.text();
-
-  if (!response.ok) {
-    throw new FetchError(response.status, response.statusText, data);
-  }
-
-  return data;
-}
+export const fetch = createServerFetch(
+  (request, store) => ${dispatch},
+  () => requestContext.getStore(),
+  "${nodeTarget ? 'http://localhost' : 'http://worker.local'}",
+);
 `;
 }
