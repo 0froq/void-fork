@@ -10,7 +10,7 @@ import {
   resolveLiveBindingConfig,
   syncWranglerBindings,
 } from './cli/wrangler.ts';
-import { readConfig } from './config.ts';
+import { getDatabaseCasing, readConfig } from './config.ts';
 import { findDependencyClosure, findVoidDependentPackages } from './installed-packages.ts';
 import { resolveLocalD1Target } from './local-d1.ts';
 import { voidLog } from './log.ts';
@@ -203,10 +203,12 @@ export function createFrameworkPlugins(input: {
       // the injected env import below and those of PostgreSQL and MySQL apps'
       // installed packages that import void, in the graph that holds void/db's env
       // module. In a D1 app, a package's own void/db reads the same D1 binding, so
-      // those packages stay with Node.
+      // those packages stay with Node, unless `database.casing` is set: only the
+      // virtual module applies it.
+      const inlineDependents = dialect !== 'sqlite' || getDatabaseCasing(config) !== undefined;
       return {
         ssr: {
-          noExternal: ['void', ...(dialect === 'sqlite' ? [] : findVoidDependentPackages(root))],
+          noExternal: ['void', ...(inlineDependents ? findVoidDependentPackages(root) : [])],
         },
       };
     },
@@ -358,6 +360,23 @@ export default {
         }
       : undefined;
 
+  // A D1 build keeps Kit's output, so installed packages that import void stay external and
+  // load their own void/db. Only the virtual module applies `database.casing`: bundle them when
+  // it is set, as the dev server inlines them.
+  const svelteKitD1CasingBuildPlugin: Plugin | undefined =
+    detected.class === 'b' && dialect === 'sqlite' && getDatabaseCasing(config) !== undefined
+      ? {
+          name: 'void:sveltekit-d1-casing-build',
+          apply: 'build',
+          configEnvironment(name) {
+            if (name !== 'ssr') {
+              return;
+            }
+            return { resolve: { noExternal: findVoidDependentPackages(root) } };
+          },
+        }
+      : undefined;
+
   return [
     devTriggerSecretGuardPlugin(),
     createCloudflareBuiltinsExternalPlugin(),
@@ -367,6 +386,7 @@ export default {
     ...(astroServerEntryPlugin ? [astroServerEntryPlugin] : []),
     svelteKitHooksInjectPlugin,
     ...(svelteKitWorkerBuildPlugin ? [svelteKitWorkerBuildPlugin] : []),
+    ...(svelteKitD1CasingBuildPlugin ? [svelteKitD1CasingBuildPlugin] : []),
     clientStubsPlugin,
     // Also serves the Node built-ins that the driver requires in SvelteKit's workerd build.
     serverRuntimeOptimizerPlugin,
@@ -382,6 +402,7 @@ export default {
     drizzlePlugin(root, false, dialect, {
       d1BindingName: bindingNames?.d1,
       forceVirtualDb: bindingNames?.d1 !== undefined,
+      casing: getDatabaseCasing(config),
       localD1DatabaseId: localD1.databaseId,
       localD1PersistRoot: frameworkPersistRoot,
       nitroBundlesServer: detected.name === 'nuxt' || detected.name === 'analog',
