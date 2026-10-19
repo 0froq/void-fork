@@ -726,6 +726,18 @@ body {
 .void-admin-access-table {
   overflow-x: auto;
 }
+.void-admin-access-table table {
+  table-layout: auto;
+}
+.void-admin-access-table th,
+.void-admin-access-table td {
+  /* Let all columns participate in sizing, not only the unwrapped dates. */
+  max-width: none;
+}
+.void-admin-access-table th,
+.void-admin-invitations-table td {
+  white-space: nowrap;
+}
 .void-admin-pagination {
   display: flex;
   align-items: center;
