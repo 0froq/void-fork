@@ -7,8 +7,8 @@
     "dev": "vp dev"
   },
   "dependencies": {
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "react-router": "^8.4.0"
   },
   "devDependencies": {

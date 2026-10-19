@@ -11,8 +11,8 @@
   "dependencies": {
     "@hono/node-server": "^2.1.5",
     "hono": "^4.13.13",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react": "catalog:",
+    "react-dom": "catalog:"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",

@@ -358,7 +358,7 @@
     "@void/edge": "workspace:*",
     "@void/isr": "workspace:*",
     "@void/platform": "workspace:*",
-    "better-auth": "^1.7.7",
+    "better-auth": "catalog:",
     "better-sqlite3": "^13.0.3",
     "blake3-jit": "^1.1.0",
     "cf": "catalog:",
@@ -383,7 +383,7 @@
     "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.9",
+    "@electric-sql/pglite": "catalog:",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "catalog:",
     "@types/pg": "^8.23.1",
