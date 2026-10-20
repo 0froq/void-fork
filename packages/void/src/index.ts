@@ -118,7 +118,10 @@ export function voidPlugin(options?: {
   // A preview reads the build's Wrangler deploy config, which the build moved aside. Put it back
   // until the preview exits.
   const restorePreviewPointer = () => {
-    if (!existsSync(join(root, 'void.config.ts'))) {
+    if (
+      !existsSync(join(root, 'void.config.ts')) ||
+      process.env[CLOUDFLARE_DEPLOY_BUILD_ENV] === '1'
+    ) {
       return;
     }
     if (restoreCloudflarePreviewPointer(root) && !scheduledPreviewPointerCleanups.has(root)) {

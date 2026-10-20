@@ -1106,6 +1106,55 @@ describe('voidPlugin Vite environments', () => {
   );
 });
 
+describe('deploy-build preview', () => {
+  it.each(['vite', 'astro'])(
+    'preserves the fresh deploy pointer when %s previews inside a deploy build',
+    (command) => {
+      const root = createProjectRoot();
+      rmSync(join(root, 'void.json'));
+      writeFileSync(join(root, 'void.config.ts'), 'export default {};\n');
+      if (command === 'astro') {
+        writeFileSync(
+          join(root, 'package.json'),
+          JSON.stringify({ type: 'module', dependencies: { astro: '*' } }),
+        );
+      }
+      const stash = '{"configPath":"../../old-build/wrangler.json"}';
+      const fresh = '{"configPath":"../../dist/server/wrangler.json"}';
+      mkdirSync(join(root, '.void'), { recursive: true });
+      writeFileSync(join(root, '.void/preview-deploy-config.json'), stash);
+      const pointer = join(root, '.wrangler/deploy/config.json');
+      mkdirSync(join(root, '.wrangler/deploy'), { recursive: true });
+      writeFileSync(pointer, fresh);
+      vi.spyOn(process, 'cwd').mockReturnValue(root);
+      vi.stubEnv('VOID_CLOUDFLARE_DEPLOY_BUILD', '1');
+      const once = vi.spyOn(process, 'once').mockReturnValue(process);
+      const argv = process.argv;
+      process.argv = [argv[0]!, command, command === 'astro' ? 'preview' : 'build'];
+      try {
+        const guard = voidPlugin().find(
+          (plugin) => plugin.name === 'void:remove-implicit-cloudflare-deploy-pointer',
+        )!;
+        const configure = getHookHandler(guard.config) as (
+          config: object,
+          env: { command: string; mode: string; isPreview: boolean },
+        ) => void;
+        configure({}, { command: 'serve', mode: 'production', isPreview: true });
+        for (const [event, listener] of once.mock.calls) {
+          if (event === 'exit') {
+            (listener as () => void)();
+          }
+        }
+        expect(existsSync(pointer)).toBe(true);
+        expect(readFileSync(pointer, 'utf8')).toBe(fresh);
+        expect(readFileSync(join(root, '.void/preview-deploy-config.json'), 'utf8')).toBe(stash);
+      } finally {
+        process.argv = argv;
+      }
+    },
+  );
+});
+
 describe('Astro preview', () => {
   // `astro preview` loads the Astro config, which calls voidPlugin(), but runs none of its hooks.
   it.each([
