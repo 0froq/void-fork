@@ -25,6 +25,7 @@ import {
   runInitCommand,
 } from '../../src/cli/init.ts';
 import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
+import { readDeploymentPlatform } from '../../src/cli/project.ts';
 import { LATEST_KNOWN_COMPAT_DATE } from '../../src/cli/wrangler.ts';
 import { buildDrizzleKitSpawnEnv } from '../../src/cli/yarn-pnp.ts';
 import { readConfig } from '../../src/config.ts';
@@ -131,6 +132,70 @@ describe('init Git arguments', () => {
       }
     },
   );
+});
+
+describe('init scaffold arguments', () => {
+  it('parses scaffold choices and rejects unknown values', () => {
+    expect(
+      parseInitArgs([
+        '--toolchain',
+        'vite',
+        '--framework=vue',
+        '--starter',
+        'static',
+        '--deploy',
+        'none',
+      ]),
+    ).toMatchObject({ toolchain: 'vite', framework: 'vue', starter: 'static', deploy: 'none' });
+    expect(parseInitArgs([])).toMatchObject({
+      toolchain: undefined,
+      framework: undefined,
+      starter: undefined,
+      deploy: undefined,
+    });
+    expect(() => parseInitArgs(['--framework', 'angular'])).toThrow(
+      'init: --framework must be one of react, vue, svelte, solid.',
+    );
+  });
+
+  it('scaffolds from flags without prompting when stdin is not a terminal', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-flags-'));
+    try {
+      Object.defineProperty(process.stdin, 'isTTY', { configurable: true, get: () => false });
+      await runInitCommand(
+        root,
+        parseInitArgs([
+          '--toolchain',
+          'vite',
+          '--framework',
+          'react',
+          '--starter',
+          'static',
+          '--deploy',
+          'none',
+        ]),
+      );
+      expect(mockSelect).not.toHaveBeenCalled();
+      expect(existsSync(join(root, 'pages', 'index.tsx'))).toBe(true);
+      expect(readDeploymentPlatform(root)).toBe('none');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('fails with the missing flag instead of prompting when stdin is not a terminal', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-flags-missing-'));
+    try {
+      Object.defineProperty(process.stdin, 'isTTY', { configurable: true, get: () => false });
+      await expect(runInitCommand(root, parseInitArgs(['--toolchain', 'vite']))).rejects.toThrow(
+        'init: Pass --framework (react, vue, svelte, solid) when running without an interactive terminal.',
+      );
+      expect(mockSelect).not.toHaveBeenCalled();
+      expect(readdirSync(root)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('GitHub Actions deployment workflows', () => {
@@ -448,7 +513,26 @@ function cloudflareOperationType(args: unknown): string | undefined {
   }
 }
 
+// Prompts are mocked, so give init a terminal to prompt in. CI stays set, as
+// in CI runs, so Git and AGENTS.md setup keep skipping their prompts.
+const stdinTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+let previousCI: string | undefined;
+
+function restoreInteractiveTerminal(): void {
+  if (previousCI === undefined) {
+    delete process.env.CI;
+  } else {
+    process.env.CI = previousCI;
+  }
+  if (stdinTtyDescriptor) {
+    Object.defineProperty(process.stdin, 'isTTY', stdinTtyDescriptor);
+  } else {
+    Reflect.deleteProperty(process.stdin, 'isTTY');
+  }
+}
+
 afterEach(() => {
+  restoreInteractiveTerminal();
   delete process.env.VOID_PLATFORM_REGISTRY_DIR;
   rmSync(platformRegistryDirectory, { recursive: true, force: true });
   mockSpawnSync.mockReset();
@@ -469,6 +553,9 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  previousCI = process.env.CI;
+  process.env.CI = 'true';
+  Object.defineProperty(process.stdin, 'isTTY', { configurable: true, get: () => true });
   platformRegistryDirectory = mkdtempSync(join(tmpdir(), 'void-init-platform-registry-'));
   process.env.VOID_PLATFORM_REGISTRY_DIR = platformRegistryDirectory;
   savePlatformConnection({

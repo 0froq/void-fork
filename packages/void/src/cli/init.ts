@@ -72,7 +72,33 @@ export type InitArgs = {
   tsconfig: boolean;
   github: boolean;
   git?: boolean;
+  toolchain?: ScaffoldToolchain;
+  framework?: ScaffoldFramework;
+  starter?: ScaffoldStarterMode;
+  deploy?: DeploymentPlatform;
 };
+
+const SCAFFOLD_STARTER_MODES: ReadonlyArray<ScaffoldStarterMode> = [
+  'sqlite',
+  'postgresql',
+  'mysql',
+  'static',
+];
+const DEPLOYMENT_PLATFORMS: ReadonlyArray<DeploymentPlatform> = ['cloudflare', 'void', 'none'];
+
+function parseChoice<T extends string>(
+  flag: string,
+  value: unknown,
+  choices: ReadonlyArray<T>,
+): T | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'string' || !choices.includes(value as T)) {
+    throw new Error(`init: --${flag} must be one of ${choices.join(', ')}.`);
+  }
+  return value as T;
+}
 
 export function parseInitArgs(args: Array<string>): InitArgs {
   let parsed: ReturnType<typeof parseArgs>;
@@ -83,6 +109,10 @@ export function parseInitArgs(args: Array<string>): InitArgs {
         tsconfig: { type: 'boolean' },
         github: { type: 'boolean' },
         git: { type: 'boolean' },
+        toolchain: { type: 'string' },
+        framework: { type: 'string' },
+        starter: { type: 'string' },
+        deploy: { type: 'string' },
       },
       allowNegative: true,
       strict: true,
@@ -96,6 +126,18 @@ export function parseInitArgs(args: Array<string>): InitArgs {
     tsconfig: parsed.values.tsconfig === true,
     github: parsed.values.github === true,
     git: parsed.values.git as boolean | undefined,
+    toolchain: parseChoice(
+      'toolchain',
+      parsed.values.toolchain,
+      SCAFFOLD_TOOLCHAIN_OPTIONS.map((option) => option.value),
+    ),
+    framework: parseChoice(
+      'framework',
+      parsed.values.framework,
+      SCAFFOLD_FRAMEWORK_OPTIONS.map((option) => option.value),
+    ),
+    starter: parseChoice('starter', parsed.values.starter, SCAFFOLD_STARTER_MODES),
+    deploy: parseChoice('deploy', parsed.values.deploy, DEPLOYMENT_PLATFORMS),
   };
 }
 
@@ -1463,7 +1505,23 @@ function applyDatabaseSetup(root: string, choice: DatabaseSetupChoice): void {
   applyDatabaseDialect(root, choice);
 }
 
-async function promptStarterMode(): Promise<ScaffoldStarterMode> {
+/**
+ * A prompt cannot be answered when stdin is not a terminal, so fail with the
+ * flag that answers it instead of exiting as if init succeeded.
+ */
+function assertInteractive(flag: string, choices: ReadonlyArray<string>): void {
+  if (!process.stdin.isTTY) {
+    throw new Error(
+      `init: Pass --${flag} (${choices.join(', ')}) when running without an interactive terminal.`,
+    );
+  }
+}
+
+async function promptStarterMode(starter?: ScaffoldStarterMode): Promise<ScaffoldStarterMode> {
+  if (starter) {
+    return starter;
+  }
+  assertInteractive('starter', SCAFFOLD_STARTER_MODES);
   const choice = await select({
     message: 'Choose a Pages starter:',
     options: [
@@ -1498,7 +1556,14 @@ async function promptStarterMode(): Promise<ScaffoldStarterMode> {
   return choice as ScaffoldStarterMode;
 }
 
-async function promptScaffoldToolchain(): Promise<ScaffoldToolchain> {
+async function promptScaffoldToolchain(toolchain?: ScaffoldToolchain): Promise<ScaffoldToolchain> {
+  if (toolchain) {
+    return toolchain;
+  }
+  assertInteractive(
+    'toolchain',
+    SCAFFOLD_TOOLCHAIN_OPTIONS.map((option) => option.value),
+  );
   const choice = await select({
     message: 'Choose a Pages scaffold toolchain:',
     initialValue: 'vite-plus',
@@ -1513,7 +1578,14 @@ async function promptScaffoldToolchain(): Promise<ScaffoldToolchain> {
   return choice as ScaffoldToolchain;
 }
 
-async function promptScaffoldFramework(): Promise<ScaffoldFramework> {
+async function promptScaffoldFramework(framework?: ScaffoldFramework): Promise<ScaffoldFramework> {
+  if (framework) {
+    return framework;
+  }
+  assertInteractive(
+    'framework',
+    SCAFFOLD_FRAMEWORK_OPTIONS.map((option) => option.value),
+  );
   const choice = await select({
     message: 'Choose a Pages framework to scaffold:',
     options: [...SCAFFOLD_FRAMEWORK_OPTIONS],
@@ -1566,7 +1638,15 @@ async function promptDatabaseSetup(root: string): Promise<DatabaseSetupChoice> {
   return choice as DatabaseSetupChoice;
 }
 
-async function promptDeploymentPlatform(root: string): Promise<DeploymentPlatform> {
+async function promptDeploymentPlatform(
+  root: string,
+  deploy?: DeploymentPlatform,
+): Promise<DeploymentPlatform> {
+  if (deploy) {
+    writeDeploymentPlatform(root, deploy);
+    return deploy;
+  }
+  assertInteractive('deploy', DEPLOYMENT_PLATFORMS);
   const current = readDeploymentPlatform(root);
   const choice = await select({
     message: 'Where should this project deploy?',
@@ -2690,16 +2770,16 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
 
   if (!targeted && !framework && isScaffoldableEmptyProject(root)) {
     log.info('Empty project detected. Scaffolding a Pages starter...');
-    const scaffoldToolchain = await promptScaffoldToolchain();
+    const scaffoldToolchain = await promptScaffoldToolchain(initArgs?.toolchain);
     if (detectedPagesFramework) {
       scaffoldedPagesFramework = detectedPagesFramework;
       log.info(
         `Detected ${SCAFFOLD_FRAMEWORKS[detectedPagesFramework].label} adapter in package.json`,
       );
     } else {
-      scaffoldedPagesFramework = await promptScaffoldFramework();
+      scaffoldedPagesFramework = await promptScaffoldFramework(initArgs?.framework);
     }
-    const starterMode = await promptStarterMode();
+    const starterMode = await promptStarterMode(initArgs?.starter);
     const existingPackageJson = readPackageJson(root);
     const hasPackageManager =
       hasLocalLockfile(root) ||
@@ -2842,7 +2922,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
 
   // Targeted runs keep the saved deployment preference without prompting.
   const deploymentPlatform = !targeted
-    ? await promptDeploymentPlatform(root)
+    ? await promptDeploymentPlatform(root, initArgs?.deploy)
     : readDeploymentPlatform(root);
   let voidPlatformDiscovery: PlatformDiscoveryDocument | null = null;
 

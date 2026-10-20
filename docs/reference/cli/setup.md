@@ -29,9 +29,26 @@ Resources recorded in `void.lock.json` without a matching definition appear sepa
 
 ```sh
 void init [--tsconfig] [--github] [--git | --no-git]
+          [--toolchain <name>] [--framework <name>] [--starter <name>] [--deploy <target>]
 ```
 
 Set up a new or existing Void project. In an empty directory, choose Vite+ or Vite, a framework, and a D1, PostgreSQL, MySQL, or Static Pages starter.
+
+To scaffold without prompts, for example from a script or a coding agent, pass the choices as flags. Without an interactive terminal, init stops and names the flag it needs instead of prompting.
+
+| Flag          | Values                                    |
+| ------------- | ----------------------------------------- |
+| `--toolchain` | `vite-plus`, `vite`                       |
+| `--framework` | `react`, `vue`, `svelte`, `solid`         |
+| `--starter`   | `sqlite`, `postgresql`, `mysql`, `static` |
+| `--deploy`    | `cloudflare`, `void`, `none`              |
+
+```sh
+void init --toolchain vite-plus --framework react --starter sqlite --deploy none
+npm create void@latest my-app -- --toolchain vite-plus --framework react --starter sqlite --deploy none
+```
+
+Cloudflare and Void platform setup still sign in interactively. Without a terminal, choose `--deploy none` and run `void connect` later.
 
 Vite+ projects install dependencies through `vp install`; no global Vite+ installation is required. Void preserves existing package-manager versions and lockfiles. New Vite+ projects without a package-manager configuration use pnpm without pinning a version.
 

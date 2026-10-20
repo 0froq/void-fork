@@ -129,6 +129,13 @@ const HELP_TREE: HelpTree = {
       { command: '--tsconfig', description: 'Update tsconfig.json and set up coding agents' },
       { command: '--git', description: 'Initialize a Git repository without prompting' },
       { command: '--no-git', description: 'Skip Git repository initialization' },
+      { command: '--toolchain <name>', description: 'Scaffold with vite-plus or vite' },
+      { command: '--framework <name>', description: 'Scaffold with react, vue, svelte, or solid' },
+      {
+        command: '--starter <name>',
+        description: 'Scaffold the sqlite, postgresql, mysql, or static starter',
+      },
+      { command: '--deploy <target>', description: 'Deploy to cloudflare, void, or none' },
       {
         command: '--github',
         description: 'Create the GitHub Actions deploy workflow and set up coding agents',
@@ -136,6 +143,10 @@ const HELP_TREE: HelpTree = {
     ],
     examples: [
       { command: 'void init', description: 'Scaffold or configure the current project' },
+      {
+        command: 'void init --toolchain vite-plus --framework react --starter sqlite --deploy none',
+        description: 'Scaffold without prompts',
+      },
       { command: 'void init --github', description: 'Scaffold the GitHub Actions deploy workflow' },
     ],
   },
