@@ -193,6 +193,7 @@ export function createPagesStarterTemplate(options: {
     dependencies: {
       ...SCAFFOLD_BASE_DEPENDENCIES,
       ...config.dependencies,
+      ...(starterMode !== 'static' ? { zod: '^4.6.7' } : {}),
     },
     devDependencies: {
       void: voidPackageSpec,
