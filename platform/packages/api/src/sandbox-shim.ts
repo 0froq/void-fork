@@ -1,6 +1,6 @@
-// Immutable SDK 1.0.1 helper layer. Verify before extracting executable bytes.
+// Immutable SDK 1.0.2 helper layer. Verify before extracting executable bytes.
 // The published SDK image contains only this helper, not a runnable environment.
-const LAYER_DIGEST = '0bde2e1205235984cfd717db67421aeae2601ea2bb2811df3cf2d50253eeb65c';
+const LAYER_DIGEST = '70b334e5506d6f0e4ea973dc56c91993a03865b816a100c9f06b3d09274c2e2d';
 let shim: Promise<Uint8Array> | undefined;
 
 export function getSandboxShim(): Promise<Uint8Array> {
