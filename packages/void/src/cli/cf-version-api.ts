@@ -160,6 +160,14 @@ function bindingsFromOutput(
           ...(value.deliveryDelay === undefined ? {} : { delivery_delay: value.deliveryDelay }),
         });
         break;
+      case 'rate-limit':
+        bindings.push({
+          name,
+          type: 'ratelimit',
+          namespace_id: requiredString(value.namespace, name),
+          simple: value.simple,
+        });
+        break;
       case 'ai':
       case 'browser':
       case 'images':

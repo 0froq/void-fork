@@ -715,6 +715,10 @@ async function verifyPinnedUpload(atomic: boolean): Promise<void> {
       keep_vars: true,
       assets: { directory: '../client', binding: 'ASSETS', not_found_handling: 'none' },
       queues: { producers: [{ binding: 'JOBS', queue: 'jobs', delivery_delay: 7 }] },
+      ratelimits: [
+        { name: 'FAST_LIMIT', namespace_id: '1001', simple: { limit: 5, period: 10 } },
+        { name: 'MINUTE_LIMIT', namespace_id: '1002', simple: { limit: 30, period: 60 } },
+      ],
       ai: { binding: 'AI' },
       hyperdrive: [{ binding: 'POSTGRES', id: 'a'.repeat(32) }],
       services: [
@@ -880,6 +884,18 @@ async function verifyPinnedUpload(atomic: boolean): Promise<void> {
         { name: 'DASHBOARD_VAR', type: 'inherit', version_id: activeVersionId },
         { name: 'APP_VERSION', type: 'version_metadata' },
         { name: 'JOBS', type: 'queue', queue_name: 'jobs', delivery_delay: 7 },
+        {
+          name: 'FAST_LIMIT',
+          type: 'ratelimit',
+          namespace_id: '1001',
+          simple: { limit: 5, period: 10 },
+        },
+        {
+          name: 'MINUTE_LIMIT',
+          type: 'ratelimit',
+          namespace_id: '1002',
+          simple: { limit: 30, period: 60 },
+        },
         { name: 'AI', type: 'ai' },
         { name: 'POSTGRES', type: 'hyperdrive', id: 'a'.repeat(32) },
         {
@@ -985,10 +1001,10 @@ async function verifyPinnedUpload(atomic: boolean): Promise<void> {
   }
 }
 
-it('uploads live secrets and multiple asset batches when the latest upload is inactive', () =>
+it('uploads live secrets, rate limits and multiple asset batches when the latest upload is inactive', () =>
   verifyPinnedUpload(false));
 
-it('uploads live secrets and multiple asset batches for atomic publication', () =>
+it('uploads live secrets, rate limits and multiple asset batches for atomic publication', () =>
   verifyPinnedUpload(true));
 
 it('converts Container and transfer exports as cf does', () => {
