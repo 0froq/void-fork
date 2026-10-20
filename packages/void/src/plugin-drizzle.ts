@@ -106,7 +106,11 @@ function createVoidDbModule(
           // but schema.path from Node's path.join uses backslashes on Windows.
           const normalizedImporter = normalizePath(importer);
           const normalizedSchemaPath = normalizePath(schema.path);
-          if (schema.type === 'file' && normalizedImporter === normalizedSchemaPath) {
+          if (
+            schema.type === 'file' &&
+            (normalizedImporter === normalizedSchemaPath ||
+              normalizedImporter.startsWith(normalizePath(paths.schemaDir) + '/'))
+          ) {
             return VIRTUAL_SCHEMA_DB_ID;
           }
           if (schema.type === 'directory' && normalizedImporter.startsWith(normalizedSchemaPath)) {

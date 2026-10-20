@@ -750,6 +750,24 @@ export const requestPoolOptions = (env) =>
     expect(code).not.toContain('requireRuntimeBinding');
   });
 
+  it('treats files in db/schema/ beside db/schema.ts as schema files', () => {
+    // `void gen model` writes db/schema/<name>.ts and re-exports it from db/schema.ts.
+    const root = createProjectRoot();
+    const plugin = drizzlePlugin(root, false, 'sqlite');
+    const resolveId = getHookHandler(plugin.resolveId) as (
+      this: { environment: { name: string } },
+      source: string,
+      importer: string | undefined,
+      options: { isEntry: boolean },
+    ) => string | undefined;
+    const resolve = (importer: string) =>
+      resolveId.call({ environment: { name: 'ssr' } }, 'void/db', importer, { isEntry: false });
+
+    expect(resolve(join(root, 'db', 'schema', 'todos.ts'))).toBe('\0virtual:void-db-schema');
+    expect(resolve(join(root, 'db', 'schema-helpers.ts'))).toBe('\0virtual:void-db');
+    expect(resolve(join(root, 'routes', 'api', 'todos', 'index.ts'))).toBe('\0virtual:void-db');
+  });
+
   it('can virtualize void/db without a user schema when forced', () => {
     const root = createProjectRoot({ schema: false });
     const plugin = drizzlePlugin(root, false, 'postgresql', { forceVirtualDb: true });
