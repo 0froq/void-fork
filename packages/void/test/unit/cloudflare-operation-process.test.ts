@@ -105,6 +105,67 @@ function runOperation(
   });
 }
 
+it.each([true, false])(
+  'publishes observability from the trigger operation (enabled=%s)',
+  async (enabled) => {
+    const directory = temporaryDirectory('void-cf-observability-');
+    const configPath = join(directory, 'wrangler.json');
+    const observability = { enabled, logs: { enabled }, traces: { enabled } };
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        name: 'test-worker',
+        workers_dev: false,
+        preview_urls: false,
+        observability,
+      }),
+    );
+    const patches: Array<{ path: string; body: unknown; authorization?: string }> = [];
+    const api = await listen(
+      createServer(async (request, response) => {
+        const chunks: Array<Buffer> = [];
+        for await (const chunk of request) {
+          chunks.push(Buffer.from(chunk));
+        }
+        if (request.method === 'PATCH') {
+          patches.push({
+            path: request.url ?? '',
+            body: JSON.parse(Buffer.concat(chunks).toString()),
+            authorization: request.headers.authorization,
+          });
+        }
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            success: true,
+            result: request.url?.endsWith('/workers/subdomain')
+              ? { subdomain: 'fixture' }
+              : { subdomain: { enabled: false, previews_enabled: false }, observability },
+          }),
+        );
+      }),
+    );
+    const output = await runOperation(
+      directory,
+      {
+        type: 'triggers.deploy',
+        workerName: 'test-worker',
+        configPath,
+      },
+      tokenEnv(api),
+    );
+    expect(output.status, output.stderr).toBe(0);
+    expect(patches).toEqual([
+      {
+        path: '/client/v4/accounts/test-account/workers/scripts/test-worker/script-settings',
+        body: { observability },
+        authorization: 'Bearer synthetic-token',
+      },
+    ]);
+  },
+  15_000,
+);
+
 it('requests immutable version source explicitly without loading or provisioning build output', async () => {
   const directory = temporaryDirectory('void-cf-secret-source-');
   const draft = voidSecretDraftVersion();

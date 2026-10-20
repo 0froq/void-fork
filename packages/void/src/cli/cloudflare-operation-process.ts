@@ -17,6 +17,7 @@ import { dirname, join, resolve } from 'pathslash';
 import { isD1Bookmark, readCfUploadOutput, safePositional } from './cf-command-values.ts';
 import { persistCfKeyringPreference, readCfSessionCredential } from './cf-session.ts';
 import { getCfCliVersion, getVoidUserAgent } from './cf-user-agent.ts';
+import { publishCloudflareObservability } from './cf-worker-settings.ts';
 import {
   cloudflareDeviceCode,
   cloudflareVerificationUrl,
@@ -1082,9 +1083,19 @@ async function workerChanges(): Promise<Result> {
       : clearWorkerCustomDomains(name);
   }
   if (operation.type === 'triggers.deploy') {
-    return withBuildOutput(raw, null, (directory) =>
+    const deployed = await withBuildOutput(raw, null, (directory) =>
       runCf(['workers', 'triggers', 'deploy', '--prebuilt'], directory),
     );
+    if (deployed.status === 0 && raw.observability !== undefined) {
+      await publishCloudflareObservability({
+        apiBaseUrl: apiBaseUrl(),
+        accountId: accountId(),
+        workerName: name,
+        observability: raw.observability,
+        headers: await apiHeaders(),
+      });
+    }
+    return deployed;
   }
   if (operation.type === 'versions.upload' || operation.type === 'worker.deploy') {
     const path = configPath()!;

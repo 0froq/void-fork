@@ -1061,8 +1061,8 @@ export async function uploadPinnedCloudflareVersion(options: {
         'limits',
         'placement',
         'cache',
-        // Worker-level settings that version uploads cannot set. Like observability, the
-        // live Worker keeps its current values.
+        // Worker-level settings that version uploads cannot set. Observability is
+        // published separately during post-activation trigger synchronization.
         'logpush',
         'tailConsumers',
       ]).has(key),

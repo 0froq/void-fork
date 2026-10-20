@@ -1717,6 +1717,63 @@ describe('Cloudflare version activation', () => {
   // config's `addresses`. The trigger-only config Void hands it must therefore carry the
   // snapshot's addresses verbatim — and carry NOTHING when the snapshot has none, because an
   // absent key skips the plan while `[]` deletes every rule the Worker owns.
+  it('snapshots explicit observability and restores it without borrowing local settings', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-version-observability-'));
+    const configPath = join(directory, 'wrangler.json');
+    const sourcePath = join(directory, 'source.json');
+    const observability = {
+      enabled: true,
+      head_sampling_rate: 0.25,
+      logs: { enabled: true, invocation_logs: false },
+      traces: { enabled: true, head_sampling_rate: 0.1 },
+    };
+    try {
+      writeFileSync(configPath, JSON.stringify({ name: 'app', observability }));
+      const snapshot = readCloudflareTriggerConfig(configPath);
+      expect(snapshot).toMatchObject({ observability });
+      expect(parseCloudflareVersionMessage(encodeCloudflareVersionMessage([], snapshot))).toEqual({
+        schema: 2,
+        migrations: [],
+        triggerConfig: snapshot,
+      });
+
+      writeFileSync(configPath, JSON.stringify({ name: 'app', observability: { enabled: false } }));
+      let applied: Record<string, unknown> | undefined;
+      const publish = async (triggerConfig: CloudflareTriggerConfig, preserveTriggers = false) =>
+        deployCloudflareVersionTriggers({
+          runWrangler: operationFixture(async (args) => {
+            applied = readConfigArg(args);
+            return ok();
+          }),
+          workerName: 'app',
+          configPath,
+          triggerConfig: preserveTriggers ? { ...triggerConfig, preserve: true } : triggerConfig,
+        });
+      await publish(snapshot);
+      expect(applied).toMatchObject({ observability });
+      const disabled = readCloudflareTriggerConfig(configPath);
+      await publish(disabled);
+      expect(applied).toMatchObject({ observability: { enabled: false } });
+
+      // Generated defaults must not turn an omitted source setting into an update.
+      writeFileSync(sourcePath, JSON.stringify({ name: 'app' }));
+      const omitted = readCloudflareTriggerConfig(configPath, sourcePath);
+      expect(omitted).not.toHaveProperty('observability');
+      await publish(omitted);
+      expect(applied).not.toHaveProperty('observability');
+      applied = undefined;
+      await publish(snapshot, true);
+      expect(applied).toBeUndefined();
+      expect(
+        parseCloudflareVersionMessage(
+          `void:${JSON.stringify({ schema: 2, migrations: [], triggerConfig: { ...snapshot, observability: null } })}`,
+        ),
+      ).toBeNull();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('carries Email Routing addresses through the trigger snapshot and the trigger config', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-version-addresses-'));
     const configPath = join(directory, 'wrangler.json');
@@ -2861,6 +2918,7 @@ describe('Cloudflare version activation', () => {
     const immutable = triggersWith({
       routes: [{ pattern: 'old.example.com', custom_domain: true }],
       crons: ['0 * * * *'],
+      observability: { enabled: false },
     });
     const liveTraffic = {
       workers_dev: false,
@@ -2900,6 +2958,7 @@ describe('Cloudflare version activation', () => {
         preserveWorkersDev: true,
         preservePreviewUrls: true,
         crons: ['*/10 * * * *'],
+        observability: { enabled: true, traces: { enabled: true } },
       }),
       fetch: async () => Response.json({ ready: true }),
     });
@@ -2908,8 +2967,13 @@ describe('Cloudflare version activation', () => {
     expect(publications[0]).toMatchObject({
       ...liveTraffic,
       triggers: { crons: ['*/10 * * * *'] },
+      observability: { enabled: true, traces: { enabled: true } },
     });
-    expect(publications[1]).toMatchObject({ ...liveTraffic, triggers: { crons: ['0 * * * *'] } });
+    expect(publications[1]).toMatchObject({
+      ...liveTraffic,
+      triggers: { crons: ['0 * * * *'] },
+      observability: { enabled: false },
+    });
     expect(publications[1].queues).toEqual({ consumers: [] });
   });
 

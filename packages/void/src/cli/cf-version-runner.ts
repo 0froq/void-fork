@@ -20,6 +20,7 @@ import {
   uploadPinnedCloudflareVersion,
   type CfCommand,
 } from './cf-version-api.ts';
+import { publishCloudflareObservability } from './cf-worker-settings.ts';
 import { isCleanCloudflareExit } from './cloudflare-process.ts';
 
 function failed(message: string): CloudflareCommandResult {
@@ -767,11 +768,35 @@ export function createCfVersionRunner(options: {
         if (!isCleanCloudflareExit(verified)) {
           return verified;
         }
-        return await run(
+        const deployed = await run(
           ['workers', 'triggers', 'deploy', '--prebuilt'],
           command.capture,
           directory,
         );
+        if (isCleanCloudflareExit(deployed) && raw.observability !== undefined) {
+          const credentials = options.pinnedUpload;
+          if (!credentials || !credentials.verifyUploader()) {
+            return failed('The Cloudflare settings publisher is unavailable.');
+          }
+          try {
+            const token = await credentials.getToken();
+            if (!token || !credentials.verifyUploader()) {
+              return failed('Cloudflare session is unavailable for publishing Worker settings.');
+            }
+            await publishCloudflareObservability({
+              apiBaseUrl: credentials.apiBaseUrl,
+              accountId: credentials.accountId,
+              workerName,
+              observability: raw.observability,
+              headers: { Authorization: `Bearer ${token}` },
+            });
+          } catch (cause) {
+            return failed(
+              cause instanceof Error ? cause.message : 'Cloudflare settings update failed.',
+            );
+          }
+        }
+        return deployed;
       } finally {
         rmSync(directory, { recursive: true, force: true });
       }

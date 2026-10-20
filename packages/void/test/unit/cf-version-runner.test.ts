@@ -23,6 +23,7 @@ import {
   activateCloudflareVersion,
   deployCloudflareVersionTriggers,
   encodeCloudflareVersionMessage,
+  readCloudflareTriggerConfig,
 } from '../../../deploy-cloudflare/src/version.ts';
 import { operationFixture } from '../../../deploy-cloudflare/test/operation-fixture.ts';
 import { voidSecretDraftVersion } from '../../../deploy-cloudflare/test/secret-draft-fixture.ts';
@@ -334,6 +335,7 @@ it(
   async () => {
     const current = '11111111-1111-4111-8111-111111111111';
     const next = '22222222-2222-4222-8222-222222222222';
+    const observability = { enabled: true, logs: { enabled: true }, traces: { enabled: true } };
     const triggerConfig = {
       workers_dev: true,
       preview_urls: true,
@@ -341,9 +343,11 @@ it(
       crons: [],
       queueConsumers: [],
       workflows: [],
+      observability,
     };
     const message = encodeCloudflareVersionMessage([], triggerConfig);
     const prepared = await output({
+      observability,
       secrets: { required: ['AUTH_SECRET'] },
       version_metadata: { binding: 'APP_VERSION' },
       send_email: [
@@ -373,7 +377,11 @@ it(
       requests.push(row);
       const path = new URL(row.path, 'http://localhost').pathname;
       let result: unknown;
-      if (row.method === 'POST' && path.endsWith('/workers/workers/void-test/versions')) {
+      if (row.method === 'PATCH' && path.endsWith('/script-settings')) {
+        expect(traffic).toEqual([{ version_id: next, percentage: 100 }]);
+        events.push('settings');
+        result = row.body;
+      } else if (row.method === 'POST' && path.endsWith('/workers/workers/void-test/versions')) {
         uploaded = true;
         events.push('upload');
         result = { id: next, urls: [`https://${next.slice(0, 8)}-void-test.example.workers.dev`] };
@@ -508,6 +516,14 @@ it(
       expect(events.indexOf('upload')).toBeLessThan(events.indexOf('ready'));
       expect(events.indexOf('ready')).toBeLessThan(events.indexOf('activate'));
       expect(events.indexOf('activate')).toBeLessThan(events.indexOf('triggers'));
+      expect(requests.filter((row) => row.method === 'PATCH')).toEqual([
+        {
+          method: 'PATCH',
+          path: '/client/v4/accounts/account-id/workers/scripts/void-test/script-settings',
+          body: { observability },
+        },
+      ]);
+      expect(events.indexOf('activate')).toBeLessThan(events.indexOf('settings'));
       expect(
         events.slice(0, events.indexOf('upload')).filter((event) => event === 'owner'),
       ).toHaveLength(2);
@@ -2013,6 +2029,7 @@ it.each([false, true])(
     const current = '11111111-1111-4111-8111-111111111111';
     const next = '22222222-2222-4222-8222-222222222222';
     const domain = 'app.example.com';
+    const observability = { enabled: true, logs: { enabled: true }, traces: { enabled: true } };
     const triggerConfig = {
       workers_dev: false,
       preview_urls: false,
@@ -2020,8 +2037,10 @@ it.each([false, true])(
       crons: [],
       queueConsumers: [],
       workflows: [],
+      observability,
     };
     const prepared = await output({
+      observability,
       workers_dev: false,
       preview_urls: false,
       routes: triggerConfig.routes,
@@ -2031,6 +2050,18 @@ it.each([false, true])(
     let active = current;
     let published = false;
     const server = createServer(async (request, response) => {
+      if (request.method === 'PATCH') {
+        expect(request.url).toBe(
+          '/client/v4/accounts/account-id/workers/scripts/void-test/script-settings',
+        );
+        const chunks: Array<Buffer> = [];
+        for await (const chunk of request) {
+          chunks.push(Buffer.from(chunk));
+        }
+        expect(JSON.parse(Buffer.concat(chunks).toString())).toEqual({ observability });
+        expect(active).toBe(next);
+        events.push('settings');
+      }
       request.resume();
       response.writeHead(200, { 'Content-Type': 'application/json' });
       const upload = request.method === 'POST';
@@ -2128,7 +2159,7 @@ it.each([false, true])(
         versionId: next,
         previewUrl: `https://${domain}`,
       });
-      expect(events).toEqual(['activate', 'publish-domain', 'readiness']);
+      expect(events).toEqual(['activate', 'publish-domain', 'settings', 'readiness']);
     } finally {
       await prepared.dispose();
     }
@@ -2461,6 +2492,83 @@ it.each(['newest-first', 'oldest-first'] as const)(
       prepared.dispose();
     }
   },
+);
+
+it.each([
+  { label: 'enable', observability: { enabled: true, traces: { enabled: true } }, rejected: false },
+  { label: 'disable', observability: { enabled: false }, rejected: false },
+  { label: 'omit', observability: undefined, rejected: false },
+  { label: 'reject', observability: { enabled: true }, rejected: true },
+])(
+  'publishes explicit observability with the real cf trigger transport: $label',
+  async ({ observability, rejected }) => {
+    const prepared = await output({ workers_dev: false, preview_urls: false, observability });
+    const requests: Array<{ method: string; path: string; body: unknown; authorization?: string }> =
+      [];
+    const apiBaseUrl = await listen(
+      createServer(async (request, response) => {
+        const chunks: Array<Buffer> = [];
+        for await (const chunk of request) {
+          chunks.push(Buffer.from(chunk));
+        }
+        const text = Buffer.concat(chunks).toString();
+        requests.push({
+          method: request.method ?? '',
+          path: request.url ?? '',
+          body: text ? JSON.parse(text) : undefined,
+          authorization: request.headers.authorization,
+        });
+        const failed = rejected && request.method === 'PATCH';
+        response.writeHead(failed ? 403 : 200, { 'Content-Type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            success: !failed,
+            result: request.url?.endsWith('/workers/subdomain')
+              ? { subdomain: 'fixture' }
+              : { subdomain: { enabled: false, previews_enabled: false }, observability },
+          }),
+        );
+      }),
+    );
+    try {
+      const runner = createCfVersionRunner({
+        output: prepared,
+        workerName: 'void-test',
+        runCf: pinnedCf(apiBaseUrl),
+        verifyResources: async () => ({ status: 0, stdout: '', stderr: '' }),
+        pinnedUpload: {
+          accountId: 'account-id',
+          apiBaseUrl,
+          getToken: async () => 'synthetic-token',
+          verifyUploader: () => true,
+        },
+      });
+      const configPath = join(roots.at(-1)!, 'dist/ssr/wrangler.json');
+      const result = await deployCloudflareVersionTriggers({
+        runWrangler: runner,
+        workerName: 'void-test',
+        configPath,
+        triggerConfig: readCloudflareTriggerConfig(configPath),
+      });
+      expect(result, result.stdout + result.stderr).toMatchObject({ status: rejected ? 1 : 0 });
+      expect(requests.filter(({ method }) => method === 'PATCH')).toEqual(
+        observability
+          ? [
+              {
+                method: 'PATCH',
+                path: '/client/v4/accounts/account-id/workers/scripts/void-test/script-settings',
+                body: { observability },
+                authorization: 'Bearer synthetic-token',
+              },
+            ]
+          : [],
+      );
+      expect(requests.some(({ path }) => path.includes('/versions'))).toBe(false);
+    } finally {
+      prepared.dispose();
+    }
+  },
+  REAL_CF_TIMEOUT_MS,
 );
 
 it('applies the immutable trigger snapshot through a private cf output copy', async () => {

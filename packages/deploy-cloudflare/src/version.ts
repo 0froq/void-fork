@@ -40,6 +40,8 @@ export type CloudflareTriggerConfig = Readonly<{
   preservePreviewUrls?: boolean;
   /** Fingerprint of explicit non-versioned settings while remote triggers stay opaque. */
   settingsHash?: string;
+  /** Explicit Worker-wide observability settings, published after version activation. */
+  observability?: Readonly<Record<string, unknown>>;
   workers_dev: boolean;
   preview_urls: boolean;
   routes: ReadonlyArray<unknown>;
@@ -189,18 +191,20 @@ export function parseCloudflareVersionMessage(
 }
 
 /**
- * Capture every configuration surface mutated by `wrangler triggers deploy` — routes,
- * workers.dev / preview flags, crons, queue consumers, workflows, and Email Routing addresses.
+ * Capture shared configuration published after activation: routes, workers.dev / preview flags,
+ * crons, queue consumers, workflows, Email Routing addresses, and explicit observability.
  */
 export function readCloudflareTriggerConfig(
   configPath: string,
   sourceConfigPath?: string,
 ): CloudflareTriggerConfig {
-  const result = triggerConfigFromWrangler(parseRootWranglerConfig(configPath));
+  const config = parseRootWranglerConfig(configPath);
+  // Build tooling can supply defaults; only authored settings may change the live Worker.
+  const source = sourceConfigPath ? parseRootWranglerConfig(sourceConfigPath) : config;
+  const result = triggerConfigFromWrangler({ ...config, observability: source.observability });
   if (!sourceConfigPath) {
     return result;
   }
-  const source = parseRootWranglerConfig(sourceConfigPath);
   return {
     ...result,
     settingsHash: nonVersionedSettingsHash(source),
@@ -210,7 +214,7 @@ export function readCloudflareTriggerConfig(
   };
 }
 
-/** Apply a version's persisted trigger state using an isolated temporary Wrangler config. */
+/** Apply a version's persisted triggers and Worker settings using an isolated temporary config. */
 export async function deployCloudflareVersionTriggers(options: {
   runWrangler: CloudflareCommandRunner;
   workerName: string;
@@ -585,6 +589,7 @@ function triggerConfigFromWrangler(config: Record<string, unknown>): CloudflareT
     ...(config.workers_dev === undefined ? { preserveWorkersDev: true } : {}),
     ...(config.preview_urls === undefined ? { preservePreviewUrls: true } : {}),
     settingsHash: nonVersionedSettingsHash(config),
+    ...(isRecord(config.observability) ? { observability: config.observability } : {}),
     workers_dev: workersDev,
     preview_urls: typeof config.preview_urls === 'boolean' ? config.preview_urls : workersDev,
     routes,
@@ -631,6 +636,7 @@ function parseTriggerConfig(value: unknown): CloudflareTriggerConfig | null {
       (key) => value[key] !== undefined && typeof value[key] !== 'boolean',
     ) ||
     (value.settingsHash !== undefined && typeof value.settingsHash !== 'string') ||
+    (value.observability !== undefined && !isRecord(value.observability)) ||
     typeof value.workers_dev !== 'boolean' ||
     typeof value.preview_urls !== 'boolean' ||
     !Array.isArray(value.routes) ||
@@ -647,6 +653,7 @@ function parseTriggerConfig(value: unknown): CloudflareTriggerConfig | null {
     ...(value.preserveWorkersDev === true ? { preserveWorkersDev: true } : {}),
     ...(value.preservePreviewUrls === true ? { preservePreviewUrls: true } : {}),
     ...(typeof value.settingsHash === 'string' ? { settingsHash: value.settingsHash } : {}),
+    ...(isRecord(value.observability) ? { observability: value.observability } : {}),
     workers_dev: value.workers_dev,
     preview_urls: value.preview_urls,
     routes: value.routes,
@@ -668,6 +675,9 @@ function triggerWranglerConfig(
   queues.consumers = [...triggerConfig.queueConsumers];
   const config: Record<string, unknown> = {
     ...base,
+    ...(triggerConfig.observability === undefined
+      ? {}
+      : { observability: triggerConfig.observability }),
     triggers,
     queues,
     workflows: [...triggerConfig.workflows],
@@ -704,6 +714,7 @@ function resolvePreservedTraffic(
   return {
     ...(desired.preserve ? { preserve: true } : {}),
     ...(desired.settingsHash ? { settingsHash: desired.settingsHash } : {}),
+    ...(desired.observability === undefined ? {} : { observability: desired.observability }),
     workers_dev: desired.preserveWorkersDev
       ? (previous?.workers_dev ?? desired.workers_dev)
       : desired.workers_dev,
