@@ -12,7 +12,11 @@ import type {
 import { isRecord as record } from '@void/deploy-core';
 import { dirname, join } from 'pathslash';
 import type { CfBuildOutput } from './cf-build-output.ts';
-import { readCfUploadOutput, safePositional } from './cf-command-values.ts';
+import {
+  CF_VERSION_SOURCE_MAX_OUTPUT_BYTES,
+  readCfUploadOutput,
+  safePositional,
+} from './cf-command-values.ts';
 import { migrateBuiltWranglerConfig } from './cf-config-migrate.ts';
 import { getCfCliVersion } from './cf-user-agent.ts';
 import {
@@ -577,7 +581,7 @@ export function createCfVersionRunner(options: {
             cwd: output.directory,
             capture: true,
             timeoutMs: 30_000,
-            maxOutputBytes: 1024 * 1024,
+            maxOutputBytes: CF_VERSION_SOURCE_MAX_OUTPUT_BYTES,
           })
         : await run(args, true);
       const result = { ...called, data: called.data ?? parseJson(called.stdout) };

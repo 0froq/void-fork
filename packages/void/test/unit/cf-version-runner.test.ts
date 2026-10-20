@@ -100,11 +100,16 @@ function pinnedCf(apiBaseUrl: string, accountId = 'account-id', env: NodeJS.Proc
   });
 }
 
-it(
-  'reads the exact immutable SDK draft source through the real pinned cf HTTP transport',
-  async () => {
+it.each([false, true])(
+  'reads immutable version source through the real pinned cf HTTP transport (large=%s)',
+  async (large) => {
     const prepared = await output();
     const draft = voidSecretDraftVersion();
+    if (large) {
+      draft.modules[0]!.content_base64 = Buffer.from(
+        `/* ${'x'.repeat(1024 * 1024)} */\nexport default { fetch() { return new Response("ok"); } };`,
+      ).toString('base64');
+    }
     const requests: Array<string> = [];
     const userAgents: Array<string | undefined> = [];
     const apiBaseUrl = await listen(
@@ -141,14 +146,18 @@ it(
         },
         { capture: true },
       );
-      expect(result.status).toBe(0);
-      expect(isVoidSecretOnlyDraft(result.data as Record<string, unknown>)).toBe(true);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.data).toMatchObject(draft);
+      expect(isVoidSecretOnlyDraft(result.data as Record<string, unknown>)).toBe(!large);
       expect(requests).toEqual([
         `/client/v4/accounts/test-account/workers/workers/void-test/versions/${draft.id}?include=modules`,
       ]);
       expect(commands).toHaveLength(1);
       expect(userAgents).toEqual([cfUserAgent]);
-      expect(commands[0]!.bounds).toMatchObject({ timeoutMs: 30_000, maxOutputBytes: 1024 * 1024 });
+      expect(commands[0]!.bounds).toMatchObject({
+        timeoutMs: 30_000,
+        maxOutputBytes: 128 * 1024 * 1024,
+      });
       expect(JSON.stringify(result)).not.toContain('synthetic-token');
     } finally {
       await prepared.dispose();

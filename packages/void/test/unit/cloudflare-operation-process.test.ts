@@ -98,7 +98,7 @@ function runOperation(
     execFile(
       command!,
       [...(preload ? ['--import', pathToFileURL(preload).href] : []), ...prefix, ...args],
-      { cwd, encoding: 'utf8', timeout: 20_000, env },
+      { cwd, encoding: 'utf8', timeout: 20_000, maxBuffer: 128 * 1024 * 1024, env },
       (error, stdout, stderr) =>
         resolve({ status: error ? Number(error.code) || 1 : 0, stdout, stderr }),
     );
@@ -166,43 +166,56 @@ it.each([true, false])(
   15_000,
 );
 
-it('requests immutable version source explicitly without loading or provisioning build output', async () => {
-  const directory = temporaryDirectory('void-cf-secret-source-');
-  const draft = voidSecretDraftVersion();
-  const requests: Array<string> = [];
-  const userAgents: Array<string | undefined> = [];
-  const api = await listen(
-    createServer((request, response) => {
-      requests.push(request.url ?? '');
-      userAgents.push(request.headers['user-agent']);
-      request.resume();
-      response.writeHead(200, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ success: true, errors: [], messages: [], result: draft }));
-    }),
-  );
-  const configPath = join(directory, 'wrangler.json');
-  writeFileSync(configPath, JSON.stringify({ name: 'test-worker', account_id: 'test-account' }));
-  const output = await runOperation(
-    directory,
-    {
-      type: 'versions.view',
-      versionId: draft.id,
-      includeSource: true,
-      configPath,
-      workerName: 'test-worker',
-    },
-    { ...tokenEnv(api), CLI_VERSION: 'inherited-version void/stale' },
-  );
-  expect(output.status, output.stderr).toBe(0);
-  const result = decodeCloudflareOperationResult({ status: 0, stdout: output.stdout, stderr: '' });
-  expect(result.status).toBe(0);
-  expect(isVoidSecretOnlyDraft(result.data as Record<string, unknown>)).toBe(true);
-  expect(requests).toEqual([
-    `/client/v4/accounts/test-account/workers/workers/test-worker/versions/${draft.id}?include=modules`,
-  ]);
-  expect(output.stdout).not.toContain('synthetic-token');
-  expect(userAgents).toEqual([`cf-cli/${cfVersion} void/${voidVersion}`]);
-});
+it.each([false, true])(
+  'requests immutable version source without provisioning (large=%s)',
+  async (large) => {
+    const directory = temporaryDirectory('void-cf-secret-source-');
+    const draft = voidSecretDraftVersion();
+    if (large) {
+      draft.modules[0]!.content_base64 = Buffer.from(
+        `/* ${'x'.repeat(1024 * 1024)} */\nexport default { fetch() { return new Response("ok"); } };`,
+      ).toString('base64');
+    }
+    const requests: Array<string> = [];
+    const userAgents: Array<string | undefined> = [];
+    const api = await listen(
+      createServer((request, response) => {
+        requests.push(request.url ?? '');
+        userAgents.push(request.headers['user-agent']);
+        request.resume();
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ success: true, errors: [], messages: [], result: draft }));
+      }),
+    );
+    const configPath = join(directory, 'wrangler.json');
+    writeFileSync(configPath, JSON.stringify({ name: 'test-worker', account_id: 'test-account' }));
+    const output = await runOperation(
+      directory,
+      {
+        type: 'versions.view',
+        versionId: draft.id,
+        includeSource: true,
+        configPath,
+        workerName: 'test-worker',
+      },
+      { ...tokenEnv(api), CLI_VERSION: 'inherited-version void/stale' },
+    );
+    expect(output.status, output.stderr).toBe(0);
+    const result = decodeCloudflareOperationResult({
+      status: 0,
+      stdout: output.stdout,
+      stderr: '',
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.data).toEqual(draft);
+    expect(isVoidSecretOnlyDraft(result.data as Record<string, unknown>)).toBe(!large);
+    expect(requests).toEqual([
+      `/client/v4/accounts/test-account/workers/workers/test-worker/versions/${draft.id}?include=modules`,
+    ]);
+    expect(output.stdout).not.toContain('synthetic-token');
+    expect(userAgents).toEqual([`cf-cli/${cfVersion} void/${voidVersion}`]);
+  },
+);
 
 it.each([200, 503])(
   'reports HTTP %i without loading the build toolchain when domain cleanup returns non-JSON',

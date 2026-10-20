@@ -14,7 +14,12 @@ import type {
 } from '@void/deploy-cloudflare';
 import { parse } from 'jsonc-parser';
 import { dirname, join, resolve } from 'pathslash';
-import { isD1Bookmark, readCfUploadOutput, safePositional } from './cf-command-values.ts';
+import {
+  CF_VERSION_SOURCE_MAX_OUTPUT_BYTES,
+  isD1Bookmark,
+  readCfUploadOutput,
+  safePositional,
+} from './cf-command-values.ts';
 import { persistCfKeyringPreference, readCfSessionCredential } from './cf-session.ts';
 import { getCfCliVersion, getVoidUserAgent } from './cf-user-agent.ts';
 import { publishCloudflareObservability } from './cf-worker-settings.ts';
@@ -962,7 +967,9 @@ async function workerHistory(): Promise<Result> {
           ...(operation.includeSource ? ['--include', 'modules'] : []),
         ],
         process.cwd(),
-        operation.includeSource ? { timeoutMs: 30_000, maxOutputBytes: 1024 * 1024 } : undefined,
+        operation.includeSource
+          ? { timeoutMs: 30_000, maxOutputBytes: CF_VERSION_SOURCE_MAX_OUTPUT_BYTES }
+          : undefined,
       );
       if (called.status !== 0) {
         return called;
