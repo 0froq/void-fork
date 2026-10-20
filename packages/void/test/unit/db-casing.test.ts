@@ -240,7 +240,9 @@ describe('void/db with database.casing', () => {
     });
     const load = plugin.load as (id: string) => string;
     const code = load('\0virtual:void-db');
-    expect(code).toContain('drizzle-orm/node-postgres');
+    expect(code).toContain(
+      `import { drizzle } from ${JSON.stringify(fileURLToPath(import.meta.resolve('drizzle-orm/node-postgres')))};`,
+    );
     expect(code).toContain(
       'drizzle({ client: requestPool(getPool), schema, casing: "snake_case" })',
     );
