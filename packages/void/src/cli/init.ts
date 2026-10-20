@@ -2780,6 +2780,11 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
       scaffoldedPagesFramework = await promptScaffoldFramework(initArgs?.framework);
     }
     const starterMode = await promptStarterMode(initArgs?.starter);
+    // A partial starter takes the existing-project path on retry, so check
+    // the last required flag before creating its files.
+    if (initArgs?.deploy === undefined) {
+      assertInteractive('deploy', DEPLOYMENT_PLATFORMS);
+    }
     const existingPackageJson = readPackageJson(root);
     const hasPackageManager =
       hasLocalLockfile(root) ||

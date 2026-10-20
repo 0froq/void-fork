@@ -196,6 +196,27 @@ describe('init scaffold arguments', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('keeps a missing deployment choice retryable without a terminal', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-flags-retry-'));
+    const flags = ['--toolchain', 'vite', '--framework', 'react', '--starter', 'static'];
+    try {
+      Object.defineProperty(process.stdin, 'isTTY', { configurable: true, get: () => false });
+      await expect(runInitCommand(root, parseInitArgs(flags))).rejects.toThrow(
+        'init: Pass --deploy (cloudflare, void, none) when running without an interactive terminal.',
+      );
+      expect(readdirSync(root)).toEqual([]);
+      expect(mockSpawnSync).not.toHaveBeenCalled();
+      expect(mockSelect).not.toHaveBeenCalled();
+
+      await runInitCommand(root, parseInitArgs([...flags, '--deploy', 'none']));
+      expect(mockSelect).not.toHaveBeenCalled();
+      expect(existsSync(join(root, 'pages', 'index.tsx'))).toBe(true);
+      expect(readDeploymentPlatform(root)).toBe('none');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('GitHub Actions deployment workflows', () => {
