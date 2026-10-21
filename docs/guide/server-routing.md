@@ -12,7 +12,7 @@ Create route handlers in `routes/**/*.ts`. Each file maps to a URL path based on
 
 <RoutesFileTree />
 
-Dynamic segments use brackets: `[id]` becomes a route parameter and `[...slug]` becomes a catch-all. Files or directories starting with `_` are ignored. Directories wrapped in parentheses like `(admin)` are route groups. They help organize files without changing the URL.
+Dynamic segments use brackets: `[id]` becomes a route parameter and `[...slug]` becomes a catch-all. Files or directories starting with `_` are ignored, and so are those starting with `.`, except `.well-known`. Directories wrapped in parentheses like `(admin)` are route groups. They help organize files without changing the URL.
 
 ### Environment-only routes
 

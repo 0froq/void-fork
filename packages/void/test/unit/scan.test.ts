@@ -73,6 +73,14 @@ describe('scanRoutes', () => {
     expect(result.routes[0].pattern).toBe('/api/hello');
   });
 
+  it('discovers routes under .well-known and ignores other dot paths', async () => {
+    createFile('routes/.well-known/security.txt.ts');
+    createFile('routes/.cache/hello.ts');
+
+    const result = await scanRoutes(TMP);
+    expect(result.routes.map((route) => route.pattern)).toEqual(['/.well-known/security.txt']);
+  });
+
   it('discovers and sorts middleware by numeric prefix', async () => {
     createFile('middleware/02.auth.ts');
     createFile('middleware/01.logger.ts');
