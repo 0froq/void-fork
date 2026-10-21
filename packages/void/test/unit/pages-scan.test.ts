@@ -20,6 +20,22 @@ function writeFile(relativePath: string, content: string): void {
 }
 
 describe('scanPages', () => {
+  it('reads quoted server export names and ignores renamed local handlers', async () => {
+    writeFile('[slug].vue', '<template><div>Post</div></template>');
+    writeFile(
+      '[slug].server.ts',
+      `
+      const loader = () => ({}), mutate = () => ({}), paths = () => [];
+      export { loader as "helper", mutate as "action", paths as "getPrerenderPaths" };
+      export { type loader as "loader" };
+    `,
+    );
+    const page = (await scanPages(TMP, { output: 'static' })).pages[0];
+    expect(page.methods).toEqual(['action']);
+    expect(page.hasGetPrerenderPaths).toBe(true);
+    expect(page.shouldPrerender).toBe(true);
+  });
+
   it.each([
     ['export const { loader, action, actions } = handlers;', ['loader', 'action', 'actions']],
     [

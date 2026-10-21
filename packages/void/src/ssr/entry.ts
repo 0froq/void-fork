@@ -5,6 +5,7 @@ import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
 import { bindingNames, bindingResolver } from '../shared/ast-bindings.ts';
 import {
   isIdentifier,
+  moduleExportName,
   type AstCallExpression,
   type AstExportDefaultDeclaration,
   type AstExportNamedDeclaration,
@@ -159,8 +160,12 @@ function validateServerRenderExport(entry: ResolvedEntry): void {
       if (specifier.exportKind === 'type') {
         return false;
       }
-      const exported = specifier.exported;
-      return isIdentifier(exported) && exported.name === 'render';
+      const exported = moduleExportName(specifier.exported);
+      return (
+        exported === 'render' ||
+        (exported === 'default' &&
+          (!!(node as AstExportNamedDeclaration).source || isRenderer(specifier.local)))
+      );
     });
   });
 

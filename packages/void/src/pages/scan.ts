@@ -9,6 +9,7 @@ import { bindingNames } from '../shared/ast-bindings.ts';
 import {
   isIdentifier,
   isLiteral,
+  moduleExportName,
   type AstExportNamedDeclaration,
   type AstFunctionDeclaration,
   type AstNode,
@@ -156,12 +157,13 @@ function detectPageServerMetadata(source: string, filename: string): PageServerM
       }
     }
     for (const specifier of exported.specifiers ?? []) {
-      if (specifier.exportKind === 'type' || !isIdentifier(specifier.exported)) {
+      const name = moduleExportName(specifier.exported);
+      if (specifier.exportKind === 'type' || name === undefined) {
         continue;
       }
-      if (PAGE_METHODS.has(specifier.exported.name)) {
-        metadata.methods.push(specifier.exported.name);
-      } else if (specifier.exported.name === 'getPrerenderPaths') {
+      if (PAGE_METHODS.has(name)) {
+        metadata.methods.push(name);
+      } else if (name === 'getPrerenderPaths') {
         metadata.hasGetPrerenderPaths = true;
       }
     }

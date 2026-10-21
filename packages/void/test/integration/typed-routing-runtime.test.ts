@@ -67,6 +67,23 @@ export const { GET, POST } = handlers;\n`,
         `export default async (c, next) => { await next(); c.header('x-user-middleware', 'ran'); };\n`,
       );
       writeFileSync(
+        join(routes, 'quoted.ts'),
+        `
+const get = () => ({ method: 'GET' });
+const post = () => new Response('quoted POST', { status: 201 });
+const DELETE = () => new Response('should not be a route');
+export { get as "GET", post as "POST", DELETE as "helper" };
+`,
+      );
+      writeFileSync(join(pages, 'quoted-page.tsx'), 'export default () => null;');
+      writeFileSync(
+        join(pages, 'quoted-page.server.ts'),
+        `
+const mutate = () => new Response('quoted action');
+export { mutate as "action" };
+`,
+      );
+      writeFileSync(
         join(pages, 'index.server.ts'),
         `export const { loader, actions } = {
   loader: () => ({ title: 'real page loader' }),
@@ -212,6 +229,20 @@ renderPage.preambleScript = ${JSON.stringify(preambleScript)};`;
         body: { message: 'destructured handler' },
       });
       const asset = await runtime.dispatchFetch('https://app.test/static/client-abcdefgh.js');
+      expect(await (await runtime.dispatchFetch('https://app.test/quoted')).json()).toEqual({
+        method: 'GET',
+      });
+      const quotedPost = await runtime.dispatchFetch('https://app.test/quoted', { method: 'POST' });
+      expect(quotedPost.status).toBe(201);
+      expect(await quotedPost.text()).toBe('quoted POST');
+      expect(
+        (await runtime.dispatchFetch('https://app.test/quoted', { method: 'DELETE' })).status,
+      ).toBe(404);
+      const quotedAction = await runtime.dispatchFetch('https://app.test/quoted-page', {
+        method: 'POST',
+      });
+      expect(quotedAction.status).toBe(200);
+      expect(await quotedAction.text()).toBe('quoted action');
       expect(asset.headers.get('x-user-middleware')).toBe('ran');
       expect(asset.headers.get('x-edge-rule')).toBe('ran');
       expect(asset.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');

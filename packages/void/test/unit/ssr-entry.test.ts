@@ -16,6 +16,10 @@ function createTempRoot(): string {
 
 describe('ssr entry helpers', () => {
   it.each([
+    'const handler = () => new Response("ok"); export { handler as "render" };',
+    'export { handler as "render" } from "./renderer";',
+    'const handler = () => new Response("ok"); export { handler as "default" };',
+    'export { handler as "default" } from "./renderer";',
     'export const { render } = { render: () => new Response("ok") };',
     'export const { nested: [, { handler: render }] } = handlers;',
     'export const [render = fallback] = handlers;',
@@ -50,6 +54,9 @@ describe('ssr entry helpers', () => {
 
   it.each([
     'const render = 42; export default render;',
+    'const render = () => new Response("ok"); export { render as "helper" };',
+    'export { type render as "render" } from "./renderer";',
+    'export { type render as "default" } from "./renderer";',
     'const first = second; const second = first; export default first;',
     'export default missing;',
     'export const { render: helper } = handlers;',
