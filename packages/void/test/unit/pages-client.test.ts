@@ -1231,3 +1231,92 @@ describe('createVoidRouter other-origin visits', () => {
     expect(window.location.href).toBeUndefined();
   });
 });
+
+describe('preserveState history updates (#506)', () => {
+  function setup() {
+    stubClientGlobals();
+    window.location.pathname = '/case';
+    const applyUpdate = vi.fn();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve(
+          pageJson({
+            component: url.startsWith('/settings') ? 'settings' : 'home',
+            props: {},
+            url,
+          }),
+        ),
+      ),
+    );
+    return { applyUpdate };
+  }
+
+  async function router(applyUpdate: ReturnType<typeof setup>['applyUpdate']) {
+    const { router } = await createTestRouter({
+      adapter: { applyUpdate },
+      components: { home: loadComponent, settings: loadComponent },
+      matchRoute: (url) => (url.startsWith('/settings') ? 'settings' : 'home'),
+    });
+    vi.mocked(history.pushState).mockClear();
+    vi.mocked(history.replaceState).mockClear();
+    return router;
+  }
+
+  it('pushes the destination URL while preserving state', async () => {
+    const { applyUpdate } = setup();
+    const r = await router(applyUpdate);
+
+    await r.visit('/settings', { preserveState: true });
+
+    expect(applyUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ component: 'settings' }),
+      expect.anything(),
+      expect.anything(),
+      { preserveState: true },
+    );
+    expect(history.pushState).toHaveBeenCalledTimes(1);
+    expect(history.pushState).toHaveBeenCalledWith(
+      expect.objectContaining({ __voidScrollKey: expect.any(String) }),
+      '',
+      '/settings',
+    );
+    expect(history.replaceState).not.toHaveBeenCalled();
+  });
+
+  it('replaces the current entry with replace: true while preserving state', async () => {
+    const { applyUpdate } = setup();
+    const r = await router(applyUpdate);
+
+    await r.visit('/settings?tab=a#top', { preserveState: true, replace: true });
+
+    expect(applyUpdate.mock.calls[0][3]).toEqual({ preserveState: true });
+    expect(history.pushState).not.toHaveBeenCalled();
+    expect(history.replaceState).toHaveBeenCalledWith(
+      expect.objectContaining({ __voidScrollKey: expect.any(String) }),
+      '',
+      '/settings?tab=a#top',
+    );
+  });
+
+  it('does not add a history entry on router.refresh()', async () => {
+    const { applyUpdate } = setup();
+    const r = await router(applyUpdate);
+
+    await r.refresh();
+
+    expect(applyUpdate.mock.calls[0][3]).toEqual({ preserveState: true });
+    expect(history.pushState).not.toHaveBeenCalled();
+  });
+
+  it('does not write history for back/forward navigation', async () => {
+    const { applyUpdate } = setup();
+    const r = await router(applyUpdate);
+
+    await r.visit('/settings', { preserveState: true, _popstate: true, _scrollPosition: null });
+
+    expect(applyUpdate.mock.calls[0][3]).toEqual({ preserveState: true });
+    expect(history.pushState).not.toHaveBeenCalled();
+    expect(history.replaceState).not.toHaveBeenCalled();
+  });
+});

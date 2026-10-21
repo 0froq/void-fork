@@ -887,7 +887,8 @@ export async function createPageNavigationEngine(
       applyClientHead(result.pageData.head as HeadDescriptor | undefined);
       _currentFetchUrl = commitTarget.fetchUrl;
 
-      if (!options.preserveState) {
+      // preserveState only controls component state; back/forward traversal already moved history.
+      if (!options._popstate) {
         const historyUrl = commitTarget.fetchUrl + commitTarget.hash;
         scrollRestoration.writeHistory(historyUrl, !!options.replace);
       }

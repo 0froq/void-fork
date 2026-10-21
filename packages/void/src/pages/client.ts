@@ -401,6 +401,7 @@ export async function createVoidRouter(config: VoidRouterConfig): Promise<{
       return router.visit(window.location.pathname + window.location.search, {
         preserveState: true,
         preserveScroll: true,
+        replace: true,
         ...options,
       });
     },
