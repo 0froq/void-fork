@@ -750,6 +750,22 @@ export const requestPoolOptions = (env) =>
     expect(code).not.toContain('requireRuntimeBinding');
   });
 
+  it.each(['sqlite', 'postgresql', 'mysql'] as const)(
+    'exports the %s SQL helpers before void/db imports the schema',
+    (dialect) => {
+      // A table file that db/schema.ts re-exports from outside db/ imports this module while
+      // it loads the schema. Vite SSR runs imports in source order (#472).
+      const root = createProjectRoot();
+      const plugin = drizzlePlugin(root, false, dialect);
+      const load = getHookHandler(plugin.load) as (this: object, id: string) => string;
+
+      const code = load.call({}, '\0virtual:void-db').trim();
+
+      expect(code.startsWith('export { sql, eq, ')).toBe(true);
+      expect(code).toContain('import * as schema');
+    },
+  );
+
   it('treats files in db/schema/ beside db/schema.ts as schema files', () => {
     // `void gen model` writes db/schema/<name>.ts and re-exports it from db/schema.ts.
     const root = createProjectRoot();

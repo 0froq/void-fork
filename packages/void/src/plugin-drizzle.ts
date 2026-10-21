@@ -145,7 +145,10 @@ export function createDb() {
 `;
         }
 
-        // void/db virtual module
+        // void/db virtual module. Each dialect keeps the SQL helper export first: schema files
+        // that db/schema.ts reaches from outside db/ import void/db while this module is still
+        // loading. Vite SSR runs imports in source order, so the helpers must be loaded before
+        // the schema import.
         const schemaImport = schema
           ? `import * as schema from ${JSON.stringify(schema.path)};`
           : '';
@@ -161,10 +164,10 @@ export function createDb() {
           const mysqlDrizzleConfig =
             (schema ? ', schema, mode: "default"' : '') + (casingOption ? `, ${casingOption}` : '');
           return `
+export { ${DRIZZLE_OPERATORS} } from ${JSON.stringify(drizzleOrmResolved)};
 import { drizzle } from ${JSON.stringify(drizzleMysql2Resolved)};
 import { getRuntimeBinding, getRuntimeRequestResource } from ${JSON.stringify(envModuleResolved)};
 ${schemaImport}
-export { ${DRIZZLE_OPERATORS} } from ${JSON.stringify(drizzleOrmResolved)};
 
 const _requestResourceKey = {};
 
@@ -243,10 +246,10 @@ export function createDb(connectionString) {
         if (dialect === 'postgresql') {
           // Like MySQL: drizzle builds the pool, so its bare pg import is the only one.
           return `
+export { ${DRIZZLE_OPERATORS} } from ${JSON.stringify(drizzleOrmResolved)};
 import { drizzle } from ${JSON.stringify(drizzleNodePgResolved)};
 import { getRuntimeBinding, getRuntimeRequestResource } from ${JSON.stringify(envModuleResolved)};
 ${schemaImport}
-export { ${DRIZZLE_OPERATORS} } from ${JSON.stringify(drizzleOrmResolved)};
 
 const _requestResourceKey = {};
 
@@ -295,10 +298,10 @@ export function createDb(connectionString) {
 
         // SQLite (default)
         return `
+export { ${DRIZZLE_OPERATORS} } from ${JSON.stringify(drizzleOrmResolved)};
 import { drizzle } from ${JSON.stringify(drizzleD1Resolved)};
 import { getRuntimeRequestResource, requireRuntimeBinding } from ${JSON.stringify(envModuleResolved)};
 ${schemaImport}
-export { ${DRIZZLE_OPERATORS} } from ${JSON.stringify(drizzleOrmResolved)};
 
 const _requestResourceKey = {};
 

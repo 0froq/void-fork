@@ -11,7 +11,7 @@ import {
 import module, { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { cloudflare } from '@cloudflare/vite-plugin';
 import { createBuilder, createServer, normalizePath, resolveConfig } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -940,6 +940,59 @@ describe('voidPlugin Vite environments', () => {
       await expect(server.ssrLoadModule('/routes/api/cache.ts')).rejects.toThrow(
         "target: 'void/kv' is not available with target 'node'. CF bindings require target: \"cloudflare\". Imported by node_modules/kv-lib/index.js.",
       );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('loads a table file outside db/ that imports sql from void/db after a route loads void/db', async () => {
+    // #472: db/schema.ts re-exports a table file outside db/, which imports void/db while
+    // void/db is still loading db/schema.ts.
+    const root = realpathSync.native(createProjectRoot());
+    mkdirSync(join(root, 'db'));
+    writeFileSync(
+      join(root, 'db/schema.ts'),
+      'export * from "../src/resources/projects/projects.schema";\n',
+    );
+    mkdirSync(join(root, 'src/resources/projects'), { recursive: true });
+    const sqliteCore = fileURLToPath(import.meta.resolve('drizzle-orm/sqlite-core'));
+    writeFileSync(
+      join(root, 'src/resources/projects/projects.schema.ts'),
+      [
+        "import { sql } from 'void/db';",
+        `import { integer, sqliteTable, text } from ${JSON.stringify(normalizePath(sqliteCore))};`,
+        "export const projects = sqliteTable('projects', {",
+        "  id: integer('id').primaryKey(),",
+        "  createdAt: text('created_at').default(sql`(datetime('now'))`),",
+        '});',
+        '',
+      ].join('\n'),
+    );
+    mkdirSync(join(root, 'routes/api'), { recursive: true });
+    writeFileSync(
+      join(root, 'routes/api/projects.ts'),
+      [
+        "import { db } from 'void/db';",
+        "import { projects } from '@schema';",
+        'export const GET = () => Response.json({ db: typeof db, projects: typeof projects });',
+        '',
+      ].join('\n'),
+    );
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+
+    const server = await createServer({
+      root,
+      configFile: false,
+      logLevel: 'silent',
+      plugins: [voidPlugin()],
+      optimizeDeps: { noDiscovery: true },
+      server: { middlewareMode: true, ws: false, preTransformRequests: false },
+    });
+    try {
+      const route = await server.ssrLoadModule('/routes/api/projects.ts');
+      const response = (route.GET as () => Response)();
+
+      await expect(response.json()).resolves.toEqual({ db: 'object', projects: 'object' });
     } finally {
       await server.close();
     }
