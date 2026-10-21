@@ -414,7 +414,9 @@ export function compileRouteTable(
     );
   } else if (
     emitEdgeRules &&
-    (options.fallbackRules?.length || (!options.nodeTarget && options.headerRules?.length)) &&
+    (options.fallbackRules?.length ||
+      options.redirectRules?.some((rule) => rule.status === 200) ||
+      (!options.nodeTarget && options.headerRules?.length)) &&
     !(pages && scan.pages.pages.length > 0)
   ) {
     lines.push(

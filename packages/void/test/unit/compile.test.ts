@@ -1394,6 +1394,12 @@ describe('typed runtime metadata wiring', () => {
     expect(managed).not.toContain('const __routingRules');
     expect(managed).not.toContain('app.notFound');
   });
+  it('looks rewrite destinations up in static assets', () => {
+    const rewrite = [{ source: '/', destination: '/index.html', status: 200, force: true }];
+    expect(compile({ dev: false, redirectRules: rewrite })).toContain(
+      'app.notFound(__createAssetNotFound',
+    );
+  });
   it('wires fetch validation, opaque internal routes and optional ISR through runtime callbacks', () => {
     const code = compileWorkerEntry({
       envSchemaModule: { importPath: '/env.ts', helperPath: '/env-helpers.ts' },
