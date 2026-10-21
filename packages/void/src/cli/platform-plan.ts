@@ -67,6 +67,7 @@ type PlatformInstallPlanInput = Readonly<{
   applicationDomain: string;
   controlPlaneDomain: string;
   dashboardUrl?: string;
+  customDomains?: boolean;
   dedicatedZone: boolean;
   displayName: string;
   externalHyperdrive?: PlatformExternalHyperdrive;
@@ -197,7 +198,14 @@ export async function createPlatformInstallPlan(
         }
       : {}),
     ...(enableEmail ? { email: true } : {}),
+    ...(input.customDomains ? { customDomains: true } : {}),
   };
+  // Custom hostnames reach dispatch through the dedicated zone's catch-all routes.
+  if (capabilities.customDomains && (testing || !input.dedicatedZone)) {
+    throw new Error(
+      'platform: Custom domains need a dedicated application zone. Install with a domain and --dedicated-zone.',
+    );
+  }
   if (capabilities.email && options?.includeEmailGateway !== false && !enableEmail) {
     throw new Error(
       'platform: Email-enabled installations require VOID_EMAIL_SENDER_DOMAIN and VOID_EMAIL_SHARED_ZONE_ID before deploying this runtime.',
@@ -269,13 +277,22 @@ export async function createPlatformInstallPlan(
         : {}),
     },
   };
+  const existingWithCustomDomains =
+    existing &&
+    deployment.capabilities.customDomains &&
+    !existing.deployment.capabilities.customDomains
+      ? {
+          ...existingWithDashboard,
+          capabilities: { ...existingWithDashboard.capabilities, customDomains: true },
+        }
+      : existingWithDashboard;
   const comparableExistingWithoutEmailZone =
     existing && deployment.capabilities.email && !existing.deployment.capabilities.email
       ? {
-          ...existingWithDashboard,
-          capabilities: { ...existingWithDashboard.capabilities, email: true },
+          ...existingWithCustomDomains,
+          capabilities: { ...existingWithCustomDomains.capabilities, email: true },
         }
-      : existingWithDashboard;
+      : existingWithCustomDomains;
   if (
     existing &&
     (JSON.stringify(comparableExistingWithoutEmailZone) !==

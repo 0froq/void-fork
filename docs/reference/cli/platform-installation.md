@@ -24,6 +24,7 @@ void platform install [options] [--yes]
 | `--zone <domain>`                         | Cloudflare zone containing the application domain                                    |
 | `--dedicated-zone`                        | Add zone-wide catch-all routes; valid only when the app domain is the whole zone     |
 | `--no-dedicated-zone`                     | Skip zone-wide application catch-all routes                                          |
+| `--custom-domains`                        | Let projects add their own domains; needs a dedicated zone                           |
 | `--control-plane-domain <domain>`         | Optional API custom hostname; defaults to `workers.dev`                              |
 | `--no-control-plane-domain`               | Use the default `workers.dev` API hostname                                           |
 | `--dashboard-url <origin>`                | HTTPS origin of an optional dashboard deployed separately                            |
@@ -100,9 +101,9 @@ Use these commands to recover, update, pause, or remove an installation:
 
 ```sh
 void platform discover [--account <id>] [--installation <id-or-name>]
-void platform upgrade [id] [--runtime <path>] [--dashboard-url <origin>] [--plan] [--yes]
+void platform upgrade [id] [--runtime <path>] [--dashboard-url <origin>] [--custom-domains] [--plan] [--yes]
 void platform rollback [id] --runtime <earlier-path> [--from-runtime <current-path>] [--plan] [--yes]
-void platform repair [id] [--runtime <path>] [--dashboard-url <origin>] [--auth-config <path>] [--plan] [--yes]
+void platform repair [id] [--runtime <path>] [--dashboard-url <origin>] [--custom-domains] [--auth-config <path>] [--plan] [--yes]
 void platform disable [id] [--plan] [--yes]
 void platform enable [id] [--runtime <path>] [--plan] [--yes]
 void platform uninstall [id] [--plan] [--purge-data | --purge-resources] [--yes]

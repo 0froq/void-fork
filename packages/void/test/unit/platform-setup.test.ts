@@ -220,6 +220,7 @@ describe('platform credential setup links', () => {
       zoneName: 'example.com',
       controlPlaneDomain: 'api.example.com',
       dedicatedZone: true,
+      customDomains: true,
       workersDev: false,
       authConfig: './auth config.json',
       dashboardUrl: 'https://dash.example.com:8443',
@@ -229,7 +230,7 @@ describe('platform credential setup links', () => {
     const quotedName =
       process.platform === 'win32' ? "'Team''s Platform'" : "'Team'\\''s Platform'";
     expect(command).toBe(
-      `void-dev platform install --name team --account account --display-name ${quotedName} --application-domain apps.example.com --zone example.com --dedicated-zone --control-plane-domain api.example.com --auth-config './auth config.json' --dashboard-url https://dash.example.com:8443 --runtime './build output' --yes`,
+      `void-dev platform install --name team --account account --display-name ${quotedName} --application-domain apps.example.com --zone example.com --dedicated-zone --custom-domains --control-plane-domain api.example.com --auth-config './auth config.json' --dashboard-url https://dash.example.com:8443 --runtime './build output' --yes`,
     );
   });
 

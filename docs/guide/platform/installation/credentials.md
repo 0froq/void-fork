@@ -60,7 +60,7 @@ Use the following permissions for the core platform. Cloudflare may label write 
 
 When Void configures Access in the installation account, the initial management-token link also selects **Account → Access: Apps and Policies → Edit** and **Account → Access: Organizations, Identity Providers, and Groups → Read**. Protection adds **Account → Access: Service Tokens → Edit**. When the authentication configuration or saved setup selects existing applications, the link requests Read access instead of Edit. These permissions belong to the management token; the runtime token does not need them.
 
-The management token also needs **Zone Edit** with authority to create zones if you ask Void to create the zone. If it already exists, use the selected zone with Zone Read and DNS Edit. Nested application domains additionally need **SSL and Certificates: Read** on the management token. A custom runtime that enables custom project domains needs **SSL and Certificates: Edit** on the runtime token; the core runtime does not enable that feature.
+The management token also needs **Zone Edit** with authority to create zones if you ask Void to create the zone. If it already exists, use the selected zone with Zone Read and DNS Edit. Nested application domains additionally need **SSL and Certificates: Read** on the management token. An installation with [project custom domains](/guide/platform/installation/domains#project-custom-domains) needs **SSL and Certificates: Edit** on the runtime token.
 
 Void checks access before provisioning. If it reports a missing permission, update the token's permissions for the selected account or zone and retry.
 

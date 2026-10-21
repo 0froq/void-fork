@@ -300,6 +300,7 @@ export type PlatformInstallCommandOptions = {
   zoneName: string;
   controlPlaneDomain: string;
   dashboardUrl?: string;
+  customDomains?: boolean;
   dedicatedZone: boolean;
   workersDev: boolean;
   authConfig?: string;
@@ -336,6 +337,9 @@ export function platformInstallCommandArguments(
         parts.push('--dedicated-zone');
       } else {
         parts.push('--no-dedicated-zone');
+      }
+      if (options.customDomains) {
+        parts.push('--custom-domains');
       }
     }
     flag('--control-plane-domain', options.controlPlaneDomain);

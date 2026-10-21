@@ -538,6 +538,10 @@ const HELP_TREE: HelpTree = {
             command: '--no-dedicated-zone',
             description: 'Skip zone-wide application catch-all routes',
           },
+          {
+            command: '--custom-domains',
+            description: 'Let projects add their own domains (requires --dedicated-zone)',
+          },
           { command: '--control-plane-domain <domain>', description: 'Optional API hostname' },
           {
             command: '--no-control-plane-domain',
@@ -1463,7 +1467,7 @@ function lifecycleHelp(
   return {
     summary,
     usage: [
-      `void platform ${command} [id] [--plan]${command === 'disable' ? '' : ' [--runtime <path>]'}${command === 'upgrade' || command === 'repair' ? ' [--dashboard-url <origin>]' : ''}${command === 'repair' ? ' [--auth-config <path>]' : ''} [--yes]`,
+      `void platform ${command} [id] [--plan]${command === 'disable' ? '' : ' [--runtime <path>]'}${command === 'upgrade' || command === 'repair' ? ' [--dashboard-url <origin>] [--custom-domains]' : ''}${command === 'repair' ? ' [--auth-config <path>]' : ''} [--yes]`,
     ],
     options: [
       { command: '--plan', description: 'Print the exact plan without making changes' },
@@ -1481,6 +1485,10 @@ function lifecycleHelp(
               command: '--dashboard-url <origin>',
               description:
                 'Configure a separately deployed dashboard; omission keeps its saved origin',
+            },
+            {
+              command: '--custom-domains',
+              description: 'Turn on project custom domains; omission keeps the saved setting',
             },
           ]
         : []),

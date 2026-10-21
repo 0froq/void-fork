@@ -251,6 +251,9 @@ export function platformLifecycleResumeCommand(
   if ('dashboardUrl' in args && args.dashboardUrl) {
     command.push('--dashboard-url', commandArgument(args.dashboardUrl));
   }
+  if ('customDomains' in args && args.customDomains) {
+    command.push('--custom-domains');
+  }
   if (args.yes) {
     command.push('--yes');
   }
@@ -427,6 +430,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       ...(args.subcommand !== 'rollback' && args.dashboardUrl !== undefined
         ? { dashboardUrl: args.dashboardUrl }
         : {}),
+      ...(args.subcommand !== 'rollback' && args.customDomains ? { customDomains: true } : {}),
       dedicatedZone: deployment.application.dedicatedZone,
       displayName: deployment.displayName,
       installationSlug: deployment.installationSlug,

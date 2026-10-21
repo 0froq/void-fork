@@ -80,6 +80,7 @@ export type PlatformArgs =
       hyperdrive?: string;
       noControlPlaneDomain?: true;
       dedicatedZoneSpecified?: true;
+      customDomains?: true;
       account: string;
       applicationDomain: string;
       controlPlaneDomain: string;
@@ -99,6 +100,7 @@ export type PlatformArgs =
       /** repair only: replaces the login settings while first administrator setup is pending. */
       authConfig?: string;
       dashboardUrl?: string;
+      customDomains?: true;
       selector: string;
       plan: boolean;
       runtime: string;
@@ -168,12 +170,14 @@ function parseLifecycleSelector(
   yes: boolean;
   authConfig?: string;
   dashboardUrl?: string;
+  customDomains?: true;
 } {
   const positional: Array<string> = [];
   let runtime = '';
   let fromRuntime = '';
   let authConfig: string | undefined;
   let dashboardUrl: string | undefined;
+  let customDomains = false;
   for (let index = 0; index < rest.length; index++) {
     const arg = rest[index]!;
     if (arg === '--runtime') {
@@ -187,6 +191,11 @@ function parseLifecycleSelector(
       const [value, next] = readValue(rest, index, arg);
       dashboardUrl = normalizePlatformDashboardUrl(value);
       index = next;
+    } else if (
+      arg === '--custom-domains' &&
+      (subcommand === 'upgrade' || subcommand === 'repair')
+    ) {
+      customDomains = true;
     } else if (arg === '--auth-config' && subcommand === 'repair') {
       const [value, next] = readValue(rest, index, arg);
       authConfig = value;
@@ -209,6 +218,7 @@ function parseLifecycleSelector(
     fromRuntime,
     ...(authConfig !== undefined ? { authConfig } : {}),
     ...(dashboardUrl !== undefined ? { dashboardUrl } : {}),
+    ...(customDomains ? { customDomains: true as const } : {}),
   };
 }
 
@@ -319,7 +329,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     subcommand === 'disable' ||
     subcommand === 'enable'
   ) {
-    const { selector, plan, runtime, fromRuntime, yes, authConfig, dashboardUrl } =
+    const { selector, plan, runtime, fromRuntime, yes, authConfig, dashboardUrl, customDomains } =
       parseLifecycleSelector(rest, subcommand);
     return subcommand === 'rollback'
       ? { subcommand, selector, plan, runtime, fromRuntime, yes }
@@ -331,6 +341,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
           yes,
           ...(authConfig !== undefined ? { authConfig } : {}),
           ...(dashboardUrl !== undefined ? { dashboardUrl } : {}),
+          ...(customDomains ? { customDomains } : {}),
         };
   }
   if (subcommand === 'uninstall') {
@@ -373,6 +384,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
       '--zone',
     ]);
     let workersDev = false;
+    let customDomains = false;
     for (let i = 0; i < rest.length; i++) {
       const arg = rest[i]!;
       if (valueFlags.has(arg)) {
@@ -399,6 +411,8 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
         yes = true;
       } else if (arg === '--workers-dev') {
         workersDev = true;
+      } else if (arg === '--custom-domains') {
+        customDomains = true;
       } else {
         throw new Error(`platform: Unexpected argument '${arg}'.`);
       }
@@ -440,10 +454,16 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
         'platform: --workers-dev cannot be combined with a domain, zone, or --dedicated-zone.',
       );
     }
+    if (customDomains && (workersDev || noDedicatedZone)) {
+      throw new Error(
+        'platform: --custom-domains needs a dedicated application zone; it cannot be combined with --workers-dev or --no-dedicated-zone.',
+      );
+    }
     return {
       subcommand,
       ...(noControlPlaneDomain ? { noControlPlaneDomain: true as const } : {}),
       ...(noDedicatedZone ? { dedicatedZoneSpecified: true as const } : {}),
+      ...(customDomains ? { customDomains: true as const } : {}),
       ...(values.has('--hyperdrive') ? { hyperdrive: values.get('--hyperdrive')! } : {}),
       ...(loginMethods
         ? { loginMethods: [...new Set(loginMethods)] as Array<PlatformLoginKind> }

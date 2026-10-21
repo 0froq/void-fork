@@ -52,6 +52,22 @@ describe('platform args', () => {
       ).toThrow();
     }
   });
+  it('turns on custom domains only in install, upgrade, and repair', () => {
+    for (const command of ['install', 'upgrade', 'repair']) {
+      expect(parsePlatformArgs([command, '--custom-domains'])).toMatchObject({
+        customDomains: true,
+      });
+      expect(parsePlatformArgs([command])).not.toHaveProperty('customDomains');
+    }
+    for (const command of ['enable', 'disable', 'rollback', 'uninstall']) {
+      expect(() => parsePlatformArgs([command, '--custom-domains'])).toThrow();
+    }
+    for (const flag of ['--workers-dev', '--no-dedicated-zone']) {
+      expect(() => parsePlatformArgs(['install', '--custom-domains', flag])).toThrow(
+        'dedicated application zone',
+      );
+    }
+  });
   it('accepts replacement login settings only in repair', () => {
     expect(parsePlatformArgs(['repair', 'team', '--auth-config', 'auth.json'])).toEqual({
       subcommand: 'repair',
