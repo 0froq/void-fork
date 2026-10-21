@@ -594,7 +594,11 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       r2SecretAccessKey: process.env.VOID_PLATFORM_R2_SECRET_ACCESS_KEY || '',
       ...replacedLogin,
     });
-    const runtimeTokenToPreflight = resolvePlatformRuntimeTokenToPreflight(plan, secrets);
+    const runtimeTokenToPreflight = resolvePlatformRuntimeTokenToPreflight(plan, secrets, {
+      enablingCustomDomains:
+        plan.deployment.capabilities.customDomains &&
+        !manifest.deployment.capabilities.customDomains,
+    });
     // Shared email setup runs after traffic pauses and uses the runtime token,
     // also when this run keeps the saved token. Check its email access first.
     const emailZoneId =
@@ -967,10 +971,21 @@ export function resolvePlatformRuntimeTokenToPreflight(
     ReturnType<typeof createPlatformInstallationSecrets>,
     'cloudflareApiToken' | 'workerSecretUpdates'
   >,
+  options: { enablingCustomDomains?: boolean } = {},
 ): string {
   const explicitUpdate = secrets.workerSecretUpdates?.CF_API_TOKEN;
   if (explicitUpdate) {
     return explicitUpdate;
+  }
+  // Enabling custom hostnames adds a runtime permission even when the Workers
+  // retain their token. Check it before the installer can pause traffic.
+  if (options.enablingCustomDomains) {
+    if (!secrets.cloudflareApiToken) {
+      throw new Error(
+        'platform: Before enabling project custom domains, set VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN to the platform runtime token with Zone → SSL and Certificates → Edit on the application zone so Void can check its access.',
+      );
+    }
+    return secrets.cloudflareApiToken;
   }
   return plan.actions.some(
     (action) =>

@@ -259,7 +259,7 @@ import {
   writePendingInstallationSecrets,
 } from '../../src/cli/platform-registry.ts';
 
-const upgrade = (overrides: { plan?: boolean; yes?: boolean } = {}) =>
+const upgrade = (overrides: { plan?: boolean; yes?: boolean; customDomains?: true } = {}) =>
   runInstalledPlatformCommand({
     subcommand: 'upgrade',
     selector: state.manifest!.id,
@@ -918,6 +918,126 @@ describe('installed platform upgrade', () => {
       vi.mocked(installPlatform).mockRejectedValueOnce(new Error('Worker upload failed'));
       await expect(repair({ authConfig: authFile })).rejects.toThrow('Worker upload failed');
       expect(writePendingInstallationSecrets).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('enabling project custom domains', () => {
+    const customHostnamePath = '/zones/zone/custom_hostnames?per_page=1';
+
+    beforeEach(() => {
+      state.manifest = {
+        ...state.manifest!,
+        deployment: createPlatformDeploymentManifest({
+          ...state.manifest!.deployment,
+          application: { baseDomain: 'example.com', zoneName: 'example.com', dedicatedZone: true },
+        }),
+      };
+      const planner = vi.mocked(createPlatformInstallPlan).getMockImplementation()!;
+      vi.mocked(createPlatformInstallPlan).mockImplementationOnce(async (...args) => {
+        const plan = await planner(...args);
+        return {
+          ...plan,
+          deployment: createPlatformDeploymentManifest({
+            ...plan.deployment,
+            capabilities: {
+              ...plan.deployment.capabilities,
+              ...(args[1].customDomains ? { customDomains: true } : {}),
+            },
+          }),
+          zone: { id: 'zone', name: 'example.com', nameServers: [], status: 'active' },
+        };
+      });
+      state.createSecrets.mockReturnValue({ cloudflareApiToken: 'saved-runtime-token' });
+      state.request.mockImplementation(async (path: string) => {
+        state.events.push(`request:${path}`);
+        return [];
+      });
+    });
+
+    it.each(['upgrade', 'repair'] as const)(
+      'checks the retained token before %s can pause traffic',
+      async (subcommand) => {
+        await runInstalledPlatformCommand({
+          subcommand,
+          selector: state.manifest!.id,
+          runtime: '',
+          customDomains: true,
+          plan: false,
+          yes: true,
+        });
+        expect(state.clientTokens).toContain('saved-runtime-token');
+        const probe = state.events.indexOf(`request:${customHostnamePath}`);
+        expect(probe).toBeGreaterThan(-1);
+        expect(probe).toBeLessThan(state.events.indexOf('installer-start'));
+        expect(state.createSecrets).toHaveBeenCalledWith(
+          expect.objectContaining({ cloudflareApiToken: '' }),
+        );
+      },
+    );
+
+    it.each([401, 403, 429, 503])(
+      'stops before deployment when the token check returns %s',
+      async (status) => {
+        state.request.mockImplementation(async (path: string) => {
+          if (path === customHostnamePath) {
+            throw new PlatformCloudflareApiError(
+              'upstream echoed saved-runtime-token',
+              status,
+              path,
+            );
+          }
+          return [];
+        });
+        const failure = await upgrade({ customDomains: true }).catch((error: Error) => error);
+        expect(failure).toBeInstanceOf(Error);
+        expect(String(failure)).toContain(`HTTP ${status}`);
+        expect(String(failure)).not.toContain('saved-runtime-token');
+        if (status === 403) {
+          expect(String(failure)).toContain('SSL and Certificates → Edit');
+        }
+        expect(installPlatform).not.toHaveBeenCalled();
+        expect(state.events.filter((event) => event.startsWith('put:'))).toEqual([]);
+      },
+    );
+
+    it('requires a runtime token when enabling custom domains without saved credentials', async () => {
+      state.createSecrets.mockReturnValue({});
+      await expect(upgrade({ customDomains: true })).rejects.toThrow(
+        'VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN',
+      );
+      expect(installPlatform).not.toHaveBeenCalled();
+    });
+
+    it('checks an explicit replacement instead of the retained token', async () => {
+      state.createSecrets.mockReturnValue({
+        cloudflareApiToken: 'replacement-token',
+        workerSecretUpdates: { CF_API_TOKEN: 'replacement-token' },
+      });
+      await upgrade({ customDomains: true });
+      expect(state.clientTokens).toContain('replacement-token');
+      expect(state.clientTokens).not.toContain('saved-runtime-token');
+      expect(state.events).toContain(`request:${customHostnamePath}`);
+    });
+
+    it('does not check retained tokens when custom domains are already enabled', async () => {
+      state.manifest = {
+        ...state.manifest!,
+        deployment: createPlatformDeploymentManifest({
+          ...state.manifest!.deployment,
+          capabilities: { ...state.manifest!.deployment.capabilities, customDomains: true },
+        }),
+      };
+      await upgrade();
+      expect(state.clientTokens).not.toContain('saved-runtime-token');
+      expect(state.events).not.toContain(`request:${customHostnamePath}`);
+    });
+
+    it('can plan enabling custom domains without a runtime token', async () => {
+      state.createSecrets.mockReturnValue({});
+      await upgrade({ customDomains: true, plan: true });
+      expect(state.clientTokens).not.toContain('saved-runtime-token');
+      expect(installPlatform).not.toHaveBeenCalled();
+      expect(state.events).not.toContain(`request:${customHostnamePath}`);
     });
   });
 
