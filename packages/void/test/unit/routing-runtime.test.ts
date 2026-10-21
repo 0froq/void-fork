@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { describe, expect, it, vi } from 'vite-plus/test';
 import { createClientAssetTags, createManifestLoader } from '../../src/runtime/routing-assets.ts';
@@ -455,6 +455,37 @@ describe('typed Pages and SSR execution', () => {
       expect(await response.text()).toBe(text);
       expect(response.status).toBe(status);
     }
+  });
+  it.each([
+    ['/named?delete', '/named'],
+    ['/named?delete&page=2', '/named?page=2'],
+    ['/named?delete=1&page=2', '/named?page=2'],
+    ['/named?&delete&page=2', '/named?page=2'],
+    ['/named?delete&delete=x&page=2', '/named?delete=x&page=2'],
+    ['/named?delete&q=a%20b&flag', '/named?q=a%20b&flag'],
+    ['/single?page=2', '/done?page=2'],
+  ])('drops only the named action key when c.redirect() carries %s', async (path, location) => {
+    const app = new Hono();
+    const runtime = createRoutingRuntime(app, { nodeTarget: true });
+    app.use(runtime.contextMiddleware);
+    const redirectTo = (location: string) => (c: Context) => c.redirect(location);
+    app.post(
+      '/named',
+      createPageMutationHandler({
+        ...pageOptions,
+        load: async () => ({ actions: { delete: redirectTo('/named') } }),
+        namedActions: true,
+      }),
+    );
+    app.post(
+      '/single',
+      createPageMutationHandler({
+        ...pageOptions,
+        load: async () => ({ action: redirectTo('/done') }),
+      }),
+    );
+    const response = await app.fetch(new Request('https://app.test' + path, { method: 'POST' }));
+    expect(response.headers.get('location')).toBe(location);
   });
   it('executes the real page loader and protocol', async () => {
     const app = new Hono();

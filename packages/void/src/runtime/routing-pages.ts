@@ -22,6 +22,12 @@ export type PageRouteOptions = {
   renderOptions: PageGetArguments[7];
   namedActions?: boolean;
 };
+// Requests whose first query key selected a named action. That key addresses
+// the action, not the page, so c.redirect() must not carry it over.
+const actionQueryRequests = new WeakSet<Request>();
+export function hasActionQueryKey(request: Request): boolean {
+  return actionQueryRequests.has(request);
+}
 export function createPageGetHandler(options: PageRouteOptions): (c: Context) => Promise<Response> {
   return async (context) => {
     const mod = options.load ? await options.load() : { head: options.head };
@@ -59,6 +65,9 @@ export function createPageMutationHandler(
       return new Response('Unknown action' + (actionName ? ': ' + actionName : ''), {
         status: 404,
       });
+    }
+    if (actionName) {
+      actionQueryRequests.add(context.req.raw);
     }
     return handlePageMutation(
       handler,
