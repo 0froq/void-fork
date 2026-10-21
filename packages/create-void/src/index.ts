@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import * as p from '@voidzero-dev/vite-plus-prompts';
 import { resolve } from 'pathslash';
 import pc from 'picocolors';
-import { parseCreateArgs } from './args.ts';
+import { parseCreateArgs, validateProjectName } from './args.ts';
 import { detectPM, pmExec, pmInstall, run, writePnpmBuildPolicy } from './pm.ts';
 
 const pm = detectPM();
@@ -25,11 +25,7 @@ async function main() {
       message: 'Project name:',
       defaultValue: 'my-app',
       placeholder: 'my-app',
-      validate(value) {
-        if (value && !value.trim()) {
-          return 'Project name cannot be blank';
-        }
-      },
+      validate: validateProjectName,
     });
     if (p.isCancel(name) || typeof name !== 'string') {
       p.cancel('Cancelled.');
