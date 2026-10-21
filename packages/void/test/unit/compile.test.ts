@@ -29,6 +29,7 @@ import {
 
 const testOptions = {
   honoPath: '/resolved/hono/index.mjs',
+  honoRoutePath: '/resolved/hono/route.mjs',
 
   runtimeEnvPath: '/resolved/void/runtime/env.mjs',
   projectRoot: '/project',
@@ -171,7 +172,7 @@ describe('compileRouteTable', () => {
     expect(code.indexOf('app.use(middleware0)')).toBeLessThan(
       code.indexOf('app.all("/chat/:room"'),
     );
-    const fallback = 'app.all("/chat/:room", (c) => __forwardWebSocketRequest';
+    const fallback = 'app.all("/chat/:room", __markRouteHandler((c) => __forwardWebSocketRequest';
     expect(code.indexOf('app.get("/chat/:room"')).toBeGreaterThan(
       code.indexOf('app.all("/chat/:room"'),
     );

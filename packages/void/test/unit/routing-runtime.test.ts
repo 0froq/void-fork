@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
+import { matchedRoutes } from 'hono/route';
 import { describe, expect, it, vi } from 'vite-plus/test';
 import { createClientAssetTags, createManifestLoader } from '../../src/runtime/routing-assets.ts';
 import { createErrorRenderer } from '../../src/runtime/routing-errors.ts';
@@ -7,7 +8,9 @@ import {
   createPageGetHandler,
   createPageMutationHandler,
   createPagesFallback,
+  createNamedActionMarker,
   createSsrFallback,
+  markRouteHandler,
 } from '../../src/runtime/routing-pages.ts';
 import {
   applyAssetCachePolicy,
@@ -486,6 +489,105 @@ describe('typed Pages and SSR execution', () => {
     );
     const response = await app.fetch(new Request('https://app.test' + path, { method: 'POST' }));
     expect(response.headers.get('location')).toBe(location);
+  });
+  describe('the named action key around the action', () => {
+    function createNamedActionApp(pagePattern = '/named') {
+      const app = new Hono();
+      const runtime = createRoutingRuntime(app, { nodeTarget: true });
+      app.use(runtime.contextMiddleware);
+      app.use(createNamedActionMarker(matchedRoutes));
+      app.use(async (c, next) => (c.req.header('x-anon') ? c.redirect('/login') : next()));
+      app.post(
+        '/api/x',
+        createHttpRouteHandler(async () => ({ POST: (c: Context) => c.redirect('/done') }), 'POST'),
+      );
+      app.on(
+        ['POST', 'PUT'],
+        pagePattern,
+        createPageMutationHandler({
+          ...pageOptions,
+          load: async () => ({
+            actions: {
+              delete: (c: Context) => c.redirect('/named'),
+              update: (c: Context) => c.redirect('/named', 303),
+              move: (c: Context) => c.redirect('/named-v2', 307),
+              go: (c: Context) => c.rewrite('/api/x'),
+              goWithQuery: (c: Context) => c.rewrite('/api/x?q=1'),
+              save: () => undefined,
+            },
+          }),
+          namedActions: true,
+        }),
+      );
+      return app;
+    }
+
+    it.each([
+      ['POST', '/named?delete&page=2', 'middleware', '/login?page=2'],
+      ['POST', '/named?move&page=2', 'a 307 redirect', '/named-v2?move&page=2'],
+      ['PUT', '/named?delete&page=2', 'a 302 redirect', '/named?delete&page=2'],
+      ['PUT', '/named?update&page=2', 'a 303 redirect', '/named?page=2'],
+      ['POST', '/named?go&page=2', 'a rewrite', '/done?page=2'],
+      ['POST', '/named?goWithQuery&page=2', 'a rewrite with its own query', '/done?q=1'],
+    ])('%s %s through %s redirects to %s', async (method, path, through, location) => {
+      const response = await createNamedActionApp().fetch(
+        new Request('https://app.test' + path, {
+          method,
+          headers: through === 'middleware' ? { 'x-anon': '1' } : {},
+        }),
+      );
+      expect(response.headers.get('location')).toBe(location);
+    });
+
+    it('marks the request for a one-argument middleware that answers first', async () => {
+      const app = new Hono();
+      const runtime = createRoutingRuntime(app, { nodeTarget: true });
+      app.use(runtime.contextMiddleware);
+      app.use(createNamedActionMarker(matchedRoutes));
+      app.use('/named', async (c) => c.redirect('/maintenance'));
+      app.post('/named', createPageMutationHandler({ ...pageOptions, namedActions: true }));
+      const response = await app.fetch(
+        new Request('https://app.test/named?delete&page=2', { method: 'POST' }),
+      );
+      expect(response.headers.get('location')).toBe('/maintenance?page=2');
+    });
+
+    it('leaves the query alone when another route answers a catch-all page pattern', async () => {
+      const response = await createNamedActionApp('/*').fetch(
+        new Request('https://app.test/api/x?return=/a&page=2', { method: 'POST' }),
+      );
+      expect(response.headers.get('location')).toBe('/done?return=/a&page=2');
+    });
+
+    it('leaves the query alone when a tagged Void route answers before a catch-all page', async () => {
+      const app = new Hono();
+      const runtime = createRoutingRuntime(app, { nodeTarget: true });
+      app.use(runtime.contextMiddleware);
+      app.use(createNamedActionMarker(matchedRoutes));
+      app.use(async (c, next) => (c.req.header('x-anon') ? c.redirect('/login') : next()));
+      app.all(
+        '/api/auth/*',
+        markRouteHandler(async () => new Response('auth')),
+      );
+      app.post('/*', createPageMutationHandler({ ...pageOptions, namedActions: true }));
+      const response = await app.fetch(
+        new Request('https://app.test/api/auth/callback?code=1&state=2', {
+          method: 'POST',
+          headers: { 'x-anon': '1' },
+        }),
+      );
+      expect(response.headers.get('location')).toBe('/login?code=1&state=2');
+    });
+
+    it('leaves the key out of the page URL when the action renders the page again', async () => {
+      const response = await createNamedActionApp().fetch(
+        new Request('https://app.test/named?save&page=2', {
+          method: 'POST',
+          headers: { 'x-voidpages': 'true' },
+        }),
+      );
+      expect(((await response.json()) as { url: string }).url).toBe('/named?page=2');
+    });
   });
   it('executes the real page loader and protocol', async () => {
     const app = new Hono();

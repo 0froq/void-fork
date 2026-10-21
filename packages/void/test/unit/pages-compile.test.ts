@@ -5,6 +5,7 @@ import type { ScanResult } from '../../src/router/scan.ts';
 
 const testOptions = {
   honoPath: '/resolved/hono/index.mjs',
+  honoRoutePath: '/resolved/hono/route.mjs',
 
   runtimeEnvPath: '/resolved/void/runtime/env.mjs',
   projectRoot: '/project',
@@ -61,6 +62,42 @@ describe('Pages metadata wiring', () => {
     expect(code).toContain('namedActions: true');
     expect(code).not.toContain('handlePageMutation(handler');
   });
+  it.each([
+    [['loader', 'actions'], true],
+    [['loader', 'action'], false],
+  ] as const)(
+    'marks named action requests between routing rules and user middleware for %j',
+    (methods, marked) => {
+      const code = compileRouteTable(
+        {
+          ...makeScan({
+            pages: [{ ...page, methods: [...methods] }],
+            layouts: [],
+            namedLayouts: [],
+          }),
+          middleware: [{ order: 1, filePath: '01.auth.ts' }],
+        },
+        '/routes',
+        '/middleware',
+        '/crons',
+        '/queues',
+        null,
+        { ...testOptions, redirectRules: [{ source: '/old', destination: '/', status: 301 }] },
+        pagesOptions,
+      );
+      const marker = code.indexOf('app.use(__createNamedActionMarker(__matchedRoutes));');
+      expect(marker !== -1).toBe(marked);
+      expect(
+        code.includes(
+          'import { matchedRoutes as __matchedRoutes } from "/resolved/hono/route.mjs";',
+        ),
+      ).toBe(marked);
+      if (marked) {
+        expect(marker).toBeGreaterThan(code.indexOf('__routingRuntime.routingMiddleware('));
+        expect(marker).toBeLessThan(code.indexOf('app.use(middleware0);'));
+      }
+    },
+  );
   it('marks page render options as dev only in dev builds', () => {
     expect(compile()).toContain('renderOptions: {"renderMode":"server","dev":true} }');
     const prod = compile({ ...testOptions, dev: false });
