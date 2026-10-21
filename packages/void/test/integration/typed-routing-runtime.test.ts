@@ -68,37 +68,26 @@ export const { GET, POST } = handlers;\n`,
       );
       writeFileSync(
         join(pages, 'index.server.ts'),
-        `export function loader() { return { title: 'real page loader' }; }\nexport const actions = { save: () => new Response('saved') };\n`,
+        `export const { loader, actions } = {
+  loader: () => ({ title: 'real page loader' }),
+  actions: { save: () => new Response('saved') },
+};\n`,
       );
+      writeFileSync(join(pages, 'index.tsx'), 'export default () => null;');
       const { scan } = await analyzeApplication(directory, { config: readConfig(directory) });
-      scan.pages.pages = [
-        {
-          pattern: '/',
-          params: [],
-          catchAll: false,
-          componentPath: 'index.tsx',
-          componentId: 'index',
-          serverPath: 'index.server.ts',
-          methods: ['loader', 'actions'],
-          ssrMode: 'server',
-          prerenderMode: 'disabled',
-          renderMode: 'server',
-          shouldPrerender: false,
-        },
-        {
-          pattern: '/client-only',
-          params: [],
-          catchAll: false,
-          componentPath: 'client-only.tsx',
-          componentId: 'client-only',
-          serverPath: null,
-          methods: [],
-          ssrMode: 'client',
-          prerenderMode: 'disabled',
-          renderMode: 'client',
-          shouldPrerender: false,
-        },
-      ];
+      scan.pages.pages.push({
+        pattern: '/client-only',
+        params: [],
+        catchAll: false,
+        componentPath: 'client-only.tsx',
+        componentId: 'client-only',
+        serverPath: null,
+        methods: [],
+        ssrMode: 'client',
+        prerenderMode: 'disabled',
+        renderMode: 'client',
+        shouldPrerender: false,
+      });
       const routeTable = join(directory, 'generated-routes.ts');
       const entry = join(directory, 'generated-worker.ts');
       writeFileSync(

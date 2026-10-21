@@ -20,6 +20,35 @@ function writeFile(relativePath: string, content: string): void {
 }
 
 describe('scanPages', () => {
+  it.each([
+    ['export const { loader, action, actions } = handlers;', ['loader', 'action', 'actions']],
+    [
+      'export const { get: loader, action: helper, nested: [actions] } = handlers;',
+      ['loader', 'actions'],
+    ],
+    ['export const [loader = fallback, , ...actions] = handlers;', ['loader', 'actions']],
+    ['export const { [action]: helper, other = loader } = handlers;', []],
+    ['const { loader, action } = handlers; export const helper = loader;', []],
+  ])('detects exported page bindings in %s', async (source, methods) => {
+    writeFile('index.vue', '<template><div>Home</div></template>');
+    writeFile('index.server.ts', source as string);
+    expect((await scanPages(TMP)).pages[0].methods).toEqual(methods);
+  });
+
+  it('prerenders a static dynamic page with a destructured path provider', async () => {
+    writeFile('[slug].vue', '<template><div>Post</div></template>');
+    writeFile('[slug].server.ts', 'export const { getPrerenderPaths } = handlers;');
+    const page = (await scanPages(TMP, { output: 'static' })).pages[0];
+    expect(page.hasGetPrerenderPaths).toBe(true);
+    expect(page.shouldPrerender).toBe(true);
+  });
+
+  it('does not automatically prerender an island with a destructured loader', async () => {
+    writeFile('index.island.tsx', 'export default () => null;');
+    writeFile('index.server.ts', 'export const { loader } = handlers;');
+    expect((await scanPages(TMP)).pages[0].shouldPrerender).toBe(false);
+  });
+
   beforeEach(() => {
     mkdirSync(join(TMP, 'pages'), { recursive: true });
   });

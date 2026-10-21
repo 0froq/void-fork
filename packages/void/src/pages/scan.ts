@@ -5,6 +5,7 @@ import { parseSync } from 'vite';
 import { voidWarn } from '../log.ts';
 import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
 import { parseRouteFilename } from '../router/parse-filename.ts';
+import { bindingNames } from '../shared/ast-bindings.ts';
 import {
   isIdentifier,
   isLiteral,
@@ -122,15 +123,15 @@ function detectPageServerMetadata(source: string, filename: string): PageServerM
     if (declaration?.type === 'VariableDeclaration') {
       const variables = declaration as AstVariableDeclaration;
       for (const variable of variables.declarations ?? []) {
-        if (!isIdentifier(variable.id)) {
-          continue;
+        for (const name of bindingNames(variable.id)) {
+          if (PAGE_METHODS.has(name)) {
+            metadata.methods.push(name);
+          } else if (name === 'getPrerenderPaths') {
+            metadata.hasGetPrerenderPaths = true;
+          }
         }
-        const name = variable.id.name;
-        if (PAGE_METHODS.has(name)) {
-          metadata.methods.push(name);
-        } else if (name === 'getPrerenderPaths') {
-          metadata.hasGetPrerenderPaths = true;
-        } else if (variables.kind === 'const') {
+        if (isIdentifier(variable.id) && variables.kind === 'const') {
+          const name = variable.id.name;
           if (name === 'revalidate') {
             const value = readLiteral(variable.init);
             if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
