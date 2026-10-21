@@ -208,7 +208,7 @@ import { useRouter } from '@void/vue'; // or "@void/react", "@void/svelte", "@vo
 
 const router = useRouter();
 router.visit('/users');
-router.refresh(); // re-fetch current page props
+router.refresh(); // re-fetch current page props, keeping the same history entry
 router.visit('/logout', { method: 'POST' }); // non-GET navigation
 ```
 

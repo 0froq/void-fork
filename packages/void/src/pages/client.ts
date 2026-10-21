@@ -219,6 +219,21 @@ export function createSsrRouter(url = '/', params: Record<string, string> = {}):
 
 export const ssrProxy: VoidRouter = createSsrRouter();
 
+/** Refetch the current page in place: same history entry, URL hash, state and scroll. */
+export function refreshPage(
+  router: Pick<VoidRouter, 'visit'>,
+  options: VisitOptions = {},
+): Promise<unknown> {
+  const { pathname, search, hash } = window.location;
+  return router.visit(pathname + search + hash, {
+    preserveState: true,
+    preserveScroll: true,
+    replace: true,
+    ...options,
+    _refresh: true,
+  });
+}
+
 export async function submitAction(
   router: VoidRouter,
   url: string,
@@ -398,12 +413,7 @@ export async function createVoidRouter(config: VoidRouterConfig): Promise<{
     },
 
     refresh(options = {}) {
-      return router.visit(window.location.pathname + window.location.search, {
-        preserveState: true,
-        preserveScroll: true,
-        replace: true,
-        ...options,
-      });
+      return refreshPage(router, options);
     },
 
     prefetch(url, options = {}) {

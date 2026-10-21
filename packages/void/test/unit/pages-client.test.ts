@@ -689,7 +689,7 @@ describe('createVoidRouter', () => {
     expect(window.scrollTo).toHaveBeenCalledWith(0, 42);
   });
 
-  it('does not write history for same-page hash visits when state is preserved', async () => {
+  it('writes history for same-page hash visits when state is preserved', async () => {
     stubClientGlobals();
     window.location.pathname = '/docs';
     window.location.search = '?tab=api';
@@ -702,7 +702,11 @@ describe('createVoidRouter', () => {
 
     expect(fetch).not.toHaveBeenCalled();
     expect(applyUpdate).not.toHaveBeenCalled();
-    expect(history.pushState).not.toHaveBeenCalled();
+    expect(history.pushState).toHaveBeenCalledWith(
+      expect.objectContaining({ __voidScrollKey: expect.any(String) }),
+      '',
+      '/docs?tab=api#section',
+    );
     expect(history.replaceState).not.toHaveBeenCalled();
     expect(window.scrollTo).toHaveBeenCalledWith(0, 0);
   });
@@ -1299,14 +1303,22 @@ describe('preserveState history updates (#506)', () => {
     );
   });
 
-  it('does not add a history entry on router.refresh()', async () => {
+  it('refetches the current URL in place on router.refresh(), hash included', async () => {
     const { applyUpdate } = setup();
+    window.location.search = '?tab=a';
+    window.location.hash = '#top';
     const r = await router(applyUpdate);
 
     await r.refresh();
 
+    expect(fetch).toHaveBeenCalledWith('/case?tab=a', expect.anything());
     expect(applyUpdate.mock.calls[0][3]).toEqual({ preserveState: true });
     expect(history.pushState).not.toHaveBeenCalled();
+    expect(history.replaceState).toHaveBeenCalledWith(
+      expect.objectContaining({ __voidScrollKey: expect.any(String) }),
+      '',
+      '/case?tab=a#top',
+    );
   });
 
   it('does not write history for back/forward navigation', async () => {

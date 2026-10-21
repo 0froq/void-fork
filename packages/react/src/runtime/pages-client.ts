@@ -19,6 +19,7 @@ import {
   idleNavigationState,
   isAbortError,
   isCallSiteActionError,
+  refreshPage,
   type PageNavigationResource,
   type PageNavigationResult,
   type NavigationState,
@@ -295,11 +296,7 @@ function createRouter(engine: Awaited<ReturnType<typeof createPageNavigationEngi
       return scheduleVisit(normalizeUrl(url), options);
     },
     refresh(options = {}) {
-      return router.visit(window.location.pathname + window.location.search, {
-        preserveState: true,
-        preserveScroll: true,
-        ...options,
-      });
+      return refreshPage(router, options);
     },
     prefetch(url, options = {}) {
       return engine.prefetch(normalizeUrl(url), options);
