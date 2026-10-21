@@ -3,6 +3,7 @@ import { parseSync } from 'vite';
 import { isIdentifier, isMemberExpression, type AstNode } from '../shared/ast.ts';
 import { staticModuleReferences } from '../shared/module-references.ts';
 import { staticLiteral, unwrapStaticExpression } from '../shared/static-exports.ts';
+import { CLIENT_MODULES, inferClientAuth } from './client-auth.ts';
 
 export type InferredBindings = {
   needsD1: boolean;
@@ -56,7 +57,11 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
     return result;
   }
 
-  function recordModuleReference(source: string, statement: string): void {
+  let hasClientModule = false;
+  function recordModuleReference(source: string): void {
+    if (CLIENT_MODULES.has(source)) {
+      hasClientModule = true;
+    }
     switch (source) {
       case 'void/db':
         result.needsD1 = true;
@@ -85,22 +90,11 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
       case 'void/live':
         result.needsLive = true;
         break;
-      case 'void/client':
-      case 'void/client/react':
-      case 'void/client/vue':
-      case 'void/client/svelte':
-      case 'void/client/solid': {
-        // Check if the `auth` specifier is imported (not just `fetch`)
-        if (/\bauth\b/.test(statement)) {
-          result.needsAuth = true;
-        }
-        break;
-      }
     }
   }
 
   for (const reference of staticModuleReferences(parsed, code)) {
-    recordModuleReference(reference.source, code.slice(reference.start, reference.end));
+    recordModuleReference(reference.source);
   }
 
   for (const reference of parsed.module.dynamicImports) {
@@ -112,8 +106,12 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
         ? staticLiteral(expression.expression as AstNode)
         : undefined;
     if (typeof source === 'string') {
-      recordModuleReference(source, code.slice(reference.start, reference.end));
+      recordModuleReference(source);
     }
+  }
+
+  if (hasClientModule) {
+    result.needsAuth ||= inferClientAuth(parsed, code);
   }
 
   if (!ENV_BINDING_RE.test(code) || !RESOURCE_BINDING_RE.test(code)) {

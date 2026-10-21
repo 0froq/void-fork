@@ -24,6 +24,15 @@ function writeCompatConfig(root: string): void {
 }
 
 describe('inferProjectBindings', () => {
+  it('infers namespace auth use across the project without mistaking fetch aliases for auth', () => {
+    const root = createTempRoot();
+    const file = join(root, 'src/client.ts');
+    writeFileSync(file, 'import { type auth, fetch as authFetch } from "void/client";');
+    expect(inferProjectBindings(root).needsAuth).toBe(false);
+    writeFileSync(file, 'import * as client from "void/client"; client.auth.signOut();');
+    expect(inferProjectBindings(root).needsAuth).toBe(true);
+  });
+
   it('retains resources used only through destructuring and bracket access', () => {
     const root = createTempRoot();
     writeFileSync(

@@ -31,6 +31,64 @@ const MODULE_BINDINGS = [
 
 describe('inferBindingsFromSource', () => {
   it.each([
+    'import { auth as account } from "void/client";',
+    'import { "auth" as account } from "void/client";',
+    'import { \\u0061uth as account } from "void/client";',
+    'import * as client from "void/client"; client.auth.signOut();',
+    'import * as client from "void/client/react"; client["auth"].useSession();',
+    'import * as client from "void/client"; client["\\x61uth"].signOut();',
+    'import * as client from "void/client"; client["aut\\h"].signOut();',
+    'import * as client from "void/client"; client["au\\\nth"].signOut();',
+    'import * as client from "void/client"; const { auth: account } = client;',
+    'import * as client from "void/client"; const alias = client; alias.auth.signOut();',
+    'import * as client from "void/client"; namespace Local { export const client = {}; } client.auth.signOut();',
+    'const { auth } = await import("void/client");',
+    'const client = await import("void/client"); client.auth.signOut();',
+    'const value = (await import("void/client"))["auth"];',
+    'async function run() { const client = await import("void/client"); client["\\141uth"].signOut(); }',
+    'export { auth as account } from "void/client";',
+    'export { "\\x61uth" as account } from "void/client";',
+    'export * from "void/client";',
+    'export * as client from "void/client";',
+  ])('infers auth from the imported runtime value: %s', (code) => {
+    expect(inferBindingsFromSource(code, 'test.ts')).toEqual({ ...NO_BINDINGS, needsAuth: true });
+  });
+
+  it.each([
+    'import { fetch as auth } from "void/client";',
+    'import { fetch /* auth */ } from "void/client";',
+    'import { type auth, fetch } from "void/client";',
+    'import type * as client from "void/client"; type T = typeof client.auth;',
+    'import * as client from "void/client"; client.fetch("/api");',
+    'import * as client from "void/client"; const parts = text.split(/\\s+/); client.fetch("/api");',
+    'import * as client from "void/client"; function local(client) { return client.auth; }',
+    'import * as client from "void/client"; function local() { client.auth(); var client; }',
+    'import * as client from "void/client"; class Local { constructor(private client: any) { client.auth(); } }',
+    'import * as client from "void/client"; function local() { enum client { auth }; return client.auth; }',
+    'import * as client from "void/client"; const { fetch: auth } = client;',
+    'import * as client from "void/client"; client[key];',
+    'import * as client from "void/client"; const a = b; const b = a; a.auth;',
+    'const { fetch: auth } = await import("void/client");',
+    'const client = await import("void/client"); function local(client) { return client.auth; }',
+    'export { fetch as auth } from "void/client";',
+    'export { type auth, fetch } from "void/client";',
+    'export type * from "void/client";',
+  ])('ignores aliases, type-only names and unrelated auth properties: %s', (code) => {
+    expect(inferBindingsFromSource(code, 'test.ts')).toEqual(NO_BINDINGS);
+  });
+
+  it('resolves long namespace alias chains without overflowing the stack', () => {
+    const aliases = Array.from(
+      { length: 10_000 },
+      (_, index) => `const alias${index + 1} = alias${index};`,
+    ).join('\n');
+    const code = `import * as client from 'void/client'; const alias0 = client;
+      ${aliases}
+      alias10000.auth.signOut();`;
+    expect(inferBindingsFromSource(code, 'test.ts')).toEqual({ ...NO_BINDINGS, needsAuth: true });
+  });
+
+  it.each([
     'const { DB, KV: cache } = c.env;',
     'const { ["DB"]: db, [`KV`]: cache } = env;',
     'const { env: { DB, KV } } = c;',
