@@ -5,11 +5,36 @@ import {
   isIdentifier,
   type AstExportNamedDeclaration,
   type AstFunctionDeclaration,
+  type AstNode,
   type AstProgram,
   type AstVariableDeclaration,
 } from '../shared/ast.ts';
 
 const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD']);
+
+function collectHttpBindings(node: AstNode | null | undefined, methods: Array<string>): void {
+  if (isIdentifier(node)) {
+    if (HTTP_METHODS.has(node.name)) {
+      methods.push(node.name);
+    }
+  } else if (node?.type === 'ObjectPattern') {
+    for (const property of (node.properties as Array<AstNode> | undefined) ?? []) {
+      // Only bound names are exports, not property keys or default value expressions.
+      collectHttpBindings(
+        (property.type === 'RestElement' ? property.argument : property.value) as
+          | AstNode
+          | undefined,
+        methods,
+      );
+    }
+  } else if (node?.type === 'ArrayPattern') {
+    for (const element of (node.elements as Array<AstNode | null> | undefined) ?? []) {
+      collectHttpBindings(element, methods);
+    }
+  } else if (node?.type === 'AssignmentPattern' || node?.type === 'RestElement') {
+    collectHttpBindings((node.left ?? node.argument) as AstNode | undefined, methods);
+  }
+}
 
 /**
  * Detect which HTTP method names are exported from a route file.
@@ -35,14 +60,12 @@ export function detectHttpExports(absPath: string): Array<string> {
       if (declarationNode.exportKind === 'type') {
         continue;
       }
-      // export const GET = ...; export function POST() { ... }
+      // export const GET = ...; export const { GET, POST } = ...; export function POST() { ... }
       const decl = declarationNode.declaration;
       if (decl) {
         if (decl.type === 'VariableDeclaration') {
           for (const declarator of (decl as AstVariableDeclaration).declarations ?? []) {
-            if (isIdentifier(declarator.id) && HTTP_METHODS.has(declarator.id.name)) {
-              methods.push(declarator.id.name);
-            }
+            collectHttpBindings(declarator.id, methods);
           }
         } else if (decl.type === 'FunctionDeclaration') {
           const fn = decl as AstFunctionDeclaration;

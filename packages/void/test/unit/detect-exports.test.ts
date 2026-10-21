@@ -35,6 +35,60 @@ export { handler as GET };`,
     expect(detectHttpExports(path)).toEqual(['GET']);
   });
 
+  it.each([
+    {
+      name: 'object shorthand bindings',
+      source: 'export const { GET, POST } = handlers;',
+      methods: ['GET', 'POST'],
+    },
+    {
+      name: 'renamed bindings rather than property keys',
+      source: 'export const { get: GET, GET: helper, post: POST } = handlers;',
+      methods: ['GET', 'POST'],
+    },
+    {
+      name: 'defaults without inspecting initializer expressions',
+      source: 'export const { GET = fallback, helper = POST, post: POST = fallback } = handlers;',
+      methods: ['GET', 'POST'],
+    },
+    {
+      name: 'nested object and array bindings with holes',
+      source: 'export const { handlers: { get: GET }, methods: [, POST, { PUT }] } = routes;',
+      methods: ['GET', 'POST', 'PUT'],
+    },
+    {
+      name: 'array bindings with defaults and rest',
+      source: 'export const [GET, , POST = fallback, ...HEAD] = handlers;',
+      methods: ['GET', 'POST', 'HEAD'],
+    },
+    {
+      name: 'object rest bindings',
+      source: 'export const { helper, ...OPTIONS } = handlers;',
+      methods: ['OPTIONS'],
+    },
+    {
+      name: 'computed keys without treating key expressions as bindings',
+      source: 'export const { [GET]: helper, [key]: POST, "put": PUT } = handlers;',
+      methods: ['POST', 'PUT'],
+    },
+    {
+      name: 'nested defaults without treating property names as bindings',
+      source: 'export const { GET: { helper = POST }, handlers: [PATCH] = defaults } = routes;',
+      methods: ['PATCH'],
+    },
+  ])('detects HTTP methods in $name', ({ source, methods }) => {
+    const path = writeRoute('destructured.ts', source);
+    expect(detectHttpExports(path)).toEqual(methods);
+  });
+
+  it('ignores destructured bindings that are not exported', () => {
+    const path = writeRoute(
+      'hello.ts',
+      'const { GET, POST } = handlers; export const helper = GET;',
+    );
+    expect(detectHttpExports(path)).toEqual([]);
+  });
+
   it('ignores non-HTTP exports', () => {
     const path = writeRoute(
       'hello.ts',

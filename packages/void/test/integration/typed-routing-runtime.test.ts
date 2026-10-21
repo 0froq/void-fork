@@ -55,6 +55,14 @@ describe('typed routing in generated Workers', () => {
         `export function GET(c) { return c.rewrite('/hello'); }\n`,
       );
       writeFileSync(
+        join(routes, 'destructured.ts'),
+        `const handlers = {
+  GET: (c) => ({ method: 'GET', path: c.req.path }),
+  POST: async (c) => ({ method: 'POST', body: await c.req.json() }),
+};
+export const { GET, POST } = handlers;\n`,
+      );
+      writeFileSync(
         join(middleware, '01.headers.ts'),
         `export default async (c, next) => { await next(); c.header('x-user-middleware', 'ran'); };\n`,
       );
@@ -201,6 +209,19 @@ renderPage.preambleScript = ${JSON.stringify(preambleScript)};`;
       expect(await hello.json()).toEqual({ path: '/hello', rewritten: false, public: 'public' });
       expect(hello.headers.get('x-user-middleware')).toBe('ran');
       expect(hello.headers.get('x-edge-rule')).toBe('ran');
+      const destructuredGet = await runtime.dispatchFetch('https://app.test/destructured');
+      expect(destructuredGet.status).toBe(200);
+      expect(await destructuredGet.json()).toEqual({ method: 'GET', path: '/destructured' });
+      const destructuredPost = await runtime.dispatchFetch('https://app.test/destructured', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: 'destructured handler' }),
+      });
+      expect(destructuredPost.status).toBe(200);
+      expect(await destructuredPost.json()).toEqual({
+        method: 'POST',
+        body: { message: 'destructured handler' },
+      });
       const asset = await runtime.dispatchFetch('https://app.test/static/client-abcdefgh.js');
       expect(asset.headers.get('x-user-middleware')).toBe('ran');
       expect(asset.headers.get('x-edge-rule')).toBe('ran');
