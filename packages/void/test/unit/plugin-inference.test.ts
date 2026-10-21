@@ -24,6 +24,27 @@ function writeCompatConfig(root: string): void {
 }
 
 describe('inferProjectBindings', () => {
+  it('retains resources used only through destructuring and bracket access', () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, 'src/handler.ts'),
+      `
+      export const handler = ({ env: { DB, KV } }) => [DB, KV];
+      export const storage = (c) => c.env['STORAGE'];
+    `,
+    );
+    expect(inferProjectBindings(root)).toMatchObject({
+      needsD1: true,
+      needsKV: true,
+      needsR2: true,
+    });
+    expect(inferProjectBindings(root, { bindings: { db: false, kv: false } })).toMatchObject({
+      needsD1: false,
+      needsKV: false,
+      needsR2: true,
+    });
+  });
+
   afterEach(() => {
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop()!;

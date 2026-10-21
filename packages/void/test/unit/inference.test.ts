@@ -31,6 +31,60 @@ const MODULE_BINDINGS = [
 
 describe('inferBindingsFromSource', () => {
   it.each([
+    'const { DB, KV: cache } = c.env;',
+    'const { ["DB"]: db, [`KV`]: cache } = env;',
+    'const { env: { DB, KV } } = c;',
+    'export const handler = ({ env: { DB, KV } }) => [DB, KV];',
+    'function handler({ env: { DB, KV } = fallback }) {}',
+    'function handler({ DB, KV } = env) {}',
+    'const { DB, KV } = c.env as Env;',
+    '({ DB, KV } = c.env);',
+    'const value = [c.env["DB"], env[`KV`]];',
+    'const value = [c["env"].DB, c.env?.KV];',
+    'const value = [c.env /* keep */ .DB, env // keep\n .KV];',
+    'const value = [env.D\\u0042, e\\u006ev.KV];',
+    'const value = [c["e\\x6ev"].DB, c["e\\x6ev"].KV];',
+    'const value = [c.env["\\x44B"], c.env["\\x4bV"]];',
+    'const value = [c.env["D\\B"], c.env["K\\V"]];',
+    'const value = [c["\\145nv"]["\\104B"], c["\\145nv"]["\\113V"]];',
+    'const value = [c["en\\\nv"]["D\\\nB"], c["en\\\nv"]["K\\\nV"]];',
+  ])('infers resources across static env access forms: %s', (code) => {
+    expect(inferBindingsFromSource(code, 'test.ts')).toEqual({
+      ...NO_BINDINGS,
+      needsD1: true,
+      needsKV: true,
+    });
+  });
+
+  it.each([
+    'const { DB: env } = unrelated;',
+    'const { helper = DB } = env;',
+    'const { [DB]: helper } = env;',
+    'const value = env[key];',
+    'const value = c[env].DB;',
+    'const { env: { helper: DB } } = context;',
+    'const { env: { SEND_EMAIL } } = context;',
+    'const { env: { nested: { DB } } } = context;',
+  ])('does not guess dynamic keys or mistake bound names for resources: %s', (code) => {
+    expect(inferBindingsFromSource(code, 'test.ts')).toEqual(NO_BINDINGS);
+  });
+
+  it('infers every supported resource from renamed destructured properties', () => {
+    expect(
+      inferBindingsFromSource(
+        'const { STORAGE: bucket, AI: ai, SANDBOX: sandbox, QUEUE_EMAILS: queue } = env;',
+        'test.ts',
+      ),
+    ).toEqual({
+      ...NO_BINDINGS,
+      needsR2: true,
+      needsAI: true,
+      needsSandbox: true,
+      needsQueues: true,
+    });
+  });
+
+  it.each([
     "const load = () => import('void/ai');",
     'const load = () => import(`void/ai`);',
     "const load = () => import('void/\\u0061i');",
