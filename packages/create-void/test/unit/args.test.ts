@@ -21,16 +21,12 @@ describe('parseCreateArgs', () => {
     expect(() => parseCreateArgs([name])).toThrow('create-void: Project name must be lowercase');
   });
 
-  it.each([
-    'my_app',
-    'my.app',
-    'my app',
-    'nested/my-app',
-    'my-app-',
-    'a'.repeat(64),
-  ])('rejects invalid project names from the command line: %s', (name) => {
-    expect(() => parseCreateArgs([name])).toThrow('create-void: Project name');
-  });
+  it.each(['my_app', 'my.app', 'my app', 'nested/my-app', 'my-app-', 'a'.repeat(64)])(
+    'rejects invalid project names from the command line: %s',
+    (name) => {
+      expect(() => parseCreateArgs([name])).toThrow('create-void: Project name');
+    },
+  );
 
   it.each(['a', '0', 'my-app', 'my--app', 'app123', 'a'.repeat(63)])(
     'accepts deployable project names from the command line: %s',
