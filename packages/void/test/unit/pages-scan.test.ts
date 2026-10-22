@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import * as tinyglobby from 'tinyglobby';
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vite-plus/test';
 import { generateRouteTypes } from '../../src/codegen/route-types.ts';
 import { resolveLayoutIds } from '../../src/pages/layout-resolution.ts';
@@ -10,6 +11,8 @@ import {
   resolveEffectiveLayoutChain,
   MAX_REVALIDATE,
 } from '../../src/pages/scan.ts';
+
+vi.mock('tinyglobby', { spy: true });
 
 const TMP = join(import.meta.dirname, '__tmp_pages_scan__');
 
@@ -1078,5 +1081,77 @@ describe('resolveLayoutIds', () => {
     expect(
       resolveLayoutIds({ componentId: 'guide/intro', layout: '!home' }, layouts, namedLayouts),
     ).toEqual(['_layouts/home']);
+  });
+});
+
+describe('scanPages between saves', () => {
+  beforeEach(() => {
+    mkdirSync(join(TMP, 'pages'), { recursive: true });
+
+    // Files written by a test are too recent to reuse; move the clock past that window.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 60_000);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('returns stable layout inventories regardless of glob enumeration order', async () => {
+    const files = ['z/layout.tsx', 'a/layout.tsx', '_layouts/z.tsx', '_layouts/a.tsx', 'index.tsx'];
+    for (const file of files) {
+      writeFile(file, 'export default function Component() { return null; }');
+    }
+    const glob = vi.mocked(tinyglobby.glob);
+    try {
+      glob.mockResolvedValueOnce([...files]);
+      const before = await scanPages(TMP);
+      glob.mockResolvedValueOnce([...files].reverse());
+      const after = await scanPages(TMP);
+      expect(after.layouts).toEqual(before.layouts);
+      expect(after.namedLayouts).toEqual(before.namedLayouts);
+    } finally {
+      glob.mockRestore();
+    }
+  });
+
+  it('does not expose cached markdown metadata for mutation between scans', async () => {
+    writeFile('notes.md', '---\ntitle: Original\ndescription: Unchanged\n---\n# Notes');
+    const first = await scanPages(TMP);
+    first.pages[0]!.metadata!.title = 'Mutated';
+    first.pages[0]!.metadata!.description = 'Also mutated';
+    const second = await scanPages(TMP);
+    expect(second.pages[0]!.metadata).toEqual({ title: 'Original', description: 'Unchanged' });
+  });
+
+  it('picks up page metadata changed since the previous scan', async () => {
+    writeFile('cached/post.tsx', 'export default function Post() { return null; }');
+    writeFile('cached/post.server.ts', 'export const revalidate = 60;');
+    writeFile('cached/notes.md', '---\ntitle: Draft\n---\n# Notes');
+
+    const before = await scanPages(TMP);
+
+    expect(before.pages.find((page) => page.componentId === 'cached/post')).toMatchObject({
+      methods: [],
+      revalidate: 60,
+    });
+    expect(before.pages.find((page) => page.componentId === 'cached/notes')?.metadata).toEqual({
+      title: 'Draft',
+    });
+
+    writeFile('cached/post.tsx', 'export const layout = false;\nexport default function Post() {}');
+    writeFile('cached/post.server.ts', 'export const loader = () => ({});');
+    writeFile('cached/notes.md', '---\ntitle: Published\n---\n# Notes');
+
+    const after = await scanPages(TMP);
+
+    expect(after.pages.find((page) => page.componentId === 'cached/post')).toMatchObject({
+      methods: ['loader'],
+      layout: false,
+    });
+    expect(after.pages.find((page) => page.componentId === 'cached/notes')?.metadata).toEqual({
+      title: 'Published',
+    });
   });
 });
