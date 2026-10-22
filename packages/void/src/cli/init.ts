@@ -241,6 +241,7 @@ const EMPTY_PROJECT_ALLOWED_SCRIPTS: Record<string, Set<string> | undefined> = {
   dev: new Set(['vite', 'vp dev']),
   build: new Set(['vite build', 'vp build']),
   preview: new Set(['vite preview', 'vp preview']),
+  postinstall: new Set(['void prepare']),
 };
 const EMPTY_PROJECT_STARTER_SCRIPT_COMMANDS = new Set(
   Object.values(EMPTY_PROJECT_ALLOWED_SCRIPTS).flatMap((commands) =>

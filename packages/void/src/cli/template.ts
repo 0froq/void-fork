@@ -189,6 +189,9 @@ export function createPagesStarterTemplate(options: {
       dev: toolchain === 'vite-plus' ? 'vp dev' : 'vite',
       build: toolchain === 'vite-plus' ? 'vp build' : 'vite build',
       preview: toolchain === 'vite-plus' ? 'vp preview' : 'vite preview',
+      // `.void/` is gitignored, so fresh clones and new scaffolds need the
+      // generated types before the editor opens tsconfig.json.
+      postinstall: 'void prepare',
     },
     dependencies: {
       ...SCAFFOLD_BASE_DEPENDENCIES,

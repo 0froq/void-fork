@@ -1205,6 +1205,7 @@ describe('isScaffoldableEmptyProject', () => {
               dev: 'vp dev',
               build: 'vp build',
               preview: 'vp preview',
+              postinstall: 'void prepare',
             },
             dependencies: {
               hono: '^4.11.9',
@@ -1321,6 +1322,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.scripts.dev).toBe('vp dev');
       expect(pkg.scripts.build).toBe('vp build');
       expect(pkg.scripts.preview).toBe('vp preview');
+      expect(pkg.scripts.postinstall).toBe('void prepare');
 
       const reactViteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf-8');
       expect(reactViteConfig).toContain('from "@void/react/plugin"');
