@@ -55,6 +55,8 @@ export type VisitOptions = {
   _scrollPosition?: { x: number; y: number } | null;
   /** @internal Used by popstate handler to avoid writing history while traversing */
   _popstate?: boolean;
+  /** @internal Used by router.refresh() to refetch the current URL even when it has a hash */
+  _refresh?: boolean;
 };
 
 export type PrefetchOptions = {
@@ -905,7 +907,8 @@ export async function createPageNavigationEngine(
       applyClientHead(result.pageData.head as HeadDescriptor | undefined);
       _currentFetchUrl = commitTarget.fetchUrl;
 
-      if (!options.preserveState) {
+      // preserveState only controls component state; back/forward traversal already moved history.
+      if (!options._popstate) {
         const historyUrl = commitTarget.fetchUrl + commitTarget.hash;
         scrollRestoration.writeHistory(historyUrl, !!options.replace);
       }
@@ -969,18 +972,14 @@ export async function createPageNavigationEngine(
       _pendingResource = null;
 
       const isSamePageHashNavigation =
+        !options._refresh &&
         effectiveFetchUrl === hashNavigationBaseUrl &&
         method === 'GET' &&
         !options.data &&
         Boolean(hash || options._popstate);
 
       if (isSamePageHashNavigation) {
-        commitHashNavigation(
-          effectiveFetchUrl,
-          hash,
-          options,
-          !options._popstate && !options.preserveState,
-        );
+        commitHashNavigation(effectiveFetchUrl, hash, options, !options._popstate);
         return {
           id,
           url,

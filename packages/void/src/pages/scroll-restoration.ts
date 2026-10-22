@@ -94,7 +94,8 @@ export function createScrollRestoration(): ScrollRestoration {
     save,
 
     writeHistory(url: string, replace: boolean): void {
-      renderedKey = newKey();
+      // A replaced entry keeps its key: its position is saved again when it is left.
+      renderedKey = (replace ? readKey(history.state) : null) ?? newKey();
       const state = { ...(replace ? history.state : {}), __voidScrollKey: renderedKey };
       if (replace) {
         history.replaceState(state, '', url);
