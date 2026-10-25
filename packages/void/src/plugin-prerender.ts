@@ -2,7 +2,8 @@ import { join } from 'pathslash';
 import type { Plugin } from 'vite';
 import { resolveDistDir, resolveWorkerDirName } from './cli/build-output-dir.ts';
 import { isNodeTarget, type VoidConfig } from './config.ts';
-import { voidLog, voidWarn, setShowTimestamp } from './log.ts';
+import { voidLog, setShowTimestamp } from './log.ts';
+import { assertNoPrerenderFailures } from './prerender-render.ts';
 import { prerenderPages, prerenderPagesNode } from './prerender.ts';
 import { resolveRemoteMode } from './shared/env.ts';
 
@@ -64,9 +65,7 @@ export function prerenderPlugin(root: string, config: VoidConfig): Plugin {
         return;
       }
 
-      if (result.failed.length > 0) {
-        voidWarn(`${result.failed.length} page(s) failed to prerender`);
-      }
+      assertNoPrerenderFailures(result.failed);
     },
   };
 }
