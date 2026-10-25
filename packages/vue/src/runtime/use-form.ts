@@ -12,7 +12,7 @@ import {
   type VoidRouter,
 } from 'void/pages-client';
 import type { ActionUrl, ResolveActionBody, ActionFormOptions } from 'void/routes';
-import { computed, reactive, ref, shallowRef, inject } from 'vue';
+import { computed, reactive, ref, shallowRef, inject, watch } from 'vue';
 
 type FormSubmitOptions = Omit<VisitOptions, 'method' | 'data'> & {
   data?: Record<string, unknown>;
@@ -31,6 +31,7 @@ type UntypedForm = {
   delete(opts?: FormSubmitOptions): Promise<void>;
   reset(options: FormResetOptions, ...fields: ReadonlyArray<string>): void;
   reset(...fields: ReadonlyArray<string>): void;
+  setError(field: string, message: string): void;
   clearErrors(...fields: ReadonlyArray<string>): void;
   clearError(): void;
 };
@@ -56,6 +57,7 @@ export function useForm<U extends ActionUrl & string>(
     ...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>
   ): void;
   reset(...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>): void;
+  setError(field: keyof ResolveActionBody<U> & string, message: string): void;
   clearErrors(...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>): void;
   clearError(): void;
 };
@@ -77,6 +79,20 @@ export function useForm(
   const defaults_ = shallowRef(initialDefaults);
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
+  let dataSnapshot = { ...initialDefaults };
+  watch(
+    data,
+    (val) => {
+      for (const key of Object.keys(val)) {
+        if (!isEqualFormValue(val[key], dataSnapshot[key])) {
+          delete errors[key];
+        }
+      }
+      dataSnapshot = { ...val };
+    },
+    { deep: true, flush: 'sync' },
+  );
+
   const hasChanges = computed(() =>
     Object.keys(defaults_.value).some((key) => !isEqualFormValue(data[key], defaults_.value[key])),
   );
@@ -91,6 +107,7 @@ export function useForm(
         data[field] = cloneFormValue(source[field]);
       }
     }
+    dataSnapshot = { ...data };
   }
 
   function clearErrors(...fields: ReadonlyArray<string>) {
@@ -103,6 +120,10 @@ export function useForm(
         delete errors[field];
       }
     }
+  }
+
+  function setError(field: string, message: string) {
+    errors[field] = message;
   }
 
   function clearError() {
@@ -172,6 +193,7 @@ export function useForm(
     wasSuccessful,
     recentlySuccessful,
     reset,
+    setError,
     clearErrors,
     clearError,
     post: (opts?: FormSubmitOptions) => submit('POST', opts),

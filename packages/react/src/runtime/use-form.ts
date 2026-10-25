@@ -37,6 +37,7 @@ type UntypedForm = {
   delete(formData: FormData): void;
   reset(options: FormResetOptions, ...fields: ReadonlyArray<string>): void;
   reset(...fields: ReadonlyArray<string>): void;
+  setError(field: string, message: string): void;
   clearErrors(...fields: ReadonlyArray<string>): void;
   clearError(): void;
 };
@@ -67,6 +68,7 @@ export function useForm<U extends ActionUrl & string>(
     ...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>
   ): void;
   reset(...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>): void;
+  setError(field: keyof ResolveActionBody<U> & string, message: string): void;
   clearErrors(...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>): void;
   clearError(): void;
 };
@@ -82,7 +84,7 @@ export function useForm(
     cloneFormValue(defaults),
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [error, setError] = useState<VoidActionError | null>(null);
+  const [error, setActionError] = useState<VoidActionError | null>(null);
   const [wasSuccessful, setWasSuccessful] = useState(false);
   const [recentlySuccessful, setRecentlySuccessful] = useState(false);
 
@@ -100,6 +102,14 @@ export function useForm(
   const setData = useCallback((field: string, value: unknown) => {
     dataRef.current = { ...dataRef.current, [field]: value };
     setDataState(dataRef.current);
+    setErrors((prev) => {
+      if (!(field in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
   }, []);
 
   const reset = useCallback((...args: ReadonlyArray<string | FormResetOptions>) => {
@@ -131,8 +141,12 @@ export function useForm(
     }
   }, []);
 
+  const setError = useCallback((field: string, message: string) => {
+    setErrors((prev) => ({ ...prev, [field]: message }));
+  }, []);
+
   const clearError = useCallback(() => {
-    setError(null);
+    setActionError(null);
   }, []);
 
   const [, dispatchAction, pending] = useActionState(
@@ -150,7 +164,7 @@ export function useForm(
         successTimeoutRef.current = null;
       }
       setErrors({});
-      setError(null);
+      setActionError(null);
 
       let result;
       try {
@@ -173,7 +187,7 @@ export function useForm(
         if (validationErrors) {
           setErrors(validationErrors);
         } else {
-          setError(result.error);
+          setActionError(result.error);
         }
         return previousSuccessVersion;
       }
@@ -230,6 +244,7 @@ export function useForm(
     patch,
     delete: deleteAction,
     reset,
+    setError,
     clearErrors,
     clearError,
   };

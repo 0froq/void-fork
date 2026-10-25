@@ -33,6 +33,7 @@ type UntypedForm = {
   delete(opts?: FormSubmitOptions): Promise<void>;
   reset(options: FormResetOptions, ...fields: ReadonlyArray<string>): void;
   reset(...fields: ReadonlyArray<string>): void;
+  setError(field: string, message: string): void;
   clearErrors(...fields: ReadonlyArray<string>): void;
   clearError(): void;
 };
@@ -63,6 +64,7 @@ export function useForm<U extends ActionUrl & string>(
     ...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>
   ): void;
   reset(...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>): void;
+  setError(field: keyof ResolveActionBody<U> & string, message: string): void;
   clearErrors(...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>): void;
   clearError(): void;
 };
@@ -99,7 +101,7 @@ export function useForm(
     return globalErrors;
   });
   const [pending, setPending] = createSignal(false);
-  const [error, setError] = createSignal<VoidActionError | null>(null);
+  const [error, setActionError] = createSignal<VoidActionError | null>(null);
   const [wasSuccessful, setWasSuccessful] = createSignal(false);
   const [recentlySuccessful, setRecentlySuccessful] = createSignal(false);
 
@@ -113,6 +115,14 @@ export function useForm(
 
   function setData(field: string, value: unknown) {
     setDataStore(field, value);
+    setLocalErrors((prev) => {
+      if (!(field in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
   }
 
   function reset(...args: ReadonlyArray<string | FormResetOptions>) {
@@ -141,8 +151,12 @@ export function useForm(
     }
   }
 
+  function setFieldError(field: string, message: string) {
+    setLocalErrors((prev) => ({ ...prev, [field]: message }));
+  }
+
   function clearError() {
-    setError(null);
+    setActionError(null);
   }
 
   async function submit(method: string, opts: FormSubmitOptions = {}) {
@@ -173,7 +187,7 @@ export function useForm(
         if (validationErrors) {
           setLocalErrors(validationErrors);
         } else {
-          setError(result.error);
+          setActionError(result.error);
         }
         return;
       }
@@ -223,6 +237,7 @@ export function useForm(
       return recentlySuccessful();
     },
     reset,
+    setError: setFieldError,
     clearErrors,
     clearError,
     post: (opts?: FormSubmitOptions) => submit('POST', opts),
