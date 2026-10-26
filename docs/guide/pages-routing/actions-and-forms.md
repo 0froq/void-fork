@@ -159,8 +159,11 @@ The types are inferred from your action's `withValidator()` schema in the compan
 | `recentlySuccessful`             | `true` for 2 seconds after a successful submission. Useful for flash messages.                                                                                                      |
 | `reset(...fields)`               | Reset form data to the current defaults (last submitted values after success). Field names autocomplete. Pass `{ initial: true }` first to reset to the values passed to `useForm`. |
 | `resetOnSuccess` (option)        | When `true`, a successful submit resets both form data and defaults to the mount-time values. Useful for create forms that should clear after save.                                 |
+| `setError(field, message)`       | Set a client-side validation error on a field.                                                                                                                                      |
 | `clearErrors(...fields)`         | Clear validation errors. Field names autocomplete.                                                                                                                                  |
 | `clearError()`                   | Clear `error`.                                                                                                                                                                      |
+
+Use `setError()` to display errors from your own client-side validation. Setting an error preserves errors on other fields. Changing a field clears that field's validation error automatically (`setData` in React and Solid, or assigning to `data` in Vue and Svelte).
 
 For a native React form, use `form.post`, `form.put`, `form.patch`, or `form.delete` as a native form action. For an awaitable mutation, use `action()`. In Vue, Svelte, and Solid, form submissions return `Promise<void>`; catch thrown errors or use your framework's error handling.
 

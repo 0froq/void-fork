@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vite-plus/test';
 import type { VoidRouter } from 'void/pages-client';
-import { createSSRApp, defineComponent, h } from 'vue';
+import { createSSRApp, defineComponent, h, nextTick } from 'vue';
 import { renderToString } from 'vue/server-renderer';
 import { useForm as typedUseForm } from '../../src/runtime/use-form.ts';
 
 type TestForm = {
+  setError(field: string, message: string): void;
+  readonly errors: Record<string, string>;
   data: Record<string, unknown>;
   hasChanges: boolean;
   pending: boolean;
@@ -113,6 +115,71 @@ describe('useForm reset', () => {
     form.data.title = 'Hello';
     form.reset({});
     expect(form.data).toEqual({ title: '' });
+  });
+});
+
+describe('useForm setError', () => {
+  it('clears errors after repeated nested object and array edits', async () => {
+    const app = createSSRApp(
+      defineComponent({
+        setup() {
+          const form = useForm('/test', { profile: { name: '' }, tags: [] });
+          for (let edit = 0; edit < 3; edit++) {
+            form.setError('profile', 'Invalid profile');
+            form.setError('tags', 'Invalid tags');
+            (form.data.profile as { name: string }).name = 'Name ' + edit;
+            expect(form.errors.profile).toBeUndefined();
+            expect(form.errors.tags).toBe('Invalid tags');
+            (form.data.tags as Array<string>).push('tag');
+            expect(form.errors).toEqual({});
+          }
+          return () => h('form');
+        },
+      }),
+    );
+    app.provide('__void_router', { visit: async () => ({}) });
+    await renderToString(app);
+  });
+
+  it('sets a field error and clears it when data changes', async () => {
+    const router = {
+      visit: async () => ({}),
+    } as unknown as VoidRouter;
+    const app = createSSRApp(
+      defineComponent({
+        async setup() {
+          const form = useForm('/test', { email: '', name: '' }, {});
+          form.setError('email', 'Invalid email');
+          expect(form.errors.email).toBe('Invalid email');
+          form.data.email = 'a@example.com';
+          await nextTick();
+          expect(form.errors.email).toBeUndefined();
+          return () => h('form');
+        },
+      }),
+    );
+    app.provide('__void_router', router);
+    await renderToString(app);
+  });
+
+  it('keeps errors on other fields when one field changes', async () => {
+    const router = {
+      visit: async () => ({}),
+    } as unknown as VoidRouter;
+    const app = createSSRApp(
+      defineComponent({
+        setup() {
+          const form = useForm('/test', { email: '', name: '' }, {});
+          form.setError('email', 'Invalid email');
+          form.setError('name', 'Required');
+          form.data.email = 'a@example.com';
+          expect(form.errors.name).toBe('Required');
+          return () => h('form');
+        },
+      }),
+    );
+    app.provide('__void_router', router);
+    await renderToString(app);
   });
 });
 

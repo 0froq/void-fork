@@ -1,4 +1,4 @@
-import { getContext } from 'svelte';
+import { getContext, untrack } from 'svelte';
 import {
   VoidActionError,
   cloneFormValue,
@@ -31,6 +31,7 @@ type UntypedForm = {
   delete(opts?: FormSubmitOptions): Promise<void>;
   reset(options: FormResetOptions, ...fields: ReadonlyArray<string>): void;
   reset(...fields: ReadonlyArray<string>): void;
+  setError(field: string, message: string): void;
   clearErrors(...fields: ReadonlyArray<string>): void;
   clearError(): void;
 };
@@ -57,6 +58,7 @@ export function useForm<U extends ActionUrl & string>(
     ...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>
   ): void;
   reset(...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>): void;
+  setError(field: keyof ResolveActionBody<U> & string, message: string): void;
   clearErrors(...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>): void;
   clearError(): void;
 };
@@ -78,6 +80,20 @@ export function useForm(
 
   let defaults_ = $state.raw(initialDefaults);
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
+  let dataSnapshot = cloneFormValue(initialDefaults);
+
+  $effect(() => {
+    // Read nested values even after an earlier edit, without subscribing to errors.
+    const current = cloneFormValue(data);
+    untrack(() => {
+      for (const key of new Set([...Object.keys(dataSnapshot), ...Object.keys(current)])) {
+        if (!isEqualFormValue(current[key], dataSnapshot[key])) {
+          delete errors[key];
+        }
+      }
+      dataSnapshot = current;
+    });
+  });
 
   const hasChanges = $derived(
     Object.keys(defaults_).some((key) => !isEqualFormValue(data[key], defaults_[key])),
@@ -93,6 +109,7 @@ export function useForm(
         data[field] = cloneFormValue(source[field]);
       }
     }
+    dataSnapshot = cloneFormValue(data);
   }
 
   function clearErrors(...fields: ReadonlyArray<string>) {
@@ -103,6 +120,12 @@ export function useForm(
         delete errors[field];
       }
     }
+  }
+
+  function setError(field: string, message: string) {
+    // An input handler may validate its new value before the change effect runs.
+    dataSnapshot = { ...dataSnapshot, [field]: cloneFormValue(data[field]) };
+    errors = { ...errors, [field]: message };
   }
 
   function clearError() {
@@ -131,7 +154,9 @@ export function useForm(
       if (!result.ok) {
         const validationErrors = getValidationErrors(result.error.body);
         if (validationErrors) {
-          Object.assign(errors, validationErrors);
+          for (const [field, message] of Object.entries(validationErrors)) {
+            setError(field, message);
+          }
         } else {
           error = result.error;
         }
@@ -182,6 +207,7 @@ export function useForm(
       return recentlySuccessful;
     },
     reset,
+    setError,
     clearErrors,
     clearError,
     post: (opts?: FormSubmitOptions) => submit('POST', opts),

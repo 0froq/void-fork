@@ -33,6 +33,7 @@ type UntypedForm = {
   delete(opts?: FormSubmitOptions): Promise<void>;
   reset(options: FormResetOptions, ...fields: ReadonlyArray<string>): void;
   reset(...fields: ReadonlyArray<string>): void;
+  setError(field: string, message: string): void;
   clearErrors(...fields: ReadonlyArray<string>): void;
   clearError(): void;
 };
@@ -63,6 +64,7 @@ export function useForm<U extends ActionUrl & string>(
     ...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>
   ): void;
   reset(...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>): void;
+  setError(field: keyof ResolveActionBody<U> & string, message: string): void;
   clearErrors(...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>): void;
   clearError(): void;
 };
@@ -82,12 +84,7 @@ export function useForm(
   const [data, setDataStore] = createStore<Record<string, unknown>>(
     cloneFormValue(initialDefaults),
   );
-  const [localErrors, setLocalErrors] = createSignal<Record<string, string>>({});
-  const errors = createMemo(() => {
-    const local = localErrors();
-    if (Object.keys(local).length > 0) {
-      return local;
-    }
+  const serverErrors = createMemo(() => {
     // globalErrors is a signal accessor (function) on the client, or a plain
     // object on the server. Handle both cases.
     if (!globalErrors) {
@@ -98,8 +95,22 @@ export function useForm(
     }
     return globalErrors;
   });
+  const [localErrors, setLocalErrors] = createSignal<{
+    source: Record<string, string>;
+    values: Record<string, string>;
+  } | null>(null);
+  const errors = createMemo(() => {
+    const server = serverErrors();
+    const local = localErrors();
+    // A new router result replaces earlier edits, including explicit clears.
+    return local?.source === server ? local.values : server;
+  });
+
+  function replaceErrors(values: Record<string, string>) {
+    setLocalErrors({ source: serverErrors(), values });
+  }
   const [pending, setPending] = createSignal(false);
-  const [error, setError] = createSignal<VoidActionError | null>(null);
+  const [error, setActionError] = createSignal<VoidActionError | null>(null);
   const [wasSuccessful, setWasSuccessful] = createSignal(false);
   const [recentlySuccessful, setRecentlySuccessful] = createSignal(false);
 
@@ -113,6 +124,7 @@ export function useForm(
 
   function setData(field: string, value: unknown) {
     setDataStore(field, value);
+    clearErrors(field);
   }
 
   function reset(...args: ReadonlyArray<string | FormResetOptions>) {
@@ -129,20 +141,22 @@ export function useForm(
 
   function clearErrors(...fields: ReadonlyArray<string>) {
     if (fields.length === 0) {
-      setLocalErrors({});
+      replaceErrors({});
     } else {
-      setLocalErrors((prev) => {
-        const next = { ...prev };
-        for (const field of fields) {
-          delete next[field];
-        }
-        return next;
-      });
+      const next = { ...errors() };
+      for (const field of fields) {
+        delete next[field];
+      }
+      replaceErrors(next);
     }
   }
 
+  function setFieldError(field: string, message: string) {
+    replaceErrors({ ...errors(), [field]: message });
+  }
+
   function clearError() {
-    setError(null);
+    setActionError(null);
   }
 
   async function submit(method: string, opts: FormSubmitOptions = {}) {
@@ -152,7 +166,7 @@ export function useForm(
     if (successTimeout) {
       clearTimeout(successTimeout);
     }
-    setLocalErrors({});
+    clearErrors();
     clearError();
 
     try {
@@ -171,9 +185,9 @@ export function useForm(
       if (!result.ok) {
         const validationErrors = getValidationErrors(result.error.body);
         if (validationErrors) {
-          setLocalErrors(validationErrors);
+          replaceErrors(validationErrors);
         } else {
-          setError(result.error);
+          setActionError(result.error);
         }
         return;
       }
@@ -223,6 +237,7 @@ export function useForm(
       return recentlySuccessful();
     },
     reset,
+    setError: setFieldError,
     clearErrors,
     clearError,
     post: (opts?: FormSubmitOptions) => submit('POST', opts),
