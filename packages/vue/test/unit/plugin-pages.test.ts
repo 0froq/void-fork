@@ -36,6 +36,37 @@ function writePage(relativePath: string, source: string): void {
   writeFileSync(full, source);
 }
 
+type PatchProps = (comp: Record<string, unknown>, props: Record<string, unknown>) => void;
+
+function extractPatchProps(moduleSource: string): PatchProps {
+  const marker = 'function hasRuntimePropsDeclaration';
+  const start = moduleSource.indexOf(marker);
+  if (start === -1) {
+    throw new Error('Expected patchProps runtime in generated module.');
+  }
+  const afterPatchProps = moduleSource.indexOf('function replaceRecord', start);
+  const exportRender = moduleSource.indexOf('export async function renderPage', start);
+  const end = afterPatchProps === -1 ? exportRender : afterPatchProps;
+  if (end === -1) {
+    throw new Error('Expected patchProps runtime boundary in generated module.');
+  }
+  const block = moduleSource.slice(start, end);
+  return new Function(`${block}; return patchProps;`)() as PatchProps;
+}
+
+async function loadGeneratedPatchProps(
+  plugin: PagesPluginHooks,
+  virtualId: '\0virtual:void-pages-renderer' | '\0virtual:void-pages-client',
+): Promise<PatchProps> {
+  getHookHandler(plugin.config)({}, { command: 'build' });
+  await getHookHandler(plugin.buildStart).call({});
+  const source = await getHookHandler(plugin.load)(virtualId);
+  if (!source) {
+    throw new Error(`Expected generated module for ${virtualId}.`);
+  }
+  return extractPatchProps(source);
+}
+
 function setupWatcher(plugin: PagesPluginHooks, logError = vi.fn(), invalidateModule = vi.fn()) {
   const handlers = new Map<string, Array<(path: string) => Promise<void> | void>>();
   plugin.configureServer?.({
@@ -53,6 +84,61 @@ function setupWatcher(plugin: PagesPluginHooks, logError = vi.fn(), invalidateMo
   });
   return handlers;
 }
+
+describe('pagesPlugin generated patchProps', () => {
+  afterEach(() => {
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('preserves runtime object props declarations in SSR and client bundles', async () => {
+    writePage('index.vue', '<template><h1>Home</h1></template>\n');
+
+    const plugin = pagesPlugin(PAGES_DIR).find((p) => p.name === 'void-vue:pages') as
+      | PagesPluginHooks
+      | undefined;
+    if (!plugin) {
+      throw new Error('Expected void-vue:pages plugin.');
+    }
+
+    const rendererPatchProps = await loadGeneratedPatchProps(
+      plugin,
+      '\0virtual:void-pages-renderer',
+    );
+    const clientPatchProps = await loadGeneratedPatchProps(plugin, '\0virtual:void-pages-client');
+
+    const declared = {
+      title: { type: String, default: 'DEFAULT' },
+      count: { type: Number, required: true },
+    };
+    const comp: Record<string, unknown> = { props: { ...declared } };
+
+    rendererPatchProps(comp, { count: -1 });
+    expect(comp.props).toEqual(declared);
+    expect(comp.__voidPatched).toBeUndefined();
+
+    clientPatchProps(comp, { count: -1 });
+    expect(comp.props).toEqual(declared);
+    expect(comp.__voidPatched).toBeUndefined();
+  });
+
+  it('registers prop keys when the component has no runtime props declaration', async () => {
+    writePage('index.vue', '<template><h1>Home</h1></template>\n');
+
+    const plugin = pagesPlugin(PAGES_DIR).find((p) => p.name === 'void-vue:pages') as
+      | PagesPluginHooks
+      | undefined;
+    if (!plugin) {
+      throw new Error('Expected void-vue:pages plugin.');
+    }
+
+    const patchProps = await loadGeneratedPatchProps(plugin, '\0virtual:void-pages-renderer');
+    const comp: Record<string, unknown> = {};
+
+    patchProps(comp, { count: 1, title: 'hi' });
+    expect(comp.props).toEqual(['count', 'title']);
+    expect(comp.__voidPatched).toBe(true);
+  });
+});
 
 describe('pagesPlugin dev HMR', () => {
   afterEach(() => {
