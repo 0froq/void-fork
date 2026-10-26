@@ -13,6 +13,7 @@ import { decodePagePath, isSameOrigin } from './url.ts';
 /**
  * The server leaves a named action's key out of the page URL. When the page URL
  * shows that, drop the key from the URL written to history as well.
+ * Otherwise keep the requested URL: the page URL may reflect a server rewrite.
  */
 function withoutActionKey(fetchUrl: string, pageUrl: string): string {
   const q = fetchUrl.indexOf('?');
@@ -24,22 +25,6 @@ function withoutActionKey(fetchUrl: string, pageUrl: string): string {
   return search === (pageQ === -1 ? '' : pageUrl.slice(pageQ))
     ? fetchUrl.slice(0, q) + search
     : fetchUrl;
-}
-
-/** URL to commit after a page mutation (strip action keys, then prefer the server page URL). */
-function mutationCommitUrl(fetchUrl: string, pageUrl?: string): string {
-  if (!pageUrl) {
-    return withoutActionKey(fetchUrl, '');
-  }
-  const withoutKey = withoutActionKey(fetchUrl, pageUrl);
-  if (withoutKey !== fetchUrl) {
-    return withoutKey;
-  }
-  const fetchPathEnd = fetchUrl.indexOf('?');
-  const fetchPath = fetchPathEnd === -1 ? fetchUrl : fetchUrl.slice(0, fetchPathEnd);
-  const pagePathEnd = pageUrl.indexOf('?');
-  const pagePath = pagePathEnd === -1 ? pageUrl : pageUrl.slice(0, pagePathEnd);
-  return fetchPath === pagePath ? pageUrl : fetchUrl;
 }
 
 export type PageComponentModule = {
@@ -851,7 +836,7 @@ export async function createPageNavigationEngine(
 
     if (method !== 'GET') {
       deferredRegistry.preserveValuesFrom(_committedDeferredRegistry, pageData);
-      commitTarget.fetchUrl = mutationCommitUrl(fetchUrl, pageData.url);
+      commitTarget.fetchUrl = withoutActionKey(fetchUrl, pageData.url);
     }
 
     const [component, layouts] = await Promise.race([

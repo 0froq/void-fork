@@ -1,7 +1,13 @@
+import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { createVoidRouter, ssrProxy, type VoidRouterConfig } from '../../src/pages/client.ts';
 import { createPageNavigationEngine } from '../../src/pages/navigation-engine.ts';
 import { parseCacheFor } from '../../src/pages/prefetch.ts';
+import {
+  createPageMutationHandler,
+  createRoutingRuntime,
+  type RoutingContext,
+} from '../../src/runtime/routing.ts';
 
 type DeferredTestWindow = Window & {
   __resolveDeferred(group: string, data: unknown): void;
@@ -531,15 +537,23 @@ describe('createVoidRouter', () => {
     expect(history.pushState).not.toHaveBeenCalled();
   });
 
-  it('pushes history when a POST changes the page URL', async () => {
+  it('pushes history when a POST redirects to a different query on the same path', async () => {
     stubClientGlobals();
     window.location.pathname = '/books';
     window.location.search = '';
+    const redirect = pageJson({});
+    Object.defineProperties(redirect, {
+      redirected: { value: true },
+      url: { value: 'http://localhost/books?page=2' },
+    });
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        pageJson({ component: 'home', props: {}, url: '/books?page=2', errors: null }),
-      ),
+      vi
+        .fn()
+        .mockResolvedValueOnce(redirect)
+        .mockResolvedValue(
+          pageJson({ component: 'home', props: {}, url: '/books?page=2', errors: null }),
+        ),
     );
     const { router } = await createTestRouter();
 
@@ -548,6 +562,53 @@ describe('createVoidRouter', () => {
     expect(history.pushState).toHaveBeenCalledWith(expect.anything(), '', '/books?page=2');
     expect(history.replaceState).not.toHaveBeenCalled();
   });
+
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE'])(
+    'preserves the visible query after a %s with a query-only middleware rewrite',
+    async (method) => {
+      stubClientGlobals();
+      window.location.pathname = '/books';
+      window.location.search = '?category=public';
+      const app = new Hono();
+      const runtime = createRoutingRuntime(app, { nodeTarget: true });
+      app.use(runtime.contextMiddleware);
+      app.use(async (context, next) => {
+        const c = context as RoutingContext;
+        return c.isRewritten() ? next() : c.rewrite('/books?category=internal');
+      });
+      app.on(
+        method,
+        '/books',
+        createPageMutationHandler({
+          componentId: 'home',
+          render: async () => '<html></html>',
+          assets: async () => ({ css: '', body: '', preloads: '' }),
+          headConfig: undefined,
+          renderOptions: { renderMode: 'server' },
+          load: async () => ({ action: () => undefined, loader: () => ({}) }),
+        }),
+      );
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init: RequestInit) => {
+          const response = await app.fetch(new Request(new URL(url, window.location.origin), init));
+          expect(response.status).toBe(200);
+          expect(await response.clone().json()).toMatchObject({ url: '/books?category=internal' });
+          return response;
+        }),
+      );
+      const { router } = await createTestRouter();
+
+      await router.visit('/books?category=public', { method });
+
+      expect(history.replaceState).toHaveBeenCalledWith(
+        expect.anything(),
+        '',
+        '/books?category=public',
+      );
+      expect(history.pushState).not.toHaveBeenCalled();
+    },
+  );
 
   it('does not grow history on repeated same-page named action submits', async () => {
     stubClientGlobals();
