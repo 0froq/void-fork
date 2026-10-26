@@ -119,6 +119,28 @@ describe('useForm reset', () => {
 });
 
 describe('useForm setError', () => {
+  it('clears errors after repeated nested object and array edits', async () => {
+    const app = createSSRApp(
+      defineComponent({
+        setup() {
+          const form = useForm('/test', { profile: { name: '' }, tags: [] });
+          for (let edit = 0; edit < 3; edit++) {
+            form.setError('profile', 'Invalid profile');
+            form.setError('tags', 'Invalid tags');
+            (form.data.profile as { name: string }).name = 'Name ' + edit;
+            expect(form.errors.profile).toBeUndefined();
+            expect(form.errors.tags).toBe('Invalid tags');
+            (form.data.tags as Array<string>).push('tag');
+            expect(form.errors).toEqual({});
+          }
+          return () => h('form');
+        },
+      }),
+    );
+    app.provide('__void_router', { visit: async () => ({}) });
+    await renderToString(app);
+  });
+
   it('sets a field error and clears it when data changes', async () => {
     const router = {
       visit: async () => ({}),

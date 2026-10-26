@@ -163,7 +163,7 @@ The types are inferred from your action's `withValidator()` schema in the compan
 | `clearErrors(...fields)`         | Clear validation errors. Field names autocomplete.                                                                                                                                  |
 | `clearError()`                   | Clear `error`.                                                                                                                                                                      |
 
-Changing a field clears that field's validation error automatically (`setData` in React and Solid, or assigning to `data` in Vue and Svelte).
+Use `setError()` to display errors from your own client-side validation. Setting an error preserves errors on other fields. Changing a field clears that field's validation error automatically (`setData` in React and Solid, or assigning to `data` in Vue and Svelte).
 
 For a native React form, use `form.post`, `form.put`, `form.patch`, or `form.delete` as a native form action. For an awaitable mutation, use `action()`. In Vue, Svelte, and Solid, form submissions return `Promise<void>`; catch thrown errors or use your framework's error handling.
 

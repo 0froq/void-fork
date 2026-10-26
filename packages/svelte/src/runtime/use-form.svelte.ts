@@ -1,4 +1,4 @@
-import { getContext } from 'svelte';
+import { getContext, untrack } from 'svelte';
 import {
   VoidActionError,
   cloneFormValue,
@@ -80,15 +80,19 @@ export function useForm(
 
   let defaults_ = $state.raw(initialDefaults);
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
-  let dataSnapshot = { ...defaults };
+  let dataSnapshot = cloneFormValue(initialDefaults);
 
   $effect(() => {
-    for (const key of Object.keys(data)) {
-      if (!isEqualFormValue(data[key], dataSnapshot[key])) {
-        delete errors[key];
+    // Read nested values even after an earlier edit, without subscribing to errors.
+    const current = cloneFormValue(data);
+    untrack(() => {
+      for (const key of new Set([...Object.keys(dataSnapshot), ...Object.keys(current)])) {
+        if (!isEqualFormValue(current[key], dataSnapshot[key])) {
+          delete errors[key];
+        }
       }
-    }
-    dataSnapshot = { ...data };
+      dataSnapshot = current;
+    });
   });
 
   const hasChanges = $derived(
@@ -105,7 +109,7 @@ export function useForm(
         data[field] = cloneFormValue(source[field]);
       }
     }
-    dataSnapshot = { ...data };
+    dataSnapshot = cloneFormValue(data);
   }
 
   function clearErrors(...fields: ReadonlyArray<string>) {
@@ -119,6 +123,8 @@ export function useForm(
   }
 
   function setError(field: string, message: string) {
+    // An input handler may validate its new value before the change effect runs.
+    dataSnapshot = { ...dataSnapshot, [field]: cloneFormValue(data[field]) };
     errors = { ...errors, [field]: message };
   }
 
@@ -148,7 +154,9 @@ export function useForm(
       if (!result.ok) {
         const validationErrors = getValidationErrors(result.error.body);
         if (validationErrors) {
-          Object.assign(errors, validationErrors);
+          for (const [field, message] of Object.entries(validationErrors)) {
+            setError(field, message);
+          }
         } else {
           error = result.error;
         }

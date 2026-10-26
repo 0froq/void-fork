@@ -79,18 +79,18 @@ export function useForm(
   const defaults_ = shallowRef(initialDefaults);
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  let dataSnapshot = { ...initialDefaults };
+  let dataSnapshot = cloneFormValue(initialDefaults);
   watch(
-    data,
+    () => cloneFormValue(data),
     (val) => {
-      for (const key of Object.keys(val)) {
+      for (const key of new Set([...Object.keys(dataSnapshot), ...Object.keys(val)])) {
         if (!isEqualFormValue(val[key], dataSnapshot[key])) {
           delete errors[key];
         }
       }
-      dataSnapshot = { ...val };
+      dataSnapshot = val;
     },
-    { deep: true, flush: 'sync' },
+    { flush: 'sync' },
   );
 
   const hasChanges = computed(() =>
@@ -107,7 +107,7 @@ export function useForm(
         data[field] = cloneFormValue(source[field]);
       }
     }
-    dataSnapshot = { ...data };
+    dataSnapshot = cloneFormValue(data);
   }
 
   function clearErrors(...fields: ReadonlyArray<string>) {

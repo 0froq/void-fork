@@ -1,5 +1,5 @@
 import type { Page } from 'playwright';
-import { beforeAll, expect, it } from 'vite-plus/test';
+import { beforeAll, describe, expect, it } from 'vite-plus/test';
 
 type TestWindow = Window & {
   __SPA_MARKER?: boolean;
@@ -461,6 +461,93 @@ export function registerSharedClientTests({
     } finally {
       await page.context().close();
     }
+  });
+
+  describe('form field errors', () => {
+    async function openForm() {
+      const page = await newPage();
+      await page.goto(BASE + '/form-errors');
+      await waitForHydration(page);
+      return page;
+    }
+
+    it('preserves new client validation errors and clears only edited fields', async ({
+      expect,
+    }) => {
+      const page = await openForm();
+      const readErrors = async () => JSON.parse((await page.getByTestId('errors').textContent())!);
+      try {
+        await page.getByRole('button', { name: 'Set errors', exact: true }).click();
+        await expect.poll(readErrors).toEqual({
+          email: 'Email invalid',
+          name: 'Name invalid',
+          profile: 'Profile invalid',
+          tags: 'Tags invalid',
+        });
+        await page.getByLabel('Email', { exact: true }).fill('invalid');
+        await expect.poll(readErrors).toEqual({
+          email: 'Client email invalid',
+          name: 'Name invalid',
+          profile: 'Profile invalid',
+          tags: 'Tags invalid',
+        });
+        await page.getByLabel('Name', { exact: true }).fill('Alice');
+        await page.getByLabel('Email', { exact: true }).fill('alice@example.com');
+        await expect.poll(readErrors).toEqual({ profile: 'Profile invalid', tags: 'Tags invalid' });
+        await page.getByRole('button', { name: 'Clear all', exact: true }).click();
+        await expect.poll(readErrors).toEqual({});
+      } finally {
+        await page.context().close();
+      }
+    });
+
+    it('clears errors after repeated nested object and array edits', async ({ expect }) => {
+      const page = await openForm();
+      const readErrors = async () => JSON.parse((await page.getByTestId('errors').textContent())!);
+      try {
+        for (let edit = 0; edit < 3; edit++) {
+          await page.getByRole('button', { name: 'Set nested errors', exact: true }).click();
+          await expect
+            .poll(readErrors)
+            .toEqual({ profile: 'Profile invalid', tags: 'Tags invalid' });
+          await page.getByLabel('Profile', { exact: true }).fill('Name ' + edit);
+          await expect.poll(readErrors).toEqual({ tags: 'Tags invalid' });
+          await page.getByRole('button', { name: 'Add tag', exact: true }).click();
+          await expect.poll(readErrors).toEqual({});
+        }
+      } finally {
+        await page.context().close();
+      }
+    });
+
+    it('merges client and server errors without reviving cleared errors', async ({ expect }) => {
+      const page = await openForm();
+      const readErrors = async () => JSON.parse((await page.getByTestId('errors').textContent())!);
+      try {
+        await page.getByRole('button', { name: 'Save', exact: true }).click();
+        await expect
+          .poll(readErrors)
+          .toEqual({ email: 'Email is required', name: 'Name is required' });
+        await page.getByRole('button', { name: 'Set nested errors', exact: true }).click();
+        await expect.poll(readErrors).toEqual({
+          email: 'Email is required',
+          name: 'Name is required',
+          profile: 'Profile invalid',
+          tags: 'Tags invalid',
+        });
+        await page.getByRole('button', { name: 'Clear email', exact: true }).click();
+        await page.getByLabel('Name', { exact: true }).fill('Alice');
+        await expect.poll(readErrors).toEqual({ profile: 'Profile invalid', tags: 'Tags invalid' });
+        await page.getByRole('button', { name: 'Clear all', exact: true }).click();
+        await expect.poll(readErrors).toEqual({});
+        await page.getByRole('button', { name: 'Save', exact: true }).click();
+        await expect.poll(readErrors).toEqual({ email: 'Email is required' });
+        await page.getByLabel('Email', { exact: true }).fill('alice@example.com');
+        await expect.poll(readErrors).toEqual({});
+      } finally {
+        await page.context().close();
+      }
+    });
   });
 
   it('form validation errors display', async () => {
