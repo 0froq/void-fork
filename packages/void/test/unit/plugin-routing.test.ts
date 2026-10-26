@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   createServer,
+  normalizePath,
   type ConfigEnv,
   type ResolvedConfig,
   type RunnableDevEnvironment,
@@ -739,7 +740,8 @@ describe('routingPlugin', () => {
     try {
       const resolve = async (specifier: string, importer: string) =>
         (await server.environments.client.pluginContainer.resolveId(specifier, importer))?.id;
-      const fileOf = (specifier: string) => fileURLToPath(import.meta.resolve(specifier));
+      const fileOf = (specifier: string) =>
+        normalizePath(fileURLToPath(import.meta.resolve(specifier)));
       // The app has no better-auth of its own, so these resolve only through the aliases.
       const appFile = join(root, 'routes', 'health.ts');
       for (const specifier of ['better-auth/client', 'better-auth/react']) {

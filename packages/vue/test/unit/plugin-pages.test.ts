@@ -13,6 +13,7 @@ const PAGES_DIR = join(TMP, 'pages');
 type HookWithHandler<T> = { handler: T };
 type PagesPluginHooks = {
   transform?: HookWithHandler<(code: string, id: string) => { code: string } | undefined>;
+  handleHotUpdate?: HookWithHandler<(ctx: { file: string; read: () => Promise<string> }) => void>;
   buildStart?: (() => Promise<void>) | HookWithHandler<() => Promise<void>>;
   configureServer?: (server: unknown) => void;
   config?:
@@ -208,6 +209,27 @@ const draft = defineModel('draft', { type: String, default: 'Draft' });
       expect(declared).toEqual(['title', 'optional']);
     });
   }
+});
+
+describe('pagesPlugin transform paths', () => {
+  it.each([
+    { pagesDir: `${PAGES_DIR}/nested/..`, file: join(PAGES_DIR, 'index.vue') },
+    { pagesDir: PAGES_DIR, file: `${TMP}/other/../pages/index.vue` },
+  ])(
+    'normalizes the directory and file for transforms and HMR: $pagesDir, $file',
+    async ({ pagesDir, file }) => {
+      const plugin = pagesPlugin(pagesDir).find(
+        (p) => p.name === 'void-vue:pages-transform',
+      ) as PagesPluginHooks;
+      const source = '<script setup lang="ts">defineProps<{ title: string }>();</script>';
+      const expected = '<script setup lang="ts">defineProps();</script>';
+      expect(getHookHandler(plugin.transform)(source, file)?.code).toBe(expected);
+
+      const ctx = { file, read: async () => source };
+      getHookHandler(plugin.handleHotUpdate)(ctx);
+      expect(await ctx.read()).toBe(expected);
+    },
+  );
 });
 
 describe('pagesPlugin dev HMR', () => {

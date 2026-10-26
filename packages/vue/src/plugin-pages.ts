@@ -154,7 +154,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Rea
       transform: {
         filter: { id: /\.vue$/ },
         handler(code, id) {
-          if (!isVuePageFile(id, pagesDir)) {
+          if (!isVuePageFile(normalizePath(id), normalizedPagesDir)) {
             return;
           }
           const transformed = stripDefinePropsTypeArgument(code);
@@ -168,7 +168,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Rea
       handleHotUpdate: {
         order: 'pre',
         handler(ctx) {
-          if (!isVuePageFile(ctx.file, pagesDir)) {
+          if (!isVuePageFile(normalizePath(ctx.file), normalizedPagesDir)) {
             return;
           }
 
