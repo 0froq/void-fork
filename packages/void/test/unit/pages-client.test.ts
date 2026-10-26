@@ -541,26 +541,28 @@ describe('createVoidRouter', () => {
     stubClientGlobals();
     window.location.pathname = '/books';
     window.location.search = '';
-    const redirect = pageJson({});
+    const pageData = {
+      component: 'home',
+      props: { page: 2 },
+      url: '/books?page=2',
+      errors: null,
+    };
+    const redirect = pageJson(pageData);
     Object.defineProperties(redirect, {
       redirected: { value: true },
       url: { value: 'http://localhost/books?page=2' },
     });
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValueOnce(redirect)
-        .mockResolvedValue(
-          pageJson({ component: 'home', props: {}, url: '/books?page=2', errors: null }),
-        ),
-    );
-    const { router } = await createTestRouter();
+    const fetchMock = vi.fn().mockResolvedValueOnce(redirect);
+    vi.stubGlobal('fetch', fetchMock);
+    const applyUpdate = vi.fn();
+    const { router } = await createTestRouter({ adapter: { applyUpdate } });
 
     await router.visit('/books?delete', { method: 'POST' });
 
     expect(history.pushState).toHaveBeenCalledWith(expect.anything(), '', '/books?page=2');
     expect(history.replaceState).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(applyUpdate).toHaveBeenCalledWith(pageData, {}, [], expect.anything());
   });
 
   it.each(['POST', 'PUT', 'PATCH', 'DELETE'])(
