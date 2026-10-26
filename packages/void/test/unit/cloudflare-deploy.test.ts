@@ -2680,6 +2680,38 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(trace.indexOf('postgres-migrate')).toBeLessThan(trace.indexOf('wrangler:deploy'));
   });
 
+  it('preserves authored assets.html_handling in the generated static Wrangler config', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'ssgapp' }),
+      'void.json': JSON.stringify({ output: 'static' }),
+      'wrangler.jsonc': JSON.stringify({
+        account_id: 'acc123',
+        assets: { html_handling: 'drop-trailing-slash' },
+      }),
+      'pages/index.vue': `<template><div>hi</div></template>`,
+      'pages/index.server.ts': `export const loader = () => ({});`,
+    });
+    const { deps, trace, exitCalls } = harness({
+      runStaticBuild: () => {
+        trace.push('static-build');
+        mkdirSync(join(root, 'dist/client'), { recursive: true });
+        writeFileSync(join(root, 'dist/client/index.html'), '<h1>Prerendered</h1>');
+      },
+    });
+
+    await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
+
+    expect(exitCalls).toEqual([]);
+    expect(trace).toEqual(['wrangler:whoami', 'static-build', 'wrangler:deploy']);
+    expect(parseRootWranglerConfig(generatedStaticConfig(root))).toMatchObject({
+      assets: {
+        directory: '../../../dist/client',
+        not_found_handling: '404-page',
+        html_handling: 'drop-trailing-slash',
+      },
+    });
+  });
+
   it('deploys a fully prerenderable output:"static" Pages app through the thin edge Worker', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'ssgapp' }),
