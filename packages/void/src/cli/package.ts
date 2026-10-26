@@ -656,7 +656,8 @@ export function readWranglerHtmlHandling(
     return undefined;
   }
   const value = (assets as Record<string, unknown>).html_handling;
-  return typeof value === 'string' && WRANGLER_HTML_HANDLING.has(value as AssetConfig['html_handling'])
+  return typeof value === 'string' &&
+    WRANGLER_HTML_HANDLING.has(value as AssetConfig['html_handling'])
     ? (value as AssetConfig['html_handling'])
     : undefined;
 }

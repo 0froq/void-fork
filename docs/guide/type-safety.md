@@ -104,13 +104,13 @@ The `action()` helper gets the same type checking. See [Actions & Forms](./pages
 
 ## What Gets Checked
 
-| Layer        | What's type-checked                                                  |
-| ------------ | -------------------------------------------------------------------- |
-| Database     | Table columns, value types, insert/update shapes from Drizzle schema |
-| Handlers     | `c.env` bindings, validator input, return type                       |
-| Fetch client | Route paths, HTTP methods, `body`/`query`/`params`, response type    |
+| Layer        | What's type-checked                                                                                                   |
+| ------------ | --------------------------------------------------------------------------------------------------------------------- |
+| Database     | Table columns, value types, insert/update shapes from Drizzle schema                                                  |
+| Handlers     | `c.env` bindings, validator input, return type                                                                        |
+| Fetch client | Route paths, HTTP methods, `body`/`query`/`params`, response type                                                     |
 | `useForm`    | Action URLs, `data` fields, `errors` keys, `reset()` args (including `{ initial: true }`), `params`, `resetOnSuccess` |
-| `action()`   | Action URLs, `data` payload, `params`                                |
+| `action()`   | Action URLs, `data` payload, `params`                                                                                 |
 
 ## Serialization
 
