@@ -125,7 +125,9 @@ export function generateRouteTypes(
   lines.push('      : never;');
   lines.push('');
   lines.push('  export type HasActionParams<U extends string> =');
-  lines.push('    ResolveActionParams<U> extends Record<string, string> ? true : false;');
+  lines.push('    [ResolveActionParams<U>] extends [never]');
+  lines.push('      ? false');
+  lines.push('      : ResolveActionParams<U> extends Record<string, string> ? true : false;');
   lines.push('');
   lines.push('  type ActionFormBaseOptions = { resetOnSuccess?: boolean };');
   lines.push('');

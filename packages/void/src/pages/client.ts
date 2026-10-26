@@ -29,6 +29,7 @@ export {
 export type { ActionErrorHandlingScope, ActionResult } from './action-result.ts';
 export { isEqualFormValue } from './form-value-equality.ts';
 export {
+  cloneFormValue,
   isFormResetOptions,
   parseFormResetArgs,
   type FormResetOptions,

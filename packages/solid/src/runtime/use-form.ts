@@ -2,6 +2,7 @@ import { createSignal, createMemo, useContext } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
 import {
   VoidActionError,
+  cloneFormValue,
   getValidationErrors,
   interpolateRouteParams,
   isAbortError,
@@ -77,7 +78,10 @@ export function useForm(
   // derive errors from the global state, surviving component re-creation
   // during Solid's reactive tree rebuild after router.visit().
   const globalErrors = useContext(ErrorsContext);
-  const [data, setDataStore] = createStore<Record<string, unknown>>({ ...defaults });
+  const initialDefaults = cloneFormValue(defaults);
+  const [data, setDataStore] = createStore<Record<string, unknown>>(
+    cloneFormValue(initialDefaults),
+  );
   const [localErrors, setLocalErrors] = createSignal<Record<string, string>>({});
   const errors = createMemo(() => {
     const local = localErrors();
@@ -99,8 +103,7 @@ export function useForm(
   const [wasSuccessful, setWasSuccessful] = createSignal(false);
   const [recentlySuccessful, setRecentlySuccessful] = createSignal(false);
 
-  const [defaults_, setDefaults] = createSignal<Record<string, unknown>>({ ...defaults });
-  const initialDefaults = { ...defaults };
+  const [defaults_, setDefaults] = createSignal<Record<string, unknown>>(initialDefaults);
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
   const hasChanges = createMemo(() => {
@@ -116,10 +119,10 @@ export function useForm(
     const { initial, fields } = parseFormResetArgs(args);
     const source = initial ? initialDefaults : defaults_();
     if (fields.length === 0) {
-      setDataStore(reconcile({ ...source }));
+      setDataStore(reconcile(cloneFormValue(source)));
     } else {
       for (const field of fields) {
-        setDataStore(field, source[field]);
+        setDataStore(field, cloneFormValue(source[field]));
       }
     }
   }
@@ -178,10 +181,10 @@ export function useForm(
       setWasSuccessful(true);
       setRecentlySuccessful(true);
       if (options?.resetOnSuccess) {
-        setDataStore(reconcile({ ...initialDefaults }));
-        setDefaults({ ...initialDefaults });
+        setDataStore(reconcile(cloneFormValue(initialDefaults)));
+        setDefaults(cloneFormValue(initialDefaults));
       } else {
-        setDefaults({ ...data });
+        setDefaults(cloneFormValue(data));
       }
       successTimeout = setTimeout(() => {
         setRecentlySuccessful(false);

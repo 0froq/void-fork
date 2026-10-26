@@ -1,5 +1,6 @@
 import {
   VoidActionError,
+  cloneFormValue,
   getValidationErrors,
   interpolateRouteParams,
   isAbortError,
@@ -11,7 +12,7 @@ import {
   type VoidRouter,
 } from 'void/pages-client';
 import type { ActionUrl, ResolveActionBody, ActionFormOptions } from 'void/routes';
-import { reactive, ref, inject, watch } from 'vue';
+import { computed, reactive, ref, shallowRef, inject } from 'vue';
 
 type FormSubmitOptions = Omit<VisitOptions, 'method' | 'data'> & {
   data?: Record<string, unknown>;
@@ -64,38 +65,30 @@ export function useForm(
   defaults: Record<string, unknown>,
   options?: { params?: Record<string, string>; resetOnSuccess?: boolean },
 ): UntypedForm {
-  const formDefaults = defaults;
+  const initialDefaults = cloneFormValue(defaults);
   const router = inject<VoidRouter | null>('__void_router', null);
-  const data = reactive({ ...formDefaults }) as Record<string, unknown>;
+  const data = reactive(cloneFormValue(initialDefaults)) as Record<string, unknown>;
   const errors = reactive<Record<string, string>>({});
   const error = ref<VoidActionError | null>(null);
   const pending = ref(false);
   const wasSuccessful = ref(false);
   const recentlySuccessful = ref(false);
 
-  let defaults_ = { ...formDefaults };
-  const initialDefaults = { ...formDefaults };
+  const defaults_ = shallowRef(initialDefaults);
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  const hasChanges = ref(false);
-  watch(
-    () => ({ ...data }),
-    (val) => {
-      hasChanges.value = Object.keys(defaults_).some(
-        (key) => !isEqualFormValue(val[key], defaults_[key]),
-      );
-    },
-    { deep: true },
+  const hasChanges = computed(() =>
+    Object.keys(defaults_.value).some((key) => !isEqualFormValue(data[key], defaults_.value[key])),
   );
 
   function reset(...args: ReadonlyArray<string | FormResetOptions>) {
     const { initial, fields } = parseFormResetArgs(args);
-    const source = initial ? initialDefaults : defaults_;
+    const source = initial ? initialDefaults : defaults_.value;
     if (fields.length === 0) {
-      Object.assign(data, { ...source });
+      Object.assign(data, cloneFormValue(source));
     } else {
       for (const field of fields) {
-        data[field] = source[field];
+        data[field] = cloneFormValue(source[field]);
       }
     }
   }
@@ -152,10 +145,10 @@ export function useForm(
       wasSuccessful.value = true;
       recentlySuccessful.value = true;
       if (options?.resetOnSuccess) {
-        Object.assign(data, { ...initialDefaults });
-        defaults_ = { ...initialDefaults };
+        Object.assign(data, cloneFormValue(initialDefaults));
+        defaults_.value = cloneFormValue(initialDefaults);
       } else {
-        defaults_ = { ...data };
+        defaults_.value = cloneFormValue(data);
       }
       successTimeout = setTimeout(() => {
         recentlySuccessful.value = false;

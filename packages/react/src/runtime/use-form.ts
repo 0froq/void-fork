@@ -9,6 +9,7 @@ import {
 } from 'react';
 import {
   VoidActionError,
+  cloneFormValue,
   getValidationErrors,
   interpolateRouteParams,
   isAbortError,
@@ -76,17 +77,17 @@ export function useForm(
   options?: { params?: Record<string, string>; resetOnSuccess?: boolean },
 ): UntypedForm {
   const router = useContext(RouterContext);
-  const [data, setDataState] = useState<Record<string, unknown>>(() => ({ ...defaults }));
-  const [defaultsState, setDefaultsState] = useState<Record<string, unknown>>(() => ({
-    ...defaults,
-  }));
+  const [data, setDataState] = useState<Record<string, unknown>>(() => cloneFormValue(defaults));
+  const [defaultsState, setDefaultsState] = useState<Record<string, unknown>>(() =>
+    cloneFormValue(defaults),
+  );
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<VoidActionError | null>(null);
   const [wasSuccessful, setWasSuccessful] = useState(false);
   const [recentlySuccessful, setRecentlySuccessful] = useState(false);
 
   const defaultsRef = useRef(defaultsState);
-  const initialRef = useRef<Record<string, unknown>>({ ...defaults });
+  const initialRef = useRef(defaultsState);
   const dataRef = useRef(data);
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -105,11 +106,11 @@ export function useForm(
     const { initial, fields } = parseFormResetArgs(args);
     const source = initial ? initialRef.current : defaultsRef.current;
     if (fields.length === 0) {
-      dataRef.current = { ...source };
+      dataRef.current = cloneFormValue(source);
     } else {
       const next = { ...dataRef.current };
       for (const field of fields) {
-        next[field] = source[field];
+        next[field] = cloneFormValue(source[field]);
       }
       dataRef.current = next;
     }
@@ -178,16 +179,12 @@ export function useForm(
       }
 
       if (options?.resetOnSuccess) {
-        const initial = { ...initialRef.current };
-        dataRef.current = initial;
-        setDataState(initial);
-        defaultsRef.current = initial;
-        setDefaultsState(initial);
-      } else {
-        const nextDefaults = { ...dataRef.current };
-        defaultsRef.current = nextDefaults;
-        setDefaultsState(nextDefaults);
+        dataRef.current = cloneFormValue(initialRef.current);
+        setDataState(dataRef.current);
       }
+      const nextDefaults = cloneFormValue(dataRef.current);
+      defaultsRef.current = nextDefaults;
+      setDefaultsState(nextDefaults);
       setWasSuccessful(true);
       setRecentlySuccessful(true);
       successTimeoutRef.current = setTimeout(() => {

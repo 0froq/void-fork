@@ -1,6 +1,7 @@
 import { getContext } from 'svelte';
 import {
   VoidActionError,
+  cloneFormValue,
   getValidationErrors,
   interpolateRouteParams,
   isAbortError,
@@ -67,15 +68,15 @@ export function useForm(
 ): UntypedForm {
   const router = getContext<VoidRouter>('__void_router');
 
-  let data = $state({ ...defaults });
+  const initialDefaults = cloneFormValue(defaults);
+  let data = $state(cloneFormValue(initialDefaults));
   let errors: Record<string, string> = $state({});
   let error: VoidActionError | null = $state(null);
   let pending = $state(false);
   let wasSuccessful = $state(false);
   let recentlySuccessful = $state(false);
 
-  let defaults_ = { ...defaults };
-  const initialDefaults = { ...defaults };
+  let defaults_ = $state.raw(initialDefaults);
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
   const hasChanges = $derived(
@@ -86,10 +87,10 @@ export function useForm(
     const { initial, fields } = parseFormResetArgs(args);
     const source = initial ? initialDefaults : defaults_;
     if (fields.length === 0) {
-      data = { ...source };
+      data = cloneFormValue(source);
     } else {
       for (const field of fields) {
-        data[field] = source[field];
+        data[field] = cloneFormValue(source[field]);
       }
     }
   }
@@ -140,10 +141,10 @@ export function useForm(
       wasSuccessful = true;
       recentlySuccessful = true;
       if (options?.resetOnSuccess) {
-        data = { ...initialDefaults };
-        defaults_ = { ...initialDefaults };
+        data = cloneFormValue(initialDefaults);
+        defaults_ = cloneFormValue(initialDefaults);
       } else {
-        defaults_ = { ...data };
+        defaults_ = cloneFormValue(data);
       }
       successTimeout = setTimeout(() => {
         recentlySuccessful = false;

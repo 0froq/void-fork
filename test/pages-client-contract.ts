@@ -406,6 +406,63 @@ export function registerSharedClientTests({
     }
   });
 
+  it('form resets preserve nested snapshots and update dirty state after repeated submits', async ({
+    expect,
+  }) => {
+    const page = await newPage();
+    const errors: Array<string> = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    const initial = { profile: { name: '' }, tags: [] };
+    const edited = { profile: { name: 'edited' }, tags: ['edited'] };
+
+    try {
+      await page.goto(BASE + '/form-reset');
+      await waitForHydration(page);
+
+      for (const automatic of [false, true]) {
+        const form = page.getByTestId(automatic ? 'automatic-form' : 'manual-form');
+        async function assertState(data: typeof edited, dirty: boolean) {
+          await expect
+            .poll(async () => ({
+              data: JSON.parse((await form.getByTestId('values').textContent())!),
+              dirty: await form.getByTestId('dirty').textContent(),
+            }))
+            .toEqual({ data, dirty: String(dirty) });
+        }
+        for (let attempt = 0; attempt < 2; attempt++) {
+          await form.getByRole('button', { name: 'Edit', exact: true }).click();
+          await assertState(edited, true);
+          await form.getByRole('button', { name: 'Reset current', exact: true }).click();
+          await assertState(initial, false);
+        }
+        for (let attempt = 0; attempt < 2; attempt++) {
+          await form.getByRole('button', { name: 'Edit', exact: true }).click();
+          const response = page.waitForResponse(
+            (response) =>
+              response.url() === BASE + '/form-reset' && response.request().method() === 'POST',
+          );
+          await form.getByRole('button', { name: 'Save', exact: true }).click();
+          expect((await response).ok()).toBe(true);
+          await assertState(automatic ? initial : edited, false);
+          expect(await form.getByTestId('success').textContent()).toBe('true');
+          if (!automatic) {
+            await form.getByRole('button', { name: 'Edit', exact: true }).click();
+            await assertState({ ...edited, tags: ['edited', 'edited'] }, true);
+            await form.getByRole('button', { name: 'Reset current', exact: true }).click();
+            await assertState(edited, false);
+            await form.getByRole('button', { name: 'Reset profile', exact: true }).click();
+            await assertState({ profile: { name: '' }, tags: ['edited'] }, true);
+            await form.getByRole('button', { name: 'Reset initial', exact: true }).click();
+            await assertState(initial, true);
+          }
+        }
+      }
+      expect(errors).toEqual([]);
+    } finally {
+      await page.context().close();
+    }
+  });
+
   it('form validation errors display', async () => {
     const page = await newPage();
 

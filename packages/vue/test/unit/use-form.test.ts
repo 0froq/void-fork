@@ -89,6 +89,31 @@ describe('useForm reset', () => {
     expect(form.data.title).toBe('');
     expect(form.hasChanges).toBe(false);
   });
+
+  it.each([false, true])(
+    'restores nested initial values repeatedly (automatic=%s)',
+    async (automatic) => {
+      const defaults = { profile: { name: '' }, tags: [] as Array<string> };
+      const form = await mountForm(defaults, { resetOnSuccess: automatic });
+      for (let index = 0; index < 2; index++) {
+        (form.data.profile as { name: string }).name = 'Alice';
+        (form.data.tags as Array<string>).push('react');
+        await form.post();
+        if (!automatic) {
+          form.reset({ initial: true });
+        }
+        expect(form.data).toEqual({ profile: { name: '' }, tags: [] });
+        expect(defaults).toEqual({ profile: { name: '' }, tags: [] });
+      }
+    },
+  );
+
+  it('resets with empty options without adding a field', async () => {
+    const form = await mountForm({ title: '' });
+    form.data.title = 'Hello';
+    form.reset({});
+    expect(form.data).toEqual({ title: '' });
+  });
 });
 
 describe('useForm params', () => {
