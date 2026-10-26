@@ -9,6 +9,14 @@ export type PrerenderResult = {
   failed: Array<{ path: string; error: string }>;
 };
 
+export function assertNoPrerenderFailures(failed: PrerenderResult['failed']): void {
+  if (failed.length === 0) {
+    return;
+  }
+  const details = failed.map(({ path, error }) => `  ${path}: ${error}`).join('\n');
+  throw new Error(`${failed.length} page(s) failed to prerender:\n${details}`);
+}
+
 export function outputFileForPath(path: string): string {
   return path === '/' ? 'index.html' : `${path.slice(1)}.html`;
 }
