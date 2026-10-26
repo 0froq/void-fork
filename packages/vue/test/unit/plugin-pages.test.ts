@@ -1,6 +1,10 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import * as Vue from 'vue';
+import { compileScript, parse } from 'vue/compiler-sfc';
+import { renderToString } from 'vue/server-renderer';
 import { pagesPlugin } from '../../src/plugin-pages.ts';
 
 const TMP = join(import.meta.dirname, '__tmp_pages_plugin__');
@@ -8,6 +12,7 @@ const PAGES_DIR = join(TMP, 'pages');
 
 type HookWithHandler<T> = { handler: T };
 type PagesPluginHooks = {
+  transform?: HookWithHandler<(code: string, id: string) => { code: string } | undefined>;
   buildStart?: (() => Promise<void>) | HookWithHandler<() => Promise<void>>;
   configureServer?: (server: unknown) => void;
   config?:
@@ -37,6 +42,22 @@ function writePage(relativePath: string, source: string): void {
 }
 
 type PatchProps = (comp: Record<string, unknown>, props: Record<string, unknown>) => void;
+
+function compilePage(source: string): Vue.Component & Record<string, unknown> {
+  const transform = pagesPlugin(PAGES_DIR).find((p) => p.name === 'void-vue:pages-transform') as
+    | PagesPluginHooks
+    | undefined;
+  const transformed = getHookHandler(transform?.transform)(source, join(PAGES_DIR, 'index.vue'));
+  const { descriptor } = parse(transformed?.code ?? source);
+  const compiled = compileScript(descriptor, { id: 'test-page', inlineTemplate: true });
+  // Evaluate the real SFC compiler output using the same Vue instance as the renderer.
+  const code = stripTypeScriptTypes(compiled.content)
+    .replace(/import \{([^}]+)\} from ['"]vue['"]/g, (_, names: string) => {
+      return `const {${names.replace(/\s+as\s+/g, ':')}} = Vue;`;
+    })
+    .replace('export default', 'return');
+  return new Function('Vue', code)(Vue) as Vue.Component & Record<string, unknown>;
+}
 
 function extractPatchProps(moduleSource: string): PatchProps {
   const marker = 'function hasRuntimePropsDeclaration';
@@ -138,6 +159,55 @@ describe('pagesPlugin generated patchProps', () => {
     expect(comp.props).toEqual(['count', 'title']);
     expect(comp.__voidPatched).toBe(true);
   });
+
+  for (const virtualId of [
+    '\0virtual:void-pages-renderer',
+    '\0virtual:void-pages-client',
+  ] as const) {
+    it(`renders typed loader props alongside model defaults in ${virtualId.slice(1)}`, async () => {
+      const source = `<script setup lang="ts">
+const props = defineProps<{ title: string }>();
+const draft = defineModel('draft', { type: String, default: 'Draft' });
+</script>
+<template><h1>{{ props.title }}</h1><p>{{ draft }}</p></template>`;
+      writePage('index.vue', source);
+      const plugin = pagesPlugin(PAGES_DIR).find((p) => p.name === 'void-vue:pages') as
+        | PagesPluginHooks
+        | undefined;
+      if (!plugin) {
+        throw new Error('Expected void-vue:pages plugin.');
+      }
+      const patchProps = await loadGeneratedPatchProps(plugin, virtualId);
+      const comp = compilePage(source);
+      const declared = comp.props;
+
+      patchProps(comp, { title: 'Hello' });
+
+      expect(await renderToString(Vue.createSSRApp(comp, { title: 'Hello' }))).toBe(
+        '<!--[--><h1>Hello</h1><p>Draft</p><!--]-->',
+      );
+      expect(declared).toEqual({ draft: { type: String, default: 'Draft' }, draftModifiers: {} });
+      expect(comp.props).toMatchObject(declared as object);
+    });
+
+    it(`keeps array declarations when registering additional loader props in ${virtualId.slice(1)}`, async () => {
+      writePage('index.vue', '<template><h1>Home</h1></template>');
+      const plugin = pagesPlugin(PAGES_DIR).find((p) => p.name === 'void-vue:pages') as
+        | PagesPluginHooks
+        | undefined;
+      if (!plugin) {
+        throw new Error('Expected void-vue:pages plugin.');
+      }
+      const patchProps = await loadGeneratedPatchProps(plugin, virtualId);
+      const declared = ['title', 'optional'];
+      const comp = { props: declared };
+
+      patchProps(comp, { title: 'Hello', count: 1 });
+
+      expect(comp.props).toEqual(['title', 'optional', 'count']);
+      expect(declared).toEqual(['title', 'optional']);
+    });
+  }
 });
 
 describe('pagesPlugin dev HMR', () => {

@@ -22,9 +22,21 @@ function hasRuntimePropsDeclaration(comp) {
 }
 
 function patchProps(comp, props) {
-  if (hasRuntimePropsDeclaration(comp)) return;
   if (comp.__voidPatched) return;
-  comp.props = Object.keys(props);
+  const keys = Object.keys(props);
+  if (hasRuntimePropsDeclaration(comp)) {
+    const declared = comp.props;
+    // defineModel() can declare runtime props even after typed loader props are stripped.
+    const missing = keys.filter((key) =>
+      Array.isArray(declared) ? !declared.includes(key) : !Object.hasOwn(declared, key)
+    );
+    if (missing.length === 0) return;
+    comp.props = Array.isArray(declared)
+      ? [...declared, ...missing]
+      : { ...Object.fromEntries(missing.map((key) => [key, null])), ...declared };
+  } else {
+    comp.props = keys;
+  }
   comp.__voidPatched = true;
 }
 `;
