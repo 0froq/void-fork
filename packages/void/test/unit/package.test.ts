@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 import {
   buildFrameworkManifest,
   buildStaticManifest,
+  readWranglerHtmlHandling,
   buildVoidManifest,
   computeAssetHash,
   collectAndHashAssets,
@@ -314,6 +315,30 @@ describe('buildStaticManifest', () => {
     expect(manifest.fallbackRules).toEqual([
       { source: '/docs/*', destination: '/docs.html', status: 200 },
     ]);
+  });
+
+  it('carries authored html_handling into assetConfig', () => {
+    expect(
+      buildStaticManifest({ appType: 'static', html_handling: 'drop-trailing-slash' }).assetConfig,
+    ).toEqual({
+      not_found_handling: '404-page',
+      html_handling: 'drop-trailing-slash',
+    });
+  });
+});
+
+describe('readWranglerHtmlHandling', () => {
+  it('reads a supported assets.html_handling value', () => {
+    expect(
+      readWranglerHtmlHandling({
+        assets: { html_handling: 'drop-trailing-slash' },
+      }),
+    ).toBe('drop-trailing-slash');
+  });
+
+  it('ignores missing or invalid values', () => {
+    expect(readWranglerHtmlHandling({})).toBeUndefined();
+    expect(readWranglerHtmlHandling({ assets: { html_handling: 'bogus' } })).toBeUndefined();
   });
 });
 

@@ -88,6 +88,26 @@ describe('Cloudflare static deployment', () => {
     });
   });
 
+  it('writes authored html_handling instead of the default fallback', () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-static-html-handling-'));
+    const configPath = join(root, 'wrangler.jsonc');
+    writeFileSync(configPath, '{}\n');
+
+    writeCloudflareStaticDeployConfig({
+      configPath,
+      name: 'site',
+      accountId: 'account-id',
+      main: 'static.mjs',
+      assetsDirectory: 'dist',
+      compatibilityDate: '2026-09-11',
+      assetConfig: { not_found_handling: '404-page', html_handling: 'drop-trailing-slash' },
+    });
+
+    expect(parseRootWranglerConfig(configPath).assets).toMatchObject({
+      html_handling: 'drop-trailing-slash',
+    });
+  });
+
   it('rejects duplicate keys before an edit can silently target the wrong member', () => {
     const root = mkdtempSync(join(tmpdir(), 'void-static-duplicate-'));
     const configPath = join(root, 'wrangler.jsonc');

@@ -640,6 +640,27 @@ export function collectWorkerFiles(workerDir: string): Map<string, Buffer> {
   return out;
 }
 
+const WRANGLER_HTML_HANDLING = new Set<AssetConfig['html_handling']>([
+  'auto-trailing-slash',
+  'force-trailing-slash',
+  'drop-trailing-slash',
+  'none',
+]);
+
+/** Read `assets.html_handling` from a materialized root Wrangler config object. */
+export function readWranglerHtmlHandling(
+  rootConfig: Record<string, unknown>,
+): AssetConfig['html_handling'] | undefined {
+  const assets = rootConfig.assets;
+  if (typeof assets !== 'object' || assets === null || Array.isArray(assets)) {
+    return undefined;
+  }
+  const value = (assets as Record<string, unknown>).html_handling;
+  return typeof value === 'string' && WRANGLER_HTML_HANDLING.has(value as AssetConfig['html_handling'])
+    ? (value as AssetConfig['html_handling'])
+    : undefined;
+}
+
 /**
  * Build a static-deploy manifest. Pure shape transformation — no I/O.
  */
@@ -651,20 +672,32 @@ export function buildStaticManifest(opts: {
   fallbackRules?: Array<DevRedirectRule>;
   /** Explicit `routing.notFound` — overrides the appType-inferred handling. */
   notFound?: NotFoundHandling;
+  /** Authored `cloudflare.assets.html_handling` from the root Wrangler config. */
+  html_handling?: AssetConfig['html_handling'];
 }): DeployManifest {
-  const { appType, hashedAssetsPrefix, headerRules, redirectRules, fallbackRules, notFound } = opts;
+  const {
+    appType,
+    hashedAssetsPrefix,
+    headerRules,
+    redirectRules,
+    fallbackRules,
+    notFound,
+    html_handling,
+  } = opts;
   const { assetConfig, fallbackRules: resolvedFallbackRules } = resolveSpaFallbackChain(
     appType,
     fallbackRules,
     notFound,
   );
+  const resolvedAssetConfig =
+    html_handling === undefined ? assetConfig : { ...assetConfig, html_handling };
 
   const manifest: DeployManifest = {
     version: 3,
     assetManifestVersion: 2,
     bindings: {},
     type: appType,
-    assetConfig,
+    assetConfig: resolvedAssetConfig,
   };
 
   if (hashedAssetsPrefix) {

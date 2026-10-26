@@ -1,4 +1,4 @@
-import { isRecord } from '@void/deploy-core';
+import { isRecord, type AssetConfig } from '@void/deploy-core';
 import type { RewriteDestination } from 'void/routes';
 import {
   VOID_AUTH_PROVIDERS,
@@ -156,6 +156,7 @@ export type CloudflareConfig = Record<string, unknown> & {
     directory?: string;
     binding?: string;
     not_found_handling?: NotFoundHandling;
+    html_handling?: AssetConfig['html_handling'];
     run_worker_first?: boolean | Array<string>;
   }>;
   triggers?: CloudflareField<{ crons?: Array<string> }>;

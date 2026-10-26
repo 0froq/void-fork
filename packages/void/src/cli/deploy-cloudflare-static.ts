@@ -59,7 +59,7 @@ import {
 import { type RunDeployOptions, type CloudflareDeployDeps } from './deploy-types.ts';
 import { type CliLogger } from './log-file.ts';
 import { getErrorMessage, note } from './output.ts';
-import { buildStaticManifest } from './package.ts';
+import { buildStaticManifest, readWranglerHtmlHandling } from './package.ts';
 import { detectPreset, type StaticPreset, type FrameworkPreset } from './preset.ts';
 import { deleteEnvVarCaseAware } from './provision.ts';
 import { readWranglerManagedQueueCleanupCandidates } from './wrangler.ts';
@@ -342,6 +342,7 @@ export async function runCloudflareStaticDeploy(
     redirectRules: merged.redirectRules,
     fallbackRules: merged.fallbackRules,
     notFound: voidConfig.routing?.notFound,
+    html_handling: readWranglerHtmlHandling(rootConfig),
   });
   const entryPath = join(root, '.void', 'deploy', 'cloudflare', 'static-edge.mjs');
   mkdirSync(dirname(entryPath), { recursive: true });
