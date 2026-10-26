@@ -18,6 +18,7 @@ import type { CloudflareUploadResult } from './operations.ts';
 import { isVoidSecretOnlyDraft, isWranglerSecretOnlyDraft } from './secret-draft.ts';
 
 const DURABLE_MIGRATION_VERSION_ERROR = 10211;
+const CLOUDFLARE_SECRET_CHANGED_ERROR = 10220;
 
 export type CloudflareVersionMetadata =
   | Readonly<{
@@ -107,6 +108,12 @@ export type CloudflareVersionActivation =
       versionId?: string;
       previousVersionId?: string | null;
       rollback?: 'not-needed' | 'succeeded' | 'failed' | 'unavailable' | 'unsafe';
+      /**
+       * Cloudflare refused to restore the previous version because a secret
+       * changed with this deploy, so Void forced it. The previous version runs
+       * with its earlier secret values.
+       */
+      restoredOlderSecrets?: true;
       /** Version that owned production after a concurrent operation superseded this command. */
       activeVersionId?: string | null;
       /** Whether Void restored the active version's immutable trigger snapshot. */
@@ -1384,11 +1391,11 @@ async function activateCloudflareVersionWithSecretsFile(
       reason: ready === 'access-denied' ? 'readiness-access-denied' : 'readiness-failed',
       versionId,
       previousVersionId: previous.versionId,
-      rollback: stagedVersionOverride
+      ...(stagedVersionOverride
         ? await restorePreviousVersion(options, previous.versionId, 'readiness failed', [
             stagedVersionPercentages(previous.versionId, versionId),
           ])
-        : 'not-needed',
+        : { rollback: 'not-needed' as const }),
     };
   }
   if (!options.verifyUploader()) {
@@ -1397,14 +1404,14 @@ async function activateCloudflareVersionWithSecretsFile(
       reason: 'uploader-changed',
       versionId,
       previousVersionId: previous.versionId,
-      rollback: stagedVersionOverride
+      ...(stagedVersionOverride
         ? await restorePreviousVersion(
             options,
             previous.versionId,
             'uploader verification failed',
             [stagedVersionPercentages(previous.versionId, versionId)],
           )
-        : 'not-needed',
+        : { rollback: 'not-needed' as const }),
     };
   }
 
@@ -1460,12 +1467,12 @@ async function activateCloudflareVersionWithSecretsFile(
       status: activate.status,
       versionId,
       previousVersionId: previous.versionId,
-      rollback: stagedVersionOverride
+      ...(stagedVersionOverride
         ? await restorePreviousVersion(options, previous.versionId, 'version activation failed', [
             stagedVersionPercentages(previous.versionId, versionId),
             [{ versionId, percentage: 100 }],
           ])
-        : 'not-needed',
+        : { rollback: 'not-needed' as const }),
     };
   }
 
@@ -1577,7 +1584,7 @@ async function activateCloudflareVersionWithSecretsFile(
         triggerRepair: triggerRepairOutcome(repair),
       };
     }
-    const rollback = await restorePreviousVersionAndTriggers(
+    const restore = await restorePreviousVersionAndTriggers(
       options,
       previous.versionId,
       'trigger activation failed',
@@ -1591,7 +1598,7 @@ async function activateCloudflareVersionWithSecretsFile(
       status: triggers.status,
       versionId,
       previousVersionId: previous.versionId,
-      rollback,
+      ...restore,
     };
   }
 
@@ -1641,15 +1648,15 @@ async function restorePreviousVersionAndTriggers(
   failedTriggerConfig: CloudflareTriggerConfig,
   failedVersionId: string,
   capturedTriggerConfig?: CloudflareTriggerConfig,
-): Promise<'succeeded' | 'failed' | 'unavailable' | 'unsafe'> {
+): Promise<PreviousVersionRestore> {
   const traffic = await restorePreviousVersion(options, previousVersionId, cause, [
     [{ versionId: failedVersionId, percentage: 100 }],
   ]);
-  if (traffic !== 'succeeded' || !previousVersionId) {
+  if (traffic.rollback !== 'succeeded' || !previousVersionId) {
     return traffic;
   }
   if (!options.verifyUploader()) {
-    return 'unsafe';
+    return { ...traffic, rollback: 'unsafe' };
   }
   // Traffic attachments can change between uploads (for example `void domain
   // add`). Restore the snapshot captured before this deployment, not the older
@@ -1659,17 +1666,17 @@ async function restorePreviousVersionAndTriggers(
   if (!targetTriggerConfig) {
     const metadata = await readCloudflareVersionMetadata(options, previousVersionId);
     if (metadata?.schema !== 2) {
-      return 'unavailable';
+      return { ...traffic, rollback: 'unavailable' };
     }
     targetTriggerConfig = metadata.triggerConfig;
   }
   // A preserve marker leaves routes, schedules, queue consumers and workflows opaque, so there
   // is no trigger snapshot to restore. Traffic is already back on the previous version.
   if (targetTriggerConfig.preserve) {
-    return 'unavailable';
+    return { ...traffic, rollback: 'unavailable' };
   }
   if (!options.verifyUploader()) {
-    return 'unsafe';
+    return { ...traffic, rollback: 'unsafe' };
   }
   const triggers = await stabilizeCloudflareVersionTriggers({
     runWrangler: options.runWrangler,
@@ -1682,7 +1689,10 @@ async function restorePreviousVersionAndTriggers(
     publishEmptyCustomDomains: options.publishEmptyCustomDomains,
     publishEmptyCrons: options.publishEmptyCrons,
   });
-  return triggers.ok && triggers.targetOwnsTraffic ? 'succeeded' : 'failed';
+  return {
+    ...traffic,
+    rollback: triggers.ok && triggers.targetOwnsTraffic ? 'succeeded' : 'failed',
+  };
 }
 
 async function readCloudflareVersionMetadata(
@@ -2534,7 +2544,7 @@ async function deployVersionPercentages(
   options: Pick<
     Parameters<typeof activateCloudflareVersion>[0],
     'runWrangler' | 'workerName' | 'preserveTriggers' | 'configPath'
-  >,
+  > & { bypassDeploymentChecks?: boolean },
   percentages: Array<string>,
   message: string,
 ): Promise<CloudflareCommandResult> {
@@ -2557,6 +2567,7 @@ async function deployVersionPercentages(
       configPath: options.configPath,
       workerName: options.workerName,
       message,
+      ...(options.bypassDeploymentChecks ? { bypassDeploymentChecks: true } : {}),
     },
     { capture: false },
   );
@@ -2569,6 +2580,7 @@ export async function deployCloudflareVersionTraffic(options: {
   workerName: string;
   percentages: Array<string>;
   message: string;
+  bypassDeploymentChecks?: boolean;
 }): Promise<CloudflareCommandResult> {
   const config = pickWranglerTriggerContext(parseRootWranglerConfig(options.configPath));
   const directory = mkdtempSync(join(tmpdir(), 'void-version-traffic-'));
@@ -2582,6 +2594,7 @@ export async function deployCloudflareVersionTraffic(options: {
         configPath: path,
         workerName: options.workerName,
         message: options.message,
+        ...(options.bypassDeploymentChecks ? { bypassDeploymentChecks: true } : {}),
       },
       { capture: false },
     );
@@ -2589,6 +2602,11 @@ export async function deployCloudflareVersionTraffic(options: {
     rmSync(directory, { recursive: true, force: true });
   }
 }
+
+type PreviousVersionRestore = Readonly<{
+  rollback: 'succeeded' | 'failed' | 'unavailable' | 'unsafe';
+  restoredOlderSecrets?: true;
+}>;
 
 async function restorePreviousVersion(
   options: Pick<
@@ -2598,28 +2616,45 @@ async function restorePreviousVersion(
   previousVersionId: string | null,
   cause: string,
   expectedOwnedTraffic: ReadonlyArray<ReadonlyArray<ProductionVersionPercentage>>,
-): Promise<'succeeded' | 'failed' | 'unavailable' | 'unsafe'> {
+): Promise<PreviousVersionRestore> {
   if (!previousVersionId) {
-    return 'unavailable';
+    return { rollback: 'unavailable' };
   }
   if (!options.verifyUploader()) {
-    return 'unsafe';
+    return { rollback: 'unsafe' };
   }
-  const owner = await readCurrentProductionVersion(options);
-  if (
-    owner.kind !== 'ok' ||
-    !expectedOwnedTraffic.some((expected) =>
-      productionVersionPercentagesEqual(owner.versions, expected),
-    )
-  ) {
-    return 'unsafe';
+  const ownsExpectedTraffic = async () => {
+    const owner = await readCurrentProductionVersion(options);
+    return (
+      owner.kind === 'ok' &&
+      expectedOwnedTraffic.some((expected) =>
+        productionVersionPercentagesEqual(owner.versions, expected),
+      )
+    );
+  };
+  if (!(await ownsExpectedTraffic())) {
+    return { rollback: 'unsafe' };
   }
-  const result = await deployVersionPercentages(
-    options,
-    [`${previousVersionId}@100`],
-    `Void automatic rollback after ${cause}.`,
-  );
-  return isCleanCommandExit(result) ? 'succeeded' : 'failed';
+  const restore = (bypassDeploymentChecks: boolean) =>
+    deployVersionPercentages(
+      { ...options, bypassDeploymentChecks },
+      [`${previousVersionId}@100`],
+      `Void automatic rollback after ${cause}.`,
+    );
+  const result = await restore(false);
+  // Cloudflare refuses to move traffic back to a version older than a secret
+  // change (10220). When the failed version made that change, force the
+  // restore, as Wrangler's rollback does. Check again first that Void still
+  // owns traffic, so a deployment made by someone else is not overwritten.
+  if (result.errorCode === CLOUDFLARE_SECRET_CHANGED_ERROR) {
+    if (!(await ownsExpectedTraffic())) {
+      return { rollback: 'unsafe' };
+    }
+    return isCleanCommandExit(await restore(true))
+      ? { rollback: 'succeeded', restoredOlderSecrets: true }
+      : { rollback: 'failed' };
+  }
+  return { rollback: isCleanCommandExit(result) ? 'succeeded' : 'failed' };
 }
 
 function workersDevReadinessUrl(workerName: string, value: string | undefined): string | undefined {
