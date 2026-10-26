@@ -8,7 +8,7 @@ Create a file in `routes/` to add an endpoint, and export a handler for each HTT
 
 ## Route Files
 
-Create route handlers in `routes/**/*.ts`. Each file maps to a URL path based on its location in the filesystem:
+Create route handlers in `routes/` using `.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, or `.mjs`. Each file maps to a URL path based on its location in the filesystem:
 
 <RoutesFileTree />
 
@@ -23,6 +23,8 @@ routes/
   api/health.ts        →  always
   api/debug.dev.ts     →  development only
   api/metrics.prod.ts  →  production only
+  preview.dev.tsx      →  development only, with JSX
+  report.prod.jsx      →  production only, with JSX
 ```
 
 `.dev` routes run only in development; `.prod` routes run in builds, deployments, and production previews. A resource used only by `.dev` routes is not provisioned for production.
@@ -60,6 +62,40 @@ export const POST = defineHandler(async (c) => {
 ```
 
 See [Database](./database.md) for queries with D1, PostgreSQL, or MySQL.
+
+### JSX handlers
+
+Use `.tsx` or `.jsx` when a server handler contains JSX. Void doesn't choose a JSX runtime: route files compile with the same JSX settings as the rest of your Vite app. In a React or Solid app, that is the framework's JSX, so render it with the framework's server renderer and return HTML. For example, in a React app:
+
+```tsx
+// routes/hello.tsx → GET /hello
+import { renderToStaticMarkup } from 'react-dom/server';
+import { defineHandler } from 'void';
+
+export const GET = defineHandler((c) => c.html(renderToStaticMarkup(<h1>Hello!</h1>)));
+```
+
+In an app without a JSX framework (API only, Vue, or Svelte), use [Hono's JSX](https://hono.dev/docs/guides/jsx). Your app needs `hono` in its own dependencies (new Void apps have it). Set the runtime in `vite.config.ts`, so it applies to `.tsx` and `.jsx` files alike:
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite-plus';
+import { voidPlugin } from 'void';
+
+export default defineConfig({
+  oxc: { jsx: { runtime: 'automatic', importSource: 'hono/jsx' } },
+  plugins: [voidPlugin()],
+});
+```
+
+`c.html()` then takes the JSX directly:
+
+```tsx
+// routes/hello.tsx → GET /hello
+import { defineHandler } from 'void';
+
+export const GET = defineHandler((c) => c.html(<h1>Hello!</h1>));
+```
 
 ## `defineHandler`
 
