@@ -3,7 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { serializePageData } from '../../src/pages/serialize.ts';
-import { renderPrerenderPaths } from '../../src/prerender-render.ts';
+import {
+  assertNoPrerenderFailures,
+  renderPrerenderPaths,
+} from '../../src/prerender-render.ts';
 import { createAssetFallback } from '../../src/runtime/routing-worker.ts';
 
 const roots: Array<string> = [];
@@ -197,5 +200,17 @@ describe('prerender pool', () => {
     expect(JSON.parse(readFileSync(join(clientDir, '_void/pages/ok.json'), 'utf8'))).toEqual({
       path: '/ok',
     });
+  });
+});
+
+describe('assertNoPrerenderFailures', () => {
+  it('does nothing when there are no failures', () => {
+    expect(() => assertNoPrerenderFailures([])).not.toThrow();
+  });
+
+  it('throws with path details when prerender failed', () => {
+    expect(() =>
+      assertNoPrerenderFailures([{ path: '/throws', error: 'HTTP 500' }]),
+    ).toThrow('1 page(s) failed to prerender:\n  /throws: HTTP 500');
   });
 });
