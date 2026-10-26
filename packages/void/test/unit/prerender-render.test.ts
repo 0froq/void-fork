@@ -3,10 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { serializePageData } from '../../src/pages/serialize.ts';
-import {
-  assertNoPrerenderFailures,
-  renderPrerenderPaths,
-} from '../../src/prerender-render.ts';
+import { assertNoPrerenderFailures, renderPrerenderPaths } from '../../src/prerender-render.ts';
 import { createAssetFallback } from '../../src/runtime/routing-worker.ts';
 
 const roots: Array<string> = [];
@@ -24,6 +21,43 @@ afterEach(() => {
 });
 
 describe('prerender pool', () => {
+  it.each([301, 302, 303, 307, 308])(
+    'skips HTTP %i redirects without emitting HTML or page data',
+    async (status) => {
+      const root = fixture();
+      const result = await renderPrerenderPaths(['/old', '/new'], root, async (path) =>
+        path === '/old'
+          ? new Response(null, { status, headers: { Location: '/new' } })
+          : new Response(pageHtml({ path })),
+      );
+
+      expect(result).toEqual({ rendered: ['/new'], failed: [] });
+      expect(() => assertNoPrerenderFailures(result.failed)).not.toThrow();
+      expect(existsSync(join(root, 'old.html'))).toBe(false);
+      expect(existsSync(join(root, '_void/pages/old.json'))).toBe(false);
+      expect(readFileSync(join(root, 'new.html'), 'utf8')).toBe(pageHtml({ path: '/new' }));
+    },
+  );
+
+  it.each([302, 304, 404, 500])(
+    'still rejects HTTP %i without a redirect destination',
+    async (status) => {
+      const root = fixture();
+      const result = await renderPrerenderPaths(
+        ['/broken'],
+        root,
+        async () => new Response(null, { status }),
+      );
+
+      expect(result).toEqual({
+        rendered: [],
+        failed: [{ path: '/broken', error: `HTTP ${status}` }],
+      });
+      expect(() => assertNoPrerenderFailures(result.failed)).toThrow(`/broken: HTTP ${status}`);
+      expect(existsSync(join(root, 'broken.html'))).toBe(false);
+    },
+  );
+
   it('bounds overlapping renders, keeps result order, and writes page data from one render', async () => {
     const root = fixture();
     const paths = Array.from({ length: 12 }, (_, i) => `/page-${i}`);
@@ -209,8 +243,8 @@ describe('assertNoPrerenderFailures', () => {
   });
 
   it('throws with path details when prerender failed', () => {
-    expect(() =>
-      assertNoPrerenderFailures([{ path: '/throws', error: 'HTTP 500' }]),
-    ).toThrow('1 page(s) failed to prerender:\n  /throws: HTTP 500');
+    expect(() => assertNoPrerenderFailures([{ path: '/throws', error: 'HTTP 500' }])).toThrow(
+      '1 page(s) failed to prerender:\n  /throws: HTTP 500',
+    );
   });
 });

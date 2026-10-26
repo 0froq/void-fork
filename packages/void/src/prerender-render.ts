@@ -160,6 +160,13 @@ export async function renderPrerenderPaths(
           try {
             const response = await fetchPath(path);
             const html = await response.text();
+            // Redirects are served by routing and have no HTML or page data to emit.
+            if (
+              [301, 302, 303, 307, 308].includes(response.status) &&
+              response.headers.get('Location')
+            ) {
+              continue;
+            }
             if (!response.ok) {
               const error = `HTTP ${response.status}`;
               result.failed.push({ path, error });
