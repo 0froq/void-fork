@@ -11,6 +11,24 @@ import type { PageScanResult, StaticPageDataBuildOptions } from 'void/pages';
 const RENDERER_ID = 'virtual:void-pages-renderer';
 const CLIENT_ENTRY_ID = 'virtual:void-pages-client';
 
+/** Runtime helper injected into generated SSR and client page bundles. */
+const PATCH_PROPS_RUNTIME = `
+function hasRuntimePropsDeclaration(comp) {
+  const declared = comp.props;
+  if (declared == null) return false;
+  if (Array.isArray(declared)) return declared.length > 0;
+  if (typeof declared === "object") return Object.keys(declared).length > 0;
+  return false;
+}
+
+function patchProps(comp, props) {
+  if (hasRuntimePropsDeclaration(comp)) return;
+  if (comp.__voidPatched) return;
+  comp.props = Object.keys(props);
+  comp.__voidPatched = true;
+}
+`;
+
 export type PrefetchConfig = {
   hoverDelay?: number;
   cacheFor?: number | string | [string, string];
@@ -279,11 +297,7 @@ import { serializePageData } from "void/pages-server";
 
 ${generateComponentManifest(scan, pagesDir)}
 
-function patchProps(comp, props) {
-  if (comp.__voidPatched) return;
-  comp.props = Object.keys(props);
-  comp.__voidPatched = true;
-}
+${PATCH_PROPS_RUNTIME}
 
 export async function renderPage(pageObj, assetTags) {
   const PageComponent = (await components[pageObj.component]()).default;
@@ -354,11 +368,7 @@ const currentPageKey = ref(0);
 const routeUrl = ref(window.location.pathname + window.location.search + window.location.hash);
 const navigation = reactive(idleNavigationState());
 
-function patchProps(comp, props) {
-  if (comp.__voidPatched) return;
-  comp.props = Object.keys(props);
-  comp.__voidPatched = true;
-}
+${PATCH_PROPS_RUNTIME}
 
 function replaceRecord(target, source) {
   for (const key of Object.keys(target)) delete target[key];
