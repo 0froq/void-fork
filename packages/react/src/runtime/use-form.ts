@@ -42,6 +42,13 @@ type UntypedForm = {
   clearError(): void;
 };
 
+type UntypedFormOptions = {
+  params?: Record<string, string>;
+  resetOnSuccess?: boolean;
+  onSuccess?: () => void;
+  onError?: (error: Record<string, string> | VoidActionError) => void;
+};
+
 // Typed overload — full inference from PageActionMap (requires codegen)
 export function useForm<U extends ActionUrl & string>(
   url: U,
@@ -76,7 +83,7 @@ export function useForm<U extends ActionUrl & string>(
 export function useForm(
   url: string,
   defaults: Record<string, unknown>,
-  options?: { params?: Record<string, string>; resetOnSuccess?: boolean },
+  options?: UntypedFormOptions,
 ): UntypedForm {
   const router = useContext(RouterContext);
   const [data, setDataState] = useState<Record<string, unknown>>(() => cloneFormValue(defaults));
@@ -92,6 +99,10 @@ export function useForm(
   const initialRef = useRef(defaultsState);
   const dataRef = useRef(data);
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onSuccessRef = useRef(options?.onSuccess);
+  const onErrorRef = useRef(options?.onError);
+  onSuccessRef.current = options?.onSuccess;
+  onErrorRef.current = options?.onError;
 
   const hasChanges = useMemo(() => {
     return Object.keys(defaultsState).some(
@@ -186,8 +197,10 @@ export function useForm(
         const validationErrors = getValidationErrors(result.error.body);
         if (validationErrors) {
           setErrors(validationErrors);
+          onErrorRef.current?.(validationErrors);
         } else {
           setActionError(result.error);
+          onErrorRef.current?.(result.error);
         }
         return previousSuccessVersion;
       }
@@ -205,6 +218,7 @@ export function useForm(
         setRecentlySuccessful(false);
         successTimeoutRef.current = null;
       }, 2000);
+      onSuccessRef.current?.();
       return previousSuccessVersion + 1;
     },
     0,
