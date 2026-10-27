@@ -353,6 +353,7 @@
     "@cloudflare/vite-plugin": "catalog:",
     "@cloudflare/workers-auth": "catalog:",
     "@cloudflare/workers-types": "catalog:",
+    "@cloudflare/workers-utils": "catalog:",
     "@napi-rs/keyring": "catalog:",
     "@void/deploy-cloudflare": "workspace:*",
     "@void/deploy-core": "workspace:*",

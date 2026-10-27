@@ -338,7 +338,7 @@ export async function buildCloudflareWorker(input: {
           configPath: generatedConfigPath,
           accountId,
         })
-      : prepareCfBuildOutput(dirname(generatedConfigPath), accountId);
+      : prepareCfBuildOutput(dirname(generatedConfigPath), accountId, undefined, root);
   if (usesCf) {
     // Validate the exact upload format before changing a remote database or secret.
     const preflight = await prepareBuildOutput();

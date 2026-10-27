@@ -10,6 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -132,6 +133,78 @@ async function nativeBuild() {
   writeFileSync(join(getWorkerAssetsDir(root), 'index.html'), '<h1>native</h1>');
   return root;
 }
+
+it.each(['native', 'legacy'])(
+  'keeps %s package context outside uploaded modules and preserves installed dependencies on disposal',
+  async (format) => {
+    const output =
+      format === 'native'
+        ? await nativeBuild()
+        : worker({
+            name: 'package-context-test',
+            main: 'index.js',
+            compatibility_date: '2026-10-12',
+          });
+    const root = format === 'native' ? output : dirname(dirname(output));
+    const manifest = JSON.stringify({
+      name: 'example-app',
+      type: format === 'native' ? 'module' : 'commonjs',
+      dependencies: { '@example/framework': '^1.2.0' },
+    });
+    writeFileSync(join(root, 'package.json'), manifest);
+    const dependency = join(root, 'node_modules/@example/framework');
+    mkdirSync(dependency, { recursive: true });
+    writeFileSync(
+      join(dependency, 'package.json'),
+      JSON.stringify({
+        name: '@example/framework',
+        version: '1.2.3',
+      }),
+    );
+    const prepared = await withPrepared(
+      prepareCfBuildOutput(output, format === 'native' ? {} : { projectRoot: root }),
+      async (prepared) => {
+        expect(readFileSync(join(prepared.directory, 'package.json'), 'utf8')).toBe(manifest);
+        const require = createRequire(join(prepared.directory, 'package.json'));
+        expect(require('@example/framework/package.json').version).toBe('1.2.3');
+        const built = await readBuildOutput(prepared.directory);
+        expect(Object.keys(built.workers.default.config.manifest!.modules)).not.toContain(
+          'package.json',
+        );
+        expect(existsSync(join(getWorkerBundleDir(prepared.directory), 'node_modules'))).toBe(
+          false,
+        );
+        expectCfDryRun(prepared.directory);
+      },
+    );
+    expect(existsSync(prepared.directory)).toBe(false);
+    expect(readFileSync(join(root, 'package.json'), 'utf8')).toBe(manifest);
+    expect(JSON.parse(readFileSync(join(dependency, 'package.json'), 'utf8')).version).toBe(
+      '1.2.3',
+    );
+  },
+  CF_BUILD_TIMEOUT_MS,
+);
+
+it('resolves hoisted workspace dependencies from the staged package context', async () => {
+  const output = worker({
+    name: 'workspace-test',
+    main: 'index.js',
+    compatibility_date: '2026-10-12',
+  });
+  const workspace = dirname(dirname(output));
+  const projectRoot = join(workspace, 'apps/site');
+  mkdirSync(projectRoot, { recursive: true });
+  writeFileSync(join(projectRoot, 'package.json'), '{"dependencies":{"framework":"^1.0.0"}}');
+  const dependency = join(workspace, 'node_modules/framework');
+  mkdirSync(dependency, { recursive: true });
+  writeFileSync(join(dependency, 'package.json'), '{"name":"framework","version":"1.0.1"}');
+  await withPrepared(prepareCfBuildOutput(output, { projectRoot }), (prepared) => {
+    const require = createRequire(join(prepared.directory, 'package.json'));
+    expect(require('framework/package.json').version).toBe('1.0.1');
+  });
+  expect(existsSync(join(dependency, 'package.json'))).toBe(true);
+});
 
 it(
   'prepares native output with complete module types, original mode and unchanged source files',
@@ -548,6 +621,9 @@ it(
         accountId: 'account-id',
       }),
       async (prepared) => {
+        expect(readFileSync(join(prepared.directory, 'package.json'))).toEqual(
+          readFileSync(join(root, 'package.json')),
+        );
         const built = await readBuildOutput(prepared.directory);
         expect(built.workers.default.config.manifest?.mainModule).toBe('index.js');
         const assets = getWorkerAssetsDir(prepared.directory);
@@ -945,6 +1021,13 @@ it('keeps Durable Objects, Queue triggers, and Containers in cf prebuilt output'
 it('bundles a generated static Worker and staged assets into prebuilt cf output', async () => {
   const root = mkdtempSync(join(dirname(fileURLToPath(import.meta.url)), '.tmp-cf-static-'));
   roots.push(root);
+  writeFileSync(join(root, 'package.json'), '{"name":"static-app","type":"module"}');
+  mkdirSync(join(root, 'node_modules'));
+  symlinkSync(
+    fileURLToPath(new URL('../../', import.meta.url)),
+    join(root, 'node_modules/void'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
   const generated = join(root, '.void', 'deploy', 'cloudflare');
   const assets = join(generated, 'assets');
   mkdirSync(assets, { recursive: true });
@@ -983,6 +1066,9 @@ it('bundles a generated static Worker and staged assets into prebuilt cf output'
       accountId: 'account-id',
     }),
     async (prepared) => {
+      expect(readFileSync(join(prepared.directory, 'package.json'))).toEqual(
+        readFileSync(join(root, 'package.json')),
+      );
       const built = await readBuildOutput(prepared.directory);
       expect(built.workers.default.config.manifest?.mainModule).toBe('index.js');
       expect(built.workers.default.assetsDir).toBeDefined();

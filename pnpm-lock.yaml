@@ -234,6 +234,9 @@ catalogs:
     '@cloudflare/workers-types':
       specifier: ^5.20261019.1
       version: 5.20261019.1
+    '@cloudflare/workers-utils':
+      specifier: ^0.47.3
+      version: 0.47.3
     '@electric-sql/pglite':
       specifier: 0.5.10
       version: 0.5.10
@@ -705,6 +708,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
         version: 5.20261019.1
+      '@cloudflare/workers-utils':
+        specifier: 'catalog:'
+        version: 0.47.3(vitest@5.0.5)
       '@napi-rs/keyring':
         specifier: 'catalog:'
         version: 2.1.2

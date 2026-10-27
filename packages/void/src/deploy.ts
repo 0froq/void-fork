@@ -35,6 +35,8 @@ export type CfBuildOutput = {
 };
 
 export type PrepareCfBuildOutputOptions = {
+  /** The app's package root. Defaults to the input directory. */
+  projectRoot?: string;
   /** The Cloudflare account the build must target. */
   accountId?: string;
   /** The Vite build mode. Native output must match it; legacy output defaults to production. */
@@ -49,7 +51,12 @@ export async function prepareCfBuildOutput(
   directory: string,
   options: PrepareCfBuildOutputOptions = {},
 ): Promise<CfBuildOutput | null> {
-  const prepared = await prepareInternalCfBuildOutput(directory, options.accountId, options.mode);
+  const prepared = await prepareInternalCfBuildOutput(
+    directory,
+    options.accountId,
+    options.mode,
+    options.projectRoot,
+  );
   // A fresh object keeps internal deploy state off the public result.
   return (
     prepared && {
