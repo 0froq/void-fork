@@ -316,13 +316,14 @@ export function resolveStaticBuildCommand(
 export function resolveFullDeployBuildCommand(
   root: string,
   buildOverride?: string,
+  fallbackBuildCommand = 'vite build',
 ): { label: string; command: string } {
   if (buildOverride) {
     return { label: buildOverride, command: buildOverride };
   }
   return {
-    label: formatProjectCommand(root, 'vite build'),
-    command: resolveProjectCommand(root, 'vite build'),
+    label: formatProjectCommand(root, fallbackBuildCommand),
+    command: resolveProjectCommand(root, fallbackBuildCommand),
   };
 }
 

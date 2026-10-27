@@ -397,6 +397,12 @@ describe('resolveFullDeployBuildCommand', () => {
     });
   });
 
+  it('prefers inference.build over a framework build fallback', () => {
+    expect(
+      resolveFullDeployBuildCommand(root, 'vp build', FRAMEWORK_PRESETS.nuxt.buildCommand),
+    ).toEqual({ label: 'vp build', command: 'vp build' });
+  });
+
   it.each([undefined, ''])(
     'falls back to the built-in vite build for inference.build %j',
     (build) => {
@@ -406,6 +412,15 @@ describe('resolveFullDeployBuildCommand', () => {
       });
     },
   );
+
+  it('uses a framework build command as the fallback when provided', () => {
+    expect(
+      resolveFullDeployBuildCommand(root, undefined, FRAMEWORK_PRESETS.nuxt.buildCommand),
+    ).toEqual({
+      label: formatProjectCommand(root, FRAMEWORK_PRESETS.nuxt.buildCommand),
+      command: resolveProjectCommand(root, FRAMEWORK_PRESETS.nuxt.buildCommand),
+    });
+  });
 });
 
 describe('resolveStaticDeployPreset', () => {

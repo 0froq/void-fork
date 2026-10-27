@@ -22,7 +22,7 @@ import {
 import { DEPLOY_BINDING_IDENTITY_FIELDS, bindingIdentityKey } from './deploy-binding-snapshot.ts';
 import type { CloudflareDeploySource, CloudflarePreflight } from './deploy-cloudflare-preflight.ts';
 import { prepareCloudflareFrameworkArtifact } from './deploy-cloudflare-static.ts';
-import { log, getExitCode } from './deploy-helpers.ts';
+import { log, getExitCode, resolveFullDeployBuildCommand } from './deploy-helpers.ts';
 import {
   validateAuthMigrationSchema,
   assertRemoteMigrationsDeployable,
@@ -35,7 +35,7 @@ import {
 } from './deploy-transport.ts';
 import { type CloudflareDeployDeps } from './deploy-types.ts';
 import { getErrorMessage } from './output.ts';
-import { resolveProjectCommand, type FrameworkPreset } from './preset.ts';
+import { type FrameworkPreset } from './preset.ts';
 import { deleteEnvVarCaseAware } from './provision.ts';
 
 export type CloudflareBuild = Awaited<ReturnType<typeof buildCloudflareWorker>>;
@@ -96,9 +96,11 @@ export async function buildCloudflareWorker(input: {
   const runBuild =
     deps.runBuild ??
     ((env: NodeJS.ProcessEnv) => {
-      const command = frameworkPreset
-        ? (voidConfig.inference?.build ?? resolveProjectCommand(root, frameworkPreset.buildCommand))
-        : resolveProjectCommand(root, 'vite build');
+      const command = resolveFullDeployBuildCommand(
+        root,
+        voidConfig.inference?.build,
+        frameworkPreset?.buildCommand,
+      ).command;
       execSync(command, { cwd: root, stdio: 'inherit', env });
     });
   // The build runs project code without credentials, but it can edit files, including the
