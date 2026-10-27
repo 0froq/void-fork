@@ -79,7 +79,7 @@ function requireAuth(c: CloudContext): AuthUser;
 
 ## `AuthUser` {#authuser}
 
-Better Auth user shape re-exported by Void.
+Better Auth user shape re-exported by Void. When the project has an `auth.ts` that exports `defineAuth(...)`, Void generates `.void/auth.d.ts` (listed in `.void/tsconfig.json`) so `AuthUser` also includes fields from Better Auth plugins and `user.additionalFields` in that config — for example `role` from `admin()` or a custom `plan` field.
 
 ```ts
 interface AuthUser {
@@ -95,7 +95,7 @@ interface AuthUser {
 
 ## `AuthSession` {#authsession}
 
-Better Auth session shape re-exported by Void.
+Better Auth session shape re-exported by Void. With a generated `.void/auth.d.ts`, `AuthSession` picks up session fields contributed by plugins in `auth.ts` (for example `impersonatedBy` from `admin()`).
 
 ```ts
 interface AuthSession {

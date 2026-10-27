@@ -39,12 +39,14 @@ export function createProjectTsconfig(
   const includeQueues = existsSync(pathsConfig.queuesDir);
   const includeMd = existsSync(join(outDir, 'md.d.ts'));
   const includeEnv = existsSync(join(outDir, 'env.d.ts'));
+  const includeAuth = existsSync(join(outDir, 'auth.d.ts'));
   const files = [
     ...(includeRoutes ? ['routes.d.ts'] : []),
     ...(hasDb ? ['db.d.ts'] : []),
     ...(includeQueues ? ['queues.d.ts'] : []),
     ...(includeMd ? ['md.d.ts'] : []),
     ...(includeEnv ? ['env.d.ts'] : []),
+    ...(includeAuth ? ['auth.d.ts'] : []),
   ];
 
   const tsconfig: ProjectTsconfig = { files };

@@ -3,8 +3,8 @@ import type { BetterAuthOptions, Session, User } from 'better-auth';
 import type { Context, Env } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 
-export type AuthUser = User;
-export type AuthSession = Session;
+export interface AuthUser extends User {}
+export interface AuthSession extends Session {}
 
 export type AuthState = {
   session: AuthSession;
