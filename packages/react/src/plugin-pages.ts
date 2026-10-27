@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, relative } from 'pathslash';
 import { normalizePath, type Plugin, type ResolvedConfig, type ViteDevServer } from 'vite';
 import {
@@ -37,33 +37,6 @@ type PagesPluginOptions = {
   viewTransitions?: boolean;
   prefetch?: PrefetchConfig;
 };
-
-/** Check if the pages directory has any page components that need the full client runtime. */
-function hasNonIslandPages(dir: string): boolean {
-  try {
-    for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
-      if (!entry.isFile()) {
-        continue;
-      }
-      const name = entry.name;
-      // Server companions such as `index.server.tsx` are not pages.
-      if (
-        name.startsWith('_') ||
-        name.startsWith('layout.') ||
-        name.endsWith('.server.tsx') ||
-        name.endsWith('.server.jsx')
-      ) {
-        continue;
-      }
-      if (/\.(tsx|jsx)$/.test(name) && !name.includes('.island.')) {
-        return true;
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return false;
-}
 
 export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plugin {
   let pageScan: PageScanResult | null = null;
@@ -175,7 +148,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       viteConfig = config;
     },
 
-    config(_, env) {
+    async config(_, env) {
       // Set before the early return: pages/ may be created after the server starts.
       isDev = env.command === 'serve';
       if (!existsSync(pagesDir)) {
@@ -220,7 +193,8 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       }
 
       // Skip the pages-client bundle when all pages are island pages
-      if (!hasNonIslandPages(pagesDir)) {
+      await runRescan();
+      if (!pageScan?.pages.some((page) => !page.island)) {
         return;
       }
 

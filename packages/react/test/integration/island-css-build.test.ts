@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { expect, it } from 'vite-plus/test';
 import { buildIslandApp, defineIslandCssBuildTest } from '../../../../test/island-css-build.ts';
+import { definePrivatePagesBuildTest } from '../../../../test/private-pages-build.ts';
 
 const packageDir = join(import.meta.dirname, '../..');
 const tsconfig = JSON.stringify({ compilerOptions: { jsx: 'react-jsx' } });
@@ -79,3 +80,13 @@ export default function Home() { return <Counter />; }`,
     build.cleanup();
   }
 }, 120_000);
+
+definePrivatePagesBuildTest({
+  packageDir,
+  pluginName: 'voidReact',
+  counter: `import { useState } from 'react';
+export default function Counter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(count + 1)}>Count: {count}</button>;
+}`,
+});

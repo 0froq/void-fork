@@ -20,13 +20,13 @@ type PagesPluginHooks = {
     | HookWithHandler<(id: string) => Promise<string | undefined> | string | undefined>;
 };
 
-function loadServeConfig(): Record<string, unknown> {
+async function loadServeConfig(): Promise<Record<string, unknown>> {
   mkdirSync(PAGES_DIR, { recursive: true });
   const plugin = pagesPlugin(PAGES_DIR) as PagesPluginHooks;
   if (typeof plugin.config === 'function') {
-    return plugin.config({}, { command: 'serve' }) as Record<string, unknown>;
+    return (await plugin.config({}, { command: 'serve' })) as Record<string, unknown>;
   }
-  return plugin.config?.handler({}, { command: 'serve' }) as Record<string, unknown>;
+  return (await plugin.config?.handler({}, { command: 'serve' })) as Record<string, unknown>;
 }
 
 function getHookHandler<T>(hook: T | HookWithHandler<T> | undefined): T {
@@ -68,34 +68,133 @@ describe('pagesPlugin build config', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it.each([
+    '_ui/frame.tsx',
+    'blog/_private/frame.jsx',
+    '_layouts/docs.tsx',
+    'blog/_layouts/docs.jsx',
+    '_helper.tsx',
+  ])('omits pages-client for an island-only app with %s', async (helper) => {
+    writePage('index.island.tsx', 'export default function Home() { return <h1>Home</h1>; }');
+    writePage(
+      helper,
+      'export default function Helper(props) { return <main>{props.children}</main>; }',
+    );
+
+    const plugin = pagesPlugin(PAGES_DIR) as PagesPluginHooks;
+    expect(await getHookHandler(plugin.config)({}, { command: 'build' })).toBeUndefined();
+  });
+
+  it.each([
+    ['debug.dev.tsx', false],
+    ['debug.prod.tsx', true],
+  ] as const)('selects pages-client from production pages for %s', async (page, included) => {
+    writePage('index.island.tsx', 'export default function Home() { return <h1>Home</h1>; }');
+    writePage(page, 'export default function Debug() { return <p>Debug</p>; }');
+
+    const plugin = pagesPlugin(PAGES_DIR) as PagesPluginHooks;
+    const config = await getHookHandler(plugin.config)({}, { command: 'build' });
+    if (included) {
+      expect(config).toMatchObject({
+        build: { rollupOptions: { input: { 'pages-client': 'virtual:void-pages-client' } } },
+      });
+    } else {
+      expect(config).toBeUndefined();
+    }
+  });
+
+  it.each([false, true])(
+    'scans a custom pages root under an underscore path, ordinary page=%s',
+    async (ordinary) => {
+      const customPages = join(TMP, '_source', '_views');
+      mkdirSync(customPages, { recursive: true });
+      writeFileSync(
+        join(customPages, 'index.island.tsx'),
+        'export default function Home() { return <h1>Home</h1>; }',
+      );
+      if (ordinary) {
+        writeFileSync(
+          join(customPages, 'about.tsx'),
+          'export default function About() { return <p>About</p>; }',
+        );
+      }
+
+      const plugin = pagesPlugin(customPages, { root: TMP }) as PagesPluginHooks;
+      const config = await getHookHandler(plugin.config)({}, { command: 'build' });
+      if (ordinary) {
+        expect(config).toMatchObject({
+          build: { rollupOptions: { input: { 'pages-client': 'virtual:void-pages-client' } } },
+        });
+      } else {
+        expect(config).toBeUndefined();
+      }
+    },
+  );
+
+  it('omits pages-client for Markdown pages', async () => {
+    writePage('index.md', '# Home');
+    const plugin = pagesPlugin(PAGES_DIR) as PagesPluginHooks;
+    expect(await getHookHandler(plugin.config)({}, { command: 'build' })).toBeUndefined();
+  });
+
+  it.each([
+    ['other.vue', '<template><p>Other</p></template>'],
+    ['other.svelte', '<p>Other</p>'],
+  ])('uses the scanner inventory for a non-island %s component', async (page, component) => {
+    writePage(page, component);
+    const plugin = pagesPlugin(PAGES_DIR) as PagesPluginHooks;
+    expect(await getHookHandler(plugin.config)({}, { command: 'build' })).toMatchObject({
+      build: { rollupOptions: { input: { 'pages-client': 'virtual:void-pages-client' } } },
+    });
+  });
+
+  it('returns no build config when the pages directory is missing', async () => {
+    const plugin = pagesPlugin(PAGES_DIR) as PagesPluginHooks;
+    expect(await getHookHandler(plugin.config)({}, { command: 'build' })).toBeUndefined();
+  });
+
+  it('reports invalid production routes during build configuration', async () => {
+    writePage('index.tsx', 'export default function Home() { return <h1>Home</h1>; }');
+    writePage('index.jsx', 'export default function Duplicate() { return <h1>Duplicate</h1>; }');
+    const plugin = pagesPlugin(PAGES_DIR) as PagesPluginHooks;
+    await expect(getHookHandler(plugin.config)({}, { command: 'build' })).rejects.toThrow(
+      'Multiple page files resolve to the same route',
+    );
+  });
+
   it.each(['tsx', 'jsx'])(
     'omits pages-client for island-only pages with .server.%s files',
-    (extension) => {
+    async (extension) => {
       writePage('index.island.tsx', 'export default function Home() { return <h1>Home</h1>; }');
       writePage(`index.server.${extension}`, 'export const loader = () => ({ count: 0 });');
 
       const plugin = pagesPlugin(PAGES_DIR) as PagesPluginHooks;
-      expect(getHookHandler(plugin.config)({}, { command: 'build' })).toBeUndefined();
+      expect(await getHookHandler(plugin.config)({}, { command: 'build' })).toBeUndefined();
     },
   );
 
-  it.each(['about.tsx', 'about.jsx', 'blog/about.tsx', 'blog/about.jsx', 'status.server.v2.tsx'])(
-    'keeps pages-client for an ordinary %s page alongside island pages',
-    (page) => {
-      writePage('index.island.tsx', 'export default function Home() { return <h1>Home</h1>; }');
-      writePage('index.server.tsx', 'export const loader = () => ({});');
-      writePage('index.server.jsx', 'export const loader = () => ({});');
-      writePage(page, 'export default function About() { return <h1>About</h1>; }');
+  it.each([
+    'about.tsx',
+    'about.jsx',
+    'blog/about.tsx',
+    'blog/about.jsx',
+    'status.server.v2.tsx',
+    'status.island.v2.tsx',
+    'layout.extra.tsx',
+  ])('keeps pages-client for an ordinary %s page alongside island pages', async (page) => {
+    writePage('index.island.tsx', 'export default function Home() { return <h1>Home</h1>; }');
+    writePage('index.server.tsx', 'export const loader = () => ({});');
+    writePage('index.server.jsx', 'export const loader = () => ({});');
+    writePage(page, 'export default function About() { return <h1>About</h1>; }');
 
-      const plugin = pagesPlugin(PAGES_DIR) as PagesPluginHooks;
-      expect(getHookHandler(plugin.config)({}, { command: 'build' })).toMatchObject({
-        build: {
-          manifest: true,
-          rollupOptions: { input: { 'pages-client': 'virtual:void-pages-client' } },
-        },
-      });
-    },
-  );
+    const plugin = pagesPlugin(PAGES_DIR) as PagesPluginHooks;
+    expect(await getHookHandler(plugin.config)({}, { command: 'build' })).toMatchObject({
+      build: {
+        manifest: true,
+        rollupOptions: { input: { 'pages-client': 'virtual:void-pages-client' } },
+      },
+    });
+  });
 });
 
 describe('pagesPlugin dev config', () => {
@@ -103,8 +202,8 @@ describe('pagesPlugin dev config', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
-  it('pre-optimizes React dependencies in the Cloudflare worker environment', () => {
-    const config = loadServeConfig();
+  it('pre-optimizes React dependencies in the Cloudflare worker environment', async () => {
+    const config = await loadServeConfig();
 
     expect(config).toMatchObject({
       environments: {
@@ -124,8 +223,8 @@ describe('pagesPlugin dev config', () => {
     });
   });
 
-  it('includes only the React entry points needed by each environment', () => {
-    const config = loadServeConfig() as {
+  it('includes only the React entry points needed by each environment', async () => {
+    const config = (await loadServeConfig()) as {
       optimizeDeps: { include: Array<string> };
       ssr?: { optimizeDeps?: { include?: Array<string> } };
       environments: {
@@ -151,7 +250,7 @@ describe('pagesPlugin dev config', () => {
     writePage('index.tsx', 'export default function Index() { return <h1>Home</h1>; }\n');
 
     const plugin = pagesPlugin(PAGES_DIR) as PagesPluginHooks;
-    getHookHandler(plugin.config)({}, { command: 'serve' });
+    await getHookHandler(plugin.config)({}, { command: 'serve' });
     await getHookHandler(plugin.buildStart).call({});
     const handlers = setupWatcher(plugin);
 
@@ -170,7 +269,7 @@ describe('pagesPlugin dev config', () => {
     writePage('index.tsx', 'export default function Index() { return <h1>Home</h1>; }\n');
 
     const plugin = pagesPlugin(PAGES_DIR) as PagesPluginHooks;
-    getHookHandler(plugin.config)({}, { command: 'serve' });
+    await getHookHandler(plugin.config)({}, { command: 'serve' });
     await getHookHandler(plugin.buildStart).call({});
     const logError = vi.fn();
     const invalidateModule = vi.fn();
@@ -218,7 +317,7 @@ describe('pagesPlugin environment suffixes', () => {
 
   async function loadModules(command: 'serve' | 'build') {
     const plugin = pagesPlugin(PAGES_DIR) as PagesPluginHooks;
-    getHookHandler(plugin.config)({}, { command });
+    await getHookHandler(plugin.config)({}, { command });
     await getHookHandler(plugin.buildStart).call({});
     const load = getHookHandler(plugin.load);
     return {
@@ -254,7 +353,7 @@ describe('pagesPlugin environment suffixes', () => {
 
   it('scans for dev when pages/ is created after the serve config', async () => {
     const plugin = pagesPlugin(PAGES_DIR) as PagesPluginHooks;
-    expect(getHookHandler(plugin.config)({}, { command: 'serve' })).toBeUndefined();
+    expect(await getHookHandler(plugin.config)({}, { command: 'serve' })).toBeUndefined();
 
     writePage('debug.dev.tsx', 'export default function Debug() { return <h1>Debug</h1>; }\n');
     await getHookHandler(plugin.buildStart).call({});
