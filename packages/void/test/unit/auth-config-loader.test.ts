@@ -2,7 +2,6 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createRunnableDevEnvironment, createServer } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
@@ -102,7 +101,7 @@ describe('loadVoidAuthConfig', () => {
         '--input-type=module',
         '-e',
         'const { prepareProject } = await import(process.argv[1]); await prepareProject(process.argv[2]);',
-        fileURLToPath(new URL('../../src/codegen/prepare.ts', import.meta.url)),
+        new URL('../../src/codegen/prepare.ts', import.meta.url).href,
         root,
       ],
       { stdio: 'pipe' },
