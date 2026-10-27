@@ -552,7 +552,7 @@ export function createErrorRenderer(options: ErrorRendererOptions): ErrorRendere
 
   function injectDevErrorOverlay(html: string, overlay: string): string {
     return /<\/body\s*>/i.test(html)
-      ? html.replace(/<\/body\s*>/i, overlay + '</body>')
+      ? html.replace(/<\/body\s*>/i, () => overlay + '</body>')
       : html + overlay;
   }
 
@@ -572,7 +572,9 @@ export function createErrorRenderer(options: ErrorRendererOptions): ErrorRendere
     if (!css) {
       return html;
     }
-    return /<\/head\s*>/i.test(html) ? html.replace(/<\/head\s*>/i, css + '</head>') : css + html;
+    return /<\/head\s*>/i.test(html)
+      ? html.replace(/<\/head\s*>/i, () => css + '</head>')
+      : css + html;
   }
 
   function renderErrorPage(status: ErrorPageStatus, title: string, error?: unknown): string {

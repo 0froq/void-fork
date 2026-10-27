@@ -761,6 +761,36 @@ describe('typed error rendering', () => {
         .text(),
     ).toBe('');
   });
+  it.each(['default', 'custom'] as const)(
+    'preserves replacement tokens in the %s error page overlay and captured CSS',
+    async (page) => {
+      const errors = createErrorRenderer({ dev: true, projectRoot: '/project', homeDir: '/home' });
+      const message = "replacement tokens: $& $$ $` $'";
+      const escapedMessage = "replacement tokens: $&amp; $$ $` $'";
+      const css = '<style data-error-css>body::before { content: "$& $$ $`"; }</style>';
+      const error = Object.assign(new Error(message, { cause: new Error(message) }), {
+        __voidPageAssetTags: { css },
+      });
+      error.stack = `Error: ${message}`;
+      const app = new Hono();
+      app.get('/error', (c) => errors.serveCustomPage(c, 500, 'Internal Server Error', error));
+      const response = await app.fetch(new Request('https://app.test/error'), {
+        ASSETS: {
+          fetch: async () =>
+            page === 'custom'
+              ? new Response('<!doctype html><html><head></head><body>Custom error</body></html>')
+              : new Response('Not Found', { status: 404 }),
+        },
+      });
+      const html = await response.text();
+      expect(response.status).toBe(500);
+      expect(html).toContain(css);
+      expect(html).toContain(`<p class="__void-error-message">${escapedMessage}</p>`);
+      expect(html).toContain(`<pre>Error: ${escapedMessage}</pre>`);
+      expect(html.match(/<!doctype html>/g)).toHaveLength(1);
+      expect(html.match(/data-void-error-overlay role=/g)).toHaveLength(1);
+    },
+  );
   it('preserves HTTP exceptions and adds captured page CSS and dev overlay to custom 500 pages', async () => {
     const app = new Hono();
     const errors = createErrorRenderer({ dev: true, projectRoot: '/project', homeDir: '/home' });
