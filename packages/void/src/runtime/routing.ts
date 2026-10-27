@@ -347,9 +347,15 @@ export function createHttpRouteHandler(
   load: () => Promise<Record<string, (c: Context) => unknown>>,
   method: string,
 ): (c: Context) => Promise<Response> {
-  return markRouteHandler(async (c: Context) =>
-    convertReturnValue(await (await load())[method](c)),
-  );
+  return markRouteHandler(async (c: Context) => {
+    const result = await (await load())[method](c);
+    if (c.finalized) {
+      const response = c.res;
+      c.finalized = false;
+      return response;
+    }
+    return convertReturnValue(result);
+  });
 }
 
 export {

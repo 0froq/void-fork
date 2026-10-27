@@ -163,6 +163,8 @@ type ScheduledFn = (
   ctx: ExecutionContext,
 ) => unknown | Promise<unknown>;
 
+const composedHandlerContexts = new WeakSet<CloudContext>();
+
 export type QueueRetryOptions = { delaySeconds?: number };
 
 /** A single message in a queue batch. */
@@ -218,6 +220,10 @@ export type TypedHandler<V extends ValidatorSlots = {}, R = unknown> = {
 export function defineHandler<R>(
   handler: LoaderFn<R>,
 ): TypedHandler<{}, Exclude<Awaited<R>, Response>>;
+export function defineHandler<H extends TypedHandler>(
+  firstMiddleware: MiddlewareFn,
+  handler: H,
+): H;
 export function defineHandler<R>(
   firstMiddleware: MiddlewareFn,
   handler: LoaderFn<R>,
@@ -226,6 +232,11 @@ export function defineHandler<F extends HandlerFn>(
   firstMiddleware: MiddlewareFn,
   handler: F,
 ): TypedHandler<{}, LoaderOutput<F>>;
+export function defineHandler<H extends TypedHandler>(
+  firstMiddleware: MiddlewareFn,
+  secondMiddleware: MiddlewareFn,
+  handler: H,
+): H;
 export function defineHandler<R>(
   firstMiddleware: MiddlewareFn,
   secondMiddleware: MiddlewareFn,
@@ -236,6 +247,12 @@ export function defineHandler<F extends HandlerFn>(
   secondMiddleware: MiddlewareFn,
   handler: F,
 ): TypedHandler<{}, LoaderOutput<F>>;
+export function defineHandler<H extends TypedHandler>(
+  firstMiddleware: MiddlewareFn,
+  secondMiddleware: MiddlewareFn,
+  thirdMiddleware: MiddlewareFn,
+  handler: H,
+): H;
 export function defineHandler<R>(
   firstMiddleware: MiddlewareFn,
   secondMiddleware: MiddlewareFn,
@@ -248,6 +265,13 @@ export function defineHandler<F extends HandlerFn>(
   thirdMiddleware: MiddlewareFn,
   handler: F,
 ): TypedHandler<{}, LoaderOutput<F>>;
+export function defineHandler<H extends TypedHandler>(
+  firstMiddleware: MiddlewareFn,
+  secondMiddleware: MiddlewareFn,
+  thirdMiddleware: MiddlewareFn,
+  fourthMiddleware: MiddlewareFn,
+  handler: H,
+): H;
 export function defineHandler<R>(
   firstMiddleware: MiddlewareFn,
   secondMiddleware: MiddlewareFn,
@@ -262,6 +286,14 @@ export function defineHandler<F extends HandlerFn>(
   fourthMiddleware: MiddlewareFn,
   handler: F,
 ): TypedHandler<{}, LoaderOutput<F>>;
+export function defineHandler<H extends TypedHandler>(
+  firstMiddleware: MiddlewareFn,
+  secondMiddleware: MiddlewareFn,
+  thirdMiddleware: MiddlewareFn,
+  fourthMiddleware: MiddlewareFn,
+  fifthMiddleware: MiddlewareFn,
+  handler: H,
+): H;
 export function defineHandler<R>(
   firstMiddleware: MiddlewareFn,
   secondMiddleware: MiddlewareFn,
@@ -286,21 +318,40 @@ export function defineHandler(...args: Array<MiddlewareFn | HandlerFn>): TypedHa
   const handler = args[args.length - 1] as HandlerFn;
 
   return (async (c: CloudContext) => {
+    composedHandlerContexts.add(c);
     let index = 0;
+    let result: unknown;
     const dispatch = async (): Promise<void> => {
       if (index < middlewares.length) {
         const middleware = middlewares[index++];
         const middlewareResponse = await middleware(c, dispatch);
         if (middlewareResponse instanceof Response) {
+          result = middlewareResponse;
           c.res = middlewareResponse;
         }
       } else {
-        c.res = convertReturnValue(await handler(c));
+        result = await handler(c);
+        c.res =
+          result instanceof Response ? result : convertReturnValue(result);
       }
     };
     await dispatch();
-    return c.res;
+    return result;
   }) as TypedHandler;
+}
+
+/**
+ * Clears Hono finalization left by {@link defineHandler} middleware composition so
+ * callers (page loaders/actions, outer route handlers) can return their own Response.
+ */
+export function releaseMiddlewareCompositionContext(c: CloudContext): void {
+  if (!composedHandlerContexts.has(c)) {
+    return;
+  }
+  composedHandlerContexts.delete(c);
+  if (c.finalized) {
+    c.finalized = false;
+  }
 }
 
 /**

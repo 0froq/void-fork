@@ -1,4 +1,8 @@
-import type { CloudBindings, CloudContext } from '../runtime/handler.ts';
+import {
+  releaseMiddlewareCompositionContext,
+  type CloudBindings,
+  type CloudContext,
+} from '../runtime/handler.ts';
 import { isConvertedResponse } from '../runtime/response.ts';
 import { hasActionKey, searchWithoutActionKey } from './action-key.ts';
 import { DEFERRED, separateDeferred, type ResolvedDeferredGroup } from './defer.ts';
@@ -291,10 +295,13 @@ async function runLoader(
   if (result instanceof Response && !isConvertedResponse(result)) {
     const contentType = result.headers.get('content-type') || '';
     if (result.status >= 300 || !contentType.includes('application/json')) {
+      releaseMiddlewareCompositionContext(c);
       return result;
     }
   }
-  return extractProps(result);
+  const props = await extractProps(result);
+  releaseMiddlewareCompositionContext(c);
+  return props;
 }
 
 /** Flatten withValidator's { issues: [{ slot, issues: [{ message, path }] }] } into { field: message } */
@@ -651,6 +658,7 @@ export async function handlePageMutation(
   let result: unknown;
   try {
     result = mutationHandler ? await mutationHandler(c) : undefined;
+    releaseMiddlewareCompositionContext(c);
   } catch (e) {
     if (e instanceof ValidationError) {
       return respondWithErrors(e.errors);

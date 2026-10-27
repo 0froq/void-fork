@@ -2,7 +2,7 @@ import { type as arktype } from 'arktype';
 import * as v from 'valibot';
 import { describe, expectTypeOf, it } from 'vite-plus/test';
 import { z } from 'zod';
-import { defineHandler } from '../../src/runtime/handler.ts';
+import { defineHandler, defineMiddleware } from '../../src/runtime/handler.ts';
 import type { StandardSchemaV1 } from '../../src/standard-schema.ts';
 
 /**
@@ -124,5 +124,22 @@ describe('ExtractInput<handler.__validators>', () => {
       query: { format: string };
       body: { data: Array<number> };
     }>();
+  });
+
+  it('preserves validators when middleware wraps a withValidator handler', () => {
+    const passThrough = defineMiddleware(async (_c, next) => {
+      await next();
+    });
+    const handler = defineHandler(
+      passThrough,
+      defineHandler.withValidator({
+        body: z.object({ title: z.string().min(1) }),
+      })(async (_c, { body }) => {
+        return { title: body.title };
+      }),
+    );
+
+    type Input = ExtractInput<(typeof handler)['__validators']>;
+    expectTypeOf<Input>().toEqualTypeOf<{ body: { title: string } }>();
   });
 });

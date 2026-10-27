@@ -22,7 +22,13 @@ type ValidationIssueBody = {
 function createApp(handler: (c: CloudContext) => unknown) {
   const app = new Hono();
   app.get('/test', async (c) => {
-    return convertReturnValue(await handler(c as unknown as CloudContext));
+    const result = await handler(c as unknown as CloudContext);
+    if (c.finalized) {
+      const response = c.res;
+      c.finalized = false;
+      return response;
+    }
+    return convertReturnValue(result);
   });
   return app;
 }
