@@ -66,8 +66,6 @@ export type HasActionParams<U extends string> = [ResolveActionParams<U>] extends
 
 type ActionFormBaseOptions = {
   resetOnSuccess?: boolean;
-  onSuccess?: () => void;
-  onError?: (error: Record<string, string> | import('void/pages-client').VoidActionError) => void;
 };
 
 /** Form options type (requires params for dynamic routes) */

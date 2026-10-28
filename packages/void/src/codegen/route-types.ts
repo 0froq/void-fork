@@ -145,10 +145,6 @@ export function generateRouteTypes(
   lines.push('');
   lines.push('  type ActionFormBaseOptions = {');
   lines.push('    resetOnSuccess?: boolean;');
-  lines.push('    onSuccess?: () => void;');
-  lines.push(
-    '    onError?: (error: Record<string, string> | import("void/pages-client").VoidActionError) => void;',
-  );
   lines.push('  };');
   lines.push('');
   lines.push('  export type ActionFormOptions<U extends string> = ActionFormBaseOptions &');
