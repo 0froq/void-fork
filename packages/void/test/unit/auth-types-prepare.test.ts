@@ -2,7 +2,6 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 
 const roots: Array<string> = [];
@@ -14,7 +13,7 @@ function runPrepare(root: string): { written: Array<string>; removed: Array<stri
       '--input-type=module',
       '-e',
       'const { prepareProject } = await import(process.argv[1]); console.log(JSON.stringify(await prepareProject(process.argv[2])));',
-      fileURLToPath(new URL('../../src/codegen/prepare.ts', import.meta.url)),
+      new URL('../../src/codegen/prepare.ts', import.meta.url).href,
       root,
     ],
     { encoding: 'utf8', stdio: 'pipe' },

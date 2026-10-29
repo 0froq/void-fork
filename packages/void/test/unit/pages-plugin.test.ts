@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { normalizePath } from 'vite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { createPagesPlugin } from '../../src/pages/plugin.ts';
 import { scanPages } from '../../src/pages/scan.ts';
@@ -38,7 +39,7 @@ describe('shared Pages plugin scan lifecycle', () => {
 
   beforeEach(() => {
     vi.mocked(scanPages).mockReset();
-    root = mkdtempSync(join(tmpdir(), 'void-pages-plugin-'));
+    root = normalizePath(mkdtempSync(join(tmpdir(), 'void-pages-plugin-')));
     pagesDir = join(root, 'pages');
     mkdirSync(pagesDir);
   });
