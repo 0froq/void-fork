@@ -41,18 +41,23 @@ describe('syncAuthTypesFile', () => {
 });
 
 describe('generateAuthTypes', () => {
-  it('emits a module that augments void/auth AuthUser and AuthSession', () => {
+  it('emits a module that fills the void/auth VoidAuthTypes registry', () => {
     const { root, outDir, cleanup } = withTempProject((r) => {
       writeFileSync(join(r, 'auth.ts'), 'export default {};');
     });
     try {
       const { dts } = generateAuthTypes(join(root, 'auth.ts'), outDir);
       expect(dts).toContain('export {}');
+      // better-auth is reached through void/auth: apps usually cannot resolve it themselves.
+      expect(dts).toContain('import type { InferAuthSession } from "void/auth";');
+      expect(dts).not.toContain('from "better-auth"');
+      expect(dts).toContain(
+        'type _VoidAuthSession = InferAuthSession<typeof import("../auth.ts")["default"]>;',
+      );
       expect(dts).toContain('declare module "void/auth"');
-      expect(dts).toContain('interface AuthUser extends _InferredUser');
-      expect(dts).toContain('interface AuthSession extends _InferredSession');
-      expect(dts).toContain('typeof import("../auth.ts")');
-      expect(dts).toContain('Auth<_VoidAuthOptions>["$Infer"]["Session"]["user"]');
+      expect(dts).toContain('interface VoidAuthTypes {');
+      expect(dts).toContain('user: _VoidAuthSession["user"];');
+      expect(dts).toContain('session: _VoidAuthSession["session"];');
     } finally {
       cleanup();
     }

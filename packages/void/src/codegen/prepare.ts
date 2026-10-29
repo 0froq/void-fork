@@ -7,8 +7,8 @@ import { generateVoidAuthDatabaseModule, generateVoidAuthDrizzleSchema } from '.
 import { getDatabaseCasing, readConfig } from '../config.ts';
 import { discoverSchema } from '../drizzle/discover.ts';
 import { loadLocalEnv } from '../shared/env.ts';
+import { generateAuthTypes } from './auth-types.ts';
 import { generateDbDts } from './db-types.ts';
-import { generateAuthTypes, removeAuthTypesIfPresent } from './auth-types.ts';
 import { findEnvFileForPaths, generateEnvTypes } from './env-types.ts';
 import { ensureProjectTsconfig } from './project-tsconfig.ts';
 import { generateQueueTypes } from './queue-types.ts';
@@ -58,11 +58,9 @@ export async function prepareProject(root: string): Promise<PrepareProjectResult
 
   if (authConfigPath) {
     const { dts } = generateAuthTypes(authConfigPath, outDir);
-    if (writeFileIfChanged(join(outDir, 'auth.d.ts'), dts)) {
-      written.push(join('.void', 'auth.d.ts'));
-    }
-  } else if (removeAuthTypesIfPresent(outDir)) {
-    removed.push(join('.void', 'auth.d.ts'));
+    writeGeneratedFile(outDir, 'auth.d.ts', dts, written);
+  } else {
+    removeGeneratedFile(outDir, 'auth.d.ts', removed);
   }
 
   const hasRouteTypes =

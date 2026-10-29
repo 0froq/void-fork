@@ -33,12 +33,11 @@ import { lintRoutingPhases, mergeRoutingRules } from './cli/headers.ts';
 import { stampClientAssetCachePolicy } from './client-asset-manifest.ts';
 import { removeAuthTypesIfPresent, syncAuthTypesFile } from './codegen/auth-types.ts';
 import { findEnvFileForPaths } from './codegen/env-types.ts';
-import { ensureProjectTsconfig } from './codegen/project-tsconfig.ts';
+import { syncAuthTypesInProjectTsconfig } from './codegen/project-tsconfig.ts';
 import { generateQueueTypes } from './codegen/queue-types.ts';
 import { generateRouteTypes } from './codegen/route-types.ts';
 import { writeFileIfChanged } from './codegen/write-if-changed.ts';
-import { readConfig, getDatabaseCasing, getDatabaseDialect } from './config.ts';
-import { discoverSchema } from './drizzle/discover.ts';
+import { readConfig, getDatabaseDialect } from './config.ts';
 import { collectPages, collectRevalidate, hasRevalidate } from './isr-config.ts';
 import { readProjectPaths } from './project-paths.ts';
 import { readDeployBuildQueueNames } from './queues/cloudflare-names.ts';
@@ -199,22 +198,6 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     }
     const dts = generateQueueTypes(scan.queues, queuesDir, outDir);
     writeFileIfChanged(join(outDir, 'queues.d.ts'), dts);
-  }
-
-  function syncProjectTsconfig(): void {
-    if (!scan) {
-      return;
-    }
-    const analysis = options.getApplicationAnalysis(routeEnvironment);
-    const config = readConfig(root);
-    const schema = discoverSchema(root, paths);
-    const hasRouteTypes =
-      scan.routes.length > 0 ||
-      (scan.websockets?.length ?? 0) > 0 ||
-      scan.pages.pages.length > 0;
-    const hasDbRuntime =
-      schema != null || analysis.authEnabled || getDatabaseCasing(config) !== undefined;
-    ensureProjectTsconfig(root, hasRouteTypes, hasDbRuntime, schema != null, { paths });
   }
 
   async function rescan(refresh = false) {
@@ -384,7 +367,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   async function writeAuthDatabaseFiles(): Promise<void> {
     if (!compileOptions.auth) {
       if (removeAuthTypesIfPresent(outDir)) {
-        syncProjectTsconfig();
+        syncAuthTypesInProjectTsconfig(root);
       }
       return;
     }
@@ -411,10 +394,8 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       }),
     );
 
-    const authConfigPath = compileOptions.auth.authConfigPath;
-    if (syncAuthTypesFile(authConfigPath, outDir)) {
-      syncProjectTsconfig();
-    }
+    syncAuthTypesFile(compileOptions.auth.authConfigPath, outDir);
+    syncAuthTypesInProjectTsconfig(root);
   }
 
   let resolvedConfig: import('vite').ResolvedConfig | null = null;

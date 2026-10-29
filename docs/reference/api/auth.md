@@ -79,7 +79,7 @@ function requireAuth(c: CloudContext): AuthUser;
 
 ## `AuthUser` {#authuser}
 
-Better Auth user shape re-exported by Void. When the project has an `auth.ts` that exports `defineAuth(...)`, Void generates `.void/auth.d.ts` (listed in `.void/tsconfig.json`) so `AuthUser` also includes fields from Better Auth plugins and `user.additionalFields` in that config — for example `role` from `admin()` or a custom `plan` field.
+Better Auth user shape re-exported by Void. It also includes the fields that Better Auth plugins and `user.additionalFields` in `auth.ts` add, for example `role` from `admin()` or a custom `plan` field. Your tsconfig needs the generated Void types for this; see [Type Safety setup](../../guide/type-safety.md#setup).
 
 ```ts
 interface AuthUser {
@@ -95,7 +95,7 @@ interface AuthUser {
 
 ## `AuthSession` {#authsession}
 
-Better Auth session shape re-exported by Void. With a generated `.void/auth.d.ts`, `AuthSession` picks up session fields contributed by plugins in `auth.ts` (for example `impersonatedBy` from `admin()`).
+Better Auth session shape re-exported by Void. It also includes the session fields that Better Auth plugins in `auth.ts` add, for example `impersonatedBy` from `admin()`.
 
 ```ts
 interface AuthSession {
@@ -109,6 +109,10 @@ interface AuthSession {
   userAgent?: string | null;
 }
 ```
+
+::: tip Types inside `auth.ts`
+`AuthUser` and `AuthSession` are built from `auth.ts`. Inside `auth.ts` and the files it imports, don't use them, or values from `getUser()`, `getSession()` and `requireAuth()`, to type a hook's parameters or returned data. TypeScript reports a circular reference and the extra fields are lost. Let Better Auth infer those types, or use its own `User` and `Session` types. Better Auth callbacks such as `sendResetPassword` pass its base `User`, without plugin fields.
+:::
 
 ## `AuthState` {#authstate}
 
