@@ -31,7 +31,9 @@ import {
 import { resolveDistDir, resolveWorkerDirName } from './cli/build-output-dir.ts';
 import { lintRoutingPhases, mergeRoutingRules } from './cli/headers.ts';
 import { stampClientAssetCachePolicy } from './client-asset-manifest.ts';
+import { removeAuthTypesIfPresent, syncAuthTypesFile } from './codegen/auth-types.ts';
 import { findEnvFileForPaths } from './codegen/env-types.ts';
+import { syncAuthTypesInProjectTsconfig } from './codegen/project-tsconfig.ts';
 import { generateQueueTypes } from './codegen/queue-types.ts';
 import { generateRouteTypes } from './codegen/route-types.ts';
 import { writeFileIfChanged } from './codegen/write-if-changed.ts';
@@ -321,7 +323,13 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       'routes.d.ts',
       'queues.d.ts',
       ...(options.target ? ['app.ts', 'index.ts'] : ['entry.ts']),
-      ...(compileOptions.auth ? ['better-auth-db.ts', 'better-auth-schema.ts'] : []),
+      ...(compileOptions.auth
+        ? [
+            'better-auth-db.ts',
+            'better-auth-schema.ts',
+            ...(compileOptions.auth.authConfigPath ? ['auth.d.ts'] : []),
+          ]
+        : []),
     ];
     const parts: Array<string> = [];
     for (const file of files) {
@@ -358,6 +366,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
 
   async function writeAuthDatabaseFiles(): Promise<void> {
     if (!compileOptions.auth) {
+      if (removeAuthTypesIfPresent(outDir)) {
+        syncAuthTypesInProjectTsconfig(root);
+      }
       return;
     }
 
@@ -382,6 +393,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         drizzleAdapterPath,
       }),
     );
+
+    syncAuthTypesFile(compileOptions.auth.authConfigPath, outDir);
+    syncAuthTypesInProjectTsconfig(root);
   }
 
   let resolvedConfig: import('vite').ResolvedConfig | null = null;

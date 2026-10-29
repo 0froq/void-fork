@@ -22,6 +22,7 @@ import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { analyzeApplicationSync } from '../../src/application-analysis.ts';
 import { GENERATED_ASSET_HEADERS_MARKER } from '../../src/asset-worker-bypass.ts';
 import * as authConfig from '../../src/auth/config.ts';
+import { ensureProjectTsconfig } from '../../src/codegen/project-tsconfig.ts';
 import { readConfig } from '../../src/config.ts';
 import { routingPlugin } from '../../src/plugin-routing.ts';
 import { readProjectPaths } from '../../src/project-paths.ts';
@@ -210,6 +211,42 @@ describe('routingPlugin', () => {
     const schema = readFileSync(join(root, '.void', 'better-auth-schema.ts'), 'utf8');
     expect(schema).toContain('nickname');
     expect(schema).toContain('pronouns');
+  });
+
+  it('writes and removes auth.d.ts and lists it in the existing tsconfig only', async () => {
+    const root = createTempRoot();
+    writeFileSync(join(root, 'routes', 'health.ts'), 'export const GET = () => new Response();');
+    writeFileSync(
+      join(root, 'auth.ts'),
+      "import type { VoidAuthConfig } from 'void/auth';\nexport default {} satisfies VoidAuthConfig;\n",
+    );
+    const tsconfigPath = join(root, '.void', 'tsconfig.json');
+    const readTsconfig = () =>
+      JSON.parse(readFileSync(tsconfigPath, 'utf8')) as {
+        files: Array<string>;
+        compilerOptions?: { paths?: Record<string, Array<string>> };
+      };
+
+    // The Drizzle plugin wrote this tsconfig at startup, before auth.ts existed: no db.d.ts.
+    ensureProjectTsconfig(root, true, false);
+    const withAuth = createRoutingPlugin(root, { isAuthEnabled: () => true });
+    resolveConfig(withAuth, 'serve');
+    await runBuildStart(withAuth);
+
+    expect(existsSync(join(root, '.void', 'auth.d.ts'))).toBe(true);
+    expect(readTsconfig().files).toEqual(['routes.d.ts', 'auth.d.ts']);
+
+    // A pg app keeps db.d.ts and its void/db path after auth is turned off.
+    ensureProjectTsconfig(root, true, true);
+    expect(readTsconfig().files).toEqual(['routes.d.ts', 'db.d.ts', 'auth.d.ts']);
+    rmSync(join(root, 'auth.ts'));
+    const withoutAuth = createRoutingPlugin(root, { isAuthEnabled: () => false });
+    resolveConfig(withoutAuth, 'build');
+    await runBuildStart(withoutAuth);
+
+    expect(existsSync(join(root, '.void', 'auth.d.ts'))).toBe(false);
+    expect(readTsconfig().files).toEqual(['routes.d.ts', 'db.d.ts']);
+    expect(readTsconfig().compilerOptions?.paths?.['void/db']).toEqual(['./db.d.ts']);
   });
 
   it('bakes explicit page opt-outs into the native ISR policy', async () => {
