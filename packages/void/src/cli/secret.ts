@@ -59,12 +59,14 @@ export async function runSecretCommand(root: string, args: SecretArgs): Promise<
       log.message(`  ${s.name}`);
     }
 
-    const proceed = await confirm({
-      message: `This will overwrite ${formatCount(secrets.length, 'secret')} in the ${backend.target}. Continue?`,
-    });
-    if (isCancel(proceed) || !proceed) {
-      cancel('Secret sync cancelled.');
-      process.exit(1);
+    if (!args.yes) {
+      const proceed = await confirm({
+        message: `This will overwrite ${formatCount(secrets.length, 'secret')} in the ${backend.target}. Continue?`,
+      });
+      if (isCancel(proceed) || !proceed) {
+        cancel('Secret sync cancelled.');
+        process.exit(1);
+      }
     }
 
     await backend.sync(secrets);
