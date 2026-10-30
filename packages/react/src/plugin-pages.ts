@@ -1,7 +1,13 @@
-import { dirname, relative } from 'pathslash';
+import { readFileSync } from 'node:fs';
+import { dirname, relative, resolve } from 'pathslash';
 import type { Plugin } from 'vite';
-import { createPagesPlugin, generateComponentManifest } from 'void/pages';
+import {
+  createPagesPlugin,
+  generateComponentManifest,
+  resolveEffectiveLayoutChain,
+} from 'void/pages';
 import type { PageScanResult, StaticPageDataBuildOptions } from 'void/pages';
+import { findIslandImports, resolveSpecifier } from 'void/pages-islands-plugin';
 
 const CLIENT_ENTRY_ID = 'virtual:void-pages-client';
 const WORKER_ENVIRONMENT_NAME = 'void_worker';
@@ -34,17 +40,7 @@ type PagesPluginOptions = {
 
 export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plugin {
   const root = options?.root ?? dirname(pagesDir);
-  const pagesDirRelative = relative(root, pagesDir);
-  const pagesOptimizeEntries = `${pagesDirRelative}/**/*.{js,jsx,ts,tsx}`;
-  const pagesClientOptimizeEntries = [
-    pagesOptimizeEntries,
-    `!${pagesDirRelative}/**/*.server.{js,jsx,ts,tsx}`,
-    // Island pages render only on the server. Island components in the pages
-    // directory (`_Counter.tsx`) still match the first pattern.
-    `!${pagesDirRelative}/**/*.island.{js,jsx,ts,tsx}`,
-    // Setting entries turns off Vite's default `__tests__` ignore, so keep it.
-    `!${pagesDirRelative}/**/__tests__/**`,
-  ];
+  const pagesOptimizeEntries = `${relative(root, pagesDir)}/**/*.{js,jsx,ts,tsx}`;
   return createPagesPlugin(pagesDir, {
     name: 'void-react:pages',
     root,
@@ -74,7 +70,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
             exclude: ['@void/react'],
             // Crawl page modules before the first client request so third-party
             // imports are pre-bundled instead of triggering a full reload.
-            entries: pagesClientOptimizeEntries,
+            entries: clientOptimizeEntries(await scan(), pagesDir, root),
             // Pre-include React entries that are discovered late via dynamic
             // imports during SPA navigation, avoiding a full-page reload
             // from Vite's dep optimizer. void/pages-client and
@@ -122,6 +118,49 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       };
     },
   });
+}
+
+function clientOptimizeEntries(
+  scan: PageScanResult | null,
+  pagesDir: string,
+  root: string,
+): Array<string> {
+  if (!scan) {
+    return [];
+  }
+  const browserFiles = new Set<string>();
+  const islandFiles = new Set<string>();
+  for (const page of scan.pages) {
+    const layouts = resolveEffectiveLayoutChain(page, scan.layouts, scan.namedLayouts);
+    if (page.island) {
+      islandFiles.add(resolve(pagesDir, page.componentPath));
+      for (const layout of layouts) {
+        if (layout.island) {
+          islandFiles.add(resolve(pagesDir, layout.filePath));
+        }
+      }
+    } else {
+      browserFiles.add(resolve(pagesDir, page.componentPath));
+      for (const layout of layouts) {
+        browserFiles.add(resolve(pagesDir, layout.filePath));
+      }
+    }
+  }
+  // Only hydrated components run in the browser; island pages and their
+  // unmarked imports may depend on Worker-only packages.
+  for (const file of islandFiles) {
+    if (!/\.island\.(tsx|jsx)$/.test(file)) {
+      continue;
+    }
+    for (const { specifier } of findIslandImports(readFileSync(file, 'utf8'), file)) {
+      const component = resolveSpecifier(specifier, dirname(file), ['.tsx', '.jsx', '.ts', '.js']);
+      if (component) {
+        browserFiles.add(component);
+      }
+    }
+  }
+  // Entries are glob patterns, so route names such as [id] must be literal.
+  return [...browserFiles].map((file) => relative(root, file).replace(/[()[\]{}*?!|]/g, '\\$&'));
 }
 
 function generateRendererModule(scan: PageScanResult, pagesDir: string, isDev: boolean): string {
