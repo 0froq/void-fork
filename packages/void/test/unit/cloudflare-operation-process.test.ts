@@ -1617,3 +1617,77 @@ syncBuiltinESMExports();`,
   },
   30_000,
 );
+
+it.each(['canonical', 'alias', 'bearer'] as const)(
+  'reads the account workers.dev subdomain with %s credentials',
+  async (credentials) => {
+    const directory = temporaryDirectory('void-cf-subdomain-');
+    const requests: Array<{
+      path: string | undefined;
+      key: string | undefined;
+      email: string | undefined;
+      authorization: string | undefined;
+    }> = [];
+    const api = await listen(
+      createServer((request, response) => {
+        requests.push({
+          path: request.url,
+          key: request.headers['x-auth-key'] as string | undefined,
+          email: request.headers['x-auth-email'] as string | undefined,
+          authorization: request.headers.authorization,
+        });
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ success: true, result: { subdomain: 'my-team' } }));
+      }),
+    );
+    const env = {
+      ...systemEnv,
+      CI: 'true',
+      CLOUDFLARE_ACCOUNT_ID: 'test-account',
+      CLOUDFLARE_API_BASE_URL: api + '/client/v4',
+      ...(credentials === 'bearer'
+        ? { CLOUDFLARE_API_TOKEN: 'synthetic-token' }
+        : credentials === 'canonical'
+          ? { CLOUDFLARE_API_KEY: 'synthetic-key', CLOUDFLARE_EMAIL: 'dev@example.test' }
+          : { CF_API_KEY: 'synthetic-key', CF_EMAIL: 'dev@example.test' }),
+    };
+    const output = await runOperation(directory, { type: 'workers.subdomain.get' }, env);
+    expect(output.status, output.stderr).toBe(0);
+    expect(decodeCloudflareOperationResult(output).data).toEqual({ subdomain: 'my-team' });
+    expect(requests).toEqual([
+      {
+        path: '/client/v4/accounts/test-account/workers/subdomain',
+        key: credentials === 'bearer' ? undefined : 'synthetic-key',
+        email: credentials === 'bearer' ? undefined : 'dev@example.test',
+        authorization: credentials === 'bearer' ? 'Bearer synthetic-token' : undefined,
+      },
+    ]);
+    expect(output.stdout + output.stderr).not.toContain('synthetic-');
+  },
+);
+
+it.each([
+  { name: 'HTTP failure', status: 403, body: { success: false, errors: [] } },
+  { name: 'API failure', status: 200, body: { success: false, result: { subdomain: 'team' } } },
+  { name: 'missing subdomain', status: 200, body: { success: true, result: {} } },
+  { name: 'empty subdomain', status: 200, body: { success: true, result: { subdomain: ' ' } } },
+  { name: 'invalid type', status: 200, body: { success: true, result: { subdomain: 42 } } },
+  { name: 'redirect', status: 302, body: {} },
+])('rejects a subdomain lookup with $name', async ({ status, body }) => {
+  const directory = temporaryDirectory('void-cf-subdomain-error-');
+  let redirected = false;
+  const api = await listen(
+    createServer((request, response) => {
+      if (request.url === '/redirected') {
+        redirected = true;
+      }
+      response.writeHead(status, { 'Content-Type': 'application/json', Location: '/redirected' });
+      response.end(JSON.stringify(body));
+    }),
+  );
+  const output = await runOperation(directory, { type: 'workers.subdomain.get' }, tokenEnv(api));
+  expect(output.status).toBe(1);
+  expect(decodeCloudflareOperationResult(output).data).toBeUndefined();
+  expect(redirected).toBe(false);
+  expect(output.stdout + output.stderr).not.toContain('synthetic-token');
+});

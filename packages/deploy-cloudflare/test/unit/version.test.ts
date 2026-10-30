@@ -43,6 +43,17 @@ function customDomainTriggers(pattern: string): CloudflareTriggerConfig {
   });
 }
 
+function noWorkersDevMessage(): string {
+  return encodeCloudflareVersionMessage(
+    [],
+    triggersWith({ workers_dev: false, preview_urls: false }),
+  );
+}
+
+function preservedTriggerMessage(): string {
+  return encodeCloudflareVersionMessage([], triggersWith({ preserve: true }));
+}
+
 function readConfigArg(args: Array<string>): Record<string, unknown> {
   return JSON.parse(readFileSync(args[args.indexOf('-c') + 1]!, 'utf8')) as Record<string, unknown>;
 }
@@ -500,6 +511,227 @@ describe('Cloudflare version activation', () => {
       ),
     ).toBe(false);
     expect(fixture.fetcher).toHaveBeenCalledOnce();
+  });
+
+  // A draft Worker from `void secret put` has workers.dev disabled, so its first
+  // publish reports a version id without a URL (issue #573).
+  function urlLessDraftPublish(
+    fixture: ReturnType<typeof sdkDraftActivation>,
+    publishedTriggers: Array<Record<string, unknown>> = [],
+  ) {
+    return vi.fn(async (operation: CloudflareOperation): Promise<CloudflareCommandResult> => {
+      if (operation.type === 'triggers.deploy' && operation.configPath) {
+        publishedTriggers.push(
+          JSON.parse(readFileSync(operation.configPath, 'utf8')) as Record<string, unknown>,
+        );
+      }
+      const result = await fixture.runWrangler(operation);
+      return operation.type === 'worker.deploy' ? { ...result, data: { versionId: NEXT } } : result;
+    });
+  }
+
+  it.each([true, false])(
+    'looks up the account subdomain when a draft publish reports no URL (atomic=%s)',
+    async (atomic) => {
+      const fixture = sdkDraftActivation();
+      const publishedTriggers: Array<Record<string, unknown>> = [];
+      const resolveWorkersDevSubdomain = vi.fn(async () => ({
+        ok: true as const,
+        subdomain: 'example',
+      }));
+      const result = await activateCloudflareVersion({
+        ...fixture.options,
+        runWrangler: urlLessDraftPublish(fixture, publishedTriggers),
+        atomic,
+        resolveWorkersDevSubdomain,
+      });
+      expect(result.ok ? null : result.reason).toBeNull();
+      expect(result).toMatchObject({
+        ok: true,
+        versionId: NEXT,
+        previousVersionId: CURRENT,
+        previewUrl: 'https://app.example.workers.dev',
+        workersDevSubdomain: 'example',
+      });
+      expect(resolveWorkersDevSubdomain).toHaveBeenCalledOnce();
+      expect(fixture.events).toEqual(['source', 'pin', 'publish', 'triggers', 'ready']);
+      expect(publishedTriggers).toMatchObject([{ workers_dev: true }]);
+      expect(fixture.fetcher).toHaveBeenCalledOnce();
+    },
+  );
+
+  // The CLI marks traffic settings that the config leaves unset as preserved.
+  // Most projects do not set workers_dev, so this is the usual message.
+  it.each([true, false])(
+    'looks up the account subdomain for the CLI message that preserves unset traffic (atomic=%s)',
+    async (atomic) => {
+      const fixture = sdkDraftActivation();
+      const publishedTriggers: Array<Record<string, unknown>> = [];
+      const resolveWorkersDevSubdomain = vi.fn(async () => ({
+        ok: true as const,
+        subdomain: 'example',
+      }));
+      const result = await activateCloudflareVersion({
+        ...fixture.options,
+        message: encodeCloudflareVersionMessage(
+          [],
+          triggersWith({
+            preserveWorkersDev: true,
+            preservePreviewUrls: true,
+            preserveRoutes: true,
+          }),
+        ),
+        runWrangler: urlLessDraftPublish(fixture, publishedTriggers),
+        atomic,
+        resolveWorkersDevSubdomain,
+      });
+      expect(result.ok ? null : result.reason).toBeNull();
+      expect(result).toMatchObject({ ok: true, previewUrl: 'https://app.example.workers.dev' });
+      expect(resolveWorkersDevSubdomain).toHaveBeenCalledOnce();
+      expect(publishedTriggers).toMatchObject([{ workers_dev: true }]);
+    },
+  );
+
+  it('sends Access headers only to the FedRAMP High workers.dev host from the lookup', async () => {
+    const fixture = sdkDraftActivation();
+    const probes: Array<{ url: string; secret: string | null }> = [];
+    const result = await activateCloudflareVersion({
+      ...fixture.options,
+      runWrangler: urlLessDraftPublish(fixture),
+      atomic: true,
+      readinessHeaders: {
+        'CF-Access-Client-Id': 'synthetic.access',
+        'CF-Access-Client-Secret': 'synthetic-secret',
+      },
+      resolveWorkersDevSubdomain: async () => ({ ok: true, subdomain: 'example.fed' }),
+      fetch: async (url, init) => {
+        probes.push({
+          url: String(url),
+          secret: new Headers(init?.headers).get('cf-access-client-secret'),
+        });
+        return Response.json({ ready: true, versionId: NEXT });
+      },
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      previewUrl: 'https://app.example.fed.workers.dev',
+      workersDevSubdomain: 'example.fed',
+    });
+    expect(probes).toEqual([
+      { url: 'https://app.example.fed.workers.dev/__void/ready', secret: 'synthetic-secret' },
+    ]);
+  });
+
+  it.each([
+    { atomic: true, outcome: 'unavailable' },
+    { atomic: false, outcome: 'unavailable' },
+    { atomic: true, outcome: 'thrown' },
+  ] as const)(
+    'stops before triggers when no workers.dev URL is known (atomic=$atomic, $outcome)',
+    async ({ atomic, outcome }) => {
+      const fixture = sdkDraftActivation();
+      const resolveWorkersDevSubdomain = vi.fn(async () => {
+        if (outcome === 'thrown') {
+          throw new Error('synthetic lookup failure');
+        }
+        return { ok: false as const, reason: 'unavailable' as const };
+      });
+      const result = await activateCloudflareVersion({
+        ...fixture.options,
+        runWrangler: urlLessDraftPublish(fixture),
+        atomic,
+        resolveWorkersDevSubdomain,
+      });
+      expect(result).toEqual({
+        ok: false,
+        reason: atomic ? 'atomic-output-invalid' : 'bootstrap-output-invalid',
+        versionId: NEXT,
+        previousVersionId: CURRENT,
+      });
+      expect(fixture.events).not.toContain('triggers');
+      expect(fixture.fetcher).not.toHaveBeenCalled();
+    },
+  );
+
+  it('reports an uploader change that the lookup detects', async () => {
+    const fixture = sdkDraftActivation();
+    const result = await activateCloudflareVersion({
+      ...fixture.options,
+      runWrangler: urlLessDraftPublish(fixture),
+      atomic: true,
+      resolveWorkersDevSubdomain: async () => ({ ok: false, reason: 'uploader-changed' }),
+    });
+    expect(result).toEqual({
+      ok: false,
+      reason: 'uploader-changed',
+      versionId: NEXT,
+      previousVersionId: CURRENT,
+      rollback: 'unsafe',
+    });
+    expect(fixture.events).not.toContain('triggers');
+    expect(fixture.fetcher).not.toHaveBeenCalled();
+  });
+
+  it('does not look up the account subdomain after the uploader changes', async () => {
+    const fixture = sdkDraftActivation();
+    const resolveWorkersDevSubdomain = vi.fn(async () => ({
+      ok: true as const,
+      subdomain: 'example',
+    }));
+    const result = await activateCloudflareVersion({
+      ...fixture.options,
+      runWrangler: urlLessDraftPublish(fixture),
+      atomic: true,
+      verifyUploader: () => !fixture.events.includes('publish'),
+      resolveWorkersDevSubdomain,
+    });
+    expect(result).toEqual({
+      ok: false,
+      reason: 'uploader-changed',
+      versionId: NEXT,
+      previousVersionId: CURRENT,
+      rollback: 'unsafe',
+    });
+    expect(resolveWorkersDevSubdomain).not.toHaveBeenCalled();
+    expect(fixture.events).not.toContain('triggers');
+  });
+
+  it.each([
+    { label: 'workers.dev is off', options: { message: noWorkersDevMessage() } },
+    { label: 'a subdomain is configured', options: { workersDevSubdomain: 'example' } },
+    { label: 'triggers are preserved', options: { preserveTriggers: true } },
+    { label: 'the snapshot is preserved', options: { message: preservedTriggerMessage() } },
+  ])('does not look up the account subdomain when $label', async ({ options }) => {
+    const fixture = sdkDraftActivation();
+    const resolveWorkersDevSubdomain = vi.fn(async () => ({
+      ok: true as const,
+      subdomain: 'other',
+    }));
+    const result = await activateCloudflareVersion({
+      ...fixture.options,
+      runWrangler: urlLessDraftPublish(fixture),
+      atomic: true,
+      ...options,
+      resolveWorkersDevSubdomain,
+    });
+    expect(resolveWorkersDevSubdomain).not.toHaveBeenCalled();
+    if ('workersDevSubdomain' in options) {
+      expect(result).toMatchObject({ ok: true, previewUrl: 'https://app.example.workers.dev' });
+    } else {
+      expect(result).toMatchObject({ ok: false, reason: 'atomic-output-invalid' });
+    }
+  });
+
+  it('does not look up the account subdomain when the publish reports a URL', async () => {
+    const fixture = sdkDraftActivation();
+    const resolveWorkersDevSubdomain = vi.fn(async () => ({
+      ok: true as const,
+      subdomain: 'other',
+    }));
+    expect(
+      await activateCloudflareVersion({ ...fixture.options, resolveWorkersDevSubdomain }),
+    ).toMatchObject({ ok: true, previewUrl: 'https://app.example.workers.dev' });
+    expect(resolveWorkersDevSubdomain).not.toHaveBeenCalled();
   });
 
   it('does not overwrite a deployment that changed during immutable draft source inspection', async () => {

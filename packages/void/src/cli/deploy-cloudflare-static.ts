@@ -272,6 +272,7 @@ export async function runCloudflareStaticDeploy(
   }
   const {
     apiBaseUrl,
+    complianceRegion,
     usesCf,
     cfUploaderIsPinned,
     assertUploaderStillPinned,
@@ -447,6 +448,7 @@ export async function runCloudflareStaticDeploy(
         uploadConfigPath: staticConfigPath,
         accountId,
         apiBaseUrl,
+        complianceRegion,
         workerName,
         workersDevSubdomain,
         readinessAccessOrigin,

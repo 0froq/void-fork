@@ -39,7 +39,10 @@ import {
   ensureCloudflareAuthSecret,
   runWranglerAuthToken,
 } from '../../src/cli/deploy-cloudflare-auth.ts';
-import { formatCloudflareActivationError } from '../../src/cli/deploy-cloudflare-helpers.ts';
+import {
+  cloudflareCandidateActivationOptions,
+  formatCloudflareActivationError,
+} from '../../src/cli/deploy-cloudflare-helpers.ts';
 import { prepareCloudflareFrameworkArtifact } from '../../src/cli/deploy-cloudflare-static.ts';
 import { runCloudflareDeploy } from '../../src/cli/deploy-cloudflare.ts';
 import {
@@ -247,6 +250,125 @@ describe('Cloudflare activation diagnostics', () => {
       expect(message).toContain('at index.js:42:1');
     },
   );
+
+  it.each(['atomic-output-invalid', 'bootstrap-output-invalid'] as const)(
+    'explains a live %s version whose URL is unknown',
+    (reason) => {
+      const versionId = '22222222-2222-4222-8222-222222222222';
+      const withVersion = formatCloudflareActivationError({ ok: false, reason, versionId });
+      expect(withVersion).toContain(versionId);
+      expect(withVersion).toContain('could not determine its URL');
+      expect(withVersion).toContain('CLOUDFLARE_WORKERS_SUBDOMAIN');
+      expect(withVersion).toContain('"my-team.fed" for FedRAMP High');
+      expect(withVersion).not.toContain('did not report');
+      // The non-atomic retry stages the next version on workers.dev, which
+      // trigger synchronization never turned on.
+      if (reason === 'bootstrap-output-invalid') {
+        expect(withVersion).toContain('enable workers.dev for this Worker');
+        expect(withVersion).toContain(
+          'in the Cloudflare dashboard. Then set CLOUDFLARE_WORKERS_SUBDOMAIN',
+        );
+      } else {
+        expect(withVersion).not.toContain('enable workers.dev');
+      }
+      expect(formatCloudflareActivationError({ ok: false, reason })).toContain(
+        'did not report its version id',
+      );
+    },
+  );
+
+  /** A project whose root and upload configs are separate files. */
+  function lookupProject(rootRegion: string | undefined) {
+    const root = makeProject({
+      'wrangler.jsonc': JSON.stringify({
+        name: 'site',
+        account_id: 'account-a',
+        compatibility_date: '2026-02-24',
+        ...(rootRegion ? { compliance_region: rootRegion } : {}),
+      }),
+      'dist/ssr/wrangler.json': JSON.stringify({ name: 'site', account_id: 'account-a' }),
+    });
+    return {
+      root,
+      rootConfigPath: join(root, 'wrangler.jsonc'),
+      uploadConfigPath: join(root, 'dist/ssr/wrangler.json'),
+    };
+  }
+
+  function lookupOptions(
+    project: ReturnType<typeof lookupProject>,
+    complianceRegion: 'public' | 'fedramp_high' | undefined,
+    runWrangler: DeployWranglerRun,
+  ) {
+    return cloudflareCandidateActivationOptions({
+      ...project,
+      accountId: 'account-a',
+      apiBaseUrl: 'https://api.example.test/client/v4',
+      readinessAccessOrigin: undefined,
+      complianceRegion,
+      workerName: 'site',
+      workersDevSubdomain: undefined,
+      runWrangler,
+      readExistingWorker: undefined,
+      existingWorker: null,
+      pinnedHandoffLink: null,
+      initialCloudflareCandidate: null,
+      assertUploaderStillPinned: () => true,
+      approvedKv: [],
+      queueConsumerCleanup: [],
+    });
+  }
+
+  // The root config names the other region: project code can edit it after
+  // the API base and the region are pinned.
+  it.each([
+    { region: 'public', rootRegion: 'fedramp_high', subdomain: 'team' },
+    { region: 'fedramp_high', rootRegion: undefined, subdomain: 'team.fed' },
+  ] as const)(
+    'wires the workers.dev lookup to the pinned session and region ($subdomain)',
+    async ({ region, rootRegion, subdomain }) => {
+      vi.stubEnv('CLOUDFLARE_COMPLIANCE_REGION', undefined);
+      const project = lookupProject(rootRegion);
+      const operations: Array<CloudflareOperation> = [];
+      const runWrangler: DeployWranglerRun = (operation, options) => {
+        operations.push(operation);
+        expect(options).toEqual({ capture: true });
+        return { ...cleanExit, data: { subdomain: 'team' } };
+      };
+      const options = lookupOptions(project, region, runWrangler);
+      await expect(options.resolveWorkersDevSubdomain?.()).resolves.toEqual({
+        ok: true,
+        subdomain,
+      });
+      expect(operations).toEqual([
+        { type: 'workers.subdomain.get', configPath: project.uploadConfigPath },
+      ]);
+    },
+  );
+
+  it('does not look up the account subdomain when the pinned region did not resolve', async () => {
+    vi.stubEnv('CLOUDFLARE_COMPLIANCE_REGION', undefined);
+    const project = lookupProject('fedramp_high');
+    const runWrangler = vi.fn<DeployWranglerRun>(() => ({
+      ...cleanExit,
+      data: { type: 'api_token', token: 'synthetic-token' },
+    }));
+    const fetcher = vi.fn(async () =>
+      Response.json({ success: true, result: { subdomain: 'team' } }),
+    );
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      const options = lookupOptions(project, undefined, runWrangler);
+      await expect(options.resolveWorkersDevSubdomain?.()).resolves.toEqual({
+        ok: false,
+        reason: 'unavailable',
+      });
+      expect(runWrangler).not.toHaveBeenCalled();
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
   it('suggests explicit atomic publication for a Durable Object staging conflict', () => {
     const message = formatCloudflareActivationError({
@@ -1037,6 +1159,47 @@ describe('existing Cloudflare site handoff', () => {
     expect(existsSync(join(root, '.void/cloudflare-candidate.json'))).toBe(true);
     await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(existsSync(join(root, '.void/cloudflare-candidate.json'))).toBe(false);
+  });
+
+  it('keeps the compliance region that was pinned before the build ran project code', async () => {
+    vi.stubEnv('CLOUDFLARE_API_BASE_URL', undefined);
+    vi.stubEnv('CF_API_BASE_URL', undefined);
+    vi.stubEnv('CLOUDFLARE_COMPLIANCE_REGION', undefined);
+    const root = site();
+    const configPath = join(root, 'wrangler.jsonc');
+    writeFileSync(
+      configPath,
+      JSON.stringify({ ...parseRootWranglerConfig(configPath), compliance_region: 'fedramp_high' }),
+    );
+    const lookups: Array<unknown> = [];
+    const { deps } = harness({
+      runBuild: () => {
+        build(root);
+        // Project build code removes the region from the root config.
+        const { compliance_region: _region, ...config } = parseRootWranglerConfig(configPath);
+        writeFileSync(configPath, JSON.stringify(config));
+      },
+      activateVersion: async (options) => {
+        lookups.push(await options.resolveWorkersDevSubdomain?.());
+        return {
+          ok: true,
+          versionId: '22222222-2222-4222-8222-222222222222',
+          previousVersionId: null,
+          previewUrl: 'https://site.team.fed.workers.dev',
+        };
+      },
+    });
+    const runWrangler = deps.runWrangler!;
+    deps.runWrangler = (operation, options) =>
+      operation.type === 'workers.subdomain.get'
+        ? { ...cleanExit, data: { subdomain: 'team' } }
+        : runWrangler(operation, options);
+    try {
+      await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(lookups).toEqual([{ ok: true, subdomain: 'team.fed' }]);
   });
 
   it('allows an explicit atomic deploy after the Durable Object migration preflight', async () => {

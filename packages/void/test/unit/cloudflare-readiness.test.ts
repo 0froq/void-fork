@@ -1,8 +1,9 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vite-plus/test';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
+  readCloudflareWorkersDevSubdomain,
   rememberCloudflareWorkersDevSubdomain,
   resolveCloudflareReadinessAccessOrigin,
   resolveCloudflareWorkersDevSubdomain,
@@ -136,5 +137,71 @@ describe('Cloudflare readiness Access origin', () => {
         later,
       ),
     ).toEqual({ readinessAccessOrigin: 'https://app.example.com' });
+  });
+});
+
+describe('Cloudflare account subdomain lookup', () => {
+  const cleanExit = { status: 0, stdout: '', stderr: '' };
+  function lookup(
+    overrides: Partial<Parameters<typeof readCloudflareWorkersDevSubdomain>[0]> = {},
+  ) {
+    return readCloudflareWorkersDevSubdomain({
+      configPath: 'dist/wrangler.json',
+      complianceRegion: 'public',
+      runWrangler: async () => ({ ...cleanExit, data: { subdomain: 'team' } }),
+      verifyUploader: () => true,
+      ...overrides,
+    });
+  }
+
+  it('reads and normalizes the subdomain through the pinned authenticated transport', async () => {
+    const runWrangler = vi.fn(async () => ({ ...cleanExit, data: { subdomain: 'My-Team' } }));
+    await expect(lookup({ runWrangler })).resolves.toEqual({ ok: true, subdomain: 'my-team' });
+    expect(runWrangler).toHaveBeenCalledExactlyOnceWith(
+      { type: 'workers.subdomain.get', configPath: 'dist/wrangler.json' },
+      { capture: true },
+    );
+  });
+
+  it('adds the FedRAMP High suffix to the account subdomain, as Wrangler does', async () => {
+    await expect(lookup({ complianceRegion: 'fedramp_high' })).resolves.toEqual({
+      ok: true,
+      subdomain: 'team.fed',
+    });
+  });
+
+  it('reports an uploader change without calling the transport', async () => {
+    const runWrangler = vi.fn();
+    await expect(lookup({ runWrangler, verifyUploader: () => false })).resolves.toEqual({
+      ok: false,
+      reason: 'uploader-changed',
+    });
+    expect(runWrangler).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { ...cleanExit, status: 1, data: { subdomain: 'team' } },
+    { ...cleanExit, signal: 'SIGTERM' as const, data: { subdomain: 'team' } },
+    { ...cleanExit, error: 'spawn failed', data: { subdomain: 'team' } },
+    cleanExit,
+    { ...cleanExit, data: null },
+    { ...cleanExit, data: { subdomain: '' } },
+    { ...cleanExit, data: { subdomain: 42 } },
+    { ...cleanExit, data: { subdomain: 'not a subdomain' } },
+  ])('rejects an unsuccessful or invalid transport result: %j', async (result) => {
+    await expect(lookup({ runWrangler: async () => result })).resolves.toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
+  });
+
+  it('reports a thrown transport failure as unavailable', async () => {
+    await expect(
+      lookup({
+        runWrangler: async () => {
+          throw new Error('fetch failed');
+        },
+      }),
+    ).resolves.toEqual({ ok: false, reason: 'unavailable' });
   });
 });

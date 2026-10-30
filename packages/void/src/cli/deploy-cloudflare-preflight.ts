@@ -65,6 +65,7 @@ import { getErrorMessage } from './output.ts';
 import {
   checkCloudflareProvisionDrift,
   provisionCloudflareResources,
+  type ComplianceRegion,
   type ProvisionDriftEntry,
 } from './provision.ts';
 import { sameMigrationsDir, writeProvisionedWranglerConfig } from './wrangler.ts';
@@ -196,6 +197,7 @@ export async function preflightCloudflareWorker(input: {
   readonly source: CloudflareDeploySource;
 }): Promise<{
   apiBaseUrl: string;
+  complianceRegion: ComplianceRegion | undefined;
   usesCf: boolean;
   cfUploaderIsPinned: () => boolean;
   assertUploaderStillPinned: () => boolean;
@@ -264,6 +266,7 @@ export async function preflightCloudflareWorker(input: {
   }
   const {
     apiBaseUrl,
+    complianceRegion,
     usesCf,
     cfUploaderIsPinned,
     assertUploaderStillPinned,
@@ -672,6 +675,7 @@ export async function preflightCloudflareWorker(input: {
   );
   return {
     apiBaseUrl,
+    complianceRegion,
     usesCf,
     cfUploaderIsPinned,
     assertUploaderStillPinned,

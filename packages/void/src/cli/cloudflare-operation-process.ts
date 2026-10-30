@@ -696,6 +696,17 @@ async function readAllQueues(): Promise<Array<Json>> {
 
 async function resources(): Promise<Result> {
   switch (operation.type) {
+    case 'workers.subdomain.get': {
+      const body = await cloudflareApiGet(
+        `/accounts/${encodeURIComponent(accountId())}/workers/subdomain`,
+        'Cloudflare did not return the account workers.dev subdomain.',
+      );
+      const { subdomain } = object(body.result);
+      if (typeof subdomain !== 'string' || !subdomain.trim()) {
+        throw new Error('Cloudflare returned an invalid account workers.dev subdomain.');
+      }
+      return result(0, '', '', { subdomain });
+    }
     case 'd1.execute': {
       const database = d1Database(operation.database);
       // One argv item, so cf cannot read SQL that starts with "-" (such as a comment) as a flag.

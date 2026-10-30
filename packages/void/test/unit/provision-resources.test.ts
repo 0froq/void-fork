@@ -13,6 +13,7 @@ import {
   provisionCloudflareResources as provisionCloudflareResourcesImpl,
   provisionEnv,
   resolvePinnedApiBaseUrl,
+  resolveWorkersDevComplianceRegion,
   WranglerQuarantineError,
   type DesiredResourceSet,
   type RunWrangler,
@@ -3229,6 +3230,38 @@ describe('provisionCloudflareResources — wrangler-exact base resolution order'
     expect(() =>
       resolvePinnedApiBaseUrl({ CLOUDFLARE_API_BASE_URL: 'https://direct.example' }, 'bogus'),
     ).toThrow(/one of "public" or "fedramp_high"/);
+  });
+
+  it('resolves the workers.dev region from the same inputs as the API base', () => {
+    expect(resolveWorkersDevComplianceRegion({})).toBe('public');
+    expect(resolveWorkersDevComplianceRegion({}, 'fedramp_high')).toBe('fedramp_high');
+    expect(
+      resolveWorkersDevComplianceRegion({ CLOUDFLARE_COMPLIANCE_REGION: 'fedramp_high' }),
+    ).toBe('fedramp_high');
+    // A direct base does not name the workers.dev host, so the region still counts.
+    expect(
+      resolveWorkersDevComplianceRegion({
+        CLOUDFLARE_API_BASE_URL: 'https://api.fed.cloudflare.com/client/v4',
+        CLOUDFLARE_COMPLIANCE_REGION: 'fedramp_high',
+      }),
+    ).toBe('fedramp_high');
+  });
+
+  it('returns no workers.dev region for a direct base with conflicting or invalid regions', () => {
+    // The deploy accepts this input (see the direct-base test above), but Wrangler refuses to
+    // name a workers.dev host for it. The lookup then reports no URL instead of guessing.
+    const env = {
+      CLOUDFLARE_API_BASE_URL: 'https://direct.example',
+      CLOUDFLARE_COMPLIANCE_REGION: 'public',
+    };
+    expect(resolvePinnedApiBaseUrl(env, 'fedramp_high')).toBe('https://direct.example');
+    expect(resolveWorkersDevComplianceRegion(env, 'fedramp_high')).toBeUndefined();
+    expect(
+      resolveWorkersDevComplianceRegion({
+        CLOUDFLARE_API_BASE_URL: 'https://direct.example',
+        CLOUDFLARE_COMPLIANCE_REGION: 'fedramp',
+      }),
+    ).toBeUndefined();
   });
 });
 

@@ -314,6 +314,31 @@ export function resolvePinnedApiBaseUrl(
   return `https://api${fed}${staging}.cloudflare.com/client/v4`;
 }
 
+/**
+ * The compliance region that names the workers.dev host, resolved like wrangler's
+ * `getComplianceRegionSubdomain`. It reads the same inputs as {@link resolvePinnedApiBaseUrl},
+ * but a direct API base does not skip the region checks, because the base does not name the
+ * workers.dev host. Returns undefined for an invalid or conflicting region, so that a caller
+ * does not guess a host. Without a direct base, the API base resolution fails first.
+ */
+export function resolveWorkersDevComplianceRegion(
+  env: NodeJS.ProcessEnv = process.env,
+  configComplianceRegion?: string,
+): ComplianceRegion | undefined {
+  try {
+    const configRegion =
+      configComplianceRegion !== undefined
+        ? assertComplianceChoice(
+            configComplianceRegion,
+            'the Cloudflare config "compliance_region"',
+          )
+        : undefined;
+    return resolveComplianceRegion(env, configRegion);
+  } catch {
+    return undefined;
+  }
+}
+
 /** `WRANGLER_API_ENVIRONMENT` like wrangler: absent means production; other values fail. */
 function resolveApiEnvironment(env: NodeJS.ProcessEnv): 'production' | 'staging' {
   const raw = env.WRANGLER_API_ENVIRONMENT;
@@ -332,7 +357,7 @@ function resolveApiEnvironment(env: NodeJS.ProcessEnv): 'production' | 'staging'
 
 /** Compliance-region values wrangler accepts. */
 const COMPLIANCE_REGIONS = ['public', 'fedramp_high'] as const;
-type ComplianceRegion = (typeof COMPLIANCE_REGIONS)[number];
+export type ComplianceRegion = (typeof COMPLIANCE_REGIONS)[number];
 
 function assertComplianceChoice(value: string, source: string): ComplianceRegion {
   if (value !== 'public' && value !== 'fedramp_high') {
