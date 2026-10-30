@@ -39,6 +39,11 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
   const pagesClientOptimizeEntries = [
     pagesOptimizeEntries,
     `!${pagesDirRelative}/**/*.server.{js,jsx,ts,tsx}`,
+    // Island pages render only on the server. Island components in the pages
+    // directory (`_Counter.tsx`) still match the first pattern.
+    `!${pagesDirRelative}/**/*.island.{js,jsx,ts,tsx}`,
+    // Setting entries turns off Vite's default `__tests__` ignore, so keep it.
+    `!${pagesDirRelative}/**/__tests__/**`,
   ];
   return createPagesPlugin(pagesDir, {
     name: 'void-react:pages',
@@ -72,9 +77,10 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
             entries: pagesClientOptimizeEntries,
             // Pre-include React entries that are discovered late via dynamic
             // imports during SPA navigation, avoiding a full-page reload
-            // from Vite's dep optimizer. void/pages-prefetch is imported only
-            // from the virtual client entry, so the scanner cannot see it.
-            include: [...CLIENT_OPTIMIZE_DEPS, 'void/pages-prefetch'],
+            // from Vite's dep optimizer. void/pages-client and
+            // void/pages-prefetch are reached only through virtual entries and
+            // the excluded @void/react, so the scanner cannot see them.
+            include: [...CLIENT_OPTIMIZE_DEPS, 'void/pages-client', 'void/pages-prefetch'],
           },
           ssr: {
             optimizeDeps: {

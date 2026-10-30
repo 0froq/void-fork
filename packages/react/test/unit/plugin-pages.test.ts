@@ -202,7 +202,7 @@ describe('pagesPlugin dev config', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
-  it('pre-optimizes React dependencies in the Cloudflare worker environment', async () => {
+  it('pre-optimizes page dependencies in the client and Cloudflare worker environments', async () => {
     const config = await loadServeConfig();
 
     expect(config).toMatchObject({
@@ -210,8 +210,10 @@ describe('pagesPlugin dev config', () => {
         entries: [
           'pages/**/*.{js,jsx,ts,tsx}',
           '!pages/**/*.server.{js,jsx,ts,tsx}',
+          '!pages/**/*.island.{js,jsx,ts,tsx}',
+          '!pages/**/__tests__/**',
         ],
-        include: expect.arrayContaining(['void/pages-prefetch']),
+        include: expect.arrayContaining(['void/pages-client', 'void/pages-prefetch']),
       },
       environments: {
         void_worker: {
