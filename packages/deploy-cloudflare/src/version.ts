@@ -120,6 +120,11 @@ export type CloudflareVersionActivation =
       activeVersionId?: string | null;
       /** Whether Void restored the active version's immutable trigger snapshot. */
       triggerRepair?: 'succeeded' | 'failed' | 'unavailable';
+      /**
+       * Access denied a readiness probe to this custom-route origin. The probe carried no Access
+       * credentials because `readinessHeadersOrigin` did not name the origin.
+       */
+      customRouteReadinessOrigin?: string;
     };
 
 type ProductionDeployment = Readonly<{
@@ -795,6 +800,12 @@ export type CloudflareVersionActivationOptions = {
    * Wrangler cannot report a preview URL. Cached/project-controlled values must not be used here.
    */
   readinessHeadersWorkersDevSubdomain?: string;
+  /**
+   * Operator-provided HTTPS origin that may receive readiness credentials when the probe uses a
+   * configured custom route. A route hostname is not guaranteed to reach this Worker, so only an
+   * exact origin match receives them. Project-controlled values must not be used here.
+   */
+  readinessHeadersOrigin?: string;
   message: string;
   /** Direct empty-domain publisher for the Wrangler reconciliation gap. */
   publishEmptyCustomDomains?: () => Promise<CloudflareCommandResult>;
@@ -1343,12 +1354,18 @@ async function activateCloudflareVersionWithSecretsFile(
     stagedVersionOverride = true;
   }
 
+  const trustedReadinessOrigin = normalizeReadinessAccessOrigin(options.readinessHeadersOrigin);
+  // A route hostname is not guaranteed to reach this Worker. Send Access credentials to a custom
+  // route only when the operator named its exact origin.
+  const withholdsCustomRouteHeaders = (url: string) =>
+    readinessUsesCustomRoute && !isTrustedReadinessOrigin(url, trustedReadinessOrigin);
   const probe = (url: string) =>
     probeReadiness(
       `${url.replace(/\/$/, '')}/__void/ready`,
       options.workerName,
-      readinessUsesCustomRoute ? undefined : options.readinessHeaders,
+      withholdsCustomRouteHeaders(url) ? undefined : options.readinessHeaders,
       authenticatedWorkersDevSubdomain,
+      readinessUsesCustomRoute ? trustedReadinessOrigin : undefined,
       stagedVersionOverride ? versionId : undefined,
       options.fetch ?? globalThis.fetch,
       options.sleep ?? delay,
@@ -1401,6 +1418,9 @@ async function activateCloudflareVersionWithSecretsFile(
       reason: ready === 'access-denied' ? 'readiness-access-denied' : 'readiness-failed',
       versionId,
       previousVersionId: previous.versionId,
+      ...(ready === 'access-denied' && withholdsCustomRouteHeaders(readinessUrl)
+        ? customRouteReadinessOriginField(readinessUrl)
+        : {}),
       ...(stagedVersionOverride
         ? await restorePreviousVersion(options, previous.versionId, 'readiness failed', [
             stagedVersionPercentages(previous.versionId, versionId),
@@ -2129,12 +2149,21 @@ async function bootstrapFirstDeployment(
     desiredTriggerConfig.routes.some((route) => isRecord(route) && route.custom_domain === true);
   const customDomainBootstrap = !atomic && usesCustomDomain;
   const readinessTimeoutMs = customDomainBootstrap ? 300_000 : 60_000;
+  const previewSubdomain = extractWorkersDevSubdomain(previewUrl);
+  // Outside workers.dev, the probe reaches a configured custom route. Apply the same exact-origin
+  // opt-in as a staged custom-route probe.
+  const trustedReadinessOrigin = previewSubdomain
+    ? undefined
+    : normalizeReadinessAccessOrigin(options.readinessHeadersOrigin);
+  const withholdsCustomRouteHeaders =
+    !previewSubdomain && !isTrustedReadinessOrigin(previewUrl, trustedReadinessOrigin);
   options.onProgress?.('Waiting for the Worker to become ready...');
   const ready = await probeReadiness(
     `${previewUrl.replace(/\/$/, '')}/__void/ready`,
     options.workerName,
-    extractWorkersDevSubdomain(previewUrl) ? options.readinessHeaders : undefined,
-    extractWorkersDevSubdomain(previewUrl),
+    withholdsCustomRouteHeaders ? undefined : options.readinessHeaders,
+    previewSubdomain,
+    trustedReadinessOrigin,
     undefined,
     options.fetch ?? globalThis.fetch,
     options.sleep ?? delay,
@@ -2159,6 +2188,9 @@ async function bootstrapFirstDeployment(
       versionId,
       previousVersionId,
       rollback: 'unavailable',
+      ...(ready === 'access-denied' && withholdsCustomRouteHeaders
+        ? customRouteReadinessOriginField(previewUrl)
+        : {}),
       ...(ready === 'failed' && usesCustomDomain
         ? {
             diagnostic:
@@ -2434,6 +2466,7 @@ async function probeReadiness(
   workerName: string,
   readinessHeaders: Readonly<Record<string, string>> | undefined,
   authenticatedWorkersDevSubdomain: string | undefined,
+  trustedReadinessOrigin: string | undefined,
   versionOverride: string | undefined,
   fetcher: typeof globalThis.fetch,
   sleep: (milliseconds: number) => Promise<void>,
@@ -2446,6 +2479,7 @@ async function probeReadiness(
     workerName,
     readinessHeaders,
     authenticatedWorkersDevSubdomain,
+    trustedReadinessOrigin,
   );
   if (headers === null) {
     return 'failed';
@@ -2499,15 +2533,22 @@ async function probeReadiness(
   return 'failed';
 }
 
-/** Never forward Access headers to a hostname that cannot be this Worker. */
+/**
+ * Never forward Access headers to a hostname that cannot be this Worker, unless the operator
+ * named that exact origin.
+ */
 function guardedReadinessHeaders(
   url: string,
   workerName: string,
   headers: Readonly<Record<string, string>> | undefined,
   authenticatedWorkersDevSubdomain: string | undefined,
+  trustedReadinessOrigin: string | undefined,
 ): Readonly<Record<string, string>> | null {
   if (!headers || Object.keys(headers).length === 0) {
     return {};
+  }
+  if (isTrustedReadinessOrigin(url, trustedReadinessOrigin)) {
+    return headers;
   }
   try {
     const parsed = new URL(url);
@@ -2526,6 +2567,56 @@ function guardedReadinessHeaders(
     return headers;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Normalize an operator-selected readiness origin. Returns `undefined` unless the value is one
+ * exact `https:` origin without a wildcard, credentials, a path, a query, or a fragment. A probe
+ * URL never has a wildcard host, so a wildcard value could never match.
+ */
+export function normalizeReadinessAccessOrigin(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' &&
+      !url.hostname.includes('*') &&
+      !url.username &&
+      !url.password &&
+      url.pathname === '/' &&
+      !url.search &&
+      !url.hash
+      ? url.origin
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isTrustedReadinessOrigin(url: string, trustedOrigin: string | undefined): boolean {
+  if (trustedOrigin === undefined) {
+    return false;
+  }
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === 'https:' &&
+      !parsed.username &&
+      !parsed.password &&
+      parsed.origin === trustedOrigin
+    );
+  } catch {
+    return false;
+  }
+}
+
+function customRouteReadinessOriginField(url: string): { customRouteReadinessOrigin?: string } {
+  try {
+    return { customRouteReadinessOrigin: new URL(url).origin };
+  } catch {
+    return {};
   }
 }
 

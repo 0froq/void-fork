@@ -40,6 +40,7 @@ export {
   deployCloudflareVersionTraffic,
   encodeCloudflareVersionMessage,
   extractWorkersDevSubdomain,
+  normalizeReadinessAccessOrigin,
   normalizeWorkersDevSubdomain,
   parseCloudflareVersionMessage,
   readCloudflareTriggerConfig,

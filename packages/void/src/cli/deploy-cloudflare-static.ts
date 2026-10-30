@@ -265,6 +265,7 @@ export async function runCloudflareStaticDeploy(
     rootConfig: parseRootWranglerConfig(configPath),
     deps,
     persistAccount: !(options.reuseExistingWorker || initialCloudflareLink),
+    readinessAccessOrigin: options.readinessAccessOrigin,
   });
   if (!connection || !(await confirmCloudflareDeployAuthentication(connection, configPath))) {
     return exit(1);
@@ -276,6 +277,7 @@ export async function runCloudflareStaticDeploy(
     assertUploaderStillPinned,
     accountId,
     workersDevSubdomain,
+    readinessAccessOrigin,
     runWrangler,
   } = connection;
 
@@ -447,6 +449,7 @@ export async function runCloudflareStaticDeploy(
         apiBaseUrl,
         workerName,
         workersDevSubdomain,
+        readinessAccessOrigin,
         runWrangler,
         readExistingWorker: deps.readExistingWorker,
         existingWorker,

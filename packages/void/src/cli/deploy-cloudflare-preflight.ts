@@ -201,6 +201,7 @@ export async function preflightCloudflareWorker(input: {
   assertUploaderStillPinned: () => boolean;
   accountId: string;
   workersDevSubdomain: string | undefined;
+  readinessAccessOrigin: string | undefined;
   runWrangler: NonNullable<CloudflareDeployDeps['runWrangler']>;
   workerName: string;
   emailMap: EmailAddressMapInput | null;
@@ -256,6 +257,7 @@ export async function preflightCloudflareWorker(input: {
     rootConfig,
     deps,
     persistAccount: !(options.reuseExistingWorker || initialCloudflareLink),
+    readinessAccessOrigin: options.readinessAccessOrigin,
   });
   if (!connection) {
     return exit(1);
@@ -267,6 +269,7 @@ export async function preflightCloudflareWorker(input: {
     assertUploaderStillPinned,
     accountId,
     workersDevSubdomain,
+    readinessAccessOrigin,
     runWrangler,
   } = connection;
   rootConfig = connection.rootConfig;
@@ -674,6 +677,7 @@ export async function preflightCloudflareWorker(input: {
     assertUploaderStillPinned,
     accountId,
     workersDevSubdomain,
+    readinessAccessOrigin,
     runWrangler,
     workerName,
     emailMap,

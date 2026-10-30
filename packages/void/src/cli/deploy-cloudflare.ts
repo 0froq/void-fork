@@ -2,6 +2,7 @@ import { readConfig, isNodeTarget } from '../config.ts';
 import { detectFramework } from '../plugin-inference.ts';
 import { readCloudflareCandidate } from './cloudflare-candidate.ts';
 import { readCloudflareLink } from './cloudflare-link.ts';
+import { withRecordedReadinessAccessOrigin } from './cloudflare-readiness.ts';
 import {
   hasConfiguredVoidWorkerRoutingRules,
   removeDeployPointer,
@@ -33,6 +34,8 @@ export async function runCloudflareDeploy(
   cliLog: CliLogger,
   deps: CloudflareDeployDeps = {},
 ): Promise<void> {
+  // readConfig evaluates void.config.ts in this process. Record operator input before it runs.
+  options = withRecordedReadinessAccessOrigin(options);
   const initialCloudflareLink = readCloudflareLink(root);
   const initialCloudflareCandidate = readCloudflareCandidate(root);
   const exit = deps.exit ?? ((code: number): never => process.exit(code));

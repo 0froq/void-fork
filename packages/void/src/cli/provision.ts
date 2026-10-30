@@ -465,6 +465,7 @@ export function provisionEnv(ctx?: {
   scrub('CF_ACCESS_TOKEN');
   scrub('VOID_ACCESS_CREDENTIALS');
   scrub('VOID_ACCESS_ORIGIN');
+  scrub('CF_ACCESS_READINESS_ORIGIN');
   for (const name of TRANSPORT_REDIRECT_ENV_VARS) {
     scrub(name);
   }

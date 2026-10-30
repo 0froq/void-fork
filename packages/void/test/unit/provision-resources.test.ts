@@ -2121,12 +2121,14 @@ describe('provisionEnv — scrubbed and pinned keys', () => {
     vi.stubEnv('CF_ACCESS_CLIENT_ID', 'id');
     vi.stubEnv('CF_ACCESS_CLIENT_SECRET', 'secret');
     vi.stubEnv('CF_ACCESS_TOKEN', 'short-lived-user-jwt');
+    vi.stubEnv('CF_ACCESS_READINESS_ORIGIN', 'https://dashboard.example.com');
     const env = provisionEnv({ accountId: 'acct-X' });
     // CLOUDFLARE_ENV would let wrangler select an env-specific account block.
     expect(env.CLOUDFLARE_ENV).toBeUndefined();
     expect(env.CF_ACCESS_CLIENT_ID).toBeUndefined();
     expect(env.CF_ACCESS_CLIENT_SECRET).toBeUndefined();
     expect(env.CF_ACCESS_TOKEN).toBeUndefined();
+    expect(env.CF_ACCESS_READINESS_ORIGIN).toBeUndefined();
     expect(env.CLOUDFLARE_ACCOUNT_ID).toBe('acct-X');
   });
 

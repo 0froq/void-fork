@@ -8,6 +8,7 @@ import {
   deployCloudflareVersionTriggers,
   encodeCloudflareVersionMessage,
   extractWorkersDevSubdomain,
+  normalizeReadinessAccessOrigin,
   normalizeWorkersDevSubdomain,
   parseCloudflareVersionMessage,
   readCloudflareTriggerConfig,
@@ -3326,6 +3327,258 @@ describe('Cloudflare version activation', () => {
           'Cloudflare-Workers-Version-Overrides': `private-app="${NEXT}"`,
         },
       }),
+    );
+  });
+
+  describe('custom-route readiness Access origin', () => {
+    const accessHeaders = {
+      'CF-Access-Client-Id': 'service-id',
+      'CF-Access-Client-Secret': 'service-secret',
+    };
+    const routeTriggers = () =>
+      triggersWith({
+        workers_dev: false,
+        preview_urls: false,
+        routes: [{ pattern: 'app.example.com/*', zone_name: 'example.com' }],
+      });
+    const firstDeployRunner = () =>
+      runner({
+        status: { stdout: '', stderr: 'This Worker does not exist. [code: 10007]', status: 1 },
+        upload: { stdout: '', stderr: LOCAL_DURABLE_MIGRATION_ERROR, status: 1 },
+        bootstrap: ok(`Current Version ID: ${NEXT}`),
+      });
+    const probeCalls = (fetcher: { mock: { calls: Array<unknown> } }) =>
+      fetcher.mock.calls as unknown as Array<[string, RequestInit]>;
+
+    it.each([
+      ['https://App.Example.com/', 'https://app.example.com'],
+      ['https://app.example.com:443', 'https://app.example.com'],
+      ['https://app.example.com:8443', 'https://app.example.com:8443'],
+      ['https://*.example.com', undefined],
+      ['https://app*.example.com', undefined],
+      ['http://app.example.com', undefined],
+      ['https://app.example.com/path', undefined],
+      [undefined, undefined],
+    ])('normalizes the readiness Access origin %s to %s', (value, expected) => {
+      expect(normalizeReadinessAccessOrigin(value)).toBe(expected);
+    });
+
+    it('does not let the opt-in origin bypass the workers.dev guard', async () => {
+      const runWrangler = runner({ upload: ok(`Worker Version ID: ${NEXT}`) });
+      const fetcher = vi.fn(async () => Response.json({ ready: true }));
+
+      await expect(
+        activateCloudflareVersion({
+          runWrangler,
+          verifyUploader: () => true,
+          workerName: 'private-app',
+          workersDevSubdomain: 'cached',
+          readinessHeaders: accessHeaders,
+          readinessHeadersOrigin: 'https://private-app.cached.workers.dev',
+          readinessAttempts: 1,
+          message: encodeCloudflareVersionMessage(
+            [],
+            triggersWith({ workers_dev: true, preview_urls: false }),
+          ),
+          fetch: fetcher,
+        }),
+      ).resolves.toMatchObject({ ok: false, reason: 'readiness-failed' });
+      expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    it.each(['https://app.example.com', 'https://App.Example.com/'])(
+      'sends Access headers to a staged custom route whose origin is opted in (%s)',
+      async (origin) => {
+        const runWrangler = runner({ upload: ok(`Worker Version ID: ${NEXT}`) });
+        const fetcher = vi.fn(async () => Response.json({ ready: true }));
+
+        await expect(
+          activateCloudflareVersion({
+            runWrangler,
+            verifyUploader: () => true,
+            workerName: 'private-app',
+            readinessHeaders: accessHeaders,
+            readinessHeadersOrigin: origin,
+            message: encodeCloudflareVersionMessage([], routeTriggers()),
+            fetch: fetcher,
+          }),
+        ).resolves.toMatchObject({ ok: true, previewUrl: 'https://app.example.com' });
+        expect(fetcher).toHaveBeenCalledWith(
+          'https://app.example.com/__void/ready',
+          expect.objectContaining({
+            headers: {
+              'user-agent': 'void-deploy-readiness/1',
+              ...accessHeaders,
+              'Cloudflare-Workers-Version-Overrides': `private-app="${NEXT}"`,
+            },
+          }),
+        );
+      },
+    );
+
+    it.each([
+      ['no opt-in', undefined],
+      ['another origin', 'https://other.example.com'],
+      ['another port', 'https://app.example.com:8443'],
+      ['an http origin', 'http://app.example.com'],
+      ['a path', 'https://app.example.com/__void'],
+      ['a query', 'https://app.example.com/?token=1'],
+      ['credentials', 'https://user:pass@app.example.com'],
+      ['a bare hostname', 'app.example.com'],
+    ])(
+      'withholds Access headers from a staged custom route with %s and reports its origin',
+      async (_case, origin) => {
+        const runWrangler = runner({ upload: ok(`Worker Version ID: ${NEXT}`) });
+        const fetcher = vi.fn(async () => new Response('error code: 1050', { status: 403 }));
+
+        const result = await activateCloudflareVersion({
+          runWrangler,
+          verifyUploader: () => true,
+          workerName: 'private-app',
+          readinessHeaders: { 'CF-Access-Client-Secret': 'must-not-leak' },
+          readinessHeadersOrigin: origin,
+          readinessAttempts: 1,
+          message: encodeCloudflareVersionMessage([], routeTriggers()),
+          fetch: fetcher,
+        });
+        expect(result).toMatchObject({
+          ok: false,
+          reason: 'readiness-access-denied',
+          rollback: 'succeeded',
+          customRouteReadinessOrigin: 'https://app.example.com',
+        });
+        expect(fetcher).toHaveBeenCalledTimes(1);
+        const [url, init] = probeCalls(fetcher)[0]!;
+        expect(url).toBe('https://app.example.com/__void/ready');
+        expect(init.headers).not.toHaveProperty('CF-Access-Client-Secret');
+      },
+    );
+
+    it('keeps the generic Access denial after credentials reach the opted-in origin', async () => {
+      const runWrangler = runner({ upload: ok(`Worker Version ID: ${NEXT}`) });
+      const fetcher = vi.fn(async () => new Response('error code: 1050', { status: 403 }));
+
+      const result = await activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'private-app',
+        readinessHeaders: accessHeaders,
+        readinessHeadersOrigin: 'https://app.example.com',
+        readinessAttempts: 1,
+        message: encodeCloudflareVersionMessage([], routeTriggers()),
+        fetch: fetcher,
+      });
+      expect(result).toMatchObject({ ok: false, reason: 'readiness-access-denied' });
+      expect(result).not.toHaveProperty('customRouteReadinessOrigin');
+      expect(probeCalls(fetcher)[0]![1].headers).toMatchObject(accessHeaders);
+    });
+
+    it('sends Access headers when a denied preview alias falls back to the opted-in custom route', async () => {
+      const alias = 'https://void-ready-abc-private-app.developer-platform-experience.workers.dev';
+      const runWrangler = runner({
+        upload: ok(`Worker Version ID: ${NEXT}\nVersion Preview Alias URL: ${alias}`),
+      });
+      const fetcher = vi.fn(async (input: string | URL | Request) =>
+        String(input).startsWith(alias)
+          ? new Response('error code: 1050', { status: 403 })
+          : Response.json({ ready: true }),
+      );
+
+      await expect(
+        activateCloudflareVersion({
+          runWrangler,
+          verifyUploader: () => true,
+          workerName: 'private-app',
+          readinessHeaders: accessHeaders,
+          readinessHeadersOrigin: 'https://app.example.com',
+          message: encodeCloudflareVersionMessage(
+            [],
+            triggersWith({
+              workers_dev: false,
+              preview_urls: true,
+              routes: [{ pattern: 'app.example.com', custom_domain: true }],
+            }),
+          ),
+          fetch: fetcher,
+          sleep: async () => {},
+        }),
+      ).resolves.toMatchObject({ ok: true, previewUrl: 'https://app.example.com' });
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(fetcher).toHaveBeenLastCalledWith(
+        'https://app.example.com/__void/ready',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            ...accessHeaders,
+            'Cloudflare-Workers-Version-Overrides': `private-app="${NEXT}"`,
+          }),
+        }),
+      );
+    });
+
+    it.each([false, true])(
+      'sends Access headers to a custom domain whose origin is opted in after bootstrap publication (atomic=%s)',
+      async (atomic) => {
+        const fetcher = vi.fn(async () => Response.json({ ready: true }));
+
+        await expect(
+          activateCloudflareVersion({
+            runWrangler: atomic
+              ? runner({ bootstrap: ok(`Current Version ID: ${NEXT}`) })
+              : firstDeployRunner(),
+            verifyUploader: () => true,
+            workerName: 'bootstrap-private',
+            atomic,
+            readinessHeaders: accessHeaders,
+            readinessHeadersOrigin: 'https://bootstrap.example.com',
+            message: encodeCloudflareVersionMessage(
+              [],
+              customDomainTriggers('bootstrap.example.com'),
+            ),
+            fetch: fetcher,
+          }),
+        ).resolves.toMatchObject({ ok: true, previewUrl: 'https://bootstrap.example.com' });
+        const [url, init] = probeCalls(fetcher)[0]!;
+        expect(url).toBe('https://bootstrap.example.com/__void/ready');
+        expect(init.headers).toMatchObject(accessHeaders);
+      },
+    );
+
+    it.each([
+      ['bootstrap', false, undefined],
+      ['bootstrap', false, 'https://other.example.com'],
+      ['bootstrap', false, 'http://bootstrap.example.com'],
+      ['atomic', true, undefined],
+      ['atomic', true, 'https://bootstrap.example.com/path'],
+    ])(
+      'withholds Access headers from a custom domain after %s publication (atomic=%s, opt-in %s) and reports its origin',
+      async (kind, atomic, origin) => {
+        const fetcher = vi.fn(async () => new Response('error code: 1050', { status: 403 }));
+
+        const result = await activateCloudflareVersion({
+          runWrangler: atomic
+            ? runner({ bootstrap: ok(`Current Version ID: ${NEXT}`) })
+            : firstDeployRunner(),
+          verifyUploader: () => true,
+          workerName: 'bootstrap-private',
+          atomic,
+          readinessHeaders: { 'CF-Access-Client-Secret': 'must-not-leak' },
+          readinessHeadersOrigin: origin,
+          readinessAttempts: 1,
+          message: encodeCloudflareVersionMessage(
+            [],
+            customDomainTriggers('bootstrap.example.com'),
+          ),
+          fetch: fetcher,
+        });
+        expect(result).toMatchObject({
+          ok: false,
+          reason: `${kind}-readiness-access-denied`,
+          customRouteReadinessOrigin: 'https://bootstrap.example.com',
+        });
+        const [url, init] = probeCalls(fetcher)[0]!;
+        expect(url).toBe('https://bootstrap.example.com/__void/ready');
+        expect(init.headers).not.toHaveProperty('CF-Access-Client-Secret');
+      },
     );
   });
 

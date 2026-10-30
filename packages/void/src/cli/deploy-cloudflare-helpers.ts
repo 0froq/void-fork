@@ -40,6 +40,7 @@ import {
 } from './cloudflare-operations.ts';
 import {
   rememberCloudflareWorkersDevSubdomain,
+  resolveCloudflareReadinessAccessOrigin,
   resolveCloudflareWorkersDevSubdomain,
 } from './cloudflare-readiness.ts';
 import {
@@ -139,6 +140,8 @@ type CloudflareDeployConnection = {
   assertUploaderStillPinned: () => boolean;
   accountId: string;
   workersDevSubdomain: string | undefined;
+  /** Validated operator origin that may receive readiness Access credentials. */
+  readinessAccessOrigin: string | undefined;
   runWrangler: DeployWranglerRun;
   /** The root config, read again after a first-run account choice. */
   rootConfig: Record<string, unknown>;
@@ -154,6 +157,8 @@ export async function connectCloudflareDeployAccount(options: {
   rootConfig: Record<string, unknown>;
   deps: CloudflareDeployDeps;
   persistAccount: boolean;
+  /** `CF_ACCESS_READINESS_ORIGIN` as recorded before project code ran. */
+  readinessAccessOrigin: string | null | undefined;
 }): Promise<CloudflareDeployConnection | null> {
   const { root, configPath, deps } = options;
   let { rootConfig } = options;
@@ -187,8 +192,13 @@ export async function connectCloudflareDeployAccount(options: {
     }
   }
   let workersDevSubdomain: string | undefined;
+  let readinessAccessOrigin: string | undefined;
   try {
     workersDevSubdomain = resolveCloudflareWorkersDevSubdomain(root, accountId);
+    // Reject an invalid opt-in before the build.
+    readinessAccessOrigin = resolveCloudflareReadinessAccessOrigin({
+      CF_ACCESS_READINESS_ORIGIN: options.readinessAccessOrigin ?? undefined,
+    });
   } catch (error) {
     log.error(getErrorMessage(error));
     return null;
@@ -198,6 +208,7 @@ export async function connectCloudflareDeployAccount(options: {
     apiBaseUrl,
     accountId,
     workersDevSubdomain,
+    readinessAccessOrigin,
     runWrangler: deps.runWrangler ?? createDeployWranglerRunner(root, accountId, apiBaseUrl),
     rootConfig,
   };
@@ -303,6 +314,8 @@ export function cloudflareCandidateActivationOptions(options: {
   apiBaseUrl: string;
   workerName: string;
   workersDevSubdomain: string | undefined;
+  /** Validated operator origin from the deploy connection. */
+  readinessAccessOrigin: string | undefined;
   runWrangler: DeployWranglerRun;
   readExistingWorker: CloudflareDeployDeps['readExistingWorker'];
   existingWorker: ExistingCloudflareWorker | null;
@@ -370,6 +383,7 @@ export function cloudflareCandidateActivationOptions(options: {
     readinessHeadersWorkersDevSubdomain: process.env.CLOUDFLARE_WORKERS_SUBDOMAIN?.trim()
       ? workersDevSubdomain
       : undefined,
+    readinessHeadersOrigin: options.readinessAccessOrigin,
     ...createCloudflareEmptyTriggerPublishers({
       accountId,
       apiBaseUrl: options.apiBaseUrl,
@@ -558,14 +572,26 @@ function formatCloudflareActivationFailure(
     case 'atomic-output-invalid':
       return 'deploy: Cloudflare published atomically but did not report a version id or URL. Inspect `void project status` immediately.';
     case 'atomic-readiness-failed':
-    case 'atomic-readiness-access-denied':
-      return `deploy: the atomic Worker deployment is live, but /__void/ready could not be verified. Inspect \`void project status\` and Worker logs immediately.${diagnostic}`;
+    case 'atomic-readiness-access-denied': {
+      const accessHint = result.customRouteReadinessOrigin
+        ? `\n\n${customRouteAccessHint(result.customRouteReadinessOrigin).join('\n')}`
+        : '';
+      return `deploy: the atomic Worker deployment is live, but /__void/ready could not be verified. Inspect \`void project status\` and Worker logs immediately.${diagnostic}${accessHint}`;
+    }
     case 'readiness-failed':
       return [
         'deploy: the uploaded Worker Version did not pass /__void/ready.',
         formatCloudflareReadinessRestoration(result),
       ].join('\n');
     case 'readiness-access-denied':
+      if (result.customRouteReadinessOrigin) {
+        return [
+          'deploy: Cloudflare Access blocked the uploaded Worker Version readiness probe.',
+          ...customRouteAccessHint(result.customRouteReadinessOrigin),
+          ATOMIC_ACCESS_ALTERNATIVE,
+          formatCloudflareReadinessRestoration(result),
+        ].join('\n');
+      }
       return [
         'deploy: Cloudflare Access blocked the uploaded Worker Version readiness probe.',
         'For CI, set CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET to an admitted service token.',
@@ -589,6 +615,15 @@ function formatCloudflareActivationFailure(
         ].join('\n') + diagnostic
       );
     case 'bootstrap-readiness-access-denied':
+      if (result.customRouteReadinessOrigin) {
+        return [
+          'deploy: Cloudflare Access blocked the first Worker deployment readiness probe.',
+          'Cloudflare requires the first deployment to be non-versioned, so the new Worker is already active behind Access.',
+          ...customRouteAccessHint(result.customRouteReadinessOrigin),
+          'Later deploys check readiness before traffic moves, so they need the same setting.',
+          ATOMIC_ACCESS_ALTERNATIVE,
+        ].join('\n');
+      }
       return [
         'deploy: Cloudflare Access blocked the first Worker deployment readiness probe.',
         'For CI, set CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET to an admitted service token;',
@@ -612,6 +647,18 @@ function formatCloudflareActivationFailure(
     }
   }
 }
+
+/** Explain why a custom-route readiness probe carried no Access credentials. */
+function customRouteAccessHint(origin: string): Array<string> {
+  return [
+    `Void did not send Access credentials to ${origin}. A route or Custom Domain receives them only when CF_ACCESS_READINESS_ORIGIN names its origin.`,
+    `If Access protects ${origin} and admits your credentials, set CF_ACCESS_READINESS_ORIGIN=${origin} with CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET, or CF_ACCESS_TOKEN. Then retry.`,
+    'Set it only if you control this hostname and it serves this Worker, because Void sends your Access credentials to it.',
+  ];
+}
+
+const ATOMIC_ACCESS_ALTERNATIVE =
+  'For a Worker with Durable Object migration history, `void deploy --platform cloudflare --atomic` publishes without the zero-traffic check. The new version receives traffic first, and the command still exits with an error because Void cannot verify readiness through Access.';
 
 function formatCloudflareReadinessRestoration(
   result: Exclude<CloudflareActivationResult, { ok: true }>,

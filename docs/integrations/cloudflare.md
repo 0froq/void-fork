@@ -133,13 +133,14 @@ Apps using email need `email.from` in `void.config.ts`. Void reviews the domain'
 
 Set these CI secrets and variables as needed:
 
-| Name                                             | When needed                                                                                                   |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN`                           | Required. Workers Scripts: Edit, read access to bound resources, and edit access to products Void provisions. |
-| `CLOUDFLARE_ACCOUNT_ID`                          | When the token can access several accounts.                                                                   |
-| `DATABASE_URL`                                   | PostgreSQL and MySQL provisioning and migrations.                                                             |
-| `CLOUDFLARE_WORKERS_SUBDOMAIN`                   | When the Worker has no version preview URL. Use `my-team` or `my-team.workers.dev`.                           |
-| `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | When Cloudflare Access protects the readiness URL.                                                            |
+| Name                                             | When needed                                                                                                              |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `CLOUDFLARE_API_TOKEN`                           | Required. Workers Scripts: Edit, read access to bound resources, and edit access to products Void provisions.            |
+| `CLOUDFLARE_ACCOUNT_ID`                          | When the token can access several accounts.                                                                              |
+| `DATABASE_URL`                                   | PostgreSQL and MySQL provisioning and migrations.                                                                        |
+| `CLOUDFLARE_WORKERS_SUBDOMAIN`                   | When the Worker has no version preview URL. Use `my-team` or `my-team.workers.dev`.                                      |
+| `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | When Cloudflare Access protects the readiness URL.                                                                       |
+| `CF_ACCESS_READINESS_ORIGIN`                     | When Access protects a route or Custom Domain and `workers_dev` is `false`. See [Cloudflare Access](#cloudflare-access). |
 
 For email, run `void email setup --platform cloudflare` locally, commit `void.lock.json`, and pass `--require-email` in CI. The token also needs Email Routing Edit and Email Sending Edit.
 
@@ -152,6 +153,14 @@ export CF_ACCESS_TOKEN="$(cloudflared access token --app=https://<worker>.<accou
 ```
 
 Void uses Access credentials for readiness checks without saving them. If checks are denied, the deployment fails. A first-deploy bootstrap can already be active behind Access when this happens.
+
+By default, Void sends Access credentials only to `workers.dev` URLs. If `workers_dev` is `false`, Void can check readiness through your first route or Custom Domain. To send the credentials there, set `CF_ACCESS_READINESS_ORIGIN` to that hostname's origin:
+
+```sh
+export CF_ACCESS_READINESS_ORIGIN="https://app.example.com"
+```
+
+Use one exact `https:` origin, without a wildcard or a path. Set the variable in the shell or CI environment that runs `void deploy`. Void ignores a value that `void.config.ts` sets, for example through a dotenv import. Set it only for a hostname that you control and that serves this Worker, because Void sends your Access credentials to it.
 
 ### Databases and secrets
 
