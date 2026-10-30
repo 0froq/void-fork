@@ -34,7 +34,12 @@ type PagesPluginOptions = {
 
 export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plugin {
   const root = options?.root ?? dirname(pagesDir);
-  const pagesOptimizeEntries = `${relative(root, pagesDir)}/**/*.{js,jsx,ts,tsx}`;
+  const pagesDirRelative = relative(root, pagesDir);
+  const pagesOptimizeEntries = `${pagesDirRelative}/**/*.{js,jsx,ts,tsx}`;
+  const pagesClientOptimizeEntries = [
+    pagesOptimizeEntries,
+    `!${pagesDirRelative}/**/*.server.{js,jsx,ts,tsx}`,
+  ];
   return createPagesPlugin(pagesDir, {
     name: 'void-react:pages',
     root,
@@ -62,10 +67,14 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
           },
           optimizeDeps: {
             exclude: ['@void/react'],
+            // Crawl page modules before the first client request so third-party
+            // imports are pre-bundled instead of triggering a full reload.
+            entries: pagesClientOptimizeEntries,
             // Pre-include React entries that are discovered late via dynamic
             // imports during SPA navigation, avoiding a full-page reload
-            // from Vite's dep optimizer.
-            include: CLIENT_OPTIMIZE_DEPS,
+            // from Vite's dep optimizer. void/pages-prefetch is imported only
+            // from the virtual client entry, so the scanner cannot see it.
+            include: [...CLIENT_OPTIMIZE_DEPS, 'void/pages-prefetch'],
           },
           ssr: {
             optimizeDeps: {

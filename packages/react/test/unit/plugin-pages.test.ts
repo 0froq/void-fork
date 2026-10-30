@@ -206,6 +206,13 @@ describe('pagesPlugin dev config', () => {
     const config = await loadServeConfig();
 
     expect(config).toMatchObject({
+      optimizeDeps: {
+        entries: [
+          'pages/**/*.{js,jsx,ts,tsx}',
+          '!pages/**/*.server.{js,jsx,ts,tsx}',
+        ],
+        include: expect.arrayContaining(['void/pages-prefetch']),
+      },
       environments: {
         void_worker: {
           optimizeDeps: {
