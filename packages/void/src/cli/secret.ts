@@ -205,7 +205,7 @@ async function readSecretValue(): Promise<string> {
 
   if (isCancel(result) || typeof result === 'symbol') {
     cancel('Secret command cancelled.');
-    process.exit(0);
+    process.exit(1);
   }
 
   const value = result ?? '';

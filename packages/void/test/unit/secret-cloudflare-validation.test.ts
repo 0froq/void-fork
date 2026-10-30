@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cancel, confirm, CANCEL_SYMBOL } from '@voidzero-dev/vite-plus-prompts';
+import { cancel, confirm, CANCEL_SYMBOL, password } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { number, string } from '../../src/runtime/env-helpers.ts';
 import { defineEnv } from '../../src/runtime/env-public.ts';
@@ -26,6 +26,7 @@ vi.mock('@voidzero-dev/vite-plus-prompts', async (importOriginal) => {
     ...original,
     confirm: vi.fn(),
     cancel: vi.fn(),
+    password: vi.fn(),
   };
 });
 
@@ -49,6 +50,7 @@ beforeEach(() => {
   cloudflare.resolve.mockClear();
   vi.mocked(confirm).mockReset();
   vi.mocked(cancel).mockReset();
+  vi.mocked(password).mockReset();
 });
 
 afterEach(() => {
@@ -116,5 +118,43 @@ describe('direct Cloudflare secret validation', () => {
     expect(cancel).toHaveBeenCalledWith('Secret sync cancelled.');
     expect(cloudflare.sync).not.toHaveBeenCalled();
     exit.mockRestore();
+  });
+
+  it('syncs without confirmation when --yes is set', async () => {
+    const root = project();
+    const dotenv = join(root, 'production.env');
+    writeFileSync(dotenv, 'API_TOKEN=secret\n');
+    defineEnv({ API_TOKEN: string() });
+
+    await runSecretCommand(root, { action: 'sync', file: dotenv, yes: true });
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(cloudflare.sync).toHaveBeenCalledOnce();
+  });
+
+  it('exits non-zero when the put password prompt is cancelled', async () => {
+    const root = project();
+    defineEnv({ API_TOKEN: string() });
+    vi.mocked(password).mockResolvedValueOnce(CANCEL_SYMBOL as never);
+    const tty = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
+    const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`process.exit:${code ?? 0}`);
+    }) as typeof process.exit);
+
+    try {
+      await expect(runSecretCommand(root, { action: 'put', name: 'API_TOKEN' })).rejects.toThrow(
+        'process.exit:1',
+      );
+    } finally {
+      exit.mockRestore();
+      if (tty) {
+        Object.defineProperty(process.stdin, 'isTTY', tty);
+      } else {
+        Reflect.deleteProperty(process.stdin, 'isTTY');
+      }
+    }
+    expect(cancel).toHaveBeenCalledWith('Secret command cancelled.');
+    expect(cloudflare.put).not.toHaveBeenCalled();
   });
 });
