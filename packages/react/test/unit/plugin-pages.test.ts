@@ -202,10 +202,15 @@ describe('pagesPlugin dev config', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
-  it('pre-optimizes React dependencies in the Cloudflare worker environment', async () => {
+  it('pre-optimizes page dependencies in the client and Cloudflare worker environments', async () => {
+    writePage('index.tsx', 'export default function Home() { return <h1>Home</h1>; }');
     const config = await loadServeConfig();
 
     expect(config).toMatchObject({
+      optimizeDeps: {
+        entries: ['pages/index.tsx'],
+        include: expect.arrayContaining(['void/pages-client', 'void/pages-prefetch']),
+      },
       environments: {
         void_worker: {
           optimizeDeps: {
@@ -221,6 +226,65 @@ describe('pagesPlugin dev config', () => {
         },
       },
     });
+  });
+
+  it('scans browser roots without promoting server-only helpers to client entries', async () => {
+    writePage('index.tsx', 'export default function Home() { return null; }');
+    writePage('index.server.ts', 'import "./_worker-helper";');
+    writePage('_worker-helper.ts', 'import "worker-only-package";');
+    writePage('layout.tsx', 'export default function Layout({ children }) { return children; }');
+    writePage(
+      'users/[id].dev.tsx',
+      'export const layout = "profile"; export default function User() { return null; }',
+    );
+    writePage('users/[id].prod.tsx', 'export default function User() { return null; }');
+    writePage('_layouts/profile.tsx', 'export default function Profile() { return null; }');
+    writePage('_layouts/unused.tsx', 'import "worker-only-package";');
+    writePage('static/layout.tsx', 'import "worker-only-package";');
+    writePage('static/index.island.tsx', 'export default function Static() { return null; }');
+    writePage('__tests__/page.test.tsx', 'import "test-only-package";');
+
+    const config = await loadServeConfig();
+    expect(config).toMatchObject({
+      optimizeDeps: {
+        entries: expect.arrayContaining([
+          'pages/index.tsx',
+          'pages/layout.tsx',
+          'pages/users/\\[id\\].dev.tsx',
+          'pages/_layouts/profile.tsx',
+        ]),
+      },
+    });
+    expect((config.optimizeDeps as { entries: Array<string> }).entries).toHaveLength(4);
+  });
+
+  it('scans hydrated components in island pages and layouts, including outside pages', async () => {
+    writePage(
+      'index.island.tsx',
+      `
+      import Counter from './_Counter' with { island: 'load' };
+      import './_worker-helper';
+      export default function Home() { return <Counter />; }
+    `,
+    );
+    writePage(
+      'layout.island.tsx',
+      `
+      import Header from '../components/Header.tsx' with { island: 'visible' };
+      export default function Layout({ children }) { return <><Header />{children}</>; }
+    `,
+    );
+    writePage('_Counter.tsx', 'export default function Counter() { return null; }');
+    writePage('../components/Header.tsx', 'export default function Header() { return null; }');
+    writePage('_worker-helper.ts', 'import "worker-only-package";');
+
+    const config = await loadServeConfig();
+    expect(config).toMatchObject({
+      optimizeDeps: {
+        entries: expect.arrayContaining(['pages/_Counter.tsx', 'components/Header.tsx']),
+      },
+    });
+    expect((config.optimizeDeps as { entries: Array<string> }).entries).toHaveLength(2);
   });
 
   it('includes only the React entry points needed by each environment', async () => {

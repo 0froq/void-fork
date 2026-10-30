@@ -9,6 +9,7 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -124,15 +125,41 @@ function copyBundle(source: string, destination: string): Record<string, { type:
   return modules;
 }
 
+function stagePackageContext(directory: string, projectRoot: string): void {
+  const root = resolve(projectRoot);
+  const manifest = join(root, 'package.json');
+  if (!existsSync(manifest)) {
+    return;
+  }
+  // cf reads package.json and resolves installed versions from its working directory.
+  // Keep both outside the Worker bundle and assets so they are never uploaded as files.
+  copyFileSync(manifest, join(directory, 'package.json'));
+  for (let parent = root; ; parent = dirname(parent)) {
+    const modules = join(parent, 'node_modules');
+    if (existsSync(modules)) {
+      symlinkSync(
+        modules,
+        join(directory, 'node_modules'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+      break;
+    }
+    if (parent === dirname(parent)) {
+      break;
+    }
+  }
+}
+
 /** Create a disposable cf Build Output tree from an existing Cloudflare Worker build. */
 export async function prepareCfBuildOutput(
   workerDirectory: string,
   accountId?: string,
   mode?: string,
+  projectRoot: string = workerDirectory,
 ): Promise<CfBuildOutput | null> {
   const source = resolve(workerDirectory);
   if (existsSync(getRootConfigPath(source))) {
-    return prepareNativeBuildOutput(source, accountId, mode);
+    return prepareNativeBuildOutput(source, accountId, mode, projectRoot);
   }
   if (!existsSync(join(source, 'wrangler.json'))) {
     throw new Error(
@@ -179,6 +206,7 @@ export async function prepareCfBuildOutput(
     await Promise.all(images.map((image) => image.dispose()));
   };
   try {
+    stagePackageContext(directory, projectRoot);
     const bundle = getWorkerBundleDir(directory);
     mkdirSync(bundle, { recursive: true });
     const modules = copyBundle(source, bundle);
@@ -245,6 +273,7 @@ async function prepareNativeBuildOutput(
   source: string,
   accountId?: string,
   mode?: string,
+  projectRoot: string = source,
 ): Promise<CfBuildOutput | null> {
   const built = await readBuildOutput(source);
   if (
@@ -260,6 +289,7 @@ async function prepareNativeBuildOutput(
     rmSync(directory, { recursive: true, force: true });
   };
   try {
+    stagePackageContext(directory, projectRoot);
     await writeRootConfig(
       directory,
       {
@@ -475,7 +505,7 @@ async function prepareBundledBuildOutput(options: {
       JSON.stringify({ ...options.config, main: 'index.js', assets: options.assets }),
       { mode: 0o600 },
     );
-    return await prepareCfBuildOutput(scratch, options.accountId);
+    return await prepareCfBuildOutput(scratch, options.accountId, undefined, options.projectRoot);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

@@ -64,6 +64,39 @@ function textValue(value: unknown, label: string): string {
   return value;
 }
 
+/** Match cf's package collection for uploads that preserve secrets through the JSON API. */
+async function readPackageDependencies(directory: string) {
+  try {
+    const pkg = object(JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')));
+    const declared = { ...object(pkg?.dependencies), ...object(pkg?.devDependencies) };
+    const { getInstalledPackageVersion } = await import('@cloudflare/workers-utils');
+    const dependencies: Array<{
+      name: string;
+      packageJsonVersion: string;
+      installedVersion: string;
+    }> = [];
+    for (const [name, packageJsonVersion] of Object.entries(declared)) {
+      if (dependencies.length >= 200) {
+        break;
+      }
+      if (
+        typeof packageJsonVersion !== 'string' ||
+        /^(workspace|catalog|file|link):/.test(packageJsonVersion)
+      ) {
+        continue;
+      }
+      const installedVersion = getInstalledPackageVersion(name, directory);
+      if (installedVersion) {
+        dependencies.push({ name, packageJsonVersion, installedVersion });
+      }
+    }
+    return dependencies.length ? dependencies : undefined;
+  } catch {
+    // As in cf, missing or unreadable package context must not reject an upload.
+    return undefined;
+  }
+}
+
 const moduleContentTypes: Record<string, string> = {
   esm: 'application/javascript+module',
   cjs: 'application/javascript',
@@ -1116,8 +1149,9 @@ export async function uploadPinnedCloudflareVersion(options: {
         'limits',
         'placement',
         'cache',
-        // Worker-level settings that version uploads cannot set. Observability is
-        // published separately during post-activation trigger synchronization.
+        // Worker-level settings that version uploads cannot set. Observability and
+        // Logpush are published separately during post-activation trigger
+        // synchronization; tail consumers are not applied.
         'logpush',
         'tailConsumers',
       ]).has(key),
@@ -1257,6 +1291,7 @@ export async function uploadPinnedCloudflareVersion(options: {
       modules,
       compatibility_date: config.compatibilityDate,
       compatibility_flags: config.compatibilityFlags,
+      package_dependencies: await readPackageDependencies(options.output.directory),
       bindings,
       ...(config.limits
         ? { limits: { cpu_ms: config.limits.cpuMs, subrequests: config.limits.subrequests } }

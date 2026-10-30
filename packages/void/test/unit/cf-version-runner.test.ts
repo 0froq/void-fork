@@ -341,12 +341,15 @@ it(
 // This exercises multiple fresh cf subprocesses. Windows CI has exceeded 30s
 // across those startups; bound each child and give the complete protocol a
 // separate Windows budget, including assertion and cleanup overhead.
-it(
-  'uploads an ordinary API-origin revision with genuine cf reads and UUID-pinned inheritance',
-  async () => {
+it.each([
+  { observability: { enabled: true, logs: { enabled: true }, traces: { enabled: true } } },
+  { logpush: false },
+  { logpush: true },
+])(
+  'uploads an API-origin revision and publishes its explicit Worker settings: %j',
+  async (settings) => {
     const current = '11111111-1111-4111-8111-111111111111';
     const next = '22222222-2222-4222-8222-222222222222';
-    const observability = { enabled: true, logs: { enabled: true }, traces: { enabled: true } };
     const triggerConfig = {
       workers_dev: true,
       preview_urls: true,
@@ -354,11 +357,11 @@ it(
       crons: [],
       queueConsumers: [],
       workflows: [],
-      observability,
+      ...settings,
     };
     const message = encodeCloudflareVersionMessage([], triggerConfig);
     const prepared = await output({
-      observability,
+      ...settings,
       secrets: { required: ['AUTH_SECRET'] },
       version_metadata: { binding: 'APP_VERSION' },
       send_email: [
@@ -531,7 +534,7 @@ it(
         {
           method: 'PATCH',
           path: '/client/v4/accounts/account-id/workers/scripts/void-test/script-settings',
-          body: { observability },
+          body: settings,
         },
       ]);
       expect(events.indexOf('activate')).toBeLessThan(events.indexOf('settings'));
@@ -717,6 +720,161 @@ async function output(config: Record<string, unknown> = {}, additionalAsset = fa
   return prepared!;
 }
 
+it.each([false, true])(
+  'uploads the same package versions as real cf when preserving secrets (atomic=%s)',
+  async (atomic) => {
+    const activeVersionId = '11111111-1111-4111-8111-111111111111';
+    const root = mkdtempSync(join(tmpdir(), 'void-cf-package-context-'));
+    roots.push(root);
+    const worker = join(root, 'dist/ssr');
+    const dependency = join(root, 'node_modules/example-framework');
+    mkdirSync(worker, { recursive: true });
+    mkdirSync(dependency, { recursive: true });
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({
+        name: 'example-app',
+        dependencies: {
+          'example-framework': '^1.2.0',
+          '@example/esm-framework': '^2.0.0',
+          'example-tool': '^3.0.0',
+          'missing-framework': '^4.0.0',
+          'local-workspace': 'workspace:*',
+          'local-catalog': 'catalog:',
+          'local-file': 'file:../source',
+          'local-link': 'link:../source',
+        },
+        devDependencies: { 'example-tool': '~3.2.0' },
+      }),
+    );
+    writeFileSync(
+      join(dependency, 'package.json'),
+      '{"name":"example-framework","version":"1.2.3","exports":"./index.cjs"}',
+    );
+    writeFileSync(join(dependency, 'index.cjs'), '');
+    for (const [name, pkg] of Object.entries({
+      '@example/esm-framework': { version: '2.0.1', exports: { '.': { import: './index.js' } } },
+      'example-tool': {
+        name: 'example-toolchain',
+        version: '8.0.0',
+        bundledVersions: { 'example-tool': '3.2.1' },
+      },
+      'local-workspace': { version: '1.0.0' },
+      'local-catalog': { version: '1.0.0' },
+      'local-file': { version: '1.0.0' },
+      'local-link': { version: '1.0.0' },
+    })) {
+      const path = join(root, 'node_modules', name);
+      mkdirSync(path, { recursive: true });
+      writeFileSync(join(path, 'package.json'), JSON.stringify({ name, ...pkg }));
+      writeFileSync(join(path, 'index.js'), '');
+    }
+    const extraPackages = atomic
+      ? Array.from({ length: 201 }, (_, index) => `example-extra-${index}`)
+      : [];
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    for (const name of extraPackages) {
+      pkg.dependencies[name] = '^1.0.0';
+      const path = join(root, 'node_modules', name);
+      mkdirSync(path, { recursive: true });
+      writeFileSync(join(path, 'package.json'), JSON.stringify({ name, version: '1.0.1' }));
+    }
+    writeFileSync(join(root, 'package.json'), JSON.stringify(pkg));
+    writeFileSync(join(worker, 'index.js'), 'export default { fetch: () => new Response("ok") };');
+    writeFileSync(
+      join(worker, 'wrangler.json'),
+      JSON.stringify({
+        name: 'void-test',
+        main: 'index.js',
+        compatibility_date: '2026-10-12',
+      }),
+    );
+    const prepared = await prepareCfBuildOutput(worker, 'account-id', undefined, root);
+    expect(prepared).not.toBeNull();
+    const uploads: Array<Record<string, unknown>> = [];
+    const server = createServer(async (request, response) => {
+      const chunks: Array<Buffer> = [];
+      for await (const chunk of request) {
+        chunks.push(Buffer.from(chunk));
+      }
+      let result: unknown = {};
+      const path = new URL(request.url!, 'http://localhost').pathname;
+      if (request.method === 'POST' && path.endsWith('/workers/scripts/void-test/versions')) {
+        const form = await new Request('http://localhost', {
+          method: 'POST',
+          headers: { 'content-type': request.headers['content-type']! },
+          body: Buffer.concat(chunks),
+        }).formData();
+        uploads.push(JSON.parse(String(form.get('metadata'))));
+        expect([...form.keys()]).not.toContain('package.json');
+        result = { id: '33333333-3333-4333-8333-333333333333', number: 1 };
+      } else if (
+        request.method === 'POST' &&
+        path.endsWith('/workers/workers/void-test/versions')
+      ) {
+        uploads.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        result = { id: '22222222-2222-4222-8222-222222222222', urls: [] };
+      } else if (path.endsWith(`/versions/${activeVersionId}`)) {
+        result = { id: activeVersionId, bindings: [{ name: 'AUTH_SECRET', type: 'secret_text' }] };
+      } else if (path.endsWith('/services/void-test')) {
+        result = {
+          default_environment: {
+            environment: 'production',
+            script: { id: 'void-test', last_deployed_from: 'wrangler' },
+          },
+        };
+      }
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ success: true, errors: [], messages: [], result }));
+    });
+    try {
+      const apiBaseUrl = await listen(server);
+      // The fake response need only acknowledge the upload, not cf's subsequent presentation.
+      const result = await pinnedCf(apiBaseUrl)(['workers', 'versions', 'create', '--prebuilt'], {
+        cwd: prepared!.directory,
+        capture: true,
+        timeoutMs: REAL_CF_TIMEOUT_MS,
+      });
+      expect(uploads, `${result.stdout}\n${result.stderr}`).toHaveLength(1);
+      expect(uploads[0].package_dependencies).toEqual([
+        { name: 'example-framework', packageJsonVersion: '^1.2.0', installedVersion: '1.2.3' },
+        { name: '@example/esm-framework', packageJsonVersion: '^2.0.0', installedVersion: '2.0.1' },
+        { name: 'example-tool', packageJsonVersion: '~3.2.0', installedVersion: '3.2.1' },
+        ...extraPackages
+          .slice(0, 197)
+          .map((name) => ({ name, packageJsonVersion: '^1.0.0', installedVersion: '1.0.1' })),
+      ]);
+      expect(
+        await createActiveSecretPinner({
+          output: prepared,
+          handoffPending: false,
+          requiredNames: [],
+        })!(activeVersionId, [{ name: 'AUTH_SECRET', type: 'secret_text' }]),
+      ).toBe(true);
+      await uploadPinnedCloudflareVersion({
+        output: prepared!,
+        accountId: 'account-id',
+        apiBaseUrl,
+        workerName: 'void-test',
+        token: 'synthetic-token',
+        atomic,
+        verifyUploader: () => true,
+      });
+      expect(uploads).toHaveLength(2);
+      expect(uploads[1].package_dependencies).toEqual(uploads[0].package_dependencies);
+      expect(uploads[1].bindings).toContainEqual({
+        name: 'AUTH_SECRET',
+        type: 'inherit',
+        version_id: activeVersionId,
+      });
+      expect(uploads[1].modules).toEqual([expect.objectContaining({ name: 'index.js' })]);
+    } finally {
+      await prepared!.dispose();
+    }
+  },
+  REAL_CF_TIMEOUT_MS,
+);
+
 async function verifyPinnedUpload(atomic: boolean): Promise<void> {
   const prepared = await output(
     {
@@ -888,6 +1046,7 @@ async function verifyPinnedUpload(atomic: boolean): Promise<void> {
     );
     expect(upload).toBeDefined();
     const body = JSON.parse(upload!.body);
+    expect(body.package_dependencies).toBeUndefined();
     expect(body.bindings).toEqual(
       expect.arrayContaining([
         { name: 'AUTH_SECRET', type: 'inherit', version_id: activeVersionId },

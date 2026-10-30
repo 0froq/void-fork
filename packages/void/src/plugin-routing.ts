@@ -31,7 +31,9 @@ import {
 import { resolveDistDir, resolveWorkerDirName } from './cli/build-output-dir.ts';
 import { lintRoutingPhases, mergeRoutingRules } from './cli/headers.ts';
 import { stampClientAssetCachePolicy } from './client-asset-manifest.ts';
+import { removeAuthTypesIfPresent, syncAuthTypesFile } from './codegen/auth-types.ts';
 import { findEnvFileForPaths } from './codegen/env-types.ts';
+import { syncAuthTypesInProjectTsconfig } from './codegen/project-tsconfig.ts';
 import { generateQueueTypes } from './codegen/queue-types.ts';
 import { generateRouteTypes } from './codegen/route-types.ts';
 import { writeFileIfChanged } from './codegen/write-if-changed.ts';
@@ -321,7 +323,13 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       'routes.d.ts',
       'queues.d.ts',
       ...(options.target ? ['app.ts', 'index.ts'] : ['entry.ts']),
-      ...(compileOptions.auth ? ['better-auth-db.ts', 'better-auth-schema.ts'] : []),
+      ...(compileOptions.auth
+        ? [
+            'better-auth-db.ts',
+            'better-auth-schema.ts',
+            ...(compileOptions.auth.authConfigPath ? ['auth.d.ts'] : []),
+          ]
+        : []),
     ];
     const parts: Array<string> = [];
     for (const file of files) {
@@ -358,6 +366,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
 
   async function writeAuthDatabaseFiles(): Promise<void> {
     if (!compileOptions.auth) {
+      if (removeAuthTypesIfPresent(outDir)) {
+        syncAuthTypesInProjectTsconfig(root);
+      }
       return;
     }
 
@@ -382,6 +393,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         drizzleAdapterPath,
       }),
     );
+
+    syncAuthTypesFile(compileOptions.auth.authConfigPath, outDir);
+    syncAuthTypesInProjectTsconfig(root);
   }
 
   let resolvedConfig: import('vite').ResolvedConfig | null = null;
@@ -487,6 +501,8 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     assetsDir: string,
     userHeaders: boolean,
   ): { headers: string | null; wranglerPath: string; wranglerText: string | null } | null {
+    // `routing.alwaysUseHttps` keeps the bypass: hashed files are only linked
+    // from pages the Worker has already moved to HTTPS.
     if (!scan || !resolvedConfig || compileOptions.managedDispatch) {
       return null;
     }
@@ -569,6 +585,11 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       join(outDir, 'entry.ts'),
       compileWorkerEntry({
         versionMetadataBinding: options.getVersionMetadataBinding?.(),
+        // Managed dispatch enforces HTTPS before the app Worker runs.
+        alwaysUseHttps:
+          options.routing?.alwaysUseHttps === true &&
+          resolvedConfig?.command === 'build' &&
+          !compileOptions.managedDispatch,
         hasQueues: scan!.queues.length > 0,
         remote,
         assetsDir: resolvedConfig?.build.assetsDir,

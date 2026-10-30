@@ -33,7 +33,10 @@ Use `prepareCfBuildOutput` to convert an existing Cloudflare Worker build into a
 ```ts
 import { prepareCfBuildOutput } from 'void/deploy';
 
-const prepared = await prepareCfBuildOutput('/path/to/app/dist/server', { mode: 'staging' });
+const prepared = await prepareCfBuildOutput('/path/to/app/dist/server', {
+  projectRoot: '/path/to/app',
+  mode: 'staging',
+});
 if (!prepared) {
   throw new Error('The Worker build could not be prepared.');
 }
@@ -47,9 +50,10 @@ try {
 
 Pass the Worker output directory that contains a generated `wrangler.json`, such as `dist/ssr`, `dist/rsc`, or `dist/server`. When Cloudflare's build tooling built the app, pass the project root that contains its native Build Output at `.cloudflare/output/v0` instead. Preparation copies modules and assets without changing that input. Native output keeps its module types, auxiliary Workers, Container declarations, and build metadata. Preparation does not provision resources, upload a Worker, or activate a deployment. Container images built from a local Dockerfile exist only in the Docker environment that built them, so publish from that environment.
 
-| Option      | Description                                                                                                                                          |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `accountId` | Cloudflare account the build must target. A different account in the build returns `null`. When omitted, the build's account is kept or left unset.  |
-| `mode`      | Vite build mode. Native output keeps the mode it was built with, and a different value returns `null`. For other output it defaults to `production`. |
+| Option        | Description                                                                                                                                          |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `accountId`   | Cloudflare account the build must target. A different account in the build returns `null`. When omitted, the build's account is kept or left unset.  |
+| `mode`        | Vite build mode. Native output keeps the mode it was built with, and a different value returns `null`. For other output it defaults to `production`. |
+| `projectRoot` | App directory containing `package.json` and its installed dependencies. Defaults to the input directory.                                             |
 
 The result contains `directory`, an optional `assetsDirectory` pointing to the input assets, and an asynchronous `dispose()` method. Always dispose the result after use. Unsupported build configuration returns `null`. A directory without a Worker build, a missing or invalid Worker module, or an asset symlink outside the asset directory throws an error.
