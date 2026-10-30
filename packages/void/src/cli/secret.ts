@@ -64,7 +64,7 @@ export async function runSecretCommand(root: string, args: SecretArgs): Promise<
     });
     if (isCancel(proceed) || !proceed) {
       cancel('Secret sync cancelled.');
-      process.exit(0);
+      process.exit(1);
     }
 
     await backend.sync(secrets);
