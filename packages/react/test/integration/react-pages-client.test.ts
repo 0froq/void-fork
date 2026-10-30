@@ -41,12 +41,31 @@ const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const REACT_PAGES_ROOT = join(ROOT, 'playground/react-pages');
 const REACT_PAGES_LAYOUT = join(REACT_PAGES_ROOT, 'pages/layout.tsx');
 const LATE_WORKER_DEPS_ROOT = join(REACT_PAGES_ROOT, 'node_modules/@void-repro');
+const OPTIMIZER_PROBE_FILES = {
+  '_optimizer-helper.ts': `import { value } from '@void-repro/worker-only';
+export const readWorkerValue = () => value;`,
+  '_optimizer-browser.ts': `export { value } from '@void-repro/browser-only';`,
+  'optimizer-probe/[id].tsx': `import { value } from '../_optimizer-browser';
+export default function Probe() { return <p>{value}</p>; }`,
+  'optimizer-probe/[id].server.ts': `import { defineHandler } from 'void/handler';
+import { readWorkerValue } from '../_optimizer-helper';
+export const loader = defineHandler(() => ({ value: readWorkerValue() }));`,
+  'optimizer-island.island.tsx': `import Probe from './_OptimizerIsland' with { island: 'load' };
+import { readWorkerValue } from './_optimizer-helper';
+export default function IslandPage() { return <><p>{readWorkerValue()}</p><Probe /></>; }`,
+  '_OptimizerIsland.tsx': `import { value } from '@void-repro/island-only';
+export default function Probe() { return <p>{value}</p>; }`,
+};
 let DEV_BASE: string;
 let PREVIEW_BASE: string;
 
 let browser: Browser;
 
-function writeLateWorkerDep(name: string, source: string) {
+function writeLateWorkerDep(
+  name: string,
+  source: string,
+  exports: string | Record<string, string> = './index.js',
+) {
   const packageDir = join(LATE_WORKER_DEPS_ROOT, name);
   mkdirSync(packageDir, { recursive: true });
   writeFileSync(
@@ -55,7 +74,7 @@ function writeLateWorkerDep(name: string, source: string) {
       name: `@void-repro/${name}`,
       version: '1.0.0',
       type: 'module',
-      exports: './index.js',
+      exports,
     }),
   );
   writeFileSync(join(packageDir, 'index.js'), source);
@@ -63,6 +82,16 @@ function writeLateWorkerDep(name: string, source: string) {
 
 function installLateWorkerDeps() {
   rmSync(LATE_WORKER_DEPS_ROOT, { recursive: true, force: true });
+  writeLateWorkerDep('worker-only', 'export const value = "Worker value";', {
+    workerd: './index.js',
+  });
+  writeLateWorkerDep('browser-only', 'export const value = "Browser value";');
+  writeLateWorkerDep('island-only', 'export const value = "Island value";');
+  for (const [file, source] of Object.entries(OPTIMIZER_PROBE_FILES)) {
+    const path = join(REACT_PAGES_ROOT, 'pages', file);
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, source);
+  }
   writeLateWorkerDep(
     'boundary',
     `import React from 'react';
@@ -740,6 +769,25 @@ describe('react-pages client (dev)', () => {
       await killChild(child);
     }
     rmSync(LATE_WORKER_DEPS_ROOT, { recursive: true, force: true });
+    for (const file of Object.keys(OPTIMIZER_PROBE_FILES)) {
+      rmSync(join(REACT_PAGES_ROOT, 'pages', file), { force: true });
+    }
+    rmSync(join(REACT_PAGES_ROOT, 'pages/optimizer-probe'), { recursive: true, force: true });
+  });
+
+  it('dev: prebundles browser roots without scanning server-only dependencies', async () => {
+    await vi.waitFor(() => {
+      const metadata = JSON.parse(
+        readFileSync(join(REACT_PAGES_ROOT, 'node_modules/.vite/deps/_metadata.json'), 'utf8'),
+      );
+      expect(metadata.optimized).toHaveProperty('@void-repro/browser-only');
+      expect(metadata.optimized).toHaveProperty('@void-repro/island-only');
+      expect(metadata.optimized).not.toHaveProperty('@void-repro/worker-only');
+    });
+    expect(stderr).not.toContain('Failed to run dependency scan');
+    const response = await fetch(`${DEV_BASE}/optimizer-probe/example`);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('Browser value');
   });
 
   it('dev: cold SSR startup does not hit invalid React hook calls', () => {
