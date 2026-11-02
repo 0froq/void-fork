@@ -23,7 +23,8 @@ Define custom response headers in [`void.config.ts`](../../reference/config) usi
 - **Pattern keys** start with `/`. `*` matches any characters including `/`.
 - **Header values** use `Name: value` format. The value may contain colons.
 - All matching rules are merged. When multiple rules set the same header name, the **last match wins**.
-- User-defined `Cache-Control` overrides the built-in default. The default still applies when no rule matches.
+- User-defined `Cache-Control` overrides the built-in default, including the default on static assets. The default still applies when no rule matches.
+- `Cache-Control` rules only apply to successful responses (`200`, `206`, `304`). Error responses such as `404` keep their original cache policy, so a missing file under a matched pattern is not cached. Other headers apply to every status.
 
 ## Scope
 
