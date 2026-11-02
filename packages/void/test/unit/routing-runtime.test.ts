@@ -199,9 +199,53 @@ describe('typed HTTP execution', () => {
     );
     const response = await app.fetch(new Request('https://app.test/a'));
     expect(response.status).toBe(404);
-    expect(response.headers.get('x-rule')).toBe('one');
+    // Both rules match `/a`; the last match wins and survives into the outer response.
+    expect(response.headers.get('x-rule')).toBe('two');
     expect(response.headers.get('X-Void-Routing')).toBe('fallback[/a] -> /b (unknown)');
     expect(response.headers.get('X-Void-No-Match')).toBe('1');
+  });
+  it('overrides a response header the asset already carries instead of merging it back', async () => {
+    const app = new Hono();
+    const runtime = createRoutingRuntime(app, { nodeTarget: true });
+    app.use(
+      runtime.headerMiddleware([
+        {
+          pattern: '/assets/*',
+          headers: [['Cache-Control', 'public, max-age=31536000, immutable']],
+        },
+      ]),
+    );
+    app.get(
+      '/assets/*',
+      () =>
+        new Response('asset', {
+          headers: { 'cache-control': 'public, max-age=0, must-revalidate' },
+        }),
+    );
+    const response = await app.fetch(new Request('https://app.test/assets/app.css'));
+    expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    const other = await app.fetch(new Request('https://app.test/assets/app.js'));
+    expect(other.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+  });
+  it('applies authored Cache-Control only to cacheable statuses', async () => {
+    const app = new Hono();
+    const runtime = createRoutingRuntime(app, { nodeTarget: true });
+    app.use(
+      runtime.headerMiddleware([
+        {
+          pattern: '/assets/*',
+          headers: [
+            ['Cache-Control', 'public, max-age=31536000, immutable'],
+            ['X-Robots-Tag', 'noindex'],
+          ],
+        },
+      ]),
+    );
+    app.get('/assets/*', () => new Response('missing', { status: 404 }));
+    const response = await app.fetch(new Request('https://app.test/assets/missing.css'));
+    expect(response.status).toBe(404);
+    expect(response.headers.get('cache-control')).toBeNull();
+    expect(response.headers.get('x-robots-tag')).toBe('noindex');
   });
 });
 

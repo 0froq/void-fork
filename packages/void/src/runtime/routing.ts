@@ -249,13 +249,23 @@ export function createRoutingRuntime(
       }
       const headers = new Headers(c.res.headers);
       for (const [name, value] of matched) {
+        // Authored Cache-Control follows the same status gate as the built-in
+        // asset policy so a matching 404 is not cached by the rule.
+        if (name.toLowerCase() === 'cache-control' && ![200, 206, 304].includes(c.res.status)) {
+          continue;
+        }
         headers.set(name, value);
       }
-      c.res = new Response(c.res.body, {
+      const response = new Response(c.res.body, {
         headers,
         status: c.res.status,
         statusText: c.res.statusText,
       });
+      // Hono's `set res` merges the previous response headers onto the new
+      // one, which would overwrite authored values the response already
+      // carries (e.g. an asset's Cache-Control). Clear it first.
+      c.res = undefined;
+      c.res = response;
     },
     applyFallback: (c, rules) =>
       fallbackHandled.has(c.req.raw) ? Promise.resolve(undefined) : applyRules(c, rules, true),
