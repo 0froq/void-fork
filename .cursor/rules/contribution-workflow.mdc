@@ -1,0 +1,16 @@
+---
+description: Contribution workflow for this void fork. Product invariants and verification stay in AGENTS.md.
+alwaysApply: true
+---
+
+# Contribution workflow
+
+This checkout is froQ's contribution fork. Upstream is `voidzero-dev/void`. The working remote is `0froq/void-fork`.
+
+Prefer small atomic pull requests on upstream, one upstream issue or pull request each. Open a pull request against `voidzero-dev/void` only when that is explicitly requested.
+
+Write upstream-facing text in English: pull request titles and bodies, commits, issues, and comments meant for upstream.
+
+froQ contributes as a void core contributor. Match that bar: verify the change, keep the diff small, and update docs only when public behavior changes.
+
+Product invariants and verification live in the root `AGENTS.md` and `packages/void/AGENTS.md`. Follow those files.
