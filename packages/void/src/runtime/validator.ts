@@ -1,3 +1,4 @@
+import { decodeFormData, FORM_DATA_HEADER } from '../shared/form-data.ts';
 import type { StandardSchemaV1 } from '../standard-schema.ts';
 import type { CloudContext } from './handler.ts';
 
@@ -81,13 +82,27 @@ export async function runValidation<V extends ValidatorSlots>(
   }
 
   if (validators.body) {
+    const contentType = c.req.header('content-type')?.split(';', 1)[0].trim().toLowerCase();
+    const isForm =
+      contentType === 'multipart/form-data' || contentType === 'application/x-www-form-urlencoded';
     let raw: unknown;
     try {
-      raw = await c.req.json();
+      if (isForm) {
+        const field = c.req.header(FORM_DATA_HEADER);
+        raw =
+          field === undefined
+            ? await c.req.parseBody({ all: true })
+            : decodeFormData(await c.req.formData(), field);
+      } else {
+        raw = await c.req.json();
+      }
     } catch {
       return {
         ok: false,
-        response: Response.json({ error: 'Invalid JSON body' }, { status: 400 }),
+        response: Response.json(
+          { error: isForm ? 'Invalid form body' : 'Invalid JSON body' },
+          { status: 400 },
+        ),
       };
     }
     const result = await validateSlot(validators.body, raw);

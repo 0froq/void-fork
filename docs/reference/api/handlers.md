@@ -40,6 +40,10 @@ Creates a handler with input validation using any [Standard Schema](https://gith
 
 Validated input is passed as the second argument to the handler.
 
+The `body` slot accepts JSON, `multipart/form-data`, and `application/x-www-form-urlencoded`. File uploads from Pages `useForm` and `action()` preserve nested objects, arrays, numbers, booleans, and `null`; uploaded files reach the schema as `File` values. Dates are ISO strings, as with JSON submissions.
+
+Native HTML forms and manually constructed `FormData` supply flat string or `File` fields. Repeated names become arrays; names ending in `[]` always produce arrays and retain the `[]` in the key. Bracketed names such as `profile[name]` remain literal keys. Use a schema that accepts these values or explicitly converts them.
+
 ```ts
 import * as v from 'valibot';
 import { defineHandler } from 'void';

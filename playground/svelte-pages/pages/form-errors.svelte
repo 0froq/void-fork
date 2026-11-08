@@ -1,6 +1,22 @@
 <script lang="ts">
-  import { Form, useForm } from '@void/svelte';
-  const form = useForm('/form-errors', { email: '', name: '', profile: { name: '' }, tags: [] });
+  import { action, Form, useForm } from '@void/svelte';
+  const form = useForm('/form-errors', {
+    email: '',
+    name: '',
+    profile: { name: '' },
+    tags: [],
+    photo: null,
+    quantity: 3,
+    published: false,
+    note: null,
+  });
+  let actionSuccess = $state(false);
+
+  function uploadAction() {
+    return action('/form-errors', { data: form.data }).then((result) => {
+      actionSuccess = result.ok;
+    });
+  }
 
   function setErrors() {
     form.setError('email', 'Email invalid');
@@ -23,6 +39,16 @@
 
 <Form {form}>
   <output data-testid="errors">{JSON.stringify(form.errors)}</output>
+  <output data-testid="success">{String(form.wasSuccessful)}</output>
+  <output data-testid="action-success">{String(actionSuccess)}</output>
+  <label>
+    Photo
+    <input
+      type="file"
+      onchange={(event) => (form.data.photo = event.currentTarget.files?.[0] ?? null)}
+    />
+  </label>
+  <button type="button" onclick={uploadAction}>Upload action</button>
   <label>Email<input value={form.data.email} oninput={editEmail} /></label>
   <label>Name<input bind:value={form.data.name} /></label>
   <label>Profile<input bind:value={form.data.profile.name} /></label>

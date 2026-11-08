@@ -58,12 +58,8 @@ export {
 } from './form-reset.ts';
 export { interpolateRouteParams };
 export { toUrlString };
-export {
-  createPageNavigationEngine,
-  hasFiles,
-  isFile,
-  objectToFormData,
-} from './navigation-engine.ts';
+export { hasFiles, isFile, objectToFormData } from '../shared/form-data.ts';
+export { createPageNavigationEngine } from './navigation-engine.ts';
 export type {
   PageNavigationEngine,
   PageNavigationResource,

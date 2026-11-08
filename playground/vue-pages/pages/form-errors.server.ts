@@ -8,5 +8,9 @@ export const action = defineHandler.withValidator({
     name: v.pipe(v.string(), v.minLength(1, 'Name is required')),
     profile: v.object({ name: v.string() }),
     tags: v.array(v.string()),
+    photo: v.optional(v.nullable(v.pipe(v.file(), v.maxSize(4, 'File is too large')))),
+    quantity: v.optional(v.literal(3)),
+    published: v.optional(v.literal(false)),
+    note: v.optional(v.null()),
   }),
 })(() => {});

@@ -18,6 +18,7 @@ import {
   createRoutingRuntime,
   type RoutingContext,
 } from '../../src/runtime/routing.ts';
+import { decodeFormData, FORM_DATA_HEADER } from '../../src/shared/form-data.ts';
 
 type DeferredTestWindow = Window & {
   __resolveDeferred(group: string, data: unknown): void;
@@ -1665,6 +1666,30 @@ describe('createVoidRouter', () => {
 
     expect(resolveDeferred).not.toHaveBeenCalled();
   });
+});
+
+it('submits an empty FileList as an empty array rather than a JSON object', async () => {
+  stubClientGlobals();
+  class EmptyFileList {
+    get length() {
+      return 0;
+    }
+  }
+  vi.stubGlobal('FileList', EmptyFileList);
+  let request: Request | undefined;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, options: RequestInit) => {
+      request = new Request('http://localhost/', options);
+      return pageJson({ component: 'home', props: {} });
+    }),
+  );
+  const { router } = await createTestRouter();
+  await router.visit('/', { method: 'POST', data: { photos: new EmptyFileList() } });
+  expect(request?.headers.get('content-type')).toContain('multipart/form-data');
+  expect(
+    decodeFormData(await request!.formData(), request!.headers.get(FORM_DATA_HEADER)!),
+  ).toEqual({ photos: [] });
 });
 
 describe('createVoidRouter other-origin visits', () => {

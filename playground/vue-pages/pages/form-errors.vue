@@ -1,6 +1,23 @@
 <script setup lang="ts">
-import { Form, useForm } from '@void/vue';
-const form = useForm('/form-errors', { email: '', name: '', profile: { name: '' }, tags: [] });
+import { action, Form, useForm } from '@void/vue';
+import { ref } from 'vue';
+const form = useForm('/form-errors', {
+  email: '',
+  name: '',
+  profile: { name: '' },
+  tags: [],
+  photo: null,
+  quantity: 3,
+  published: false,
+  note: null,
+});
+const actionSuccess = ref(false);
+
+function uploadAction() {
+  return action('/form-errors', { data: form.data }).then((result) => {
+    actionSuccess.value = result.ok;
+  });
+}
 
 function setErrors() {
   form.setError('email', 'Email invalid');
@@ -24,6 +41,16 @@ function editEmail(event: Event) {
 <template>
   <Form :form="form">
     <output data-testid="errors">{{ JSON.stringify(form.errors) }}</output>
+    <output data-testid="success">{{ String(form.wasSuccessful) }}</output>
+    <output data-testid="action-success">{{ String(actionSuccess) }}</output>
+    <label>
+      Photo
+      <input
+        type="file"
+        @change="form.data.photo = ($event.target as HTMLInputElement).files?.[0] ?? null"
+      />
+    </label>
+    <button type="button" @click="uploadAction">Upload action</button>
     <label>Email<input :value="form.data.email" @input="editEmail" /></label>
     <label>Name<input v-model="form.data.name" /></label>
     <label>Profile<input v-model="form.data.profile.name" /></label>

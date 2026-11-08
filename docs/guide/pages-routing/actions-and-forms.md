@@ -355,6 +355,7 @@ export default function Upload() {
     <Form form={form}>
       <input value={form.data.title} onChange={(e) => form.setData('title', e.target.value)} />
       <input type="file" onChange={(e) => form.setData('photo', e.target.files?.[0] ?? null)} />
+      <p>{form.errors.title || form.errors.photo}</p>
       <button disabled={form.pending}>Upload</button>
     </Form>
   );
@@ -378,21 +379,23 @@ function onFileChange() {
   <Form :form="form">
     <input v-model="form.data.title" />
     <input type="file" ref="fileInput" @change="onFileChange" />
+    <p>{{ form.errors.title || form.errors.photo }}</p>
     <button :disabled="form.pending">Upload</button>
   </Form>
 </template>
 ```
 
 ```svelte [Svelte]
-<script>
+<script lang="ts">
   import { Form, useForm } from "@void/svelte";
 
-  const form = useForm("/photos", { title: "", photo: null });
+  const form = useForm("/photos", { title: "", photo: null as File | null });
 </script>
 
 <Form {form}>
   <input bind:value={form.data.title} />
-  <input type="file" onchange={(e) => { form.data.photo = e.target.files?.[0] ?? null; }} />
+  <input type="file" onchange={(e) => { form.data.photo = e.currentTarget.files?.[0] ?? null; }} />
+  <p>{form.errors.title || form.errors.photo}</p>
   <button disabled={form.pending}>Upload</button>
 </Form>
 ```
@@ -407,6 +410,7 @@ export default function Upload() {
     <Form form={form}>
       <input value={form.data.title} onInput={(e) => form.setData('title', e.target.value)} />
       <input type="file" onChange={(e) => form.setData('photo', e.target.files?.[0] ?? null)} />
+      <p>{form.errors.title || form.errors.photo}</p>
       <button disabled={form.pending}>Upload</button>
     </Form>
   );
@@ -415,10 +419,11 @@ export default function Upload() {
 
 :::
 
-On the server, use `c.req.parseBody()` to access the uploaded file:
+On the server, use `withValidator({ body })` to validate the fields and uploaded file together. Validation failures populate `form.errors`, just like JSON submissions:
 
 ```ts
 // pages/photos.server.ts
+import * as v from 'valibot';
 import { defineHandler, ValidationError } from 'void/handler';
 import { storage } from 'void/storage';
 
@@ -429,10 +434,16 @@ const imageTypes = new Map([
   ['image/webp', 'webp'],
 ]);
 
-export const action = defineHandler(async (c) => {
-  const body = await c.req.parseBody();
-  const file = body['photo'];
-  if (!(file instanceof File) || file.size === 0) return;
+export const action = defineHandler.withValidator({
+  body: v.object({
+    title: v.pipe(v.string(), v.minLength(1, 'Enter a title.')),
+    photo: v.nullable(v.file()),
+  }),
+})(async (_c, { body }) => {
+  const file = body.photo;
+  if (!file || file.size === 0) {
+    throw new ValidationError({ photo: 'Choose a file.' });
+  }
   const ext = imageTypes.get(file.type);
   if (!ext) {
     throw new ValidationError({ photo: 'Upload a JPEG, PNG, or WebP image.' });
@@ -442,6 +453,8 @@ export const action = defineHandler(async (c) => {
   });
 });
 ```
+
+File submissions preserve nested objects, arrays, numbers, booleans, and `null`, so adding a file does not require a different schema for the other fields. `FileList` values become arrays of `File`; dates are ISO strings, as with JSON submissions. You can still use `c.req.parseBody()` when you want to handle raw form fields yourself.
 
 Pick the storage key on the server and allow only the file types you expect. See [Serving Files](../storage.md#serving-files) to send them back safely.
 

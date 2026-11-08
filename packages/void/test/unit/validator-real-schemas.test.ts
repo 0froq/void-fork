@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vite-plus/test';
 import { z } from 'zod';
 import { defineHandler, type CloudContext } from '../../src/runtime/handler.ts';
 import { convertReturnValue } from '../../src/runtime/response.ts';
+import { encodeFormData } from '../../src/shared/form-data.ts';
 import type { StandardSchemaV1 } from '../../src/standard-schema.ts';
 
 type ValidationIssueBody = {
@@ -70,6 +71,42 @@ describe.each(libraries)('withValidator + $library', ({ CreateUser }) => {
     expect(json.issues[0].slot).toBe('body');
     expect(json.issues[0].issues.length).toBeGreaterThanOrEqual(1);
   });
+});
+
+it('validates the reported Zod file-upload schema through a real handler', async () => {
+  const app = createPostApp(
+    defineHandler.withValidator({
+      body: z.object({ title: z.string().min(1), photo: z.instanceof(File) }),
+    })(async (_c, { body }) => ({
+      title: body.title,
+      filename: body.photo.name,
+      text: await body.photo.text(),
+    })),
+  );
+  const response = await app.request(
+    new Request('http://localhost/test', {
+      method: 'POST',
+      ...encodeFormData({ title: 'Photo', photo: new File(['image'], 'photo.png') }),
+    }),
+  );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ title: 'Photo', filename: 'photo.png', text: 'image' });
+});
+
+it('validates array-shaped upload bodies', async () => {
+  const app = createPostApp(
+    defineHandler.withValidator({
+      body: z.array(z.object({ photo: z.instanceof(File) })),
+    })((_c, { body }) => body.map(({ photo }) => photo.name)),
+  );
+  const response = await app.request(
+    new Request('http://localhost/test', {
+      method: 'POST',
+      ...encodeFormData([{ photo: new File(['image'], 'photo.png') }]),
+    }),
+  );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual(['photo.png']);
 });
 
 it('does not validate inherited array length as a query parameter', async () => {

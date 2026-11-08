@@ -1,7 +1,18 @@
-import { Form, useForm } from '@void/react';
+import { action, Form, useForm } from '@void/react';
+import { useState } from 'react';
 
 export default function FormErrorsPage() {
-  const form = useForm('/form-errors', { email: '', name: '', profile: { name: '' }, tags: [] });
+  const form = useForm('/form-errors', {
+    email: '',
+    name: '',
+    profile: { name: '' },
+    tags: [],
+    photo: null,
+    quantity: 3,
+    published: false,
+    note: null,
+  });
+  const [actionSuccess, setActionSuccess] = useState(false);
 
   function setErrors() {
     form.setError('email', 'Email invalid');
@@ -17,6 +28,23 @@ export default function FormErrorsPage() {
   return (
     <Form form={form}>
       <output data-testid="errors">{JSON.stringify(form.errors)}</output>
+      <output data-testid="success">{String(form.wasSuccessful)}</output>
+      <output data-testid="action-success">{String(actionSuccess)}</output>
+      <label>
+        Photo
+        <input
+          type="file"
+          onChange={(event) => form.setData('photo', event.currentTarget.files?.[0] ?? null)}
+        />
+      </label>
+      <button
+        type="button"
+        onClick={() =>
+          action('/form-errors', { data: form.data }).then((result) => setActionSuccess(result.ok))
+        }
+      >
+        Upload action
+      </button>
       <label>
         Email
         <input

@@ -685,12 +685,98 @@ export function registerSharedClientTests({
   });
 
   describe('form field errors', () => {
-    async function openForm() {
-      const page = await newPage();
+    async function openForm(page?: Page) {
+      page ??= await newPage();
       await page.goto(BASE + '/form-errors');
       await waitForHydration(page);
       return page;
     }
+
+    it('validates multipart uploads, supports action uploads, and returns to JSON without a file', async ({
+      expect,
+    }) => {
+      const page = await newPage();
+      const pageErrors: Array<string> = [];
+      page.on('pageerror', (error) => pageErrors.push(error.message));
+      const readErrors = async () => JSON.parse((await page.getByTestId('errors').textContent())!);
+      const readSuccess = () => page.getByTestId('success').textContent();
+      const save = page.getByRole('button', { name: 'Save', exact: true });
+
+      async function submit(button = 'Save') {
+        const response = page.waitForResponse(
+          (response) =>
+            response.url() === BASE + '/form-errors' && response.request().method() === 'POST',
+        );
+        await page.getByRole('button', { name: button, exact: true }).click();
+        return response;
+      }
+
+      try {
+        await openForm(page);
+        const photo = page.getByLabel('Photo', { exact: true });
+        await photo.setInputFiles({
+          name: 'large.txt',
+          mimeType: 'text/plain',
+          buffer: Buffer.from('12345'),
+        });
+        const invalid = await submit();
+        expect(invalid.status()).toBe(200);
+        expect(invalid.request().headers()['content-type']).toMatch(
+          /^multipart\/form-data;\s*boundary=/,
+        );
+        await expect.poll(readErrors).toEqual({
+          email: 'Email is required',
+          name: 'Name is required',
+          photo: 'File is too large',
+        });
+        expect(await readSuccess()).toBe('false');
+
+        await page.getByLabel('Name', { exact: true }).fill('Alice');
+        await page.getByLabel('Email', { exact: true }).fill('alice@example.com');
+        await page.getByLabel('Profile', { exact: true }).fill('Alice Profile');
+        await page.getByRole('button', { name: 'Add tag', exact: true }).click();
+        await photo.setInputFiles({
+          name: 'small.txt',
+          mimeType: 'text/plain',
+          buffer: Buffer.from('1234'),
+        });
+        const uploaded = await submit();
+        expect(uploaded.ok()).toBe(true);
+        expect(uploaded.request().headers()['content-type']).toMatch(
+          /^multipart\/form-data;\s*boundary=/,
+        );
+        await expect.poll(readSuccess).toBe('true');
+        await expect.poll(readErrors).toEqual({});
+
+        const actionUpload = await submit('Upload action');
+        expect(actionUpload.ok()).toBe(true);
+        expect(actionUpload.request().headers()['content-type']).toMatch(
+          /^multipart\/form-data;\s*boundary=/,
+        );
+        await expect.poll(() => page.getByTestId('action-success').textContent()).toBe('true');
+
+        await photo.setInputFiles([]);
+        const withoutFile = await submit();
+        expect(withoutFile.ok()).toBe(true);
+        expect(withoutFile.request().headers()['content-type']).toMatch(/^application\/json\b/);
+        expect(withoutFile.request().postDataJSON()).toEqual({
+          email: 'alice@example.com',
+          name: 'Alice',
+          profile: { name: 'Alice Profile' },
+          tags: ['tag'],
+          photo: null,
+          quantity: 3,
+          published: false,
+          note: null,
+        });
+        await expect.poll(() => save.isDisabled()).toBe(false);
+        await expect.poll(readSuccess).toBe('true');
+        await expect.poll(readErrors).toEqual({});
+        expect(pageErrors).toEqual([]);
+      } finally {
+        await page.context().close();
+      }
+    });
 
     it('preserves new client validation errors and clears only edited fields', async ({
       expect,
