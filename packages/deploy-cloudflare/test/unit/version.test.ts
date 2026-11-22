@@ -448,6 +448,64 @@ const VOID_SCHEMA_2_PREVIOUS = {
   },
 };
 
+/**
+ * Production traffic as Cloudflare's deployment list reports it, so a test can leave that list
+ * behind the zero-percent deploy Void just made.
+ */
+function stagedTraffic(setup: {
+  initial: Array<{ version_id: string; percentage: number }>;
+  /** What the deployment list reports instead once the zero-percent deploy returns. */
+  afterStaging?: Array<{ version_id: string; percentage: number }>;
+}) {
+  let traffic = setup.initial;
+  let uploaded = false;
+  const runWrangler = operationFixture(async (args: Array<string>) => {
+    if (args[0] === 'deployments') {
+      return ok(JSON.stringify({ versions: traffic }));
+    }
+    if (args[0] === 'versions' && args[1] === 'upload') {
+      uploaded = true;
+      return ok(`Worker Version ID: ${NEXT}`);
+    }
+    if (args[0] === 'versions' && args[1] === 'list') {
+      return ok(
+        JSON.stringify([
+          VOID_SCHEMA_2_PREVIOUS,
+          ...(uploaded ? [{ id: NEXT, number: 2, annotations: {} }] : []),
+        ]),
+      );
+    }
+    if (args[0] === 'versions' && args[1] === 'deploy') {
+      const staging = args.some((argument) => argument === `${NEXT}@0`);
+      traffic =
+        staging && setup.afterStaging
+          ? setup.afterStaging
+          : args.flatMap((argument) => {
+              const matched = argument.match(/^([^@]+)@(\d+)$/);
+              return matched ? [{ version_id: matched[1]!, percentage: Number(matched[2]) }] : [];
+            });
+      return ok();
+    }
+    if (args[0] === 'triggers') {
+      return ok();
+    }
+    throw new Error(`Unexpected command: ${args.join(' ')}`);
+  });
+  return {
+    runWrangler,
+    owner: () => traffic,
+    options: {
+      runWrangler,
+      workerName: 'app',
+      workersDevSubdomain: 'developer-platform-experience',
+      message: encodeCloudflareVersionMessage([], triggersWith({ crons: ['*/5 * * * *'] })),
+      verifyUploader: () => true,
+      fetch: async () => Response.json({ ready: true }),
+      readinessAttempts: 1,
+    },
+  };
+}
+
 /** Every versions.deploy request the argv runner received, as version@percentage lists. */
 function deployRequests(runWrangler: ReturnType<typeof runner>): Array<Array<string>> {
   return runWrangler.mock.calls
@@ -3297,6 +3355,59 @@ describe('Cloudflare version activation', () => {
         }),
       }),
     );
+  });
+
+  it('activates when the deployment list has not caught up with its own zero-percent staging', async () => {
+    const fixture = stagedTraffic({
+      initial: [{ version_id: CURRENT, percentage: 100 }],
+      afterStaging: [{ version_id: CURRENT, percentage: 100 }],
+    });
+
+    await expect(activateCloudflareVersion(fixture.options)).resolves.toMatchObject({
+      ok: true,
+      versionId: NEXT,
+    });
+    expect(fixture.owner()).toEqual([{ version_id: NEXT, percentage: 100 }]);
+  });
+
+  it('stages over an unactivated upload left by a deploy that stopped before activation', async () => {
+    const fixture = stagedTraffic({
+      initial: [
+        { version_id: CURRENT, percentage: 100 },
+        { version_id: CONCURRENT, percentage: 0 },
+      ],
+    });
+
+    await expect(activateCloudflareVersion(fixture.options)).resolves.toMatchObject({
+      ok: true,
+      versionId: NEXT,
+    });
+    expect(fixture.owner()).toEqual([{ version_id: NEXT, percentage: 100 }]);
+  });
+
+  it('does not activate over another version that took production after staging', async () => {
+    const fixture = stagedTraffic({
+      initial: [{ version_id: CURRENT, percentage: 100 }],
+      afterStaging: [
+        { version_id: CONCURRENT, percentage: 100 },
+        { version_id: NEXT, percentage: 0 },
+      ],
+    });
+
+    await expect(activateCloudflareVersion(fixture.options)).resolves.toMatchObject({
+      ok: false,
+      reason: 'deployment-changed',
+      activeVersionId: CONCURRENT,
+    });
+    expect(fixture.owner()).toEqual([
+      { version_id: CONCURRENT, percentage: 100 },
+      { version_id: NEXT, percentage: 0 },
+    ]);
+    expect(
+      fixture.runWrangler.mock.calls.filter(
+        ([args]) => args[0] === 'versions' && args[1] === 'deploy',
+      ),
+    ).toHaveLength(1);
   });
 
   it('does not stage over a production owner that changed after upload', async () => {

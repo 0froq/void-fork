@@ -1576,10 +1576,7 @@ async function activateCloudflareVersionWithSecretsFile(
       : [];
   if (
     ownerBeforeActivation.versionId !== previous.versionId ||
-    !productionVersionPercentagesEqual(
-      ownerBeforeActivation.versions,
-      expectedTrafficBeforeActivation,
-    )
+    !servesExpectedTraffic(ownerBeforeActivation.versions, expectedTrafficBeforeActivation)
   ) {
     return {
       ok: false,
@@ -1588,7 +1585,6 @@ async function activateCloudflareVersionWithSecretsFile(
       previousVersionId: previous.versionId,
       activeVersionId: ownerBeforeActivation.versionId,
       rollback: 'not-needed',
-      triggerRepair: 'succeeded',
     };
   }
 
@@ -2618,6 +2614,20 @@ async function readCurrentProductionVersion(
   }
 }
 
+/**
+ * Compare the traffic a deployment serves, ignoring versions at 0%. An unactivated upload receives
+ * no traffic, and Cloudflare keeps it in the deployment until the next one replaces the list, so
+ * counting it as a change stops a deploy that nothing else touched.
+ */
+function servesExpectedTraffic(
+  actual: ReadonlyArray<ProductionVersionPercentage>,
+  expected: ReadonlyArray<ProductionVersionPercentage>,
+): boolean {
+  const serving = (versions: ReadonlyArray<ProductionVersionPercentage>) =>
+    versions.filter((version) => version.percentage > 0);
+  return productionVersionPercentagesEqual(serving(actual), serving(expected));
+}
+
 function productionVersionPercentagesEqual(
   actual: ReadonlyArray<ProductionVersionPercentage>,
   expected: ReadonlyArray<ProductionVersionPercentage>,
@@ -2715,10 +2725,7 @@ async function verifyReadinessStagingOwner(
     };
   }
   const expected = previousVersionId ? [{ versionId: previousVersionId, percentage: 100 }] : [];
-  if (
-    owner.versionId !== previousVersionId ||
-    !productionVersionPercentagesEqual(owner.versions, expected)
-  ) {
+  if (owner.versionId !== previousVersionId || !servesExpectedTraffic(owner.versions, expected)) {
     return {
       ok: false,
       reason: 'deployment-changed',
