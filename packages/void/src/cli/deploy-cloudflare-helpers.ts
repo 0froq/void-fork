@@ -587,6 +587,10 @@ function formatCloudflareActivationFailure(
       }
       return `deploy: could not snapshot the current Cloudflare deployment${status}; no version was uploaded.`;
     case 'deployment-changed':
+      if (!result.triggerRepair) {
+        // A stop before activation never changed triggers, so do not claim it restored them.
+        return `deploy: another Cloudflare operation superseded this deployment before activation. Version ${result.activeVersionId ?? '(unknown)'} serves production and this deploy left triggers untouched; retry from fresh deployment status.`;
+      }
       return result.triggerRepair === 'succeeded'
         ? `deploy: another Cloudflare operation superseded this deployment. Void restored triggers for the active version ${result.activeVersionId ?? '(unknown)'}; retry from fresh deployment status.`
         : `deploy: another Cloudflare operation superseded this deployment, but its trigger state could not be verified. Inspect the active Worker version ${result.activeVersionId ?? '(unknown)'} immediately.`;
@@ -613,7 +617,9 @@ function formatCloudflareActivationFailure(
       return [
         'deploy: the current Cloudflare deployment splits traffic across multiple Worker Versions.',
         'Void will not flatten an existing gradual rollout to 100%. Finish or cancel that rollout',
-        'in Cloudflare, then retry; no version was uploaded.',
+        result.versionId
+          ? `in Cloudflare, then retry; Worker version ${result.versionId} was uploaded and stays unused.`
+          : 'in Cloudflare, then retry; no version was uploaded.',
       ].join('\n');
     case 'upload-failed':
       return `deploy: Cloudflare Worker Version upload failed${status}; production traffic is unchanged.${cloudflareCode}${diagnostic}`;

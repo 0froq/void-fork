@@ -944,6 +944,33 @@ describe('Cloudflare activation diagnostics', () => {
       formatCloudflareActivationError({ ok: false, reason: 'status-failed', status: 1 }),
     ).toContain('no version was uploaded');
   });
+
+  it('claims no trigger repair when the stop came before activation', () => {
+    const message = formatCloudflareActivationError({
+      ok: false,
+      reason: 'deployment-changed',
+      versionId: '22222222-2222-4222-8222-222222222222',
+      previousVersionId: '11111111-1111-4111-8111-111111111111',
+      activeVersionId: '33333333-3333-4333-8333-333333333333',
+      rollback: 'not-needed',
+    });
+    expect(message).toContain('33333333-3333-4333-8333-333333333333');
+    expect(message).toContain('left triggers untouched');
+    expect(message).not.toContain('restored triggers');
+  });
+
+  it('names the uploaded version when a traffic split stops the deploy', () => {
+    expect(
+      formatCloudflareActivationError({
+        ok: false,
+        reason: 'traffic-split-unsupported',
+        versionId: '22222222-2222-4222-8222-222222222222',
+      }),
+    ).toContain('was uploaded and stays unused');
+    expect(
+      formatCloudflareActivationError({ ok: false, reason: 'traffic-split-unsupported' }),
+    ).toContain('no version was uploaded');
+  });
 });
 
 /** No-schema (nothing-to-gate) env-insensitive facts. */
