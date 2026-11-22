@@ -386,6 +386,57 @@ describe('existing Worker preservation', () => {
     expect(runWrangler.mock.calls[1]![0]).toContain('original');
   });
 
+  it('reads the active version beside an unactivated upload left by a stopped deploy', async () => {
+    const runWrangler = operationFixture((args: Array<string>) => ({
+      status: 0,
+      stderr: '',
+      stdout: JSON.stringify(
+        args[0] === 'deployments'
+          ? {
+              versions: [
+                { version_id: 'original', percentage: 100 },
+                { version_id: 'left-over', percentage: 0 },
+              ],
+            }
+          : {
+              id: 'original',
+              resources: {
+                bindings: worker.bindings,
+                script: worker.script,
+                script_runtime: worker.runtime,
+              },
+            },
+      ),
+    }));
+    await expect(
+      readExistingCloudflareWorker({
+        runWrangler,
+        workerName: 'site',
+        configPath: '/app/wrangler.jsonc',
+      }),
+    ).resolves.toMatchObject({ versionId: 'original' });
+  });
+
+  it('still refuses a deployment that splits live traffic', async () => {
+    const runWrangler = operationFixture((_args: Array<string>) => ({
+      status: 0,
+      stderr: '',
+      stdout: JSON.stringify({
+        versions: [
+          { version_id: 'original', percentage: 90 },
+          { version_id: 'half-way', percentage: 10 },
+        ],
+      }),
+    }));
+    await expect(
+      readExistingCloudflareWorker({
+        runWrangler,
+        workerName: 'site',
+        configPath: '/app/wrangler.jsonc',
+      }),
+    ).rejects.toThrow('one deployed version receiving all traffic');
+  });
+
   it('does not infer an active migration tag from an explicitly requested candidate', async () => {
     const runWrangler = operationFixture(
       (_args: Array<string>, _options: { capture: boolean }) => ({

@@ -54,6 +54,26 @@ export async function readExistingCloudflareWorker(
   return worker.snapshot;
 }
 
+/**
+ * The version serving all traffic. Versions beside it at 0% are unactivated uploads: a deploy that
+ * stops after staging its candidate leaves exactly that deployment behind, and it must not block
+ * the next deploy from reading the Worker it is about to replace.
+ */
+function activeVersionId(versions: unknown): string | null {
+  if (!Array.isArray(versions)) {
+    return null;
+  }
+  const active = versions.filter(
+    (version): version is Record<string, unknown> =>
+      isRecord(version) && version.percentage === 100 && typeof version.version_id === 'string',
+  );
+  const unactivated = versions.filter((version) => !active.includes(version));
+  return active.length === 1 &&
+    unactivated.every((version) => isRecord(version) && version.percentage === 0)
+    ? (active[0]!.version_id as string)
+    : null;
+}
+
 async function readCloudflareWorker(
   options: ExistingCloudflareWorkerOptions,
   allowMissing: boolean,
@@ -88,18 +108,12 @@ async function readCloudflareWorker(
   if (allowMissing && Array.isArray(versions) && versions.length === 0) {
     return null;
   }
-  if (
-    !Array.isArray(versions) ||
-    versions.length !== 1 ||
-    !isRecord(versions[0]) ||
-    versions[0].percentage !== 100 ||
-    typeof versions[0].version_id !== 'string'
-  ) {
+  const versionId = activeVersionId(versions);
+  if (versionId === null) {
     throw new Error(
       'The existing Worker must have one deployed version receiving all traffic. Finish any gradual rollout before linking.',
     );
   }
-  const versionId = versions[0].version_id;
   const version = await read({ type: 'versions.view', versionId, ...target });
   if (version === null) {
     throw new Error('Cloudflare did not return the existing Worker configuration.');
